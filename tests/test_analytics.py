@@ -311,3 +311,140 @@ def test_track_event_uses_its_own_rate_limit_bucket():
     deps = [d.dependency for d in route.dependencies]
     assert rate_limit_analytics in deps
     assert ANALYTICS_EVENTS_PER_MINUTE >= 60
+
+
+# --- First-party tracking events and first touch ---
+
+
+async def _send(client: AsyncClient, event_type: str, session_id: str, **extra):
+    return await client.post(f"{ANALYTICS_URL}/event", json={
+        "event_type": event_type, "session_id": session_id, "page": "/", **extra,
+    })
+
+
+def _utm(campaign: str = "2026-11-test-dev") -> dict:
+    return {"utm_source": "reddit", "utm_medium": "paid-social", "utm_campaign": campaign,
+            "utm_content": "d1-before-npx", "utm_term": "r-mcp"}
+
+
+async def _first_touch(db, session_id: str):
+    from src.models import AnalyticsFirstTouch
+
+    return await db.get(AnalyticsFirstTouch, session_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event_type", [
+    "lp_view", "check_submit", "result_view", "badge_copied", "contact_submit",
+])
+async def test_tracking_events_are_accepted(client: AsyncClient, event_type: str):
+    resp = await _send(client, event_type, str(uuid.uuid4()))
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("destination", [
+    "copy_plugin_cmd", "open_plugin_dir", "add_claude", "add_chatgpt",
+])
+async def test_cta_click_accepts_each_destination(client: AsyncClient, destination: str):
+    resp = await _send(client, "cta_click", str(uuid.uuid4()), intent=destination)
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("intent", [None, "somewhere_else"])
+async def test_cta_click_rejects_unknown_destination(client: AsyncClient, intent):
+    resp = await _send(client, "cta_click", str(uuid.uuid4()), intent=intent)
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_first_touch_stores_all_five_tags_and_landing_page(client: AsyncClient, db):
+    session_id = str(uuid.uuid4())
+    await client.post(f"{ANALYTICS_URL}/event", json={
+        "event_type": "lp_view", "session_id": session_id, "page": "/check", "metadata": _utm(),
+    })
+
+    touch = await _first_touch(db, session_id)
+    assert (touch.utm_source, touch.utm_medium, touch.utm_campaign) == (
+        "reddit", "paid-social", "2026-11-test-dev",
+    )
+    assert (touch.utm_content, touch.utm_term) == ("d1-before-npx", "r-mcp")
+    assert touch.landing_page == "/check"
+
+
+@pytest.mark.asyncio
+async def test_first_touch_is_not_replaced_by_a_later_campaign(client: AsyncClient, db):
+    session_id = str(uuid.uuid4())
+    await _send(client, "lp_view", session_id, metadata=_utm("first"))
+    await _send(client, "lp_view", session_id, metadata=_utm("second"))
+
+    touch = await _first_touch(db, session_id)
+    assert touch.utm_campaign == "first"
+
+
+@pytest.mark.asyncio
+async def test_first_touch_skips_events_without_usable_tags(client: AsyncClient, db):
+    session_id = str(uuid.uuid4())
+    await _send(client, "lp_view", session_id)
+    await _send(client, "lp_view", session_id, metadata={"utm_source": 5, "utm_term": "  "})
+
+    assert await _first_touch(db, session_id) is None
+
+
+@pytest.mark.asyncio
+async def test_first_touch_clips_long_tags_to_fit_its_columns(client: AsyncClient, db):
+    session_id = str(uuid.uuid4())
+    await _send(client, "lp_view", session_id, metadata={"utm_source": "x" * 500})
+
+    touch = await _first_touch(db, session_id)
+    assert touch.utm_source == "x" * 200
+
+
+def test_first_touch_tags_strips_nul_bytes():
+    from src.api.analytics_router import _first_touch_tags
+
+    assert _first_touch_tags({"utm_source": "a\x00b", "utm_term": "\x00"}) == {"utm_source": "ab"}
+    assert _first_touch_tags(None) == {}
+
+
+@pytest.mark.asyncio
+async def test_campaign_view_counts_a_return_visit_toward_the_first_touch(
+    client: AsyncClient, db,
+):
+    token, entity_id = await _setup_user(client, ADMIN)
+    await _make_admin(db, entity_id)
+
+    first = str(uuid.uuid4())
+    await _send(client, "lp_view", first, metadata=_utm())
+    # The return visit: a new tab, so the events carry no UTM tags.
+    await _send(client, "lp_view", first)
+    await _send(client, "check_submit", first)
+    await _send(client, "cta_click", first, intent="add_claude")
+    await _send(client, "badge_copied", first, intent="badge")
+
+    second = str(uuid.uuid4())
+    await _send(client, "lp_view", second, metadata=_utm())
+    await _send(client, "guest_page_view", str(uuid.uuid4()))  # no campaign: not in the view
+
+    resp = await client.get(f"{ANALYTICS_URL}/attribution/campaigns", headers=_auth(token))
+    assert resp.status_code == 200
+    rows = resp.json()["campaigns"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert (row["campaign"], row["content"], row["term"]) == (
+        "2026-11-test-dev", "d1-before-npx", "r-mcp",
+    )
+    assert row["sessions"] == 2
+    assert row["lp_view"] == 2  # distinct sessions, not events
+    assert row["check_submit"] == 1
+    assert row["add_claude"] == 1
+    assert row["add_chatgpt"] == 0
+    assert row["badge_copied"] == 1
+
+
+@pytest.mark.asyncio
+async def test_campaign_view_is_admin_only(client: AsyncClient):
+    token, _ = await _setup_user(client, USER)
+    resp = await client.get(f"{ANALYTICS_URL}/attribution/campaigns", headers=_auth(token))
+    assert resp.status_code == 403

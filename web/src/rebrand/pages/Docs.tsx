@@ -4,6 +4,7 @@ import { rp } from '../basePath'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import SEOHead from '../../components/SEOHead'
+import { listingCta, trackCta, trackPluginCommandCopy } from '../../lib/analytics'
 import { slugify } from '../lib/slugify'
 import howGradingWorks from '../docs/how-grading-works.md?raw'
 import gateOnTheGrade from '../docs/gate-on-the-grade.md?raw'
@@ -134,7 +135,7 @@ export default function RebrandDocs() {
         </nav>
       </aside>
 
-      <article className={`min-w-0 ${PROSE}`}>
+      <article onCopy={trackPluginCommandCopy} className={`min-w-0 ${PROSE}`}>
         {/* GFM for tables. singleTilde off: the docs use "~" for "about", never strikethrough. */}
         <Markdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]} components={{
           // Wide tables scroll inside their own box instead of widening the page.
@@ -154,7 +155,8 @@ export default function RebrandDocs() {
               )
             }
             const external = /^https?:/.test(h)
-            return <a href={h} className="text-primary-light hover:underline" {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{children}</a>
+            const cta = listingCta(h)
+            return <a href={h} onClick={cta ? () => trackCta(cta) : undefined} className="text-primary-light hover:underline" {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{children}</a>
           },
         }}>{doc.body}</Markdown>
       </article>

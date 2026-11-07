@@ -1326,6 +1326,21 @@ class AnalyticsEvent(Base):
     )
 
 
+class AnalyticsFirstTouch(Base):
+    """The first campaign tags seen for an analytics session. Written once, never updated."""
+
+    __tablename__ = "analytics_first_touch"
+
+    session_id = Column(String(64), primary_key=True)  # same value as AnalyticsEvent.session_id
+    utm_source = Column(String(200), nullable=True)
+    utm_medium = Column(String(200), nullable=True)
+    utm_campaign = Column(String(200), nullable=True)
+    utm_content = Column(String(200), nullable=True)
+    utm_term = Column(String(200), nullable=True)
+    landing_page = Column(String(200), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class ModerationAppeal(Base):
     """Appeal against a moderation decision."""
 

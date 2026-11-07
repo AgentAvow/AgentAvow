@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Reveal } from './motion'
 import { publicApi } from '../../lib/scanApi'
+import { trackBadgeCopied } from '../../lib/analytics'
 import { rp } from '../basePath'
 
 /**
@@ -55,22 +56,22 @@ const SEV: Record<string, string> = {
 
 const H3 = 'text-[13px] font-mono uppercase tracking-wide text-text-muted'
 
-function CopyButton({ text, label = 'copy' }: { text: string; label?: string }) {
+function CopyButton({ text, label = 'copy', onCopied }: { text: string; label?: string; onCopied?: () => void }) {
   const [done, setDone] = useState(false)
   return (
     <button
       type="button"
-      onClick={() => { void navigator.clipboard?.writeText(text); setDone(true); setTimeout(() => setDone(false), 1400) }}
+      onClick={() => { void navigator.clipboard?.writeText(text); onCopied?.(); setDone(true); setTimeout(() => setDone(false), 1400) }}
       className="font-mono text-[10.5px] px-2 py-0.5 rounded bg-surface-hover border border-border text-text-muted hover:text-primary-light shrink-0"
     >{done ? 'copied ✓' : label}</button>
   )
 }
 
-function CodeLine({ text }: { text: string }) {
+function CodeLine({ text, onCopied }: { text: string; onCopied?: () => void }) {
   return (
     <div className="flex items-start gap-2">
       <pre className="flex-1 min-w-0 font-mono text-[11px] bg-surface border border-border rounded-lg px-3 py-2 text-text-muted overflow-x-auto whitespace-pre-wrap break-all">{text}</pre>
-      <CopyButton text={text} />
+      <CopyButton text={text} onCopied={onCopied} />
     </div>
   )
 }
@@ -322,7 +323,7 @@ export function PackageBadge({ surface, name }: { surface: string; name: string 
         <h3 className={H3}>README badge</h3>
         <p className="mt-1.5 text-[13px] text-text-muted max-w-[64ch]">Maintain this package? Show its current signed result in your README. The image regenerates from the live result on every view.</p>
         <a href={link} className="mt-3 inline-block"><img src={img} alt="AgentAvow Trust" className="h-[22px]" loading="lazy" /></a>
-        <div className="mt-3"><CodeLine text={md} /></div>
+        <div className="mt-3"><CodeLine text={md} onCopied={() => trackBadgeCopied('badge')} /></div>
       </div>
     </Reveal>
   )
@@ -511,8 +512,8 @@ export function McpBadge({ endpoint }: { endpoint: string }) {
         <p className="mt-1.5 text-[13px] text-text-muted max-w-[64ch]">Run this server? Show its current signed result in your README or on your site. The image regenerates from the live result on every view.</p>
         <a href={link} className="mt-3 inline-block"><img src={img} alt="AgentAvow Trust" className="h-[22px]" loading="lazy" /></a>
         <div className="mt-3 space-y-2">
-          <CodeLine text={`[![AgentAvow Trust](${img})](${link})`} />
-          <CodeLine text={`<a href="${link}"><img src="${card}" alt="AgentAvow Trust" width="360"></a>`} />
+          <CodeLine text={`[![AgentAvow Trust](${img})](${link})`} onCopied={() => trackBadgeCopied('badge')} />
+          <CodeLine text={`<a href="${link}"><img src="${card}" alt="AgentAvow Trust" width="360"></a>`} onCopied={() => trackBadgeCopied('card')} />
         </div>
       </div>
     </Reveal>

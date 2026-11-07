@@ -19,7 +19,7 @@ router = APIRouter(prefix="/legal", tags=["legal"])
 
 _PRIVACY_CLAUSES: list[tuple[str, str]] = [
     ('1. Overview',
-     'Effective October 23, 2026. AgentAvow checks whether a software tool is safe'
+     'Effective November 6, 2026. AgentAvow checks whether a software tool is safe'
      ' for an AI agent to connect to: a GitHub repository, a published package, or'
      ' a live MCP server. This policy explains what we receive when you use '
      'agentavow.com, our public API, or our connector for AI assistants, what we '
@@ -64,15 +64,39 @@ _PRIVACY_CLAUSES: list[tuple[str, str]] = [
      '(for example, calls per tool and per assistant product). To count distinct '
      'callers we store a one-way hash of the IP address and User-Agent combined '
      'with a salt that changes every day, not the IP address itself. Metrics are '
-     'kept for up to 90 days.</li><li><strong>Website analytics</strong> use '
-     'Cloudflare Web Analytics, which does not use cookies.</li><li><strong>Error '
-     'reports</strong> are sent to our error-tracking provider (Sentry) to fix '
-     'bugs.</li></ul>'),
+     'kept for up to 90 days.</li><li><strong>Cloudflare Web Analytics</strong> '
+     'measures page loads and does not use cookies. It receives the address of each '
+     'page you view, without the query string. On a check page that address names '
+     'the tool you checked.</li><li><strong>Our own site analytics</strong> do not '
+     'use cookies either, and are stored in our own database. The first time you '
+     'open agentavow.com, our code stores a random identifier called '
+     "<code>ag_session_id</code> in your browser's local storage. It holds no name "
+     "or email address. It stays until you clear your browser's data for our site, "
+     'and your next visit then creates a new one. If you create an account on our '
+     '/register page, we link the identifier to that account.</li><li><strong>What '
+     'those analytics record:</strong> pages you view, submitting a check box (not '
+     'what you typed), results shown, clicks on our add and install links, copies '
+     'of an install command or a badge, and steps in creating an account. Each '
+     'record holds the event, the identifier, the page path, the time, and the IP '
+     'address of the request. On a check page the path names the tool you checked. '
+     'The query string is left out, so an MCP server URL given there is not '
+     'recorded, and a one-time private scan is recorded as /check/private with no '
+     'repository name.</li><li><strong>Campaign links:</strong> if you arrive '
+     'through a link with campaign tags (utm_source, utm_medium, utm_campaign, '
+     'utm_content, utm_term), your browser keeps them in session storage as '
+     '<code>ag_utm</code> until the tab closes and sends them with each event. It '
+     'also keeps a marker, <code>ag_landed</code>, so a landing counts once per '
+     'tab. We store the first tags we see for an identifier, with the page it '
+     'landed on, so a later visit from the same browser counts toward the same '
+     'campaign.</li><li><strong>How long:</strong> these analytics records have no '
+     'automatic deletion date. You can ask us to delete them (section 8).</li>'
+     '<li><strong>Error reports</strong> are sent to our error-tracking provider '
+     '(Sentry) to fix bugs.</li></ul>'),
     ('6. How we use data',
      'To run the checks and features you request, send the alerts you subscribe '
-     'to, secure the service against abuse, and understand aggregate usage. We do '
-     'not sell personal data, use it for advertising, or use it to train AI '
-     'models.'),
+     'to, secure the service against abuse, and understand aggregate usage, '
+     'including which pages and campaigns bring people to the site. We do not sell '
+     'personal data, use it for advertising, or use it to train AI models.'),
     ('7. Sharing',
      'We share data only with service providers that run parts of the service for '
      'us (Amazon Web Services for hosting and email, Resend for email delivery, '
@@ -82,7 +106,8 @@ _PRIVACY_CLAUSES: list[tuple[str, str]] = [
      ' the MCP server you named).'),
     ('8. Retention and your rights',
      'Account data is kept while your account is active and deleted on request. '
-     'Logs and metrics are kept as described in section 5. You may ask for access '
+     'Logs, metrics and analytics records are kept as described in section 5. You '
+     'may ask for access '
      'to, correction of, or deletion of your personal data at <a '
      'href="mailto:privacy@agentavow.com">privacy@agentavow.com</a>.'),
     ('9. Children',
@@ -194,7 +219,7 @@ async def privacy_policy() -> HTMLResponse:
     return HTMLResponse(_render(
         "Privacy Policy",
         "AgentAvow Privacy Policy — what we collect and how we use it. Checking a tool "
-        "is anonymous.",
+        "needs no account.",
         "privacy", _PRIVACY_CLAUSES,
     ))
 
