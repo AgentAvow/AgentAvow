@@ -1,5 +1,7 @@
 # AgentAvow Trust
 
+Automatically checks your MCP servers and packages before Claude uses them.
+
 **What you'll see.** Install the plugin and start a session. Claude's first reply opens with
 one line, for example: "AgentAvow pre-check: graded 8 MCP servers — 5 Safe, 2 Review, 1
 Don't connect (needs attention: 'task-master' Do not connect — one critical finding: eval of
