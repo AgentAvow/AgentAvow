@@ -485,6 +485,52 @@ def _tree_blobs(tree: list[dict], oversized_out: list | None = None) -> list[dic
     return out
 
 
+# Files that cannot run on their own: what an instruction-only Agent Skill is made of.
+# An ALLOWLIST, so anything else (a script in any language, a binary, an extensionless
+# file, a manifest an installer or agent runs) counts as runnable. Used only to tell an
+# instruction-only skill from one whose runnable code the sandbox did not find.
+_INERT_EXTS = frozenset({
+    ".md", ".markdown", ".mdx", ".txt", ".rst", ".adoc",
+    ".json", ".yaml", ".yml", ".toml", ".csv", ".tsv", ".xml",
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".pdf",
+})
+_INERT_NAMES = frozenset({
+    "license", "licence", "copying", "notice", "authors", "contributors", "codeowners",
+    "readme", "changelog", ".gitignore", ".gitattributes", ".editorconfig",
+})
+# Manifests an installer, a hook runner or an agent executes, though they look inert.
+_RUNNABLE_NAMES = frozenset({
+    "hooks.json", "plugin.json", ".mcp.json", "package.json", "pyproject.toml",
+    "setup.cfg", "pnpm-workspace.yaml", "taskfile.yml", "taskfile.yaml",
+})
+_RUNNABLE_DIRS = frozenset({"scripts", "bin", "hooks"})
+
+
+def _runnable_tree_files(items: list) -> int:
+    """How many entries of a GitHub tree listing could run: an executable bit or a
+    symlink (git mode 100755 / 120000), a hook / MCP / package manifest, anything under
+    a ``scripts/`` / ``bin/`` / ``hooks/`` directory, or any file that is not plainly
+    documentation, data or an image (``_INERT_EXTS``). Counts EVERY directory, including
+    the ones the sandbox skips (``node_modules``, ``.venv``): code an agent is told to
+    run from there still runs. 0 means the tree is instruction-only."""
+    n = 0
+    for it in items or []:
+        if not isinstance(it, dict) or it.get("type", "blob") != "blob":
+            continue
+        path = str(it.get("path") or "")
+        if not path:
+            continue
+        parts = path.lower().split("/")
+        base = parts[-1]
+        ext = posixpath.splitext(base)[1]
+        if (str(it.get("mode") or "") in ("100755", "120000")
+                or base in _RUNNABLE_NAMES
+                or any(p in _RUNNABLE_DIRS for p in parts[:-1])
+                or not (ext in _INERT_EXTS or base in _INERT_NAMES)):
+            n += 1
+    return n
+
+
 async def _note_github(resp: httpx.Response, context: str) -> None:
     """Route a metered GitHub response through real-time rate-limit protection.
 
@@ -7133,7 +7179,11 @@ async def scan_skill(owner: str, repo: str, skill: str | None = None) -> ScanRes
         # one in its directory) is disclosed as not read (coverage gaps).
         big = [str(it.get("path")) for it in (tree_meta.get("oversized") or [])
                if isinstance(it, dict) and it.get("path")]
-        tree_info = {"oversized": big, "truncated": bool(trunc)}
+        tree_info = {"oversized": big, "truncated": bool(trunc),
+                     # What could run anywhere in the repo the sandbox clones (over-cap
+                     # blobs included); unknown (None) on a partial tree.
+                     "runnable_files": None if trunc else _runnable_tree_files(
+                         list(tree) + list(tree_meta.get("oversized") or []))}
         skill_mds = [p for p in blobs if p.lower().endswith("skill.md")]
         if not skill_mds:
             result.error = "No SKILL.md found — this repo isn't a recognizable Agent Skill."
@@ -7272,6 +7322,10 @@ async def _grade_skill_at(
             "has_lifecycle_hooks": skill.has_lifecycle_hooks, "script_count": skill.script_count,
             "blast_radius": skill.blast_radius,
             "tree_digest": skill.tree_digest,
+            # Files in the cloned repo that could run (``_runnable_tree_files``); 0 =
+            # instruction-only, None = unknown. Lets a sandbox "no entrypoint" on an
+            # instruction-only skill keep the Certified mark (Kenne, 2026-11-07).
+            "runnable_files": (tree_info or {}).get("runnable_files"),
         }
         if skill.script_count == 0 and not skill.has_lifecycle_hooks and result.critical_count == 0:
             result.positive_signals.append("No bundled scripts or lifecycle hooks")

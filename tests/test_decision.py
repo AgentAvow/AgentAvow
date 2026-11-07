@@ -664,6 +664,19 @@ MARK_CASES = [
       for why in ("crashed", "no entrypoint", "install failed", "timeout", "resource limit",
                   "needs credentials", "needs arguments", "missing binary", "unknown",
                   "some future reason")],
+    # The instruction-only skill exception lives where the gap is written
+    # (public_scan_router._sandbox_gap, which sees the sandbox block): such a skill gets
+    # no gap at all. A gap that IS written still withholds the mark in both twins, even
+    # beside an inert-tree count (the attack twin cannot argue its way out here).
+    ("skill_no_entrypoint_gap_written_withholds", _scan(
+        92, 340, certified=CERTIFIED, coverage={"surface": "openclaw"},
+        surface_detail={"surface": "openclaw", "runnable_files": 0, "script_count": 0,
+                        "has_lifecycle_hooks": False},
+        coverage_gaps={"sandbox_not_observed": "no entrypoint"}), False, "coverage_gaps"),
+    ("skill_inert_tree_no_gap_keeps_mark", _scan(
+        92, 340, certified=CERTIFIED,
+        surface_detail={"surface": "openclaw", "runnable_files": 0, "script_count": 0,
+                        "has_lifecycle_hooks": False}), True, ""),
     ("never_started_beside_other_gap", _scan(92, 340, certified=CERTIFIED, coverage_gaps={
         "oversized_files": 2, "sandbox_not_observed": "crashed"}), False, "coverage_gaps"),
     # Our own sandbox not running is not the tool's doing; the mark is not withheld for it.

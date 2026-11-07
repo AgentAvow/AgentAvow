@@ -307,3 +307,169 @@ async def test_preflight_repo_withholds_the_mark(monkeypatch):
     out = await preflight_router.preflight_repo("acme", "server", request=None, force=False)
     assert out.decision == "safe"
     assert out.certified is False
+
+
+# ── instruction-only skills keep the mark (Kenne's exception, 2026-11-07) ────────────
+# A skill whose sandbox run reports ``no_entrypoint`` because it ships nothing runnable
+# (SKILL.md and docs only) had nothing to start, so nothing went unobserved. Both the
+# exerciser (no entrypoint found) and the static tree count (no file that could run)
+# must agree; anything else still withholds the mark.
+
+INSTRUCTION_ONLY = {"surface": "openclaw", "runnable_files": 0, "script_count": 0,
+                    "has_lifecycle_hooks": False}
+
+
+def _skill_scan(**detail) -> dict:
+    return {**_scan(), "surface_detail": {**INSTRUCTION_ONLY, **detail},
+            "coverage": {"surface": "openclaw"}}
+
+
+def _skill_gap(data, block):
+    return (psr._apply_behavioral_score(data, block).get("coverage_gaps") or {}).get(
+        "sandbox_not_observed")
+
+
+def _skill_mark(data, block) -> tuple[bool, str]:
+    from src.scanner.verdict import certified_mark_status, decide
+    applied = {**psr._apply_behavioral_score(data, block), "behavioral": block}
+    return certified_mark_status(applied, decide(applied))
+
+
+def _no_entrypoint_skill(**exercise) -> dict:
+    block = _never_started("no_entrypoint", "skill")
+    block["exercise"] = {"launch_ok": False, "calls": [], "tools": [],
+                         "error": "no_entrypoint_found", **exercise}
+    return block
+
+
+def test_instruction_only_skill_keeps_the_mark():
+    data, block = _skill_scan(), _no_entrypoint_skill()
+    assert _skill_gap(data, block) is None
+    assert _skill_mark(data, block) == (True, "")
+    assert psr._apply_behavioral_score(data, block)["trust_score"] == 92
+
+
+@pytest.mark.parametrize("detail", [
+    {"runnable_files": 1},          # e.g. an exec-bit binary SKILL.md tells the agent to run
+    {"runnable_files": 7},
+    {"runnable_files": None},       # partial tree: unknown
+    {"runnable_files": True},       # not an int
+    {"runnable_files": "0"},
+    {"script_count": 1},            # a bundled script the exerciser did not run
+    {"has_lifecycle_hooks": True},
+    {"has_lifecycle_hooks": None},
+])
+def test_attack_twin_runnable_code_reported_as_no_entrypoint_still_withholds(detail):
+    """A skill that HAS something runnable but whose run reports no_entrypoint (code in
+    a place or a form the exerciser does not run) must not slip through."""
+    data, block = _skill_scan(**detail), _no_entrypoint_skill()
+    assert _skill_gap(data, block) == "no entrypoint"
+    assert _skill_mark(data, block) == (False, "coverage_gaps")
+
+
+def test_attack_twin_cached_scan_without_the_count_still_withholds():
+    """Static scans cached before this change carry no runnable_files: fail closed."""
+    data = {**_scan(), "surface_detail": {"surface": "openclaw", "script_count": 0,
+                                          "has_lifecycle_hooks": False}}
+    assert _skill_gap(data, _no_entrypoint_skill()) == "no entrypoint"
+
+
+@pytest.mark.parametrize("exercise", [
+    {"tools": [{"name": "scripts/x.sh"}]},
+    {"calls": [{"tool": "scripts/x.sh", "ok": False}]},
+])
+def test_attack_twin_exerciser_found_an_entrypoint_still_withholds(exercise):
+    data, block = _skill_scan(), _no_entrypoint_skill(**exercise)
+    assert _skill_gap(data, block) == "no entrypoint"
+
+
+@pytest.mark.parametrize("plan", ("npm-mcp", "pypi-mcp", "npm-git-mcp", "pypi-git-mcp"))
+def test_mcp_plan_no_entrypoint_still_withholds_even_with_an_inert_tree(plan):
+    data = _skill_scan()
+    block = _never_started("no_entrypoint", plan)
+    assert _skill_gap(data, block) == "no entrypoint"
+    assert _skill_mark(data, block)[0] is False
+
+
+@pytest.mark.parametrize("reason", [r for r in START_REASONS if r != "no_entrypoint"])
+def test_every_other_skill_reason_still_withholds_on_an_inert_tree(reason):
+    data = _skill_scan()
+    for exercised in (True, False):
+        block = _never_started(reason, "skill", exercised=exercised)
+        assert _skill_gap(data, block) == reason.replace("_", " ")
+        assert _skill_mark(data, block) == (False, "coverage_gaps")
+
+
+@pytest.mark.asyncio
+async def test_instruction_only_skill_badge_keeps_the_mark(monkeypatch):
+    async def cached(_d):
+        return _no_entrypoint_skill()
+    monkeypatch.setattr(psr, "_cached_behavioral_for", cached)
+    probe = {**_skill_scan(), "repo_full_name": "acme/notes", "surface_kind": "skill"}
+    assert await psr._badge_view(probe, 92) == ("safe", True)
+    attack = {**_skill_scan(runnable_files=1), "repo_full_name": "acme/notes",
+              "surface_kind": "skill"}
+    assert await psr._badge_view(attack, 92) == ("safe", False)
+
+
+# ── the static signal: what in the cloned tree could run ─────────────────────────────
+
+def _blob(path: str, mode: str = "100644") -> dict:
+    return {"path": path, "type": "blob", "mode": mode, "size": 10}
+
+
+def test_an_instruction_only_tree_counts_zero():
+    from src.scanner.scan import _runnable_tree_files
+    tree = [_blob("SKILL.md"), _blob("README.md"), _blob("LICENSE"), _blob("docs/guide.md"),
+            _blob("reference/api.json"), _blob("assets/diagram.png"), _blob("notes.txt"),
+            _blob(".gitignore"), _blob(".github/workflows/ci.yml"),
+            {"path": "docs", "type": "tree", "mode": "040000"}]
+    assert _runnable_tree_files(tree) == 0
+
+
+@pytest.mark.parametrize("item", [
+    _blob("tool", "100755"),                 # exec-bit binary, no extension
+    _blob("SKILL.md", "100755"),             # exec bit on anything
+    _blob("link", "120000"),                 # symlink
+    _blob("tool"),                           # extensionless file (could be an ELF)
+    _blob("helper.ts"), _blob("run.rb"), _blob("x.exe"), _blob("lib.so"), _blob("a.wasm"),
+    _blob("go.sh"), _blob("main.py"), _blob("index.mjs"), _blob("Makefile"),
+    _blob("Dockerfile"), _blob("notebook.ipynb"),
+    _blob("scripts/run"), _blob("bin/tool.md"), _blob("hooks/pre.txt"),
+    _blob("node_modules/evil/index.js"),     # dirs the exerciser skips still count
+    _blob(".venv/bin/run.py"),
+    _blob("hooks.json"), _blob("plugin.json"), _blob(".mcp.json"), _blob("package.json"),
+    _blob("pyproject.toml"),
+], ids=lambda it: f"{it['path']}:{it['mode']}")
+def test_anything_that_could_run_counts(item):
+    from src.scanner.scan import _runnable_tree_files
+    assert _runnable_tree_files([_blob("SKILL.md"), item]) == 1
+
+
+@pytest.mark.asyncio
+async def test_scan_skill_records_the_count(monkeypatch):
+    import src.scanner.scan as scan_mod
+
+    async def fake_token():
+        return "tok"
+
+    trees = {
+        "notes": ([_blob("SKILL.md"), _blob("README.md")], False),
+        "tooly": ([_blob("SKILL.md"), _blob("tool", "100755")], False),
+        "huge": ([_blob("SKILL.md")], True),
+    }
+
+    async def fake_tree(owner, repo, token, meta_out=None):
+        tree, trunc = trees[repo]
+        return tree, trunc, True, "main"
+
+    async def fake_content(owner, repo, path, token, ref=None):
+        return ("---\nname: demo\ndescription: A demo.\n---\nRead the notes."
+                if path == "SKILL.md" else "text")
+
+    monkeypatch.setattr(scan_mod, "get_github_token", fake_token, raising=False)
+    monkeypatch.setattr(scan_mod, "_fetch_repo_tree", fake_tree)
+    monkeypatch.setattr(scan_mod, "_fetch_file_content", fake_content)
+    assert (await scan_mod.scan_skill("acme", "notes")).artifact_scan["runnable_files"] == 0
+    assert (await scan_mod.scan_skill("acme", "tooly")).artifact_scan["runnable_files"] == 1
+    assert (await scan_mod.scan_skill("acme", "huge")).artifact_scan["runnable_files"] is None
