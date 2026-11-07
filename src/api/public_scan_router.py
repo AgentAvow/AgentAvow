@@ -38,6 +38,7 @@ from src.scanner.verdict import certified_mark as _certified_mark
 from src.scanner.verdict import certified_mark_status as _certified_mark_status
 from src.scanner.verdict import coverage_gap_notes as _coverage_gap_notes
 from src.scanner.verdict import decide as _decide
+from src.scanner.verdict import is_advisory_block
 from src.scanner.verdict import is_safe as _is_safe
 from src.scanner.verdict import verdict_label as _verdict_label
 from src.scanner.verdict import verdict_reason as _verdict_reason
@@ -651,12 +652,44 @@ def _sign_behavioral_observation(surface: str, name: str, block: dict) -> dict |
         return None
 
 
+BEHAVIORAL_OTHER_VERSION_REASON = "the sandbox runs the latest release, not a pinned version"
+
+
+def _other_version_block() -> dict:
+    """The block for a version-pinned scan: final, nothing observed for this version."""
+    return {"ran": False, "pending": False, "other_version": True,
+            "reason": BEHAVIORAL_OTHER_VERSION_REASON}
+
+
+def _sandbox_gap(block: dict | None) -> str | None:
+    """Why the sandbox observed nothing, for ``coverage_gaps.sandbox_not_observed``:
+    ``other_version``, ``unavailable`` (the run did not happen), or the plain-words
+    start reason of a server that never started. None when a run is still coming, there
+    was nothing to run, or the tool was observed. Advisory live probes are never a gap."""
+    if not isinstance(block, dict) or block.get("pending") or is_advisory_block(block):
+        return None
+    if block.get("other_version"):
+        return "other_version"
+    if not block.get("ran"):
+        return "unavailable" if block.get("state") == "unavailable" or block.get("error") \
+            else None
+    gs = block.get("grade_summary") if isinstance(block.get("grade_summary"), dict) else {}
+    if not gs.get("server_failed_to_start"):
+        return None
+    return str(gs.get("start_reason") or "unknown").replace("_", " ")
+
+
 def _apply_behavioral_score(data: dict, block: dict | None) -> dict:
     """A COPY of the scan data with the signed sandbox observation folded into the
-    trust score (grade, tier, limits recomputed). The cached static data is untouched."""
+    trust score (grade, tier, limits recomputed). The cached static data is untouched.
+    A sandbox that observed nothing is recorded as a coverage gap (signed as
+    ``scan.coverageGaps``): disclosure only, it moves neither score nor decision."""
     from src.scanner.behavioral.score_effect import behavioral_score_effect
     eff = behavioral_score_effect(int(data.get("trust_score") or 0), block)
     out = dict(data)
+    gap = _sandbox_gap(block)
+    if gap:
+        out["coverage_gaps"] = {**(data.get("coverage_gaps") or {}), "sandbox_not_observed": gap}
     out["behavioral_score_effect"] = {k: eff[k] for k in
                                       ("applied", "static_score", "score", "delta", "reason")}
     if not eff["applied"]:
@@ -1826,7 +1859,11 @@ async def scan_package_endpoint(
         """Sandbox block first, so a signed observation can be folded into the score
         that gets signed; then sign and shape."""
         block = None
-        if surface in ("npm", "pypi", "docker"):
+        if surface in ("npm", "pypi", "docker") and version:
+            # The sandbox runs the latest release under an unversioned key: its result
+            # says nothing about this version and must not reach this signed score.
+            block = _other_version_block()
+        elif surface in ("npm", "pypi", "docker"):
             block = await _behavioral_block(
                 {"package_coordinate": {"surface": surface, "name": name},
                  "declared_scope": data.get("declared_scope") or {},

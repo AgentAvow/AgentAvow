@@ -345,6 +345,13 @@ CASES = [
      "do_not_connect", True,
      "2 critical findings in its code, including curl/wget piped to shell"),
     # ── coverage gaps: a Safe reason states what was not read (wording only) ─────
+    ("gap_sandbox_never_started", _scan(82, 120, coverage_gaps={
+        "sandbox_not_observed": "crashed"}), "safe", True,
+     "nothing found in 120 files; the sandbox could not start the tool (crashed), so its "
+     "behavior was not observed"),
+    ("gap_sandbox_other_version", _scan(82, 120, coverage_gaps={
+        "sandbox_not_observed": "other_version"}), "safe", True,
+     "nothing found in 120 files; the sandbox has not run this version"),
     ("gap_oversized_one", _scan(92, 120, coverage_gaps={"oversized_files": 1}), "safe", True,
      "nothing found in 120 files; 1 file over 500 KB was not fully read"),
     ("gap_oversized_many", _scan(92, 120, coverage_gaps={"oversized_files": 3}), "safe", True,
@@ -633,6 +640,8 @@ MARK_CASES = [
     ("sandbox_pending", _scan(92, 340, certified=CERTIFIED,
                               behavioral={"ran": False, "pending": True, "state": "running"}),
      False, "sandbox_pending"),
+    ("pinned_version_no_sandbox", _scan(92, 340, certified=CERTIFIED, coverage_gaps={
+        "sandbox_not_observed": "other_version"}), False, "coverage_gaps"),
     ("score_80", _scan(80, 340, certified=CERTIFIED), False, "score_below_81"),
     ("score_81", _scan(81, 340, certified=CERTIFIED), True, ""),
     ("thin_7_files", _scan(82, 7, certified=CERTIFIED), False, "thin_coverage"),
