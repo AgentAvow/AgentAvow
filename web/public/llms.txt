@@ -5,7 +5,7 @@
 ## Check a tool
 - [Check page](https://agentavow.com/check): paste a repo, package, or MCP server URL
 - [Browse the catalog](https://agentavow.com/browse): every tool we've scanned, filterable by answer
-- [Public scan API](https://agentavow.com/api/v1/docs): no account needed, e.g. `GET /api/v1/public/scan/{owner}/{repo}` or `/api/v1/public/scan/package/npm/{name}`
+- [Public scan API](https://agentavow.com/docs/check-guide): no account needed, e.g. `GET /api/v1/public/scan/{owner}/{repo}` or `/api/v1/public/scan/package/npm/{name}`
 
 ## Use it from an agent
 - MCP server (streamable HTTP): https://agentavow.com/mcp
@@ -17,5 +17,7 @@
 - [How scoring works](https://agentavow.com/docs/how-grading-works)
 - [Verify an attestation offline](https://agentavow.com/docs/verify-attestations)
 - [Safety model spec](https://github.com/AgentAvow/AgentAvow/blob/main/docs/standards/agentavow-safety-model-v1.md)
+- [FAQ](https://agentavow.com/faq)
+- [State of Agent Security, Q3 2026](https://agentavow.com/state-of-agent-security-q3-2026)
 - Public signing keys (JWKS): https://agentgraph.co/.well-known/jwks.json
 - AI catalog: https://agentavow.com/.well-known/ai-catalog.json

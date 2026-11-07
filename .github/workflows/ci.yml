@@ -104,6 +104,17 @@ jobs:
       - name: Build
         working-directory: web
         run: npx vite build
+        env:
+          VITE_CUTOVER: "true"
+
+      # Strict here so a page that stops rendering fails the PR. On the host a failure
+      # only warns: the page falls back to the app shell and the deploy carries on.
+      - name: Prerender public pages
+        working-directory: web
+        run: npm run prerender
+        env:
+          VITE_CUTOVER: "true"
+          PRERENDER_STRICT: "1"
 
   rugpull-demo:
     name: JS gate + rug-pull demo (localhost, no network after install)
