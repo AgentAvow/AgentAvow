@@ -20,6 +20,7 @@ import {
 import { useAuth } from '../../hooks/useAuth'
 import SEOHead from '../../components/SEOHead'
 import api from '../../lib/api'
+import { trackBadgeCopied, trackCheckSubmit, trackResultView } from '../../lib/analytics'
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
 import { useRotatingPlaceholder , useIsDesktop } from '../lib/hooks'
 import { summarize } from '../lib/summarize'
@@ -44,6 +45,12 @@ const CAT_LABELS: Record<string, string> = {
  * (gradeSystem.decisionOf — the same decision VerdictBadge and summarize() read, so the
  * description never disagrees with the banner). "Safe to connect · Certified — …". */
 /** "mcp.deepwiki.com/mcp" from an endpoint URL, for titles. */
+/** Reports result_view once per result shown. The page path is all it sends: no verdict or score. */
+function useResultView(shown: boolean) {
+  const { pathname, search } = useLocation()
+  useEffect(() => { if (shown) trackResultView() }, [shown, pathname, search])
+}
+
 function mcpHostLabel(endpoint: string): string {
   try {
     const u = new URL(endpoint)
@@ -480,6 +487,7 @@ function BadgePromo({ owner, repo }: { owner: string; repo: string }) {
   const cardMd = `[![AgentAvow scores](${cardUrl})](${link})`
   const copyIt = (which: 'badge' | 'card', text: string) => {
     if (navigator.clipboard) navigator.clipboard.writeText(text)
+    trackBadgeCopied(which)
     setCopied(which); setTimeout(() => setCopied(null), 1400)
   }
   const codeBox = (which: 'badge' | 'card', text: string) => (
@@ -737,6 +745,7 @@ function Hero() {
       .replace(/^cargo\s+(?:add|install)\s+/i, 'crates:')
       // `npm core-js` / `pypi litellm`: a space works like the colon.
       .replace(/^(npm|pypi|python|crates|cargo|hf|huggingface|docker)\s+(?=\S+$)/i, '$1:')
+    if (v) trackCheckSubmit()
     setNotice(null)
     // A repo host we know but can't read yet: say so instead of scanning the same-named GitHub repo.
     const host = unsupportedRepoHost(v)
@@ -1553,6 +1562,7 @@ function SkillResult({ owner, repo, skill }: { owner: string; repo: string; skil
     queryFn: () => fetchSkillScan(owner, repo, false, skill),
     retry: 0,
   })
+  useResultView(!!scan)
   if (isLoading) return <ScanningLoader owner="skill" repo={`${owner}/${repo}${skill ? `/${skill}` : ''}`} />
   if (isError || !scan) {
     return (
@@ -1745,6 +1755,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
     queryFn: () => fetchMcpScan(endpoint),
     retry: 0,
   })
+  useResultView(!!scan)
   if (isLoading) return <ScanningLoader owner="MCP server" repo={endpoint} />
   if (isError || !scan) {
     return (
@@ -1874,6 +1885,7 @@ function PackageResult({ surface, name, version }: { surface: string; name: stri
     queryFn: () => fetchPackageScan(surface, name, false, version),
     retry: 0,
   })
+  useResultView(!!scan)
   const versionQs = version ? `?version=${encodeURIComponent(version)}` : ''
   if (isLoading) return <ScanningLoader owner={surface} repo={name} />
   if (isError || !scan) {
@@ -2105,6 +2117,9 @@ function Result({ owner, repo, privateResult, showCode = false }: {
     enabled: !!scan && !isPrivate,
   })
   const heroBig = useIsDesktop() ? 1.5 : 1  // scale marks up on desktop; MUST be before any early return (hooks order)
+  const collection = (scan as { skill_collection?: SkillCollectionLead | null } | null)?.skill_collection
+  // Private results are not reported, and a skill collection reports from the page it redirects to.
+  useResultView(!!scan && !isPrivate && !(checkCollection && collectionLead) && (!collection || showCode))
 
   if (checkCollection && collectionLead) {
     return <Navigate replace to={rp(`/rebrand/check/skill/${owner}/${repo}`)} />
@@ -2113,7 +2128,6 @@ function Result({ owner, repo, privateResult, showCode = false }: {
   if (!oneTimePrivate && isLoading) return <ScanningLoader owner={owner} repo={repo} />
   // A repo that is a collection of agent skills leads with the collection's answer
   // (its worst skill), the same number its badge, card, preview and Browse row show.
-  const collection = (scan as { skill_collection?: SkillCollectionLead | null } | null)?.skill_collection
   if (collection && !isPrivate && !showCode) {
     return <Navigate replace to={rp(`/rebrand/check/skill/${owner}/${repo}`)} />
   }

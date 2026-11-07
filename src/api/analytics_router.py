@@ -5,12 +5,13 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, literal_column, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_current_entity, require_admin
 from src.api.rate_limit import rate_limit_analytics, rate_limit_reads, rate_limit_writes
 from src.database import get_db
-from src.models import AnalyticsEvent, Entity, InteractionEvent
+from src.models import AnalyticsEvent, AnalyticsFirstTouch, Entity, InteractionEvent
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -24,6 +25,22 @@ ALLOWED_EVENT_TYPES = {
     "login_complete",
     "ios_waitlist",
     "newsletter_signup",
+    "lp_view",
+    "check_submit",
+    "result_view",
+    "cta_click",
+    "badge_copied",
+    "contact_submit",
+}
+
+# A cta_click carries its destination in `intent`.
+CTA_DESTINATIONS = {"copy_plugin_cmd", "open_plugin_dir", "add_claude", "add_chatgpt"}
+
+UTM_FIELDS = ("utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term")
+UTM_MAX_LENGTH = 200
+
+CAMPAIGN_EVENT_TYPES = {
+    "lp_view", "check_submit", "result_view", "cta_click", "badge_copied", "contact_submit",
 }
 
 FUNNEL_ORDER = [
@@ -90,6 +107,43 @@ class AttributionSummary(BaseModel):
     total_unattributed: int
 
 
+class CampaignRow(BaseModel):
+    """Sessions that reached each step, grouped by the session's first campaign tags."""
+
+    source: str | None = None
+    medium: str | None = None
+    campaign: str | None = None
+    content: str | None = None
+    term: str | None = None
+    sessions: int = 0
+    lp_view: int = 0
+    check_submit: int = 0
+    result_view: int = 0
+    copy_plugin_cmd: int = 0
+    open_plugin_dir: int = 0
+    add_claude: int = 0
+    add_chatgpt: int = 0
+    badge_copied: int = 0
+    contact_submit: int = 0
+
+
+class CampaignAttribution(BaseModel):
+    period_days: int
+    campaigns: list[CampaignRow]
+
+
+def _first_touch_tags(metadata: dict | None) -> dict[str, str]:
+    """The usable UTM tags in an event's metadata, cleaned to fit the first-touch columns."""
+    tags: dict[str, str] = {}
+    for field in UTM_FIELDS:
+        value = (metadata or {}).get(field)
+        if isinstance(value, str):
+            cleaned = value.replace("\x00", "").strip()[:UTM_MAX_LENGTH]
+            if cleaned:
+                tags[field] = cleaned
+    return tags
+
+
 # --- Public endpoint ---
 
 
@@ -109,6 +163,11 @@ async def track_event(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Invalid event_type. Must be one of: {', '.join(sorted(ALLOWED_EVENT_TYPES))}",
         )
+    if body.event_type == "cta_click" and body.intent not in CTA_DESTINATIONS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid destination. Must be one of: {', '.join(sorted(CTA_DESTINATIONS))}",
+        )
 
     event = AnalyticsEvent(
         event_type=body.event_type,
@@ -121,6 +180,15 @@ async def track_event(
     )
     db.add(event)
     await db.flush()
+
+    # The first tags seen for a session win, so a return visit keeps its campaign.
+    tags = _first_touch_tags(body.metadata)
+    if tags:
+        await db.execute(
+            pg_insert(AnalyticsFirstTouch)
+            .values(session_id=body.session_id, landing_page=body.page, **tags)
+            .on_conflict_do_nothing(index_elements=["session_id"])
+        )
     return {"status": "ok"}
 
 
@@ -367,6 +435,64 @@ async def get_attribution(
         sources=sources,
         total_attributed=total_attributed,
         total_unattributed=total_unattributed,
+    )
+
+
+@router.get(
+    "/attribution/campaigns",
+    response_model=CampaignAttribution,
+    dependencies=[Depends(rate_limit_reads)],
+)
+async def get_campaign_attribution(
+    days: int = Query(30, ge=1, le=90),
+    current_entity: Entity = Depends(get_current_entity),
+    db: AsyncSession = Depends(get_db),
+):
+    """Funnel per campaign, by each session's first touch. Admin only.
+
+    Each number is distinct sessions active in the window, so a return visit counts toward
+    the campaign that first brought the session in.
+    """
+    require_admin(current_entity)
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    tags = (
+        AnalyticsFirstTouch.utm_source,
+        AnalyticsFirstTouch.utm_medium,
+        AnalyticsFirstTouch.utm_campaign,
+        AnalyticsFirstTouch.utm_content,
+        AnalyticsFirstTouch.utm_term,
+    )
+    sessions = func.count(func.distinct(AnalyticsEvent.session_id))
+    joined_in_window = (
+        AnalyticsEvent.created_at >= cutoff,
+        AnalyticsEvent.session_id == AnalyticsFirstTouch.session_id,
+    )
+
+    rows: dict[tuple, CampaignRow] = {}
+    for *key, count in (
+        await db.execute(select(*tags, sessions).where(*joined_in_window).group_by(*tags))
+    ).all():
+        source, medium, campaign, content, term = key
+        rows[tuple(key)] = CampaignRow(
+            source=source, medium=medium, campaign=campaign, content=content, term=term,
+            sessions=count,
+        )
+
+    steps = await db.execute(
+        select(*tags, AnalyticsEvent.event_type, AnalyticsEvent.intent, sessions)
+        .where(*joined_in_window, AnalyticsEvent.event_type.in_(CAMPAIGN_EVENT_TYPES))
+        .group_by(*tags, AnalyticsEvent.event_type, AnalyticsEvent.intent)
+    )
+    for *key, event_type, intent, count in steps.all():
+        step = intent if event_type == "cta_click" else event_type
+        row = rows[tuple(key)]
+        # Sum across intents: badge_copied has one row per format.
+        setattr(row, step, getattr(row, step) + count)
+
+    return CampaignAttribution(
+        period_days=days,
+        campaigns=sorted(rows.values(), key=lambda row: row.sessions, reverse=True),
     )
 
 

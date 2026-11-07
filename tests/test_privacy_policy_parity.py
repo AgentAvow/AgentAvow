@@ -32,3 +32,10 @@ def test_connector_section_and_key_commitments_are_present():
                    "privacy@agentavow.com"):
         assert phrase in text, phrase
     assert "—" not in text  # no em dashes in outbound copy
+
+
+def test_first_party_analytics_are_disclosed():
+    text = " ".join(b for _, b in _PRIVACY_CLAUSES)
+    for phrase in ("ag_session_id", "local storage", "ag_utm", "IP address of the request",
+                   "no automatic deletion date"):
+        assert phrase in text, phrase

@@ -7,6 +7,7 @@ import { isCertified as certifiedMark } from '../../components/trust/gradeSystem
 import { rp } from '../basePath'
 import { useRotatingPlaceholder } from '../lib/hooks'
 import SEOHead from '../../components/SEOHead'
+import { trackBadgeCopied } from '../../lib/analytics'
 
 declare global {
   interface Window { AgentAvow?: { render: (root?: Element | Document) => void } }
@@ -91,6 +92,7 @@ export default function RebrandBadge() {
 
   const copy = () => {
     if (navigator.clipboard) navigator.clipboard.writeText(markdown)
+    trackBadgeCopied('badge')
     setCopied(true)
     setTimeout(() => setCopied(false), 1400)
   }
@@ -118,6 +120,7 @@ export default function RebrandBadge() {
   const widgetSnippet = `<script src="${origin}/widget.js"\n        data-tool="${slug}"></script>`
   const copyWidget = () => {
     if (navigator.clipboard) navigator.clipboard.writeText(widgetSnippet)
+    trackBadgeCopied('widget')
     setCopiedW(true)
     setTimeout(() => setCopiedW(false), 1400)
   }

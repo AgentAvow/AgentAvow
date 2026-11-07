@@ -17,7 +17,7 @@ const SECTIONS: Section[] = [
     items: [
       { q: 'What is AgentAvow?', a: 'AgentAvow tells you whether a tool, MCP server, or package is safe for your AI agent to connect to. Paste a URL and get one of three answers with its reason (Safe to connect, Review before you connect, or Do not connect), a signed 0–100 trust score backed by scan evidence anyone can recompute, and an adoption score from real usage.' },
       { q: 'Is AgentAvow free?', a: 'Yes. Checking any tool is free and requires no account. An account is only needed to watch tools for change-alerts, manage API keys, or claim repositories you own.' },
-      { q: 'Do I need an account to use it?', a: 'No. Checking a tool and browsing the catalog are free and anonymous — no signup, no tracking required to get a result.' },
+      { q: 'Do I need an account to use it?', a: 'No. Checking a tool and browsing the catalog are free and need no signup. The site keeps its own analytics; the privacy policy says what they record.' },
     ],
   },
   {
