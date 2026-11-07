@@ -527,6 +527,12 @@ def coverage_gap_notes(data: dict) -> list[str]:
     n = _int(g.get("skills_ungraded"))
     if n > 0:
         notes.append(f"{_files_phrase(n, 'skill')} in the repo {_was(n)} not graded")
+    why = g.get("sandbox_not_observed")
+    if why == "other_version":
+        notes.append("the sandbox has not run this version")
+    elif isinstance(why, str) and why:
+        notes.append(f"the sandbox could not start the tool ({why}), so its behavior was "
+                     "not observed")
     return notes
 
 
@@ -781,6 +787,9 @@ def cheap_coverage_gap(data: dict) -> bool:
     if not isinstance(g, dict):
         return False
     if _int(g.get("fetch_failed")) > 0:
+        return True
+    # A pinned version has no sandbox run of its own, and the mark waits for a final one.
+    if g.get("sandbox_not_observed") == "other_version":
         return True
     if g.get("tool_list_unread") is True or g.get("tool_list_paged") is True:
         return True
