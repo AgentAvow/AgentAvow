@@ -74,12 +74,6 @@ def _render_og_html(
 </html>"""
 
 
-def _grade_from_score(score: int) -> str:
-    """Return letter grade from a 0-100 score (canonical bands — src/scoring.py)."""
-    from src.scoring import grade_from_score
-    return grade_from_score(score)
-
-
 # ── Scan OG endpoint ────────────────────────────────────────────────────
 
 
@@ -134,7 +128,8 @@ async def og_check(
             title = f"Is {full_name} Safe? | AgentAvow Security Scan"
             description = (
                 f"Check the security posture of {full_name} on AgentAvow. "
-                "Free automated security scanning for any GitHub repository."
+                "Safe to connect, Review before you connect, or Do not connect, "
+                "with a signed trust score you can verify offline."
             )
             return HTMLResponse(
                 content=_render_og_html(title, description, image_url, canonical_url),
@@ -264,13 +259,13 @@ async def og_profile(
 # The newer score surfaces. nginx routes a social crawler on /check/pkg/*,
 # /check/mcp, /check/skill/* here; real users still get the SPA.
 
-def _og_image_url(title: str, grade: str, score, subtitle: str,
+def _og_image_url(title: str, score, subtitle: str,
                   data: dict | None = None, adoption: tuple | None = None) -> str:
     from urllib.parse import urlencode
     params = {
         # Clip the title like the subtitle — a long HF/docker coordinate would otherwise
         # push it past the handler's length limit and 422 the whole image.
-        "title": (title or "")[:180], "grade": grade or "",
+        "title": (title or "")[:180],
         "score": "" if score is None else int(score), "subtitle": (subtitle or "")[:180],
     }
     if data:
@@ -307,19 +302,18 @@ def _og_verdict(score: int | None, data: dict | None = None) -> str:
 @router.get("/pkg/{surface}/{name:path}", response_class=HTMLResponse)
 async def og_package(surface: str, name: str) -> HTMLResponse:
     """OG tags for a package/model/container score page (/check/pkg/:surface/*)."""
-    from src.api.public_scan_router import _display_grade, _get_cached, _get_stale_cached
+    from src.api.public_scan_router import _get_cached, _get_stale_cached
 
     surface = (surface or "").strip().lower()
     name = (name or "").strip().strip("/")
     full = f"{surface}:{name}"
     canonical_url = f"{BASE_URL}/check/pkg/{surface}/{name}"
-    grade, score, subtitle = "", None, ""
+    score, subtitle = None, ""
     # Fall back to the 7-day stale copy like the MCP and skill previews, so a package
     # preview keeps its answer and score after the 1 h cache expires.
     cached = await _get_cached(surface, name) or await _get_stale_cached(surface, name)
     if cached:
         score = cached.get("trust_score")
-        grade = cached.get("grade") or _display_grade(score or 0, certified_mark(cached))
         subtitle = (cached.get("tool_description") or "").strip()
     verdict = _og_verdict(score, cached)
     if not subtitle:
@@ -329,7 +323,7 @@ async def og_package(surface: str, name: str) -> HTMLResponse:
     description = (f"{name} scored {_shown} on AgentAvow — {verdict}" if cached
                    else f"Check {name} on AgentAvow: Safe to connect, Review before you "
                         "connect, or Do not connect, signed and verifiable offline.")
-    image_url = _og_image_url(full, grade, score, subtitle, cached,
+    image_url = _og_image_url(full, score, subtitle, cached,
                               adoption=await _adoption_for(surface, surface, name)
                               if cached else None)
     return HTMLResponse(content=_render_og_html(title, description, image_url, canonical_url))
@@ -367,11 +361,10 @@ async def _og_skill_page(owner: str, repo: str, skill_path: str | None) -> HTMLR
     full_name = f"{owner}/{repo}"
     key = f"{full_name}/{skill_path}" if skill_path else full_name
     canonical_url = f"{BASE_URL}/check/skill/{key}"
-    grade, score = "", None
+    score = None
     cached = await _get_cached("skill", key) or await _get_stale_cached("skill", key)
     if cached:
         score = cached.get("trust_score")
-        grade = cached.get("grade") or _grade_from_score(score or 0)
     verdict = _og_verdict(score, cached)
     skill_name = skill_path.rsplit("/", 1)[-1] if skill_path else None
     subtitle = "Agent Skill · " + verdict
@@ -379,7 +372,7 @@ async def _og_skill_page(owner: str, repo: str, skill_path: str | None) -> HTMLR
              else f"{full_name} — Agent Skill")
     _shown = "—" if score is None else f"{int(score)}/100"
     description = f"{title} scored {_shown} on AgentAvow — {verdict}"
-    image_url = _og_image_url(skill_name or full_name, grade, score, subtitle, cached)
+    image_url = _og_image_url(skill_name or full_name, score, subtitle, cached)
     return HTMLResponse(content=_render_og_html(title, description, image_url, canonical_url))
 
 
@@ -399,7 +392,7 @@ async def og_mcp(endpoint: str = "") -> HTMLResponse:
     card_title = (_p.hostname or ep or "MCP server")
     if _p.path and _p.path != "/":
         card_title += _p.path
-    cached, score, grade = None, None, ""
+    cached, score = None, None
     try:
         from src.ssrf import mcp_endpoint_identity, validate_url_https
         url = mcp_endpoint_identity(validate_url_https(ep, field_name="endpoint"))
@@ -409,12 +402,11 @@ async def og_mcp(endpoint: str = "") -> HTMLResponse:
         cached = None
     if cached:
         score = cached.get("trust_score")
-        grade = cached.get("grade") or _grade_from_score(score or 0)
     verdict = _og_verdict(score, cached)
     title = f"{card_title} — MCP server"
     subtitle = "Live-checked MCP server · " + verdict
     _shown = "—" if score is None else f"{int(score)}/100"
     description = (f"{card_title} scored {_shown} on AgentAvow — {verdict}" if cached
                    else f"AgentAvow checks this MCP server's served tool surface. {ep}".strip())
-    image_url = _og_image_url(card_title, grade, score, subtitle, cached)
+    image_url = _og_image_url(card_title, score, subtitle, cached)
     return HTMLResponse(content=_render_og_html(title, description, image_url, canonical_url))

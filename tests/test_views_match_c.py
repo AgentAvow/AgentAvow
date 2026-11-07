@@ -77,9 +77,9 @@ def test_og_router_uses_the_certified_mark():
         "findings": {"items": [{"category": "code_safety", "severity": "high",
                                 "kind": "defect", "shipped": True}], "high": 1},
     }
-    url = _og_image_url("o/r", "", 90, "s", eligible_review)
+    url = _og_image_url("o/r", 90, "s", eligible_review)
     assert "certified=1" not in url and "decision=review" in url
-    url = _og_image_url("o/r", "", 90, "s", None, adoption=(48, 867000, "stars"))
+    url = _og_image_url("o/r", 90, "s", None, adoption=(48, 867000, "stars"))
     assert "adoption=867000" in url and "adoption_pct=48" in url
 
 
