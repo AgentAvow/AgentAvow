@@ -64,7 +64,7 @@ For the local stdio server instead: `pip install agentavow-trust`.
 
 ## Key Features
 
-- **Free, anonymous scanning** — Point AgentAvow at any GitHub repo, MCP server, npm or PyPI package, or OpenClaw skill (or a wallet address that resolves to one) and get one of three answers back with its reason. No account, no install. Results cache for 1 hour; `?force=true` re-scans.
+- **Free, anonymous scanning** — Point AgentAvow at any GitHub repo, MCP server, npm or PyPI package, or OpenClaw skill (or a wallet address linked to an AgentAvow account) and get one of three answers back with its reason. No account, no install. Results cache for 1 hour; `?force=true` re-scans.
 - **Two scores: trust + adoption** — Every scan leads with one of three answers and its reason (Safe to connect / Review before you connect / Do not connect), then a **0–100 trust score** (with a trust tier as detail) and an **adoption score** built from real usage (downloads, stars, installs). The trust score is computed from the findings; five per-category subscores (secret hygiene, code safety, data handling, filesystem access, dependency health) are reported beside it as independent axes. Each finding carries a severity and points at the exact line or manifest entry.
 - **Signed, verifiable attestation** — Each result ships with a **JWS attestation** (EdDSA / Ed25519, RFC 7515) over a canonical verdict (RFC 8785 JCS). Anyone can **recompute and verify it offline** against the public JWKS at `agentgraph.co/.well-known/jwks.json` — the score is a product, the signature is the proof under it.
 - **Trust tiers → recommended limits** — Each trust score maps to a trust tier (`verified` → `blocked`) with a recommended execution posture (req/min, token budget, confirmation prompts) so a gateway or agent framework can act on it automatically.
@@ -206,7 +206,7 @@ The public scanning API needs **no authentication**. All app endpoints use the `
 | **Card** | `GET /public/scan/{owner}/{repo}/card.svg` | The trust card the `widget.js` embed shows. Cached five minutes in the browser and an hour at the edge. |
 | **Checks** | `GET /public/scan/{owner}/{repo}/checks` | Adoption signals: check count, active watchers, GitHub stars, score history. |
 | **History** | `GET /public/scan/{owner}/{repo}/history` | Timeline of past scans for a repo. |
-| **Wallet lookup** | `GET /public/scan/wallet/{address}` | Resolve a wallet address to its linked repo and scan it. |
+| **Wallet lookup** | `GET /public/scan/wallet/{address}` | Look up a wallet linked to an AgentAvow account and scan the repo linked to it. This reads our own account records, not a chain. |
 | **Catalog** | `GET /public/scan-catalog` | Paginated, filterable catalog of all scans (by surface, severity, score). |
 | **OG page** | `GET /og/check/{owner}/{repo}` | Open Graph meta for a scan result page (the shareable page itself is `agentavow.com/check/{owner}/{repo}`). |
 
@@ -216,7 +216,7 @@ The public scanning API needs **no authentication**. All app endpoints use the `
 |----------|------|-------------|
 | **JWKS** | `GET /.well-known/jwks.json` | Public keys (EdDSA/Ed25519) for offline attestation verification. Served on `agentgraph.co`. |
 | **Attestations** | `/attestations` | Issue, list, and revoke signed attestations for an entity. |
-| **Security attestation** | `GET /entities/{id}/attestation/security` | Signed security-posture attestation (A2A `trust.signals[]` compatible). |
+| **Security attestation** | `GET /entities/{id}/attestation/security` | Signed security-posture attestation for an entity. |
 | **Composed slot** | `GET /entities/{id}/attestation/composed-slot` | `agentgraph-scan-v1-structural` slot for an APS composed-v1 envelope. |
 | **Aggregate verify** | `GET /aggregate/{subject_did}/verify` | Verify a signed Trust Score v2 aggregate envelope. |
 
@@ -241,7 +241,7 @@ AgentAvow/
 │   ├── attestation/         # CTEF envelopes, APS composed slot
 │   ├── trust/               # Trust score computation, aggregate envelopes, action_ref vectors
 │   ├── safety/              # Anomaly / collusion / propagation controls
-│   ├── source_import/       # Fetchers (GitHub, npm, PyPI, MCP, crates, Docker, HF, …)
+│   ├── source_import/       # Fetchers (GitHub, npm, PyPI, MCP, crates, Docker, HF, A2A card import, …)
 │   ├── jobs/                # Scheduled jobs (watch re-scan loop, population scan)
 │   ├── bridges/             # Framework adapters (MCP, LangChain, CrewAI, AutoGen)
 │   ├── models.py            # SQLAlchemy models
