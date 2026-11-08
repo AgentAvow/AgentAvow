@@ -257,8 +257,12 @@ function Orbs() {
   )
 }
 
+/** Paid landing pages: no nav, no footer, and a logo that isn't a link. One goal each. */
+const BARE_PAGES = new Set([rp('/rebrand/claude-code')])
+
 export default function RebrandLayout() {
   const { pathname } = useLocation()
+  const bare = BARE_PAGES.has(pathname)
 
   // Anonymous page-view tracking (fire-and-forget) so the admin traffic funnel
   // has real session data — the live cutover tree never emitted this before, so
@@ -294,7 +298,15 @@ export default function RebrandLayout() {
   return (
     <div className="min-h-screen bg-background text-text">
       <Helmet defaultTitle="AgentAvow — Trust for the tools your agents connect to" />
-      <Orbs />
+      {!bare && <Orbs />}
+      {bare ? (
+        <div className="relative z-[3] py-4">
+          <div className="max-w-[860px] mx-auto px-6 flex items-center justify-between gap-3">
+            <Wordmark />
+            <span className="text-[13px] text-text-muted">Free. No account.</span>
+          </div>
+        </div>
+      ) : (
       <header className="sticky top-0 z-20 bg-surface border-b border-border/60">
         <div className="max-w-[1080px] mx-auto px-6 h-[62px] flex items-center gap-7">
           <Link to={rp("/rebrand")} aria-label="AgentAvow home">
@@ -315,6 +327,7 @@ export default function RebrandLayout() {
           </div>
         </div>
       </header>
+      )}
 
       <main>
         <AtmosphericBackground intensity="medium" confineFaceToHero>
@@ -334,11 +347,14 @@ export default function RebrandLayout() {
         </AtmosphericBackground>
       </main>
 
+      {!bare && (
       <footer className="relative z-10 bg-background border-t border-border/60 mt-8">
         <div className="max-w-[1080px] mx-auto px-6 py-10">
           <div className="flex flex-wrap items-center justify-between gap-5">
             <Wordmark id="ftr" />
             <div className="flex flex-wrap gap-5 text-[14px] text-text-muted">
+              <Link to={rp("/rebrand/get")} className="hover:text-text">Get AgentAvow</Link>
+              <Link to={rp("/rebrand/teams")} className="hover:text-text">For teams</Link>
               <Link to={rp("/rebrand/docs")} className="hover:text-text">Docs</Link>
               <Link to={rp("/rebrand/badge")} className="hover:text-text">Badges</Link>
               <Link to={rp("/rebrand/certified")} className="hover:text-text">Certified</Link>
@@ -383,6 +399,7 @@ export default function RebrandLayout() {
           </div>
         </div>
       </footer>
+      )}
     </div>
   )
 }

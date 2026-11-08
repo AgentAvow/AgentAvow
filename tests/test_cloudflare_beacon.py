@@ -16,6 +16,10 @@ MAIN = (ROOT / "web/src/main.tsx").read_text()
 NGINX = (ROOT / "nginx/nginx.conf").read_text()
 
 BEACON_HOST = "https://cloudflareinsights.com"
+# Allowed only on /claude-code, for the Meta Pixel (tests/test_meta_pixel.py). The block
+# list may drop it too: that page has no in-app link to a check page, and if one were
+# followed, cutting the pixel off there is what we'd want.
+META_EVENTS_HOST = "https://www.facebook.com"
 
 
 def _csp_headers() -> list[str]:
@@ -60,7 +64,8 @@ def test_block_list_drops_only_cloudflare():
     for csp in headers:
         allowed = _directive(csp, "connect-src")
         assert BEACON_HOST in allowed
-        assert allowed - {BEACON_HOST} <= blocking, allowed - {BEACON_HOST} - blocking
+        extra = allowed - {BEACON_HOST, META_EVENTS_HOST} - blocking
+        assert not extra, extra
 
 
 def test_csp_still_allows_the_beacon_script_without_inline_code():
