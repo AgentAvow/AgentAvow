@@ -47,6 +47,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from src.scanner.bytecode import looks_like_pyc
 from src.ssrf import validate_url_https
 
 logger = logging.getLogger(__name__)
@@ -165,6 +166,8 @@ class ArtifactFile:
     # git blob SHA-1 of the raw bytes (== GitHub's tree entry `sha`). Lets drift
     # compare the artifact against a repo TREE at a release tag with no content fetch.
     git_blob_sha: str = ""
+    # The bytes start with a CPython bytecode header (a .pyc, whatever its name).
+    pyc_header: bool = False
 
 
 @dataclass
@@ -419,6 +422,7 @@ def _make_file(path: str, raw: bytes) -> ArtifactFile:
         git_blob_sha=hashlib.sha1(
             b"blob " + str(len(raw)).encode() + b"\x00" + raw
         ).hexdigest(),
+        pyc_header=is_binary and looks_like_pyc(raw[:16]),
     )
 
 

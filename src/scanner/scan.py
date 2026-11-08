@@ -6860,6 +6860,12 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
         if extra:
             gaps["oversized_files"] = int(gaps.get("oversized_files") or 0) + extra
     _fold_fetch_gaps(gaps, eco, fetched)
+    # Python bytecode in an sdist (never read): medium + the gap. Wheels and images are
+    # not graded (bytecode is normal there).
+    from src.scanner.bytecode import artifact_bytecode
+    _bc_findings, _bc_gaps = artifact_bytecode(fetched)
+    result.findings = result.findings + _bc_findings
+    gaps.update(_bc_gaps)
     result.coverage_gaps = gaps
     # Declared-scope manifest shipped INSIDE the artifact (same file the repo scan reads
     # at the repo root). Fail-open: absent/malformed = no declaration. The behavioral
@@ -7251,7 +7257,7 @@ async def _grade_skill_at(
         if info.get("truncated") is True:
             sgaps["tree_truncated"] = True
 
-        skill = analyze_skill(files, skill_md_path=skill_md_path)
+        skill = analyze_skill(files, skill_md_path=skill_md_path, tree_paths=blobs + big)
         sgaps.update(skill.coverage_gaps)
 
         # Env vars the skill's scripts read: the behavioral sandbox fills each
@@ -7792,6 +7798,15 @@ async def scan_repo(
             gaps["fetch_failed"] = fetch_failed
         if scan_errors:
             gaps["scan_errors"] = scan_errors
+        # Python bytecode committed to the repo (the PyCache trap): never read, so it is
+        # reported by itself. The tree lists tracked files only.
+        from src.scanner.bytecode import repo_bytecode
+        _bc_findings, _bc_gaps = repo_bytecode(
+            [it["path"] for it in tree if isinstance(it, dict) and it.get("path")]
+            + [str(it.get("path")) for it in (_repo_meta.get("oversized") or [])
+               if isinstance(it, dict) and it.get("path")])
+        result.findings.extend(_bc_findings)
+        gaps.update(_bc_gaps)
         npm_scripts.restore_externally_invoked(result.findings, repo_texts)
         # A test-named file that is not test code (or that running code uses) is graded
         # as shipped code.
