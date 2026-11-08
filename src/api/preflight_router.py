@@ -127,6 +127,7 @@ def _build_unscanned(target: str, auth: dict | None, cached: bool) -> PreflightR
 def _build_preflight(
     target: str, surface: str, data: dict, auth: dict | None, cached: bool,
     plugin: dict | None = None,
+    mark: bool | None = None,
 ) -> PreflightResponse:
     report = evaluate_gates(data, surface=surface, auth=auth, plugin=plugin)
     subject_full = f"mcp:{target}" if surface == "mcp" else target
@@ -144,8 +145,9 @@ def _build_preflight(
         trust_score=int(data.get("trust_score") or 0),
         trust_tier=str(data.get("trust_tier") or ""),
         grade=str(data.get("grade") or ""),
-        # The Certified MARK (display rule), not the raw provenance gate.
-        certified=certified_mark(data, dec),
+        # The Certified MARK (display rule), not the raw provenance gate. ``mark`` is the
+        # result page's own mark (sandbox state folded in) when the caller knows it.
+        certified=certified_mark(data, dec) and (mark is None or mark),
         gates=[Gate(**g) for g in report["gates"]],
         summary=report["summary"],
         signed={
@@ -259,7 +261,8 @@ async def preflight_repo(
                 cached_plugin = await _plugin_report(
                     owner, repo, await get_github_token(), plugin, pkey)
             return _build_preflight(full, "repo", cached["data"], None, cached=True,
-                                    plugin=cached_plugin)
+                                    plugin=cached_plugin,
+                                    mark=await _repo_page_mark(cached["data"], owner, repo))
 
     if request is not None:
         from src.api.rate_limit import enforce_fresh_scan_limit
@@ -279,7 +282,19 @@ async def preflight_repo(
     data = _scan_result_to_dict(result)
     await _cache_set(key, {"data": data})
     plugin_report = await _plugin_report(owner, repo, token, plugin, pkey)
-    return _build_preflight(full, "repo", data, None, cached=False, plugin=plugin_report)
+    return _build_preflight(full, "repo", data, None, cached=False, plugin=plugin_report,
+                            mark=await _repo_page_mark(data, owner, repo))
+
+
+async def _repo_page_mark(data: dict, owner: str, repo: str) -> bool:
+    """The Certified mark the repo's result page shows: its cached sandbox run folded
+    in, so a run still pending, or one that never started the tool, shows no mark.
+    Cache-only (never starts a run); False on any error (fail closed)."""
+    try:
+        from src.api.public_scan_router import _mark_for_cached
+        return bool(await _mark_for_cached(data, (owner, repo)))
+    except Exception:  # noqa: BLE001 — an unknown sandbox state never earns the mark
+        return False
 
 
 async def _plugin_report(owner: str, repo: str, token: str | None, plugin: str | None,

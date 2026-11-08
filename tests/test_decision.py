@@ -349,6 +349,14 @@ CASES = [
         "sandbox_not_observed": "crashed"}), "safe", True,
      "nothing found in 120 files; the sandbox could not start the tool (crashed), so its "
      "behavior was not observed"),
+    ("gap_sandbox_install_failed", _scan(82, 120, certified=CERTIFIED, coverage_gaps={
+        "sandbox_not_observed": "install failed"}), "safe", True,
+     "nothing found in 120 files; the sandbox could not start the tool (install failed), so "
+     "its behavior was not observed"),
+    ("gap_sandbox_needs_credentials", _scan(92, 120, certified=CERTIFIED, coverage_gaps={
+        "sandbox_not_observed": "needs credentials"}), "safe", True,
+     "nothing found in 120 files; the sandbox could not start the tool (needs credentials), "
+     "so its behavior was not observed"),
     ("gap_sandbox_other_version", _scan(82, 120, coverage_gaps={
         "sandbox_not_observed": "other_version"}), "safe", True,
      "nothing found in 120 files; the sandbox has not run this version"),
@@ -648,6 +656,40 @@ MARK_CASES = [
      False, "sandbox_pending"),
     ("pinned_version_no_sandbox", _scan(92, 340, certified=CERTIFIED, coverage_gaps={
         "sandbox_not_observed": "other_version"}), False, "coverage_gaps"),
+    # ── a sandbox that never started the tool, for ANY start reason, takes the mark off
+    # (Kenne, 2026-11-07). The values are what _sandbox_gap writes (plain words).
+    *[(f"never_started_{why.replace(' ', '_')}", _scan(92, 340, certified=CERTIFIED,
+                                                     coverage_gaps={"sandbox_not_observed": why}),
+       False, "coverage_gaps")
+      for why in ("crashed", "no entrypoint", "install failed", "timeout", "resource limit",
+                  "needs credentials", "needs arguments", "missing binary", "unknown",
+                  "some future reason")],
+    # The instruction-only skill exception lives where the gap is written
+    # (public_scan_router._sandbox_gap, which sees the sandbox block): such a skill gets
+    # no gap at all. A gap that IS written still withholds the mark in both twins, even
+    # beside an inert-tree count (the attack twin cannot argue its way out here).
+    ("skill_no_entrypoint_gap_written_withholds", _scan(
+        92, 340, certified=CERTIFIED, coverage={"surface": "openclaw"},
+        surface_detail={"surface": "openclaw", "runnable_files": 0, "script_count": 0,
+                        "has_lifecycle_hooks": False},
+        coverage_gaps={"sandbox_not_observed": "no entrypoint"}), False, "coverage_gaps"),
+    ("skill_inert_tree_no_gap_keeps_mark", _scan(
+        92, 340, certified=CERTIFIED,
+        surface_detail={"surface": "openclaw", "runnable_files": 0, "script_count": 0,
+                        "has_lifecycle_hooks": False}), True, ""),
+    ("never_started_beside_other_gap", _scan(92, 340, certified=CERTIFIED, coverage_gaps={
+        "oversized_files": 2, "sandbox_not_observed": "crashed"}), False, "coverage_gaps"),
+    # Our own sandbox not running is not the tool's doing; the mark is not withheld for it.
+    ("sandbox_unavailable_keeps_mark", _scan(92, 340, certified=CERTIFIED, coverage_gaps={
+        "sandbox_not_observed": "unavailable"}), True, ""),
+    ("sandbox_gap_empty_keeps_mark", _scan(92, 340, certified=CERTIFIED, coverage_gaps={
+        "sandbox_not_observed": ""}), True, ""),
+    ("sandbox_gap_not_a_string_keeps_mark", _scan(92, 340, certified=CERTIFIED, coverage_gaps={
+        "sandbox_not_observed": True}), True, ""),
+    # Decision first: a never-started tool that also reads Review is off as not_safe.
+    ("never_started_and_review", _scan(90, 340, certified=CERTIFIED, deprecation="use x",
+                                       coverage_gaps={"sandbox_not_observed": "crashed"}),
+     False, "not_safe"),
     ("score_80", _scan(80, 340, certified=CERTIFIED), False, "score_below_81"),
     ("score_81", _scan(81, 340, certified=CERTIFIED), True, ""),
     ("thin_7_files", _scan(82, 7, certified=CERTIFIED), False, "thin_coverage"),
@@ -718,6 +760,29 @@ def test_certified_mark_table(case_id, data, mark, why):
     assert is_certified(data) is mark
     # an API response's own field wins
     assert is_certified({**data, "certified_mark": not mark}) is (not mark)
+
+
+NEVER_STARTED = ("crashed", "no entrypoint", "install failed", "timeout", "resource limit",
+                 "needs credentials", "needs arguments", "missing binary", "unknown")
+
+
+@pytest.mark.parametrize("why", NEVER_STARTED)
+@pytest.mark.parametrize("base", [
+    _scan(92, 340, certified=CERTIFIED),
+    _scan(82, 120),
+    _scan(70, 40, [_f("medium")] * 3),
+    _scan(40, 300, [_f("critical", "curl/wget piped to shell")]),
+    _scan(90, 340, certified=CERTIFIED, deprecation="use x instead"),
+], ids=["certified_safe", "safe", "mediums", "critical", "review"])
+def test_never_started_moves_only_the_mark(base, why):
+    """The answer, its finality and the score are what they were without the gap; only
+    the Certified mark comes off (and the Safe reason states the gap)."""
+    from src.scanner.verdict import certified_mark
+    gapped = {**base, "coverage_gaps": {"sandbox_not_observed": why}}
+    before, after = decide(base), decide(gapped)
+    assert (after.decision, after.final) == (before.decision, before.final)
+    assert gapped["trust_score"] == base["trust_score"]
+    assert certified_mark(gapped) is False
 
 
 def test_mark_uses_the_passed_decision():

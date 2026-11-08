@@ -788,7 +788,8 @@ PADDED_FINDING = "Oversized source file padded with filler"
 
 def cheap_coverage_gap(data: dict) -> bool:
     """Whether ``coverage_gaps`` holds a gap that is cheap for an attacker to cause: a
-    fetch that failed, an MCP tool list unread or only partly read, a skill file not
+    fetch that failed, a sandbox run that never started the tool (or a pinned version
+    the sandbox has not run), an MCP tool list unread or only partly read, a skill file not
     read (any gap on a skill scan, or a collection skill not graded), an
     agent-instruction file over the read cap, or an oversized file the padding rule
     fired on. A plain big file (a bundled ``.js``) is not one: its head and tail were
@@ -799,8 +800,13 @@ def cheap_coverage_gap(data: dict) -> bool:
         return False
     if _int(g.get("fetch_failed")) > 0:
         return True
-    # A pinned version has no sandbox run of its own, and the mark waits for a final one.
-    if g.get("sandbox_not_observed") == "other_version":
+    # The sandbox was meant to start the tool and observed nothing: a pinned version
+    # with no run of its own (``other_version``), or a tool that never started, for any
+    # start reason (crashed, install failed, timeout, needs credentials, ...). Crashing on
+    # purpose under the sandbox is cheap, and the mark promises a finished, clean run
+    # (Kenne, 2026-11-07). ``unavailable`` (our sandbox did not run) is not one.
+    why = g.get("sandbox_not_observed")
+    if isinstance(why, str) and why and why != "unavailable":
         return True
     if g.get("tool_list_unread") is True or g.get("tool_list_paged") is True:
         return True
