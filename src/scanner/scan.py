@@ -196,6 +196,9 @@ class ScanResult:
     # Live MCP scans: how the tools/list was read (endpoint asked for, TLS facts of the
     # connection, every page). Signed as scan.observation; see mcp_observation.py.
     mcp_observation: dict | None = None
+    # A2A card scans: the card URL, its pinned RFC 8785 digest and the signature
+    # result the verdict used. Signed as scan.agentCard; see src/scanner/a2a_scan.py.
+    a2a_card: dict | None = None
     # The served tools as a display list: name + declared annotations (+ digest where
     # we hold the full definition). Unsigned; see src/scanner/mcp_tool_list.py.
     tool_list: list[dict] = field(default_factory=list)
@@ -5794,6 +5797,11 @@ def _calculate_category_scores(result: ScanResult) -> dict[str, int]:
         "schema_risk": "code_safety",
         "annotation_lie": "code_safety",
         "lethal_trifecta": "data_handling",
+        # A2A Agent Card detectors (src/scanner/a2a_scan.py).
+        "insecure_transport": "data_handling",
+        "endpoint_origin": "data_handling",
+        "auth_scheme": "secret_hygiene",
+        "card_signature": "code_safety",
     }
     severity_weights = {"critical": 25, "high": 15, "medium": 8, "low": 3, "info": 0}
 

@@ -7,7 +7,7 @@ import { NoticeText } from '../components/NoticeText'
 import ImageScanDepth from '../components/ImageScanDepth'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
-import { fetchPublicScan, fetchSkillCollectionLead, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchMcpProbe, fetchSkillScan, fetchSkillBehavioral, publicApi } from '../../lib/scanApi'
+import { fetchPublicScan, fetchSkillCollectionLead, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchA2aScan, fetchMcpProbe, fetchSkillScan, fetchSkillBehavioral, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
 import { getTrustTier, decisionOf, decisionPhrase, headline as decisionHeadline, isCertified, certifiedMarkNote, coverageGapNotes } from '../../components/trust/gradeSystem'
 import { TrustBar, AdoptionNeedle, TrustPill, CertifiedMark, VerdictBadge } from '../components/TrustMark'
@@ -753,6 +753,11 @@ function Hero() {
     // Live MCP server: `mcp:https://…`.
     const mcp = v.match(/^mcp\s*:\s*(https?:\/\/.+)$/i)
     if (mcp) { navigate(rp('/rebrand/check/mcp') + '?endpoint=' + encodeURIComponent(mcp[1].trim())); return }
+    // A2A Agent Card: `a2a:https://…`, or a pasted URL to a well-known card path.
+    const a2a = v.match(/^a2a\s*:\s*(https?:\/\/.+)$/i)
+    if (a2a || /^https?:\/\/\S+\/\.well-known\/agent(?:-card)?\.json(?:[?#]\S*)?$/i.test(v)) {
+      navigate(rp('/rebrand/check/a2a') + '?card=' + encodeURIComponent(a2a ? a2a[1].trim() : v)); return
+    }
     // Wallet address: EVM `0x…` (40 hex) or Solana base58, optionally `wallet:`-prefixed.
     const wal = v.match(/^(?:wallet\s*:\s*)?(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/)
     if (wal) { navigate(rp(`/rebrand/check/wallet/${wal[1]}`)); return }
@@ -1873,6 +1878,113 @@ function McpResult({ endpoint }: { endpoint: string }) {
   )
 }
 
+type A2aSurface = {
+  agent_name?: string; card_url?: string; card_shape?: string; protocol_version?: string
+  skill_count?: number; interface_count?: number; legacy_path?: boolean
+  interfaces?: { url: string; binding: string }[]
+  auth?: { schemes?: Record<string, string>; card_requires_auth?: boolean }
+  skills?: { id: string; name: string; description: string; capabilities: string[]; authenticated: boolean }[]
+  signature?: { state?: string; alg?: string; kid?: string; jku?: string; reason?: string }
+  card_digest?: string
+}
+
+const SIGNATURE_LABEL: Record<string, [string, string]> = {
+  verified: ['verifies ✓', 'text-success'],
+  unverified: ['present, could not be verified', 'text-warning'],
+  absent: ['not signed', 'text-text-muted'],
+}
+
+/** An A2A Agent Card: graded on the card alone (interfaces, auth, skill text, its own
+ * signature). The agent's code is never seen, so the code categories are not scored. */
+function A2aResult({ card }: { card: string }) {
+  const { data: scan, isLoading, isError } = useQuery({
+    queryKey: ['rebrand-a2a-scan', card],
+    queryFn: () => fetchA2aScan(card),
+    retry: 0,
+  })
+  useResultView(!!scan)
+  if (isLoading) return <ScanningLoader owner="A2A agent" repo={card} />
+  if (isError || !scan) {
+    return (
+      <div className="max-w-[560px] mx-auto px-6 py-24 text-center">
+        <h1 className="text-2xl font-extrabold tracking-tight">Couldn&apos;t read that agent card</h1>
+        <p className="mt-3 text-text-muted text-[14px]">Give the card&apos;s https URL (for example <span className="font-mono text-text">https://agent.example.com/.well-known/agent-card.json</span>) or the agent&apos;s base URL.</p>
+        <Link to={rp('/rebrand/check')} className="mt-6 inline-block text-primary-light hover:text-primary font-semibold">← Scan something else</Link>
+      </div>
+    )
+  }
+  const t = getTrustTier(scan.trust_score)
+  const sd = ((scan as { surface_detail?: A2aSurface }).surface_detail || {}) as A2aSurface
+  const sig = sd.signature?.state || 'absent'
+  const [sigText, sigClass] = SIGNATURE_LABEL[sig] || SIGNATURE_LABEL.absent
+  const schemes = Object.entries(sd.auth?.schemes || {})
+  const name = sd.agent_name || card
+  return (
+    <div className="max-w-[760px] mx-auto px-6 py-14">
+      <SEOHead
+        title={`Is ${name} safe? ${decisionHeadline(scan)} · trust score ${scan.trust_score}/100`}
+        description={`${scanVerdict(scan)}. AgentAvow checked this A2A Agent Card: ${scan.trust_score}/100 (${t.name}).`}
+        path={`/check/a2a?card=${encodeURIComponent(card)}`}
+      />
+      <Reveal>
+        <div className="glass rounded-2xl relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${t.color}12, transparent 55%), var(--color-surface)` }}>
+          <div className="relative px-7 pt-7">
+            <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">A2A agent card</span>
+            <h1 className="mt-2 text-lg font-extrabold tracking-tight break-all">{name}</h1>
+            <div className="mt-1 font-mono text-[12.5px] text-text-muted break-all">{sd.card_url || card}</div>
+          </div>
+          <div className="px-7 mt-3"><VerdictBadge scan={scan} verb="connect" /></div>
+          <ScoreDuo trustScore={scan.trust_score} trustLabel="Card Trust" surface="a2a" owner="a2a" repo={sd.card_url || card} certified={isCertified(scan)} />
+        </div>
+      </Reveal>
+
+      <Reveal>
+        <div className="mt-4 glass rounded-2xl p-6">
+          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">What we checked</h3>
+          <p className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">We read the <span className="text-text">agent card</span> and nothing else: where it tells a client to send tasks, which auth it asks for, the skill text an orchestrating model reads, and the card&apos;s own signature. We sent the agent no task, and we never saw its code.</p>
+          <div className="mt-3 flex flex-col gap-2 text-[13px]">
+            <div className="flex justify-between gap-3"><span className="text-text-muted">Card format</span><span className="font-mono">{sd.card_shape || '?'}{sd.protocol_version ? ` · protocol ${sd.protocol_version}` : ''}{sd.legacy_path ? ' · legacy agent.json path' : ''}</span></div>
+            <div className="flex justify-between gap-3"><span className="text-text-muted">Skills</span><span className="font-mono">{sd.skill_count ?? 0}</span></div>
+            <div className="flex justify-between gap-3"><span className="text-text-muted">Auth schemes</span><span className="font-mono break-all text-right">{schemes.length ? schemes.map(([n, k]) => `${n} (${k})`).join(', ') : 'none declared'}</span></div>
+            <div className="flex justify-between gap-3"><span className="text-text-muted">Signature</span><span className={`font-mono text-right ${sigClass}`}>{sigText}{sig === 'verified' && sd.signature?.alg ? ` · ${sd.signature.alg}` : ''}</span></div>
+            {sig === 'unverified' && sd.signature?.reason && <div className="text-[12px] text-text-muted">{sd.signature.reason}</div>}
+            {sd.card_digest && <div className="flex justify-between gap-3"><span className="text-text-muted">Card digest</span><span className="font-mono text-[11.5px] break-all text-right">{sd.card_digest}</span></div>}
+          </div>
+          {(sd.interfaces || []).length > 0 && (
+            <div className="mt-3">
+              <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted mb-1.5">Interfaces</div>
+              {(sd.interfaces || []).map((i, n) => <div key={n} className="font-mono text-[12px] break-all">{i.binding ? `${i.binding} · ` : ''}{i.url}</div>)}
+            </div>
+          )}
+        </div>
+      </Reveal>
+
+      {(sd.skills || []).length > 0 && (
+        <Reveal>
+          <div className="mt-4 glass rounded-2xl p-6">
+            <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Skills it declares</h3>
+            <div className="mt-3 flex flex-col gap-3">
+              {(sd.skills || []).slice(0, 40).map((s) => (
+                <div key={s.id} className="text-[13px]">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold">{s.name || s.id}</span>
+                    {!s.authenticated && <span className="font-mono text-[11px] text-text-muted">no auth</span>}
+                    {s.capabilities.map((c) => <span key={c} className="font-mono text-[11px] text-warning bg-warning/10 border border-warning/25 rounded-full px-2 py-0.5">{c}</span>)}
+                  </div>
+                  {s.description && <div className="text-[12.5px] text-text-muted">{s.description}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        </Reveal>
+      )}
+
+      <CategoryFindings categoryScores={null} findings={scan.findings} maxFindings={15} emptyMessage={coverageGapNotes(scan).length ? '✓ No risks found in what was read — see “Not checked” above.' : '✓ No risks found in the agent card.'} />
+      <VerifyPanel scan={scan} />
+    </div>
+  )
+}
+
 /** Native npm/PyPI package score view — the published artifact, graded by
  * coordinate (no repo). Leads with the artifact/provenance trust-chain + the
  * Certified panel (this is where A+ is actually earned), then the findings.
@@ -2019,6 +2131,12 @@ export default function RebrandCheck() {
     const ep = sp.get('endpoint')
     if (!ep) return <Hero />
     return <McpResult endpoint={ep} />
+  }
+  // A2A Agent Card route (/check/a2a?card=…).
+  if (location.pathname.replace(/\/$/, '').endsWith('/check/a2a')) {
+    const card = sp.get('card')
+    if (!card) return <Hero />
+    return <A2aResult card={card} />
   }
   // Wallet route (/check/wallet/:addr): resolve to the linked tool, then its result.
   if (location.pathname.includes('/check/wallet/') && params.addr) {

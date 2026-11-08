@@ -123,6 +123,14 @@ export async function fetchMcpScan(endpoint: string, force = false): Promise<Pub
   return data
 }
 
+/** Grade an A2A Agent Card by its URL (or the agent's base URL). */
+export async function fetchA2aScan(card: string, force = false): Promise<PublicScanResponse> {
+  const { data } = await publicApi.get<PublicScanResponse>(
+    `/public/scan/a2a?card=${encodeURIComponent(card)}${force ? '&force=true' : ''}`,
+  )
+  return data
+}
+
 /** OPT-IN live probe of a remote MCP server: calls only the tools whose annotations
  * declare them read-only (and not destructive), once each, with synthetic inputs.
  * Advisory — the result comes back as `behavioral` with `plan: "live-probe"` and

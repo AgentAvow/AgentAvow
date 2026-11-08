@@ -201,6 +201,12 @@ export const CUSTOM_CODE_UNREAD_REASON = "the model's custom code could not be r
 export const ENCODED_TEXT_UNREAD_REASON = 'encoded text the agent reads could not all be decoded'
 // A live MCP server scan reads the served tool definitions only (files = tools).
 export const THIN_REASON_REMOTE_MCP = 'tool definitions clean; server code not inspected'
+// An A2A Agent Card: a signature we could not verify reads Review, never Do not connect
+// (A2A 1.0 §8.4 contradicts itself on canonicalization). The card is all we read, so a
+// Safe reason says the agent's code was not seen. Twins of verdict.py.
+export const CARD_SIGNATURE_UNVERIFIED_REASON = "the agent card's signature could not be verified"
+export const A2A_CLEAN_REASON = 'agent card clean; agent code not inspected'
+export const A2A_FOUND_REASON = 'no critical or high findings in its agent card'
 
 // A hardcoded credential shipped in a tool (category `secret`) exposes the vendor whose
 // key leaked, not the person installing it: on its own it caps at Review, never Do not
@@ -320,6 +326,7 @@ export function findingWhere(i: Obj): string {
   if (['tool:', 'prompt:', 'resource:', 'server:'].some((p) => path.startsWith(p))) {
     return ' in its tool definitions'
   }
+  if (path.startsWith('card:')) return ' in its agent card'
   const parts = path.split('/').filter((p) => p)
   const name = parts.length ? parts[parts.length - 1] : ''
   // A deciding finding in package.json sits in its scripts: a maintainer-only script
@@ -421,6 +428,7 @@ export function coverageGapNotes(input: unknown): string[] {
     if (g[`${kind}_list_too_large`] === true) notes.push(`the server's ${kind} list was too large to read`)
     else if (g[`${kind}_list_unread`] === true) notes.push(`the server's ${kind} list could not be read`)
   }
+  if (toInt(g.card_signature_unverified) > 0) notes.push("the agent card's signature could not be verified")
   n = toInt(g.image_layers_unread)
   if (n > 0) {
     const why = typeof g.image_layers_reason === 'string' && g.image_layers_reason ? ` (${g.image_layers_reason})` : ''
@@ -566,6 +574,7 @@ export function decide(input: unknown): Decision {
     if (toInt(gap.skill_refs_unread) > 0) return done('review', SKILL_REF_UNREAD_REASON)
     if (toInt(gap.custom_code_unread) > 0) return done('review', CUSTOM_CODE_UNREAD_REASON)
     if (toInt(gap.encoded_text_unread) > 0) return done('review', ENCODED_TEXT_UNREAD_REASON)
+    if (toInt(gap.card_signature_unverified) > 0) return done('review', CARD_SIGNATURE_UNVERIFIED_REASON)
   }
 
   const found = items.some((i) => ['critical', 'high', 'medium'].includes(sev(i))
@@ -580,6 +589,9 @@ export function decide(input: unknown): Decision {
   if (deps) {
     const noun = depC + depH === 1 ? 'advisory' : 'advisories'
     return safe(`no critical or high findings in its code (dependencies: ${deps} ${noun})`)
+  }
+  if (asObj(data.coverage).surface === 'a2a' || asObj(data.surface_detail).surface === 'a2a') {
+    return safe(found ? A2A_FOUND_REASON : A2A_CLEAN_REASON)
   }
   if (filesKnown && files >= 0 && files < THIN_COVERAGE_FILES && !found) {
     if (isRemoteMcp(data)) return safe(THIN_REASON_REMOTE_MCP)

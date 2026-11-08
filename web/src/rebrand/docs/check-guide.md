@@ -12,6 +12,10 @@ No account, no install. Paste any of these into the check box, or hit the API di
 - an MCP server, an npm, PyPI or crates package, a Hugging Face model, or a Docker image
 - an Agent Skill (`skill:owner/repo`); a repo holding many skills is checked skill by skill, and its result is
   the worst of them
+- an A2A Agent Card: its URL (`https://agent.example.com/.well-known/agent-card.json`) or `a2a:` and the
+  agent's base URL. We read the card only, not the agent's code: its interface URLs, its auth schemes, the
+  skill text an orchestrating model reads, and whether the card's own signature verifies
+  (`GET /api/v1/public/scan/a2a?card={url}`)
 - a wallet address (`0x…` or a Solana address); it opens the result for the repo linked to that wallet, or
   says the wallet isn't linked to a tool yet
 

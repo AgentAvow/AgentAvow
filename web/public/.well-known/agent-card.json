@@ -1,0 +1,49 @@
+{
+  "name": "AgentAvow",
+  "description": "AgentAvow checks the tools an AI agent connects to (GitHub repos, npm, PyPI and other packages, live MCP servers and A2A Agent Cards) and answers Safe to connect, Review before you connect, or Do not connect, with the reason, over a signed 0-100 trust score anyone can recompute offline. The check is a public HTTPS API that needs no account, plus an MCP server at https://agentavow.com/mcp. AgentAvow does not serve the A2A message protocol yet, so this card lists no A2A interface: call the HTTPS endpoints named in each skill.",
+  "supportedInterfaces": [],
+  "provider": {
+    "organization": "AgentAvow",
+    "url": "https://agentavow.com"
+  },
+  "version": "1.0.0",
+  "documentationUrl": "https://agentavow.com/docs",
+  "iconUrl": "https://agentavow.com/favicon.svg",
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false,
+    "extendedAgentCard": false
+  },
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["application/json"],
+  "skills": [
+    {
+      "id": "check-repo",
+      "name": "Check a GitHub repo",
+      "description": "Static analysis of a public GitHub repository. Returns the answer and its reason, the trust score, the findings with file and line, and a signed JWS attestation. HTTPS GET https://agentavow.com/api/v1/public/scan/{owner}/{repo}",
+      "tags": ["security", "trust-score", "github", "attestation"],
+      "examples": ["Is github.com/modelcontextprotocol/servers safe to connect?"]
+    },
+    {
+      "id": "check-package",
+      "name": "Check a published package",
+      "description": "Checks the published artifact of an npm, PyPI, crates.io, Docker or Hugging Face package. HTTPS GET https://agentavow.com/api/v1/public/scan/package/{surface}/{name}",
+      "tags": ["security", "trust-score", "npm", "pypi", "supply-chain"],
+      "examples": ["Check npm:left-pad before I install it"]
+    },
+    {
+      "id": "check-mcp-server",
+      "name": "Check a live MCP server",
+      "description": "Reads the tool definitions a Streamable-HTTP MCP server serves and checks them for tool poisoning, schema risk and dangerous capabilities. HTTPS GET https://agentavow.com/api/v1/public/scan/mcp?endpoint={url}",
+      "tags": ["security", "mcp", "tool-poisoning"],
+      "examples": ["Is https://mcp.example.com/mcp safe to connect?"]
+    },
+    {
+      "id": "check-a2a-card",
+      "name": "Check an A2A Agent Card",
+      "description": "Reads an A2A Agent Card and checks its interface URLs, auth schemes, skill text and its own signature. It reads the card only, not the agent's code. HTTPS GET https://agentavow.com/api/v1/public/scan/a2a?card={url}",
+      "tags": ["security", "a2a", "agent-card"],
+      "examples": ["Check https://agent.example.com/.well-known/agent-card.json"]
+    }
+  ]
+}

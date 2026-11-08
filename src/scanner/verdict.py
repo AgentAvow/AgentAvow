@@ -204,6 +204,14 @@ CUSTOM_CODE_UNREAD_REASON = "the model's custom code could not be read"
 # Encoded text in an agent-facing file or description past the scan's decode budget
 # (src/scanner/encoded_instructions.py): padding past the cap is the cheap evasion.
 ENCODED_TEXT_UNREAD_REASON = "encoded text the agent reads could not all be decoded"
+# An A2A Agent Card that carries a signature we could not verify (src/scanner/a2a_scan.py
+# ``card_signature_unverified``). Review, never Do not connect: A2A 1.0 §8.4 contradicts
+# itself on which default-valued fields are signed, so honest verifiers disagree.
+CARD_SIGNATURE_UNVERIFIED_REASON = "the agent card's signature could not be verified"
+# An A2A Agent Card scan reads the card only (files = skills); the agent's code is not
+# seen, whatever the skill count.
+A2A_CLEAN_REASON = "agent card clean; agent code not inspected"
+A2A_FOUND_REASON = "no critical or high findings in its agent card"
 
 # A hardcoded credential shipped in a tool (category ``secret``, e.g. an AWS key in
 # yt-dlp's extractors) exposes the vendor whose key leaked, not the person installing
@@ -335,6 +343,7 @@ WHERE_INSTALL = " in its install script"
 WHERE_AGENTS = " in instructions it gives agents"
 WHERE_TOOLS = " in its tool definitions"
 WHERE_DEPENDENCY = " in a dependency"
+WHERE_CARD = " in its agent card"
 
 # Files an agent is handed as instructions (mirrors src.scanner.package_context).
 _AGENT_FILE_NAMES = frozenset({
@@ -372,6 +381,8 @@ def finding_where(i: dict) -> str:
     path = str(i.get("file_path") or "").replace("\\", "/").lower()
     if path.startswith(("tool:", "prompt:", "resource:", "server:")):
         return WHERE_TOOLS
+    if path.startswith("card:"):
+        return WHERE_CARD
     parts = [p for p in path.split("/") if p]
     name = parts[-1] if parts else ""
     # A deciding finding in package.json sits in its scripts: a maintainer-only script
@@ -525,6 +536,8 @@ def coverage_gap_notes(data: dict) -> list[str]:
             notes.append(f"the server's {kind} list was too large to read")
         elif g.get(f"{kind}_list_unread") is True:
             notes.append(f"the server's {kind} list could not be read")
+    if _int(g.get("card_signature_unverified")) > 0:
+        notes.append("the agent card's signature could not be verified")
     n = _int(g.get("image_layers_unread"))
     if n > 0:
         why = g.get("image_layers_reason")
@@ -727,8 +740,10 @@ def decide(data: dict) -> Decision:
         return done(DECISION_REVIEW, CUSTOM_CODE_UNREAD_REASON)
     if _int(gap.get("encoded_text_unread")) > 0:
         return done(DECISION_REVIEW, ENCODED_TEXT_UNREAD_REASON)
+    if _int(gap.get("card_signature_unverified")) > 0:
+        return done(DECISION_REVIEW, CARD_SIGNATURE_UNVERIFIED_REASON)
 
-    found = any(sev(i) in ("critical", "high", "medium") and i.get("kind") != "capability"
+    found =any(sev(i) in ("critical", "high", "medium") and i.get("kind") != "capability"
                 and i.get("installed") is not False for i in items)
 
     # ── safe ──────────────────────────────────────────────────────────────────────
@@ -741,6 +756,8 @@ def decide(data: dict) -> Decision:
     if deps:
         noun = "advisory" if dep_c + dep_h == 1 else "advisories"
         return safe(f"no critical or high findings in its code (dependencies: {deps} {noun})")
+    if _surface_is(data, "a2a"):
+        return safe(A2A_FOUND_REASON if found else A2A_CLEAN_REASON)
     # Thin coverage (0 <= files < 8, nothing found) reads Safe and says so in the reason
     # (Kenne, 2026-10-08, #19). The 74 / 82 evidence cap on the score still shows it.
     # Zero files (a metapackage whose code ships in a dependency, an image read only to

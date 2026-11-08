@@ -58,7 +58,7 @@ async def _dispatch(url: str) -> SourceImportResult:
     parts = path.split("/")
 
     # A2A agent card — check before .json catch-all
-    if "/.well-known/agent.json" in url:
+    if "/.well-known/agent-card.json" in url or "/.well-known/agent.json" in url:
         from src.source_import.a2a_fetcher import fetch_a2a
         return await fetch_a2a(url)
 
