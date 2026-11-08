@@ -1,9 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
 import { Reveal } from './motion'
-import { publicApi } from '../../lib/scanApi'
-import { trackBadgeCopied } from '../../lib/analytics'
 import { rp } from '../basePath'
 
 /**
@@ -174,6 +171,11 @@ function pickTools(scan: ScanLike): { rows: ToolRow[]; source: ToolSource } | nu
   return null
 }
 
+/** Whether the result holds any tool list (live, sandbox, code or bare digests). */
+export function hasToolList(scan: unknown): boolean {
+  return !!pickTools(scan as ScanLike)
+}
+
 const TOOL_NOTE: Record<ToolSource, string> = {
   live: 'Each tool\'s definition (name, description, input schema, annotations) is hashed and signed into this result. If the server later changes a tool, its digest changes, which is how a watch catches a silent swap.',
   sandbox: 'Listed by the server itself when we started the published package in the sandbox. Each digest pins the definition as the sandbox recorded it, so a later run can catch a changed tool.',
@@ -310,25 +312,6 @@ export function packageBadgeUrl(origin: string, surface: string, name: string): 
   return `${origin}/api/v1/public/scan/package/${surface}/${name.split('/').map(encodeURIComponent).join('/')}/badge`
 }
 
-/** README badge for a published package. */
-export function PackageBadge({ surface, name }: { surface: string; name: string }) {
-  if (!name) return null
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://agentavow.com'
-  const img = packageBadgeUrl(origin, surface, name)
-  const link = `${origin}/check/pkg/${surface}/${name.split('/').map(encodeURIComponent).join('/')}`
-  const md = `[![AgentAvow Trust](${img})](${link})`
-  return (
-    <Reveal>
-      <div className="mt-4 glass rounded-2xl p-6">
-        <h3 className={H3}>README badge</h3>
-        <p className="mt-1.5 text-[13px] text-text-muted max-w-[64ch]">Maintain this package? Show its current signed result in your README. The image regenerates from the live result on every view.</p>
-        <a href={link} className="mt-3 inline-block"><img src={img} alt="AgentAvow Trust" className="h-[22px]" loading="lazy" /></a>
-        <div className="mt-3"><CodeLine text={md} onCopied={() => trackBadgeCopied('badge')} /></div>
-      </div>
-    </Reveal>
-  )
-}
-
 // A self-contained offline check: Ed25519 over `<header>.<payload>`, key matched by kid
 // from a JWKS saved beforehand. Needs only Python 3 and the `cryptography` package.
 const VERIFY_PY = `python3 -c "import json,base64 as b;from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey as K;d=lambda s:b.urlsafe_b64decode(s+'='*(-len(s)%4));h,p,s=open('scan.jws').read().strip().split('.');kid=json.loads(d(h))['kid'];x=next(k['x'] for k in json.load(open('jwks.json'))['keys'] if k['kid']==kid);K.from_public_bytes(d(x)).verify(d(s),(h+'.'+p).encode());v=json.loads(d(p));print('verified',v['subject']['id'],v['scan']['trustScore'])"`
@@ -365,45 +348,6 @@ export function VerifyPanel({ scan: raw }: { scan: unknown }) {
           <CodeLine text={VERIFY_PY} />
         </div>
         <a href="/docs/verify-attestations" className="mt-3 inline-block text-[13px] font-semibold text-primary-light hover:text-primary">Verify in Python or JavaScript, step by step →</a>
-      </div>
-    </Reveal>
-  )
-}
-
-type DriftPoint = { scanned_at: string | null; trust_score: number | null; score_delta: number | null; manifest_drift: boolean }
-
-/** Score history for a published package, from the signed drift feed. Self-hides
- * until there is recorded history. */
-export function PackageHistory({ surface, name }: { surface: string; name: string }) {
-  const path = `/public/drift/pkg/${surface}/${name.split('/').map(encodeURIComponent).join('/')}`
-  const { data } = useQuery({
-    queryKey: ['pkg-drift', surface, name],
-    retry: false,
-    queryFn: async () => {
-      try {
-        return (await publicApi.get<{ summary: { points: number }; history: DriftPoint[] }>(path)).data
-      } catch { return null }
-    },
-  })
-  if (!data || !data.history?.length) return null
-  const pts = data.history.slice(0, 8)
-  const drift = data.history.filter((h) => h.manifest_drift).length
-  return (
-    <Reveal>
-      <div className="mt-4 glass rounded-2xl p-6">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <h3 className={H3}>Score history</h3>
-          <a href={`/api/v1${path}`} target="_blank" rel="noopener noreferrer" className="font-mono text-[11px] text-primary-light hover:text-primary">signed feed ↗</a>
-        </div>
-        <p className="mt-1.5 text-[13px] text-text-muted">{data.summary.points} recorded change{data.summary.points === 1 ? '' : 's'}{drift ? <>; the signed contents changed <span className="text-warning font-semibold">{drift}×</span></> : null}. A point is added when the score moves or the published contents change.</p>
-        <div className="mt-3 flex flex-col gap-1.5 text-[12.5px]">
-          {pts.map((p, i) => (
-            <div key={i} className="flex justify-between gap-3">
-              <span className="font-mono text-text-muted">{(p.scanned_at || '').slice(0, 10)}</span>
-              <span className="font-mono">{p.trust_score ?? '–'}/100{p.score_delta ? <span className={p.score_delta > 0 ? 'text-success' : 'text-danger'}> ({p.score_delta > 0 ? '+' : ''}{p.score_delta})</span> : null}{p.manifest_drift ? <span className="text-warning"> · contents changed</span> : null}</span>
-            </div>
-          ))}
-        </div>
       </div>
     </Reveal>
   )
@@ -456,65 +400,6 @@ export function McpWhatItCanDo({ scan: raw }: { scan: unknown }) {
           {br?.why && <li className="text-text-muted">{br.why}</li>}
         </ul>
         <p className="mt-3 text-[11.5px] text-text-muted/70">Read from the tool definitions the server serves. Its hosted code isn&apos;t visible to us, so code-level capabilities can&apos;t be listed.</p>
-      </div>
-    </Reveal>
-  )
-}
-
-/** Score history for a live endpoint, from the signed drift feed. */
-export function McpHistory({ endpoint }: { endpoint: string }) {
-  const path = `/public/drift/mcp?endpoint=${encodeURIComponent(endpoint)}&quiet=1`
-  const { data } = useQuery({
-    queryKey: ['mcp-drift', endpoint],
-    retry: false,
-    queryFn: async () => {
-      try {
-        return (await publicApi.get<{ summary: { points: number }; history: { scanned_at: string | null; trust_score: number | null; score_delta: number | null; manifest_drift: boolean }[] }>(path)).data
-      } catch { return null }
-    },
-  })
-  const pts = data?.history?.slice(0, 8) ?? []
-  return (
-    <Reveal>
-      <div className="mt-4 glass rounded-2xl p-6">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <h3 className={H3}>Score history</h3>
-          {pts.length > 0 && <a href={`/api/v1${path.replace('&quiet=1', '')}`} target="_blank" rel="noopener noreferrer" className="font-mono text-[11px] text-primary-light hover:text-primary">signed feed ↗</a>}
-        </div>
-        {pts.length === 0
-          ? <p className="mt-1.5 text-[13px] text-text-muted">No recorded changes yet. A point is added each time a fresh check moves the score or changes the signed tool definitions; watch the endpoint to be alerted when that happens.</p>
-          : (
-            <div className="mt-3 flex flex-col gap-1.5 text-[12.5px]">
-              {pts.map((p, i) => (
-                <div key={i} className="flex justify-between gap-3">
-                  <span className="font-mono text-text-muted">{(p.scanned_at || '').slice(0, 10)}</span>
-                  <span className="font-mono">{p.trust_score ?? '–'}/100{p.score_delta ? <span className={p.score_delta > 0 ? 'text-success' : 'text-danger'}> ({p.score_delta > 0 ? '+' : ''}{p.score_delta})</span> : null}{p.manifest_drift ? <span className="text-warning"> · tools changed</span> : null}</span>
-                </div>
-              ))}
-            </div>
-          )}
-      </div>
-    </Reveal>
-  )
-}
-
-/** Badge + website card for a live endpoint, in the same design as repos and packages. */
-export function McpBadge({ endpoint }: { endpoint: string }) {
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://agentavow.com'
-  const q = `endpoint=${encodeURIComponent(endpoint)}`
-  const img = `${origin}/api/v1/public/scan/mcp/badge?${q}`
-  const card = `${origin}/api/v1/public/scan/mcp/card.svg?${q}`
-  const link = `${origin}/check/mcp?${q}`
-  return (
-    <Reveal>
-      <div className="mt-4 glass rounded-2xl p-6">
-        <h3 className={H3}>Badge for this server</h3>
-        <p className="mt-1.5 text-[13px] text-text-muted max-w-[64ch]">Run this server? Show its current signed result in your README or on your site. The image regenerates from the live result on every view.</p>
-        <a href={link} className="mt-3 inline-block"><img src={img} alt="AgentAvow Trust" className="h-[22px]" loading="lazy" /></a>
-        <div className="mt-3 space-y-2">
-          <CodeLine text={`[![AgentAvow Trust](${img})](${link})`} onCopied={() => trackBadgeCopied('badge')} />
-          <CodeLine text={`<a href="${link}"><img src="${card}" alt="AgentAvow Trust" width="360"></a>`} onCopied={() => trackBadgeCopied('card')} />
-        </div>
       </div>
     </Reveal>
   )
