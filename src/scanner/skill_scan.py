@@ -316,6 +316,15 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md",
             "info", "skill",
         ))
 
+    # 2a. plain-text injection in the skill's prose: the SKILL.md body (its frontmatter
+    # is read above) and every markdown / text file the skill ships, with context rules
+    # for skills that talk about injection (src/scanner/skill_prose.py).
+    from src.scanner.skill_prose import scan_prose as _scan_prose
+    for path in sorted(files):
+        if files[path] and path.lower().endswith(_PROSE_EXT):
+            result.findings.extend(_scan_prose(
+                files[path], path, skip_frontmatter=path.lower().endswith("skill.md")))
+
     # 2b. encoded instructions in the skill's prose (SKILL.md, every other markdown /
     # text file it ships): decoded and read with the injection matcher.
     from src.scanner.encoded_instructions import Budget as _EncBudget
