@@ -1,7 +1,11 @@
 """Connector Preflight + registry-snippet endpoints — the developer app-store surface.
 
-* ``GET /public/preflight/{owner}/{repo}`` — repo readiness for the app stores.
+* ``GET /public/preflight/{owner}/{repo}`` — repo readiness for the app stores (with the
+  Claude plugin-directory checks when the repo holds a plugin; ``?plugin=<folder>`` picks
+  one in a multi-plugin repo).
 * ``GET /public/preflight/mcp?endpoint=`` — live MCP server readiness.
+* ``GET /public/preflight/rules`` — the date the rules were last checked, their sources,
+  and the manual checklist for what a URL or repo can't show.
 * ``GET /public/registry-snippet/{owner}/{repo}`` — the signed-score ``_meta`` block
   a developer pastes into their ``server.json`` so the score travels into the MCP
   registry record itself (portable, offline-recomputable).
@@ -25,6 +29,7 @@ from src import cache
 from src.api.rate_limit import rate_limit_reads, rate_limit_scans
 from src.database import get_db
 from src.preflight.gates import evaluate_gates
+from src.preflight.rules import RULES_CHECKED, rules_payload
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +47,14 @@ class Gate(BaseModel):
     id: str
     label: str
     status: str          # pass | fail | warn | unknown | na
-    severity: str        # blocker | warning
+    severity: str        # blocker | hold | warning
     detail: str
     stores: list[str]
+    # documented (store docs) | observed (Claude directory, not yet documented) |
+    # agentavow (our own signal; never decides directory_ready)
+    basis: str = "documented"
+    sources: list[dict] = []
+    group: str = "connector"  # connector | plugin | safety
 
 
 class PreflightResponse(BaseModel):
@@ -57,15 +67,20 @@ class PreflightResponse(BaseModel):
     decision: str = "review"
     decision_final: bool = True
     decision_reason: str = ""
-    trust_score: int
+    # None when a live server needs sign-in before it lists tools (``scanned`` False).
+    trust_score: int | None
     trust_tier: str
     grade: str
     certified: bool
     gates: list[Gate]
     summary: dict
-    signed: dict         # {jws, kid, jwks_url, report_url}
+    signed: dict         # {jws, kid, jwks_url, report_url}; {} when not scanned
     cached: bool
     scanned_at: str
+    scanned: bool = True
+    rules_checked: str = RULES_CHECKED
+    plugin_folder: str | None = None
+    plugin_folders: list[str] = []
 
 
 async def _cache_get(key: str) -> dict | None:
@@ -96,11 +111,25 @@ def _report_url(surface: str, target: str) -> str:
     return f"https://agentavow.com/check/{target}"
 
 
+def _build_unscanned(target: str, auth: dict | None, cached: bool) -> PreflightResponse:
+    """A live server that needs sign-in before tools/list: only the auth checks run."""
+    report = evaluate_gates(None, surface="mcp", auth=auth, scanned=False)
+    return PreflightResponse(
+        target=target, surface="mcp", directory_ready=report["directory_ready"],
+        headline=report["headline"], decision="review", decision_final=False,
+        decision_reason="sign-in required before the tools can be read",
+        trust_score=None, trust_tier="", grade="", certified=False,
+        gates=[Gate(**g) for g in report["gates"]], summary=report["summary"],
+        signed={}, cached=cached, scanned_at="", scanned=False,
+    )
+
+
 def _build_preflight(
     target: str, surface: str, data: dict, auth: dict | None, cached: bool,
+    plugin: dict | None = None,
     mark: bool | None = None,
 ) -> PreflightResponse:
-    report = evaluate_gates(data, surface=surface, auth=auth)
+    report = evaluate_gates(data, surface=surface, auth=auth, plugin=plugin)
     subject_full = f"mcp:{target}" if surface == "mcp" else target
     jws = _sign(subject_full, data)
     from src.scanner.verdict import certified_mark, decide
@@ -129,7 +158,16 @@ def _build_preflight(
         },
         cached=cached,
         scanned_at=str(data.get("scanned_at") or ""),
+        plugin_folder=(plugin or {}).get("folder"),
+        plugin_folders=list((plugin or {}).get("folders") or []),
     )
+
+
+@router.get("/preflight/rules", dependencies=[Depends(rate_limit_reads)])
+async def preflight_rules() -> dict:
+    """When the review rules were last checked, their sources, and the manual checklist
+    for the rules a URL, repo or manifest can't show."""
+    return rules_payload()
 
 
 @router.get(
@@ -156,6 +194,8 @@ async def preflight_mcp(
     key = "preflight:mcp:" + hashlib.sha256(url.encode()).hexdigest()[:22]
     if not force:
         cached = await _cache_get(key)
+        if cached and cached.get("signin"):
+            return _build_unscanned(url, cached.get("auth"), cached=True)
         if cached:
             return _build_preflight(url, "mcp", cached["data"], cached.get("auth"), cached=True)
 
@@ -164,13 +204,19 @@ async def preflight_mcp(
         await enforce_fresh_scan_limit(request)
 
     from src.preflight.auth_probe import probe_mcp_auth
-    from src.scanner.scan import scan_mcp
+    from src.scanner.scan import MCP_SIGNIN_REQUIRED_ERROR, scan_mcp
 
     try:
         result = await asyncio.wait_for(scan_mcp(url), timeout=45)
     except asyncio.TimeoutError:
         raise HTTPException(503, "MCP handshake timed out — please retry shortly.",
                             headers={"Retry-After": "20"})
+    if result.error == MCP_SIGNIN_REQUIRED_ERROR:
+        # Most store connectors use OAuth: their sign-in is what review checks first,
+        # so report it instead of failing the whole preflight.
+        auth = await probe_mcp_auth(url)
+        await _cache_set(key, {"signin": True, "auth": auth})
+        return _build_unscanned(url, auth, cached=False)
     if result.error:
         raise HTTPException(422, f"Scan error: {result.error}")
 
@@ -190,27 +236,38 @@ async def preflight_repo(
     repo: str,
     request: Request = None,
     force: bool = Query(False, description="Bypass cache and force a fresh scan"),
+    plugin: str | None = Query(None, max_length=200,
+                               description="Plugin folder in a multi-plugin repo"),
 ) -> PreflightResponse:
-    """Check a GitHub repo (an MCP server / agent tool) against the submission gates."""
+    """Check a GitHub repo (an MCP server, agent tool or Claude plugin) against the
+    submission gates."""
     from src.api.public_scan_router import _scan_result_to_dict
 
     if not owner.replace("-", "").replace("_", "").replace(".", "").isalnum() or \
        not repo.replace("-", "").replace("_", "").replace(".", "").isalnum():
         raise HTTPException(400, "Invalid owner/repo")
     full = f"{owner}/{repo}"
+    plugin = _plugin_folder(plugin)
 
     key = f"preflight:repo:{full}"
+    pkey = f"preflight:plugin:{full}:{plugin or ''}"
+    from src.github_auth import get_github_token
+
     if not force:
         cached = await _cache_get(key)
         if cached:
+            cached_plugin = await _cache_get(pkey)
+            if cached_plugin is None:
+                cached_plugin = await _plugin_report(
+                    owner, repo, await get_github_token(), plugin, pkey)
             return _build_preflight(full, "repo", cached["data"], None, cached=True,
+                                    plugin=cached_plugin,
                                     mark=await _repo_page_mark(cached["data"], owner, repo))
 
     if request is not None:
         from src.api.rate_limit import enforce_fresh_scan_limit
         await enforce_fresh_scan_limit(request)
 
-    from src.github_auth import get_github_token
     from src.scanner.scan import scan_repo
 
     token = await get_github_token()
@@ -224,7 +281,8 @@ async def preflight_repo(
 
     data = _scan_result_to_dict(result)
     await _cache_set(key, {"data": data})
-    return _build_preflight(full, "repo", data, None, cached=False,
+    plugin_report = await _plugin_report(owner, repo, token, plugin, pkey)
+    return _build_preflight(full, "repo", data, None, cached=False, plugin=plugin_report,
                             mark=await _repo_page_mark(data, owner, repo))
 
 
@@ -237,6 +295,34 @@ async def _repo_page_mark(data: dict, owner: str, repo: str) -> bool:
         return bool(await _mark_for_cached(data, (owner, repo)))
     except Exception:  # noqa: BLE001 — an unknown sandbox state never earns the mark
         return False
+
+
+async def _plugin_report(owner: str, repo: str, token: str | None, plugin: str | None,
+                         pkey: str) -> dict:
+    """The Claude plugin-directory checks for a repo (cached when they ran)."""
+    from src.preflight.plugin_check import check_plugin_repo
+
+    try:
+        report = await asyncio.wait_for(
+            check_plugin_repo(owner, repo, token, plugin), timeout=30)
+    except asyncio.TimeoutError:
+        report = {"found": None, "folder": None, "folders": [], "gates": []}
+    if report.get("found") is not None:
+        await _cache_set(pkey, report)
+    return report
+
+
+def _plugin_folder(raw: str | None) -> str | None:
+    """A plugin folder path from the query, or None. Letters, digits, dots, hyphens and
+    underscores per segment (the directory's own rule), no ``..``."""
+    folder = (raw or "").strip().strip("/")
+    if not folder:
+        return None
+    parts = folder.split("/")
+    if any(p in ("", ".", "..") or not p.replace("-", "").replace("_", "").replace(
+            ".", "").isalnum() or not p.isascii() for p in parts):
+        raise HTTPException(400, "Invalid plugin folder")
+    return folder
 
 
 def _registry_meta(subject_id: str, subject_full: str, data: dict) -> dict:

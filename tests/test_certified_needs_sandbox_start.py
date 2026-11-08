@@ -304,7 +304,8 @@ async def test_preflight_repo_withholds_the_mark(monkeypatch):
     monkeypatch.setattr(psr, "_cached_behavioral_for", cached_block)
     monkeypatch.setattr(preflight_router, "_cache_get",
                         AsyncMock(return_value={"data": _scan()}))
-    out = await preflight_router.preflight_repo("acme", "server", request=None, force=False)
+    out = await preflight_router.preflight_repo("acme", "server", request=None, force=False,
+                                                plugin=None)
     assert out.decision == "safe"
     assert out.certified is False
 

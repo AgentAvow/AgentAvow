@@ -33,6 +33,26 @@
     "storage_state_uploaded": "do_not_connect",
     "storage_state_uploaded_other_file": "do_not_connect"
   },
+  "cases_bytecode": {
+    "ctl_decompiler_fixtures_in_tests": "safe",
+    "ctl_repo_gitignored_pycache": "safe",
+    "ctl_skill_no_bytecode": "safe",
+    "ctl_wheel_with_pyc": "safe",
+    "gap_skill_renamed_pyc_with_loader": "safe",
+    "gap_wheel_shadow_pyc": "safe",
+    "repo_conftest_shadow_in_tests": "review",
+    "repo_legacy_pyc_beside_py": "review",
+    "repo_legacy_pyc_source_elsewhere": "review",
+    "repo_orphan_pyc": "review",
+    "repo_orphan_pycache_entry": "review",
+    "repo_pyc_beside_clean_py": "review",
+    "repo_sourceless_pyc_in_tests": "review",
+    "skill_legacy_pyc_beside_clean_py": "review",
+    "skill_nested_pycache": "review",
+    "skill_orphan_pyc": "review",
+    "skill_pyc_beside_clean_py": "review",
+    "skill_pyo": "review"
+  },
   "cases_encoded_instructions": {
     "b64_in_body": "review",
     "b64_in_frontmatter_description": "review",
