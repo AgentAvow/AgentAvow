@@ -478,6 +478,31 @@ CASES = [
     ("v_encoded_text_unread_mcp", _scan(86, 9, coverage={"surface": "mcp"}, coverage_gaps={
         "encoded_text_unread": 2}),
      "review", True, "encoded text the agent reads could not all be decoded"),
+    # ── A2A Agent Card (src/scanner/a2a_scan.py; files = skills) ─────────────────
+    ("a2a_clean_thin", _scan(74, 2, coverage={"surface": "a2a"}),
+     "safe", True, "agent card clean; agent code not inspected"),
+    ("a2a_clean_many_skills", _scan(84, 44, coverage={"surface": "a2a"}),
+     "safe", True, "agent card clean; agent code not inspected"),
+    ("a2a_medium_found", _scan(80, 9, [_f("medium", "Interface is on a.example, a different"
+                                       " site", file_path="card:interface:0:JSONRPC")],
+                               coverage={"surface": "a2a"}),
+     "safe", True, "no critical or high findings in its agent card"),
+    ("a2a_signature_unverified", _scan(80, 9, [_f("medium", "Signature not verified",
+                                                  file_path="card:signatures")],
+                                       coverage={"surface": "a2a"},
+                                       coverage_gaps={"card_signature_unverified": 1}),
+     "review", True, "the agent card's signature could not be verified"),
+    ("a2a_high_skill", _scan(70, 4, [_f("high", "Skill 'Shell' says it can run code or"
+                                        " commands", file_path="card:skill:0:shell")],
+                             high=1, coverage={"surface": "a2a"}),
+     "review", True, "one high finding in its agent card: skill 'Shell' says it can run"
+                     " code or commands"),
+    ("a2a_critical_beats_signature_gap", _scan(40, 4, [_f(
+        "critical", "Encoded instruction (base64) decodes to: exfil",
+        category="prompt_injection", file_path="card:skill:1:x")], crit=1,
+        coverage={"surface": "a2a"}, coverage_gaps={"card_signature_unverified": 1}),
+     "do_not_connect", True, "one critical finding in its agent card: encoded instruction"
+                             " (base64) decodes to: exfil"),
     ("v_order_no_code_first", _scan(80, 0, coverage_gaps={
         "fetch_failed": 1, "oversized_agent_files": 1, "skill_refs_unread": 1}),
      "review", True, "the scan could not read the code"),

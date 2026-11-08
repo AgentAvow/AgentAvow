@@ -7,7 +7,7 @@ import { NoticeText } from '../components/NoticeText'
 import ImageScanDepth from '../components/ImageScanDepth'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
-import { fetchPublicScan, fetchSkillCollectionLead, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchMcpProbe, fetchSkillScan, fetchSkillBehavioral, publicApi } from '../../lib/scanApi'
+import { fetchPublicScan, fetchSkillCollectionLead, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchA2aScan, fetchMcpProbe, fetchSkillScan, fetchSkillBehavioral, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
 import { getTrustTier, decisionOf, decisionPhrase, headline as decisionHeadline, coverageGapNotes } from '../../components/trust/gradeSystem'
 import { TrustPill } from '../components/TrustMark'
@@ -201,7 +201,7 @@ function CategoryFindings({ categoryScores, findings, maxFindings = 15, emptyMes
   )
 }
 
-const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'crates:serde', 'hf:openai-community/gpt2', 'mcp:https://…', 'a repo, package, model, or MCP server']
+const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'crates:serde', 'hf:openai-community/gpt2', 'mcp:https://…', 'a2a:https://…', 'a repo, package, model, MCP server, or A2A agent card']
 
 /** "Watch this tool" — the PRIMARY action. Full-width gradient CTA.
  * Works across every surface: pass the coordinate as stored server-side
@@ -861,6 +861,11 @@ function Hero() {
     // Live MCP server: `mcp:https://…`.
     const mcp = v.match(/^mcp\s*:\s*(https?:\/\/.+)$/i)
     if (mcp) { navigate(rp('/rebrand/check/mcp') + '?endpoint=' + encodeURIComponent(mcp[1].trim())); return }
+    // A2A Agent Card: `a2a:https://…`, or a pasted URL to a well-known card path.
+    const a2a = v.match(/^a2a\s*:\s*(https?:\/\/.+)$/i)
+    if (a2a || /^https?:\/\/\S+\/\.well-known\/agent(?:-card)?\.json(?:[?#]\S*)?$/i.test(v)) {
+      navigate(rp('/rebrand/check/a2a') + '?card=' + encodeURIComponent(a2a ? a2a[1].trim() : v)); return
+    }
     // Wallet address: EVM `0x…` (40 hex) or Solana base58, optionally `wallet:`-prefixed.
     const wal = v.match(/^(?:wallet\s*:\s*)?(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/)
     if (wal) { navigate(rp(`/rebrand/check/wallet/${wal[1]}`)); return }
@@ -911,12 +916,14 @@ function Hero() {
     ['HF model', 'hf:openai-community/gpt2'],
     ['Container', 'docker:nginx'],
     ['MCP server', 'mcp:https://mcp.deepwiki.com/mcp'],
+    ['A2A agent card', 'a2a:https://agentavow.com/.well-known/agent-card.json'],
   ]
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-20 text-center">
       <SEOHead title="Check a tool" description="Is this tool safe for your agent to connect? Paste a GitHub repo, MCP server, npm/PyPI/crates package, Docker image, Hugging Face model or agent skill for Safe to connect, Review before you connect, or Do not connect, with a signed trust score." path="/check" />
       <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight">Is this tool <span className="gradient-text-bio">safe</span>?</h1>
       <p className="mt-4 text-text-muted max-w-[46ch] mx-auto">Paste anything your agent connects to. We'll tell you — in plain English — whether it's safe, and prove it with a signed score.</p>
+      <p className="mt-2 text-[13px] text-text-muted max-w-[56ch] mx-auto">Paste any A2A Agent Card URL for an answer, findings and a signed attestation, including whether the card&apos;s own signature verifies.</p>
       <form onSubmit={(e) => { e.preventDefault(); go() }} className="glass mt-7 mx-auto max-w-[560px] flex gap-2.5 rounded-2xl p-2 pl-4 shadow-lg shadow-primary/10">
         <input value={value} onChange={(e) => setValue(e.target.value)} placeholder={value ? '' : hint}
           className="flex-1 min-w-0 bg-transparent outline-none font-mono text-[15px] text-text placeholder:text-text-muted" />
@@ -1969,6 +1976,134 @@ function McpResult({ endpoint }: { endpoint: string }) {
   )
 }
 
+type A2aSurface = {
+  agent_name?: string; card_url?: string; card_shape?: string; protocol_version?: string
+  skill_count?: number; interface_count?: number; legacy_path?: boolean
+  interfaces?: { url: string; binding: string }[]
+  auth?: { schemes?: Record<string, string>; card_requires_auth?: boolean }
+  skills?: { id: string; name: string; description: string; capabilities: string[]; authenticated: boolean }[]
+  signature?: { state?: string; alg?: string; kid?: string; jku?: string; reason?: string }
+  card_digest?: string
+}
+
+const SIGNATURE_LABEL: Record<string, [string, string]> = {
+  verified: ['verifies ✓', 'text-success'],
+  unverified: ['present, could not be verified', 'text-warning'],
+  absent: ['not signed', 'text-text-muted'],
+}
+
+/** The couldn't-check state for an A2A Agent Card we could not read. */
+function A2aCouldntCheck({ card, detail }: { card: string; detail: string }) {
+  const host = mcpHostLabel(card)
+  return (
+    <div className="max-w-[860px] mx-auto px-6 py-14" data-result-kind="a2a" data-state="couldnt-check">
+      <SEOHead title={`Is ${host} safe to connect? We couldn't check it`} description={`AgentAvow couldn't read an A2A Agent Card at ${host}.`} path={`/check/a2a?card=${encodeURIComponent(card)}`} noindex />
+      <ResultTitle eyebrow={['A2A agent card', host, 'not readable']} checked="just now" name={host} />
+      <Reveal>
+        <div className="mt-6 glass rounded-2xl border border-warning/40 px-6 py-6" data-testid="answer-card">
+          <div className="flex items-center gap-2.5 text-[22px] sm:text-[26px] font-extrabold tracking-tight text-warning"><span aria-hidden="true">!</span><span>We couldn&apos;t read that agent card</span></div>
+          <p className="mt-2 text-[14.5px] text-text-muted max-w-[68ch]">Give the card&apos;s https URL (for example <span className="font-mono text-text">https://agent.example.com/.well-known/agent-card.json</span>) or the agent&apos;s base URL. There is no signed answer or score for it.</p>
+          {detail && <p className="mt-2 font-mono text-[11.5px] text-text-muted/80 break-words">{detail}</p>}
+        </div>
+      </Reveal>
+      <Section id="next-steps" title="Next steps">
+        <NextStepCards oneTime />
+      </Section>
+    </div>
+  )
+}
+
+/** An A2A Agent Card, graded on the card alone (interfaces, auth, skill text, its own
+ * signature), rendered through the shared ResultPage. The agent's code is never seen,
+ * so the code categories are not scored. */
+function A2aResult({ card }: { card: string }) {
+  const key = ['rebrand-a2a-scan', card]
+  const { data: scan, isLoading, isError, error } = useQuery({
+    queryKey: key,
+    queryFn: () => fetchA2aScan(card),
+    retry: 0,
+  })
+  const recheck = useRecheck(key, () => fetchA2aScan(card, true))
+  useResultView(!!scan)
+  if (isLoading) return <ScanningLoader owner="A2A agent" repo={card} />
+  if (isError || !scan) return <A2aCouldntCheck card={card} detail={errorDetail(error)} />
+  const t = getTrustTier(scan.trust_score)
+  const sd = ((scan as { surface_detail?: A2aSurface }).surface_detail || {}) as A2aSurface
+  const sig = sd.signature?.state || 'absent'
+  const [sigText, sigClass] = SIGNATURE_LABEL[sig] || SIGNATURE_LABEL.absent
+  const schemes = Object.entries(sd.auth?.schemes || {})
+  const host = mcpHostLabel(sd.card_url || card)
+  const name = sd.agent_name || host
+  const skills = sd.skills || []
+  return (
+    <>
+      <SEOHead
+        title={`Is ${name} safe? ${decisionHeadline(scan)} · trust score ${scan.trust_score}/100`}
+        description={`${scanVerdict(scan)}. AgentAvow checked this A2A Agent Card: ${scan.trust_score}/100 (${t.name}).`}
+        path={`/check/a2a?card=${encodeURIComponent(card)}`}
+      />
+      <ResultPage
+        scan={scan as unknown as Record<string, unknown> & { trust_score: number }}
+        kind="a2a"
+        eyebrow={['A2A agent card', host]}
+        name={name}
+        recheck={recheck}
+        chips={<span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">A2A agent card</span>}
+        intro={<div className="mt-2 font-mono text-[12px] text-text-muted break-all">{sd.card_url || card}</div>}
+        adoption={adoptionFrom(undefined, 'No usage data: an agent card has no public download count')}
+        allFindings={<CategoryFindings categoryScores={null} findings={scan.findings} maxFindings={15} emptyMessage={coverageGapNotes(scan).length ? '✓ No risks found in what was read; see what we couldn’t check above.' : '✓ No risks found in the agent card.'} />}
+        gapNotes={[
+          <p key="code"><b>Agent code:</b> not read. An agent card is graded on what it declares; the agent behind it isn&apos;t visible to us, so the code categories aren&apos;t scored. We sent the agent no task.</p>,
+        ]}
+        inside={<>
+          {skills.length > 0
+            ? <Reveal>
+                <div className="mt-4 glass rounded-2xl p-6">
+                  <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Skills it declares</h3>
+                  <div className="mt-3 flex flex-col gap-3">
+                    {skills.slice(0, 40).map((s) => (
+                      <div key={s.id} className="text-[13px]">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold">{s.name || s.id}</span>
+                          {!s.authenticated && <span className="font-mono text-[11px] text-text-muted">no auth</span>}
+                          {s.capabilities.map((c) => <span key={c} className="font-mono text-[11px] text-warning bg-warning/10 border border-warning/25 rounded-full px-2 py-0.5">{c}</span>)}
+                        </div>
+                        {s.description && <div className="text-[12.5px] text-text-muted">{s.description}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </Reveal>
+            : <EmptyPanel title="Skills it declares">The card declares no skills.</EmptyPanel>}
+          <EmptyPanel title="Advisories">Doesn&apos;t apply: security advisories are published against packages, not agent cards.</EmptyPanel>
+        </>}
+        badgeClaimShare={<SharePanel label={name} score={scan.trust_score} />}
+        proof={<VerifyPanel scan={scan} />}
+        whatWeChecked={
+          <div className="mt-4 rounded-xl border border-border/60 p-5">
+            <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">What we checked</h3>
+            <p className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">We read the <span className="text-text">agent card</span> and nothing else: where it tells a client to send tasks, which auth it asks for, the skill text an orchestrating model reads, and the card&apos;s own signature.</p>
+            <div className="mt-3 flex flex-col gap-2 text-[13px]">
+              <div className="flex justify-between gap-3"><span className="text-text-muted">Card format</span><span className="font-mono">{sd.card_shape || '?'}{sd.protocol_version ? ` · protocol ${sd.protocol_version}` : ''}{sd.legacy_path ? ' · legacy agent.json path' : ''}</span></div>
+              <div className="flex justify-between gap-3"><span className="text-text-muted">Skills</span><span className="font-mono">{sd.skill_count ?? 0}</span></div>
+              <div className="flex justify-between gap-3"><span className="text-text-muted">Auth schemes</span><span className="font-mono break-all text-right">{schemes.length ? schemes.map(([n, k]) => `${n} (${k})`).join(', ') : 'none declared'}</span></div>
+              <div className="flex justify-between gap-3"><span className="text-text-muted">Signature</span><span className={`font-mono text-right ${sigClass}`}>{sigText}{sig === 'verified' && sd.signature?.alg ? ` · ${sd.signature.alg}` : ''}</span></div>
+              {sig === 'unverified' && sd.signature?.reason && <div className="text-[12px] text-text-muted">{sd.signature.reason}</div>}
+              {sd.card_digest && <div className="flex justify-between gap-3"><span className="text-text-muted">Card digest</span><span className="font-mono text-[11.5px] break-all text-right">{sd.card_digest}</span></div>}
+            </div>
+            {(sd.interfaces || []).length > 0 && (
+              <div className="mt-3">
+                <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted mb-1.5">Interfaces</div>
+                {(sd.interfaces || []).map((i, n) => <div key={n} className="font-mono text-[12px] break-all">{i.binding ? `${i.binding} · ` : ''}{i.url}</div>)}
+              </div>
+            )}
+          </div>
+        }
+      />
+    </>
+  )
+}
+
 /** The package version control in the eyebrow: latest, the pinned version, or another
  * one typed in (it rides in `?version=`, the same pin the MCP connector links to). The
  * API returns no version list, so the picker can't offer one. */
@@ -2126,6 +2261,12 @@ export default function RebrandCheck() {
   const params = useParams()
   const location = useLocation()
   const [sp] = useSearchParams()
+  // A2A Agent Card route (/check/a2a?card=…).
+  if (location.pathname.replace(/\/$/, '').endsWith('/check/a2a')) {
+    const card = sp.get('card')
+    if (!card) return <Hero />
+    return <A2aResult card={card} />
+  }
   // Live MCP server route (/check/mcp?endpoint=…).
   if (location.pathname.replace(/\/$/, '').endsWith('/check/mcp')) {
     const ep = sp.get('endpoint')

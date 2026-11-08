@@ -177,6 +177,8 @@ function AnswerCard({ scan, kind, adoption }: { scan: ResultPageProps['scan']; k
   const reason = d.reason ? cap(d.reason) + '.' : ''
   const scoreSub = kind === 'mcp'
     ? 'Signed · scored on the tools it serves, not its server code'
+    : kind === 'a2a'
+    ? "Signed · scored on its agent card, not the agent's code"
     : crit > 0 && scan.trust_score <= 45 ? 'Signed · a critical finding caps the score at 45' : null
   return (
     <Reveal>

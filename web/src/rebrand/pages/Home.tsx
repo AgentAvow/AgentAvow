@@ -18,7 +18,7 @@ import { DNC_LIST, useAnswerMix } from '../lib/answerMix'
 import { AppsButtons, AppsStrip } from '../components/AppsStrip'
 import { BuiltInTheOpenLine } from '../components/BuiltInTheOpen'
 
-const CHECK_HINTS = ['Paste a link to check', 'github.com/owner/repo', 'npmjs.com/package/…', 'https://mcp.example.com/mcp', 'pypi:requests']
+const CHECK_HINTS = ['Paste a link to check', 'github.com/owner/repo', 'npmjs.com/package/…', 'https://mcp.example.com/mcp', 'pypi:requests', 'an A2A agent card URL']
 
 /**
  * AgentAvow homepage (website build spec 2026-11-07). Six sections:
@@ -212,6 +212,11 @@ export default function RebrandHome() {
     // Live MCP server: `mcp:https://…`.
     const mcp = v.match(/^mcp\s*:\s*(https?:\/\/.+)$/i)
     if (mcp) { navigate(rp('/rebrand/check/mcp') + '?endpoint=' + encodeURIComponent(mcp[1].trim())); return }
+    // A2A Agent Card: `a2a:https://…`, or a pasted URL to a well-known card path.
+    const a2a = v.match(/^a2a\s*:\s*(https?:\/\/.+)$/i)
+    if (a2a || /^https?:\/\/\S+\/\.well-known\/agent(?:-card)?\.json(?:[?#]\S*)?$/i.test(v)) {
+      navigate(rp('/rebrand/check/a2a') + '?card=' + encodeURIComponent(a2a ? a2a[1].trim() : v)); return
+    }
     // Agent Skill: `skill:owner/repo`.
     const sk = v.match(/^skill\s*:\s*(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i)
     if (sk) { navigate(rp(`/rebrand/check/skill/${sk[1]}/${sk[2]}`)); return }

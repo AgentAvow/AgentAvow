@@ -14,7 +14,7 @@ import {
 type Obj = Record<string, unknown>
 const asObj = (v: unknown): Obj => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Obj) : {})
 
-export type ResultKind = 'repo' | 'package' | 'mcp' | 'skill'
+export type ResultKind = 'repo' | 'package' | 'mcp' | 'skill' | 'a2a'
 
 
 /** "7 min ago" from an ISO time; '' when unknown. */
@@ -106,6 +106,8 @@ export function certifiedRows(scan: unknown, kind: ResultKind, d: Decision = dec
     rows.push({ label: ROW_PROVENANCE, state: 'pass', evidence: boundRepo ? `Signed build provenance → ${boundRepo}` : 'Signed build provenance verified' })
   } else if (kind === 'mcp') {
     rows.push({ label: ROW_PROVENANCE, state: 'fail', evidence: 'A server checked by URL has no published package to match' })
+  } else if (kind === 'a2a') {
+    rows.push({ label: ROW_PROVENANCE, state: 'fail', evidence: 'An agent card checked by URL has no published package to match' })
   } else if (prov.present === true && prov.verified !== true) {
     rows.push({ label: ROW_PROVENANCE, state: 'fail', evidence: 'Provenance is published but did not verify' })
   } else if (checks.artifact_scanned === false) {
@@ -126,7 +128,7 @@ export function certifiedRows(scan: unknown, kind: ResultKind, d: Decision = dec
   } else if (!Object.keys(checks).length) {
     rows.push({ label: ROW_FILES, state: 'fail', evidence: 'Not checked for this result' })
   } else {
-    rows.push({ label: ROW_FILES, state: 'pass', evidence: kind === 'mcp' ? 'Every served tool definition read, no drift' : notes.length ? 'No drift; what an agent reads was read in full' : 'All files read, no drift' })
+    rows.push({ label: ROW_FILES, state: 'pass', evidence: kind === 'mcp' ? 'Every served tool definition read, no drift' : kind === 'a2a' ? 'The whole agent card read: every skill, interface and auth scheme' : notes.length ? 'No drift; what an agent reads was read in full' : 'All files read, no drift' })
   }
 
   // 4 · the sandbox ran it, and the signed result recomputes
@@ -149,6 +151,8 @@ export function certifiedRows(scan: unknown, kind: ResultKind, d: Decision = dec
     rows.push({ label: ROW_SANDBOX, state: 'fail', evidence: typeof b.reason === 'string' && b.reason ? `didn't run: ${b.reason}` : 'no finished run' })
   } else if (kind === 'mcp') {
     rows.push({ label: ROW_SANDBOX, state: 'fail', evidence: 'a server checked by URL is not run in the sandbox' })
+  } else if (kind === 'a2a') {
+    rows.push({ label: ROW_SANDBOX, state: 'fail', evidence: "an agent card is read, not run: the agent's code is not in the sandbox" })
   } else if (mark) {
     rows.push({ label: ROW_SANDBOX, state: 'na', evidence: "the sandbox doesn't run this kind of tool; the signed result recomputes offline" })
   } else {

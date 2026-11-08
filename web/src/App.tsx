@@ -276,6 +276,7 @@ function AppRoutes() {
           <Route path="docs/:slug" element={<RebrandDocs />} />
           <Route path="check" element={<RebrandCheck />} />
           <Route path="check/mcp" element={<RebrandCheck />} />
+          <Route path="check/a2a" element={<RebrandCheck />} />
           <Route path="check/wallet/:addr" element={<RebrandCheck />} />
           <Route path="check/skill/:owner/:repo" element={<RebrandCheck />} />
           <Route path="check/skill/:owner/:repo/*" element={<RebrandCheck />} />

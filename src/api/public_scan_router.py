@@ -1319,7 +1319,7 @@ async def _build_scan_envelope(
 # Coordinates that already name their surface: "npm:left-pad", "skill:owner/repo",
 # "mcp:https://…". Anything else is a bare GitHub "owner/repo".
 _SURFACED_COORDINATE_PREFIXES = (
-    "npm:", "pypi:", "crates:", "huggingface:", "docker:", "skill:", "mcp:",
+    "npm:", "pypi:", "crates:", "huggingface:", "docker:", "skill:", "mcp:", "a2a:",
 )
 
 
@@ -1391,6 +1391,12 @@ def _build_scan_payload(repo: str, result_data: dict, drift: dict | None = None)
     _obs = result_data.get("mcp_observation")
     if _obs:
         scan_block["observation"] = _obs
+    # A2A card scans: the card URL, its RFC 8785 digest (profile
+    # agentavow.a2a-agent-card.v1) and the signature result the verdict used, so a
+    # verifier holding the card recomputes the findings offline. Additive.
+    _card = result_data.get("a2a_card")
+    if _card:
+        scan_block["agentCard"] = _card
     payload = {
         "@context": "https://schema.agentgraph.co/attestation/security/v1",
         "type": "SecurityPostureAttestation",
@@ -1547,6 +1553,8 @@ def _scan_result_to_dict(result: object) -> dict:
         "tool_list": list(getattr(result, "tool_list", []) or []),
         # Live MCP scans: how tools/list was read (signed as scan.observation).
         "mcp_observation": getattr(result, "mcp_observation", None),
+        # A2A card scans: card URL, pinned digest, signature result (scan.agentCard).
+        "a2a_card": getattr(result, "a2a_card", None),
         # Phase 0/1: recompute-discipline coverage block (surface, scan_depth,
         # db_snapshots, evidence_anchors) + the OSV/deps.dev supply-chain summary.
         "coverage": getattr(result, "coverage", {}) or {},
@@ -2288,6 +2296,90 @@ async def scan_mcp_endpoint(
     resp = _package_response(full, data, jws, cached=False, tool_drift=drift)
     resp.behavioral = await _mcp_live_probe_block(url, run=probe)
     return resp
+
+
+def _a2a_identity(card: str) -> tuple[str, str]:
+    """(normalized card URL, cache key) for an A2A Agent Card or agent base URL.
+    https only; user:pass, query and fragment are dropped, and a key-looking path is
+    refused (the MCP endpoint rule). Raises HTTPException(400)."""
+    import hashlib
+
+    from src.ssrf import CredentialedURLError, mcp_endpoint_identity, validate_url_https
+
+    try:
+        url = mcp_endpoint_identity(validate_url_https(card.strip(), field_name="card"))
+    except CredentialedURLError:
+        raise HTTPException(
+            400, "card URL path looks like a credential; AgentAvow does not scan or publish "
+            "credentialed URLs. Remove the key from the URL and retry.",
+        )
+    except Exception:
+        raise HTTPException(400, "card must be a valid https:// URL")
+    return url, "a2a_" + hashlib.sha256(url.encode()).hexdigest()[:22]
+
+
+@router.get(
+    "/a2a",
+    response_model=PublicScanResponse,
+    dependencies=[Depends(rate_limit_reads), Depends(rate_limit_scans)],
+)
+async def scan_a2a_endpoint(
+    card: str = Query(..., description=(
+        "The A2A Agent Card URL (https://host/.well-known/agent-card.json), or the "
+        "agent's base URL: /.well-known/agent-card.json is tried, then the legacy "
+        "/.well-known/agent.json")),
+    request: Request = None,
+    force: bool = Query(False, description="Bypass cache and force a fresh scan"),
+    db: AsyncSession = Depends(get_db),
+) -> PublicScanResponse:
+    """Grade an **A2A Agent Card** (A2A 1.0, with 0.3 cards read too). Reads the card
+    only, never the agent's code, and sends the agent nothing but a GET for the card.
+    Findings: interface URLs (non-https, private addresses, a different site from
+    the card), auth schemes (none on skills that can run code, write data or move
+    money; weak schemes), injected or encoded instructions in skill and card text, and
+    the card's own JWS signature (verified, unverifiable, or absent; unverifiable
+    reads Review). The card's RFC 8785 digest is signed as `scan.agentCard.digest`, so
+    the verdict recomputes offline. `coverage.surface = a2a`.
+    E.g. `/public/scan/a2a?card=https://agent.example.com/.well-known/agent-card.json`."""
+    force = _qbool(force)
+    url, key = _a2a_identity(card)
+    full = f"a2a:{url}"
+
+    if not force:
+        cached = await _get_cached("a2a", key)
+        if cached:
+            jws = create_jws(canonicalize(_build_scan_payload(full, cached)))
+            return _package_response(full, cached, jws, cached=True)
+
+    if request is not None:
+        from src.api.rate_limit import enforce_fresh_scan_limit
+        await enforce_fresh_scan_limit(request)
+        await _track_checker(request)
+
+    old_cached = await _get_cached("a2a", key) or await _get_stale_cached("a2a", key)
+
+    from src.scanner.a2a_scan import scan_a2a
+
+    try:
+        result = await asyncio.wait_for(scan_a2a(url), timeout=30)
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            503, "Reading the agent card timed out — please retry shortly.",
+            headers={"Retry-After": "20"},
+        )
+    if result.error:
+        raise HTTPException(422, f"Scan error: {result.error}")
+
+    data = _scan_result_to_dict(result)
+    await _set_cached("a2a", key, data)
+    if len(full) <= 512:
+        await _record_scan_history(full, "a2a", "a2a", url[:255], data, db)
+    drift = (
+        _compute_tool_drift(old_cached, data)
+        if (old_cached or {}).get("tool_manifest_digest") else None
+    )
+    jws = create_jws(canonicalize(_build_scan_payload(full, data, drift)))
+    return _package_response(full, data, jws, cached=False, tool_drift=drift)
 
 
 # ── Opt-in live probe of a remote MCP server (advisory; never scored) ──────────────

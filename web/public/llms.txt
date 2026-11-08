@@ -4,6 +4,7 @@
 
 ## Check a tool
 - [Check page](https://agentavow.com/check): paste a repo, package, or MCP server URL
+- A2A Agent Cards: paste any A2A Agent Card URL for an answer, findings and a signed attestation, including whether the card's own signature verifies. API: `GET /api/v1/public/scan/a2a?card={url}`
 - [Browse the catalog](https://agentavow.com/browse): every tool we've scanned, filterable by answer
 - [Public scan API](https://agentavow.com/docs/check-guide): no account needed, e.g. `GET /api/v1/public/scan/{owner}/{repo}` or `/api/v1/public/scan/package/npm/{name}`
 

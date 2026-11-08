@@ -84,7 +84,19 @@ UNREAD = {  # a live MCP server whose tool list couldn't be read
     "coverage_gaps": {"tool_list_unread": True}, "findings": {"items": []},
 }
 
+A2A_SAFE = {  # an A2A Agent Card read at /public/scan/a2a (2026-11-07)
+    "trust_score": 84, "decision": "safe", "decision_final": True,
+    "decision_reason": "agent card clean; agent code not inspected",
+    "certified": {"eligible": False, "checks": {**CHECKS_ALL, "artifact_scanned": False,
+                                                "provenance_verified": False}},
+    "certified_mark": False, "coverage_gaps": {}, "metadata": {"files_scanned": 12},
+    "coverage": {"surface": "a2a"}, "findings": {"items": [
+        {"name": "The card is not signed", "severity": "info", "kind": "defect",
+         "remediation": "Sign it.", "file_path": "card:signatures"}]},
+}
+
 CASES = [
+    ("a2a_safe", A2A_SAFE, "a2a"),
     ("safe_certified", SAFE_CERT, "package"),
     ("safe_not_certified", SAFE_NOT_CERT, "package"),
     ("pending", PENDING, "package"),
@@ -159,6 +171,14 @@ def test_unread_live_server(results):
     assert r["rows"][2] == ["fail", "The live tool list couldn't be read"]
 
 
+def test_a2a_card_rows_say_what_a_card_check_is(results):
+    r = results["a2a_safe"]
+    assert r["rows"][1] == ["fail", "An agent card checked by URL has no published package to match"]
+    assert r["rows"][2] == ["pass", "The whole agent card read: every skill, interface and auth scheme"]
+    assert r["rows"][3] == ["fail", "an agent card is read, not run: the agent's code is not in the sandbox"]
+    assert r["status"]["lead"] == "Not Certified yet"
+
+
 def test_top_findings_lead_with_the_worst_and_say_the_fix(results):
     top = results["do_not_connect"]["top"]
     assert top[0] == ["Wallet private key sent over the network", "Sign locally and send the signature."]
@@ -171,9 +191,9 @@ def test_top_findings_lead_with_the_worst_and_say_the_fix(results):
 
 def test_every_result_type_renders_through_one_result_page():
     src = (ROOT / "web/src/rebrand/pages/Check.tsx").read_text()
-    for kind in ("skill", "mcp", "package", "repo"):
+    for kind in ("skill", "mcp", "package", "repo", "a2a"):
         assert f'kind="{kind}"' in src, kind
-    assert src.count("<ResultPage") == 4
+    assert src.count("<ResultPage") == 5
     # The old per-surface score labels are gone: every page says "Trust score".
     for rel in ("web/src/rebrand/pages/Check.tsx", "web/src/rebrand/components/ResultPage.tsx"):
         text = (ROOT / rel).read_text()
