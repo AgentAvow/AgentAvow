@@ -2,7 +2,7 @@ import SEOHead from '../../components/SEOHead'
 import { currentPath, trackEvent } from '../../lib/analytics'
 import { rp } from '../basePath'
 import { AppsStrip } from '../components/AppsStrip'
-import { CHATGPT_LISTING, CLAUDE_LISTING, trackListingClick } from '../lib/listings'
+import { CHATGPT_LISTING, CLAUDE_LISTING, trackListing } from '../lib/listings'
 import { cursorInstall } from '../lib/installLinks'
 
 /**
@@ -69,7 +69,7 @@ const GROUPS: { title: string; sub: string; items: Item[] }[] = [
 
 function onItemClick(item: Item): void {
   if (item.href.startsWith('https://claude.ai/') || item.href.startsWith('https://chatgpt.com/')) {
-    trackListingClick(item.href)
+    trackListing(item.href)
   } else {
     trackEvent('guest_cta_click', currentPath(), `get:${item.name}`)
   }
@@ -89,7 +89,7 @@ export default function RebrandGet() {
           <p className="mt-[18px] max-w-[58ch] text-[18px] font-light text-text-muted">
             The same check everywhere: <b className="font-medium text-text">Safe to connect</b>, <b className="font-medium text-text">Review before you connect</b>, or <b className="font-medium text-text">Do not connect</b>, with a signed 0-100 trust score, an adoption score, and the Certified mark where a tool has earned it. Free, no account.
           </p>
-          <AppsStrip align="left" />
+          <AppsStrip align="start" className="mt-5" />
         </div>
       </div>
 

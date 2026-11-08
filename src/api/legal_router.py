@@ -18,8 +18,6 @@ from fastapi.responses import HTMLResponse
 router = APIRouter(prefix="/legal", tags=["legal"])
 
 _PRIVACY_CLAUSES: list[tuple[str, str]] = [
-    # TODO(deploy): the effective date is a placeholder (November 8, 2026). Set it to the
-    # day the Meta Pixel ships to production, in both copies (Legal.tsx too).
     ('1. Overview',
      'Effective November 8, 2026. AgentAvow checks whether a software tool is '
      'safe for an AI agent to connect to: a GitHub repository, a published '
