@@ -193,22 +193,25 @@ def tool_digest(tool: dict) -> str:
     null field is omitted; _meta and unknown fields are never hashed. Never raises: a
     definition JCS cannot represent (NaN or Infinity, a number too large for a double,
     a lone surrogate) gets the issuer's digest under a distinct label, which no
-    portable digest can equal."""
+    portable digest can equal; lone surrogates are passed through into that text, so
+    it still carries every character of the definition."""
     body = {f: tool[f] for f in DIGEST_FIELDS if tool.get(f) is not None}
     try:
         return _sha256(jcs({"profile": PROFILE, "tool": _ijson(body)}))
     except Exception:
         pass
     try:
-        return _sha256(PROFILE + ".noncanonical\n" + json.dumps(
-            body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str))
+        text = PROFILE + ".noncanonical\n" + json.dumps(
+            body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+        return "sha256:" + hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
     except Exception:
         return _sha256(PROFILE + ".unhashable")
 
 
 # The issuer's digest for a definition that neither JCS nor the fallback can encode
-# (a lone surrogate in a string). It carries none of the definition, so two such
-# definitions share it: equal digests here prove nothing, and a gate never binds to it.
+# (json.dumps refuses it; a parsed tools/list never does, and before 2026-11 a lone
+# surrogate did). It carries none of the definition, so two such definitions share
+# it: equal digests here prove nothing, and a gate never binds to it.
 UNBOUND_DIGEST = _sha256(PROFILE + ".unhashable")
 
 
@@ -540,7 +543,7 @@ def evaluate(
         return GateDecision(
             False, "drift",
             f"AgentAvow blocked '{tool_name}' on {server}: its definition holds text the "
-            f"signed digest cannot carry (a lone surrogate), so a change to it would not "
+            "signed digest cannot carry, so a change to it would not "
             f"show ({_score_text(grade)}). Not run. Report: {report}",
             tool_name, server, grade, served, signed)
     if signed != served:

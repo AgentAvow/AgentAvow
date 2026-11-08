@@ -677,9 +677,14 @@ def tool_definition_digest(tool: dict) -> str:
     restricted to ``_TOOL_DIGEST_FIELDS``; a missing or null field is omitted.
 
     Never raises. A definition JCS cannot represent (NaN/Infinity, which Python's
-    JSON parser accepts) gets a digest over sorted-key JSON under a distinct
+    JSON parser accepts; a number too large for a double; a lone surrogate, which
+    ``\\ud800`` escapes produce) gets a digest over sorted-key JSON under a distinct
     profile label: still stable for drift detection, but not reproducible by an
-    independent verifier, and never equal to a portable digest.
+    independent verifier, and never equal to a portable digest. That text is encoded
+    as UTF-8 with lone surrogates passed through (``surrogatepass``), so it carries
+    every character of the definition: a change to such a definition is drift.
+    ``.unhashable`` is left only for a body ``json.dumps`` itself refuses, which a
+    parsed ``tools/list`` does not produce.
     """
     body = {f: tool[f] for f in _TOOL_DIGEST_FIELDS if tool.get(f) is not None}
     try:
@@ -689,8 +694,9 @@ def tool_definition_digest(tool: dict) -> str:
     except Exception:
         pass
     try:
-        return _sha256(MCP_TOOL_DIGEST_PROFILE + ".noncanonical\n" + json.dumps(
-            body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str))
+        text = MCP_TOOL_DIGEST_PROFILE + ".noncanonical\n" + json.dumps(
+            body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+        return "sha256:" + hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
     except Exception:
         return _sha256(MCP_TOOL_DIGEST_PROFILE + ".unhashable")
 
