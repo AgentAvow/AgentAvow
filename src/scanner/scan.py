@@ -7028,6 +7028,7 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
         else compute_icon_fingerprint(data.get("tools"), data.get("server_info")))
     from src.scanner.mcp_tool_list import build_tool_list
     result.tool_list = build_tool_list(data.get("tools"))
+    from src.preflight.tool_review import tool_review_facts
     result.files_scanned = mcp.tool_count
     result.total_scannable_files = mcp.tool_count
     result.primary_language = "MCP"
@@ -7045,6 +7046,9 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
         "prompt_count": mcp.prompt_count, "capabilities": mcp.capabilities,
         "lethal_trifecta": mcp.lethal_trifecta,
         "blast_radius": mcp.blast_radius,
+        # Per-tool facts the store review rules ask about (title, hints, name length,
+        # read/write split). Unsigned display data for Connector Preflight; not scored.
+        "review_facts": tool_review_facts(data.get("tools")),
     }
     result.coverage = build_coverage(
         surface="mcp", scan_depth=SCAN_DEPTH_ARTIFACT_LIVE, live_observed=True,
