@@ -17,8 +17,10 @@ import Badge from './rebrand/pages/Badge'
 import Browse from './rebrand/pages/Browse'
 import Certified from './rebrand/pages/Certified'
 import Check from './rebrand/pages/Check'
+import ClaudeCode from './rebrand/pages/ClaudeCode'
 import FAQ from './rebrand/pages/FAQ'
 import ForDevelopers from './rebrand/pages/ForDevelopers'
+import Get from './rebrand/pages/Get'
 import Home from './rebrand/pages/Home'
 import HowItWorks from './rebrand/pages/HowItWorks'
 import Preflight from './rebrand/pages/Preflight'
@@ -26,6 +28,7 @@ import Research from './rebrand/pages/Research'
 import Sandbox from './rebrand/pages/Sandbox'
 import StateOfAgentSecurityQ3 from './rebrand/pages/StateOfAgentSecurityQ3'
 import Submit from './rebrand/pages/Submit'
+import Teams from './rebrand/pages/Teams'
 import TrustIndex from './rebrand/pages/TrustIndex'
 
 /**
@@ -47,6 +50,9 @@ const PAGES: Record<string, ReactNode> = {
   '/preflight': <Preflight />,
   '/badge': <Badge />,
   '/sandbox': <Sandbox />,
+  '/claude-code': <ClaudeCode />,
+  '/get': <Get />,
+  '/teams': <Teams />,
 }
 
 export const ROUTES = Object.keys(PAGES)

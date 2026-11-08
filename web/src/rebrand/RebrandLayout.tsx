@@ -294,8 +294,12 @@ function SiteFooter() {
   )
 }
 
+/** Paid landing pages: no nav, no footer, and a logo that isn't a link. One goal each. */
+const BARE_PAGES = new Set([rp('/rebrand/claude-code')])
+
 export default function RebrandLayout() {
   const { pathname } = useLocation()
+  const bare = BARE_PAGES.has(pathname)
 
   // Anonymous page-view tracking (fire-and-forget) so the admin traffic funnel
   // has real session data — the live cutover tree never emitted this before, so
@@ -331,6 +335,14 @@ export default function RebrandLayout() {
   return (
     <div className="min-h-screen bg-background text-text">
       <Helmet defaultTitle="AgentAvow — Trust for the tools your agents connect to" />
+      {bare ? (
+        <div className="relative z-[3] py-4">
+          <div className="max-w-[860px] mx-auto px-6 flex items-center justify-between gap-3">
+            <Wordmark />
+            <span className="text-[13px] text-text-muted">Free. No account.</span>
+          </div>
+        </div>
+      ) : (
       <header className="sticky top-0 z-20 bg-surface border-b border-border/60">
         <div className="max-w-[1080px] mx-auto px-6 h-[62px] flex items-center gap-7">
           <Link to={rp("/rebrand")} aria-label="AgentAvow home">
@@ -351,6 +363,7 @@ export default function RebrandLayout() {
           </div>
         </div>
       </header>
+      )}
 
       <main>
         <AtmosphericBackground intensity="medium" confineFaceToHero>
@@ -370,7 +383,7 @@ export default function RebrandLayout() {
         </AtmosphericBackground>
       </main>
 
-      <SiteFooter />
+      {!bare && <SiteFooter />}
     </div>
   )
 }
