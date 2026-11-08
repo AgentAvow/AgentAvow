@@ -9,8 +9,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
 import { fetchPublicScan, fetchSkillCollectionLead, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchMcpProbe, fetchSkillScan, fetchSkillBehavioral, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
-import { getTrustTier, decisionOf, decisionPhrase, headline as decisionHeadline, isCertified, certifiedMarkNote, coverageGapNotes } from '../../components/trust/gradeSystem'
-import { TrustBar, AdoptionNeedle, TrustPill, CertifiedMark, VerdictBadge } from '../components/TrustMark'
+import { getTrustTier, decisionOf, decisionPhrase, headline as decisionHeadline, coverageGapNotes } from '../../components/trust/gradeSystem'
+import { TrustPill } from '../components/TrustMark'
+import { ResultPage, ResultTitle, CertifiedChecklist, NextStepCards, Section, EmptyPanel, type ResultAdoption, type ResultRecheck, type ResultKind } from '../components/ResultPage'
 import {
   mcpNameFromUrl, cursorInstall, vscodeInstall, gooseInstall, claudeCodeCmd,
   geminiCmd, codexCmd, claudeDesktopConfig, packageInstallCommands, skillInstallCommands,
@@ -22,9 +23,10 @@ import SEOHead from '../../components/SEOHead'
 import api from '../../lib/api'
 import { trackBadgeCopied, trackCheckSubmit, trackResultView } from '../../lib/analytics'
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
-import { useRotatingPlaceholder , useIsDesktop } from '../lib/hooks'
+import { useRotatingPlaceholder } from '../lib/hooks'
 import { summarize } from '../lib/summarize'
-import { CapabilitiesPanel, AdvisoriesPanel, McpToolList, PackageFacts, PackageBadge, PackageClaim, PackageHistory, VerifyPanel, McpWhatItCanDo, McpHistory, McpBadge, McpNotes } from '../components/ScanEvidence'
+import { CapabilitiesPanel, AdvisoriesPanel, McpToolList, PackageFacts, PackageClaim, VerifyPanel, McpWhatItCanDo, McpNotes, hasToolList, packageBadgeUrl } from '../components/ScanEvidence'
+import type { AxiosError } from 'axios'
 
 /**
  * Rebrand-native check / trust-score page — built for ANY user, not just devs.
@@ -262,30 +264,12 @@ function ClaimedBadge({ surface, owner = '', repo }: { surface: string; owner?: 
   )
 }
 
-/** Adoption as a co-equal RING for the non-GitHub views (was only a small pill). Big
- * number + unit; a dashed muted ring when there's no adoption signal (e.g. a live MCP
- * endpoint, or a brand-new package) so it never fabricates reliance. */
-/** "Safer than X% of tools scanned" — the Insygna-style percentile, from the live
- * catalog distribution. Renders nothing until it resolves (or if the corpus is empty). */
-function Percentile({ score }: { score: number }) {
-  const { data } = useQuery({
-    queryKey: ['score-percentile', score],
-    queryFn: async () => (await publicApi.get<{ percentile: number | null; population: number }>(
-      `/public/scan-catalog/percentile?score=${score}`)).data,
-    staleTime: 600_000, retry: 0,
-  })
-  if (data?.percentile == null) return null
-  return (
-    <div className="mt-1.5 text-[11.5px] text-text-muted">
-      Safer than <b className="text-text tabular-nums">{data.percentile}%</b> of tools scanned
-    </div>
-  )
-}
-
 /** Declared scope — a tool's own `.agentavow.yml`: the hosts it says it contacts + the
  * capabilities it uses. Transparency now; the behavioral tier verifies observed-vs-declared. */
-function DeclaredScopePanel({ scope }: { scope?: { present?: boolean; egress?: string[]; capabilities?: string[]; note?: string } }) {
-  if (!scope?.present) return null
+function DeclaredScopePanel({ scope, what = 'tool' }: { scope?: { present?: boolean; egress?: string[]; capabilities?: string[]; note?: string }; what?: string }) {
+  if (!scope?.present) {
+    return <EmptyPanel title="Declared scope">No <span className="font-mono">.agentavow.yml</span> in this {what}. When there is one, the network hosts, files and capabilities it declares show here next to what we found.</EmptyPanel>
+  }
   const egress = scope.egress || []
   const caps = scope.capabilities || []
   return (
@@ -320,56 +304,140 @@ function DeclaredScopePanel({ scope }: { scope?: { present?: boolean; egress?: s
   )
 }
 
-function ScoreDuo({ trustScore, trustLabel, surface, owner = '', repo, certified = false }: {
-  trustScore: number; trustLabel: string; surface: string; owner?: string; repo: string; certified?: boolean
-}) {
-  const t = getTrustTier(trustScore)
-  const { data } = useQuery({
+// ── Shared score-page data hooks and panels (every result type) ─────────────────
+
+/** Re-check: a fresh scan (force) that replaces the cached result on the page. The API
+ * rate-limits forced scans; an error just says to try later. */
+function useRecheck(key: unknown[], fn: () => Promise<PublicScanResponse>): ResultRecheck {
+  const qc = useQueryClient()
+  const m = useMutation({ mutationFn: fn, onSuccess: (data) => qc.setQueryData(key, data) })
+  return { run: () => m.mutate(), pending: m.isPending, error: m.isError }
+}
+
+interface AdoptionResp {
+  adoption_score_100?: number; tier?: string; badge?: string; insufficient_data?: boolean
+  axes?: Array<{ axis: string; label: string; absolute: number; momentum: number }>
+  headline?: { count: number; unit: string } | null
+}
+
+/** Surface-aware adoption (packages, MCP servers, skills): the needle's headline count
+ * plus the 5-axis breakdown. */
+function useSurfaceAdoption(surface: string, owner: string, repo: string, enabled = true) {
+  return useQuery({
     queryKey: ['surface-adoption', surface, owner, repo],
-    queryFn: async () => (await api.get<{ headline?: { count: number; unit: string } | null; adoption_score_100?: number }>(
+    queryFn: async () => (await api.get<AdoptionResp>(
       `/public/scan/adoption?surface=${encodeURIComponent(surface)}&owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`,
     )).data,
     staleTime: 300_000,
     retry: 0,
-  })
+    enabled,
+  }).data
+}
+
+/** "downloads/wk" → "downloads a week" for the plain line under the needle. */
+function unitWords(unit: string): string {
+  return unit.replace(/\/wk$/, ' a week').replace(/\/mo$/, ' a month').replace(/\/yr$/, ' a year').replace(/\/90d$/, ' in 90 days')
+}
+
+function adoptionFrom(data: AdoptionResp | undefined, none: string): ResultAdoption {
   const h = data?.headline
   const has = !!(h && h.count && h.count > 0)
-  const big = useIsDesktop() ? 1.5 : 1  // scale the marks up on desktop; spec size on mobile
-  // `certified` is the Certified MARK (isCertified: eligible AND Safe to connect AND
-  // final AND score >= 81 AND not thin) — never the raw provenance gate.
-  const showCert = certified
+  const rising = data?.badge === 'rising' ? ' · rising' : ''
+  return {
+    count: has ? h!.count : 0,
+    unit: has ? h!.unit : undefined,
+    scorePct: data?.adoption_score_100,
+    sub: has ? `${h!.count.toLocaleString('en-US')} ${unitWords(h!.unit)}${rising}` : none,
+  }
+}
+
+const _ADOPTION_AXES: Record<string, string> = {
+  A: 'Downloads + trend', B: 'Reverse-dependents', C: 'Stars + velocity',
+  D: 'First-party (AgentAvow)', E: 'MCP / registry usage',
+}
+
+/** Adoption detail — the real 5-axis metric, distinct from safety. */
+function AdoptionDetail({ data }: { data?: AdoptionResp | null }) {
+  const axes = data?.axes ?? []
+  if (!data || axes.length === 0) {
+    return <EmptyPanel title="Adoption detail">No usage data yet: no downloads, dependents, stars or registry listings we can count for this tool. Adoption is a separate score from safety; popular is not the same as safe.</EmptyPanel>
+  }
+  const score = data.adoption_score_100 ?? 0
+  const badge = data.badge
   return (
-    <div className="relative px-4 sm:px-7 py-6">
-      <div className="relative rounded-2xl border border-border/70 overflow-hidden bg-gradient-to-b from-surface/50 to-surface/10">
-        <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(460px 200px at 24% -25%, ${t.color}20, transparent 70%), radial-gradient(460px 200px at 78% -25%, rgba(45,212,191,0.13), transparent 70%)` }} />
-        <div className="relative grid grid-cols-2">
-          <div className="px-2 py-4 sm:p-6 pb-5 text-center flex flex-col items-center min-w-0">
-            <div className="min-h-[100px] sm:min-h-[132px] md:min-h-[150px] flex items-center justify-center">{showCert ? <CertifiedMark score={trustScore} scale={big} /> : <TrustBar score={trustScore} scale={big} />}</div>
-            <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em]" style={{ color: showCert ? undefined : t.color }}>{trustLabel}</div>
-            <div className="mt-0.5 text-[11.5px] text-text-muted">Signed · verifiable now</div>
-            <Percentile score={trustScore} />
+    <Reveal>
+      <div className="mt-4 glass rounded-2xl p-6 border-l-4 border-accent/50">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Adoption detail{!data.insufficient_data ? ` · score ${score}` : ''}</h3>
+          {badge && (
+            <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded"
+              style={{ background: badge === 'rising' ? 'rgba(56,189,248,.14)' : 'rgba(129,140,248,.14)', color: badge === 'rising' ? '#7dd3fc' : '#a5b4fc' }}>
+              {badge === 'rising' ? '↑ Rising' : `◆ ${badge}`}
+            </span>
+          )}
+        </div>
+        <p className="text-text-muted text-[13px] mt-1 max-w-[62ch]">Do real, independent parties rely on this? A <span className="text-text">separate</span> score from safety: popular is not the same as safe.</p>
+        {!data.insufficient_data && (
+          <div className="mt-3 flex items-center gap-3">
+            <div className="flex-1 h-2 rounded-full bg-surface-hover overflow-hidden"><div className="h-full rounded-full bg-gradient-to-r from-primary to-accent" style={{ width: `${score}%` }} /></div>
+            <span className="font-mono text-[12px] text-text-muted tabular-nums">{score}/100</span>
           </div>
-          <div className="px-2 py-4 sm:p-6 pb-5 text-center flex flex-col items-center min-w-0 border-l border-border/50">
-            <div className="min-h-[100px] sm:min-h-[132px] md:min-h-[150px] flex items-center justify-center">
-              <AdoptionNeedle count={has ? h!.count : 0} unit={has ? h!.unit : undefined} scorePct={data?.adoption_score_100} scale={big} />
-            </div>
-            <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em] gradient-text">Adoption</div>
-            <div className="mt-0.5 text-[11.5px] text-text-muted">{has ? 'independent reliance' : 'no adoption signal yet'}</div>
-          </div>
+        )}
+        <div className="mt-4 flex flex-col gap-2">
+          {axes.map((a) => {
+            const w = Math.round((a.absolute || 0) * 100)
+            return (
+              <div key={a.axis} className="grid grid-cols-[150px_1fr_auto] items-center gap-3 text-[12px]">
+                <span className="text-text-muted truncate">{_ADOPTION_AXES[a.axis] || a.label}</span>
+                <span className="h-1.5 rounded-full bg-surface-hover overflow-hidden"><span className="block h-full rounded-full bg-gradient-to-r from-primary to-accent" style={{ width: `${w}%` }} /></span>
+                <span className="font-mono text-[11px] text-text-muted/70 tabular-nums">{a.momentum > 0.05 ? '↑' : a.momentum < -0.05 ? '↓' : '·'} {w}</span>
+              </div>
+            )
+          })}
         </div>
       </div>
-    </div>
+    </Reveal>
   )
 }
 
-/** Score-over-time line chart. Only shown once there's real multi-scan history —
- * a single point is meaningless, so we hide it until the tool has been re-scanned. */
-function ScoreHistory({ history, current }: { history: { score: number; at?: number }[]; current: number }) {
+type DriftPoint = { scanned_at: string | null; trust_score: number | null; score_delta: number | null; manifest_drift: boolean }
+type DriftFeed = { summary: { points: number; drift_events?: number }; history: DriftPoint[] }
+
+/** The signed drift feed for a result (repo, package, MCP endpoint or skill). */
+function useDriftFeed(path: string | null) {
+  return useQuery({
+    queryKey: ['drift-feed', path],
+    retry: false,
+    enabled: !!path,
+    queryFn: async () => {
+      try {
+        return (await publicApi.get<DriftFeed>(path!, { params: { quiet: 1 } })).data
+      } catch { return null }
+    },
+  }).data
+}
+
+/** Score-over-time line chart, from the /checks history (repos) or the signed drift
+ * feed (everything else). With fewer than two points it says so instead of hiding. */
+function ScoreHistory({ history, current, feedHref, rows }: { history: { score: number; at?: number }[]; current: number; feedHref?: string; rows?: DriftPoint[] }) {
   const merged = [...history]
   // Append the current scan as "now" if it isn't already the last recorded point.
   if (!merged.length || merged[merged.length - 1].score !== current) merged.push({ score: current })
   const pts = merged.slice(-30)
-  if (pts.length < 2) return null // nothing meaningful to plot yet
+  const feed = feedHref ? <a href={feedHref} target="_blank" rel="noopener noreferrer" className="font-mono text-[11px] text-primary-light hover:text-primary">signed feed ↗</a> : null
+  if (pts.length < 2) {
+    return (
+      <Reveal>
+        <div className="mt-4 glass rounded-2xl p-6">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Score history</h3>
+            {feed}
+          </div>
+          <p className="mt-1.5 text-[13px] text-text-muted max-w-[64ch]">Now {current}/100. No change recorded yet: a point is added each time a fresh check moves the score or changes the signed definition. Watch this tool to be alerted when that happens.</p>
+        </div>
+      </Reveal>
+    )
+  }
 
   const W = 320, H = 90, PAD = 8
   const x = (i: number) => PAD + (i / (pts.length - 1)) * (W - 2 * PAD)
@@ -385,9 +453,9 @@ function ScoreHistory({ history, current }: { history: { score: number; at?: num
 
   return (
     <Reveal>
-      <div className="mt-6 glass rounded-2xl p-6">
+      <div className="mt-4 glass rounded-2xl p-6">
         <div className="flex items-baseline justify-between gap-3 flex-wrap">
-          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Trust score over time</h3>
+          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Score history</h3>
           <span className="font-mono text-[11.5px] text-text-muted">
             <b className="mr-2" style={{ color: delta > 0 ? '#22c55e' : delta < 0 ? '#ef4444' : undefined }}>
               {delta > 0 ? `↑${delta}` : delta < 0 ? `↓${Math.abs(delta)}` : 'unchanged'} since {firstDate}
@@ -395,66 +463,82 @@ function ScoreHistory({ history, current }: { history: { score: number; at?: num
             {pts.length} scans · now <b style={{ color: lastG.color }}>{current}/100</b>
           </span>
         </div>
-        <p className="text-text-muted text-[13px] mt-1 mb-3">A living record — every re-scan, not a one-shot snapshot. Watch this tool to be alerted the moment the line drops.</p>
+        <p className="text-text-muted text-[13px] mt-1 mb-3">A living record of every re-check, not a one-shot snapshot. Watch this tool to be alerted the moment the line drops. {feed}</p>
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-[90px]" preserveAspectRatio="none" aria-hidden="true">
           {[0, 50, 100].map((g) => <line key={g} x1={PAD} y1={y(g)} x2={W - PAD} y2={y(g)} stroke="currentColor" className="text-border" strokeWidth="0.5" opacity="0.5" />)}
+          <line x1={PAD} y1={y(81)} x2={W - PAD} y2={y(81)} stroke="#2DD4BF" strokeWidth="0.6" strokeDasharray="3 3" opacity="0.6" />
           <polyline points={line} fill="none" stroke={lastG.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
           {pts.map((p, i) => <circle key={i} cx={x(i)} cy={y(p.score)} r={i === pts.length - 1 ? 4 : 2.5} fill={getTrustTier(p.score).color} />)}
         </svg>
         {/* time axis labels */}
         <div className="flex justify-between font-mono text-[10.5px] text-text-muted/70 mt-1">
           <span>{firstDate}</span>
-          <span className="text-text-muted/50">score 0–100 (higher = safer)</span>
+          <span className="text-text-muted/50">score 0–100 · dashed line = 81, the Certified line</span>
           <span>{lastDate}</span>
         </div>
+        {rows && rows.length > 0 && (
+          <div className="mt-3 flex flex-col gap-1.5 text-[12.5px]">
+            {rows.slice(0, 8).map((p, i) => (
+              <div key={i} className="flex justify-between gap-3">
+                <span className="font-mono text-text-muted">{(p.scanned_at || '').slice(0, 10)}</span>
+                <span className="font-mono">{p.trust_score ?? '–'}/100{p.score_delta ? <span className={p.score_delta > 0 ? 'text-success' : 'text-danger'}> ({p.score_delta > 0 ? '+' : ''}{p.score_delta})</span> : null}{p.manifest_drift ? <span className="text-warning"> · definition changed</span> : null}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </Reveal>
   )
 }
 
-/** The recompute-on-release drift feed, surfaced. The score chart above shows the
- * NUMBER over time; this shows whether the tool's SIGNED DEFINITION drifted (a
- * rug-pull can change the tools without moving the score) — from the signed,
- * offline-recomputable /drift feed. Self-hides until there's recorded history. */
-function DefinitionDrift({ owner, repo }: { owner: string; repo: string }) {
-  const { data } = useQuery({
-    queryKey: ['drift', owner, repo],
-    retry: false,
-    queryFn: async () => {
-      try {
-        return (await publicApi.get<{
-          summary: { points: number; drift_events: number }
-          history: { manifest_drift: boolean }[]
-        }>(`/public/drift/${owner}/${repo}`, { params: { quiet: 1 } })).data
-      } catch { return null }
-    },
-  })
-  if (!data || !data.history.length) return null
-  const driftCount = data.history.filter((h) => h.manifest_drift).length
-  const feedUrl = `/api/v1/public/drift/${owner}/${repo}`
+/** Score history from the signed drift feed (packages, MCP endpoints, skills). */
+function FeedHistory({ path, current }: { path: string; current: number }) {
+  const data = useDriftFeed(path)
+  const rows = data?.history ?? []
+  const pts = [...rows].reverse().filter((p) => typeof p.trust_score === 'number')
+    .map((p) => ({ score: p.trust_score as number, at: p.scanned_at ? Date.parse(p.scanned_at) / 1000 : undefined }))
+  return <ScoreHistory history={pts} current={current} feedHref={`/api/v1${path}`} rows={rows} />
+}
+
+/** Definition changes — whether the tool's SIGNED DEFINITION drifted (a rug-pull can
+ * change the tools without moving the score), from the signed, offline-recomputable
+ * drift feed. Says plainly when there is no history yet. */
+function DefinitionChanges({ path, toolCount }: { path: string; toolCount?: number }) {
+  const data = useDriftFeed(path)
+  const feedUrl = `/api/v1${path}`
+  const history = data?.history ?? []
+  const changes = history.filter((h) => h.manifest_drift)
+  const watched = toolCount ? `${toolCount} tool${toolCount === 1 ? '' : 's'} watched` : ''
   return (
     <Reveal>
-      <div className="mt-3 glass rounded-2xl p-5">
+      <div className="mt-4 glass rounded-2xl p-5">
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Definition integrity</h3>
-          <a href={feedUrl} target="_blank" rel="noopener noreferrer" className="font-mono text-[11px] text-primary-light hover:text-primary">signed feed ↗</a>
+          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Definition changes{watched ? <span className="normal-case tracking-normal font-sans text-[12px]"> · {watched}</span> : null}</h3>
+          {history.length > 0 && <a href={feedUrl} target="_blank" rel="noopener noreferrer" className="font-mono text-[11px] text-primary-light hover:text-primary">signed feed ↗</a>}
         </div>
-        <p className="text-[13px] mt-1.5">
-          {driftCount > 0
-            ? <><span className="text-warning font-semibold">Signed definition changed {driftCount}×</span> — the tool&apos;s manifest drifted across a release, even where the score held. That&apos;s the rug-pull signal.</>
-            : <><span className="text-success font-semibold">Signed definition stable</span> — no tool-manifest drift across {data.summary.points} recorded scan{data.summary.points === 1 ? '' : 's'}.</>}
-        </p>
-        <p className="text-text-muted text-[12px] mt-1">A signed, offline-recomputable timeline — verify it against our JWKS instead of taking our word.</p>
+        {!history.length ? (
+          <p className="text-[13px] mt-1.5 text-text-muted">No recorded history yet. Each fresh check signs the tool&apos;s definition; when a later one differs, the date and the change show here.</p>
+        ) : changes.length > 0 ? (
+          <>
+            <p className="text-[13px] mt-1.5"><span className="text-warning font-semibold">Signed definition changed {changes.length}×</span>: the tool&apos;s manifest drifted across a release, even where the score held. That&apos;s the rug-pull signal.</p>
+            <ul className="mt-2 flex flex-col gap-1 text-[12.5px]">
+              {changes.slice(0, 6).map((c, i) => <li key={i} className="flex justify-between gap-3"><span className="font-mono text-text-muted">{(c.scanned_at || '').slice(0, 10)}</span><span className="text-warning">definition changed · {c.trust_score ?? '–'}/100</span></li>)}
+            </ul>
+          </>
+        ) : (
+          <p className="text-[13px] mt-1.5"><span className="text-success font-semibold">No change</span>: the definition matches across {data!.summary.points} recorded check{data!.summary.points === 1 ? '' : 's'}.</p>
+        )}
+        <p className="text-text-muted text-[12px] mt-1">A signed, offline-recomputable timeline: verify it against our public keys instead of taking our word.</p>
       </div>
     </Reveal>
   )
 }
 
 /** Share row — copy link + branded X / Bluesky icons. */
-function ShareRow({ owner, repo, score }: { owner: string; repo: string; score: number }) {
+function ShareRow({ label, score }: { label: string; score: number }) {
   const [copied, setCopied] = useState(false)
   const url = typeof window !== 'undefined' ? window.location.href : ''
-  const text = `${owner}/${repo} scored ${score}/100 on AgentAvow — a signed, verifiable trust score.`
+  const text = `${label} scored ${score}/100 on AgentAvow — a signed, verifiable trust score.`
   const copy = () => { if (navigator.clipboard) navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1400) }
   const icon = 'grid place-items-center w-8 h-8 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors'
   return (
@@ -470,69 +554,147 @@ function ShareRow({ owner, repo, score }: { owner: string; repo: string; score: 
   )
 }
 
-/** Prominent badge promotion — dynamic origin so copied embeds always resolve. */
-/** "Show it off" — the two signed, LIVE, hosted assets: the README badge
- * (compact: the answer + trust bar + adoption dial) and the trust card. Both are served from a URL and regenerate
- * from the current signed verdict — always current, embeddable anywhere, never a
- * stale download. */
-function BadgePromo({ owner, repo }: { owner: string; repo: string }) {
-  const [copied, setCopied] = useState<'badge' | 'card' | null>(null)
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://agentavow.com'
-  const link = `${origin}/check/${owner}/${repo}`
-  const badgeBase = `${origin}/api/v1/public/scan/${owner}/${repo}/badge`
-  // The compact README badge carries both meters (trust + adoption) — same design as the card.
-  const badge = { url: badgeBase, alt: 'AgentAvow' }
-  const badgeMd = `[![${badge.alt}](${badge.url})](${link})`
-  const cardUrl = `${origin}/api/v1/public/scan/${owner}/${repo}/card.svg`
-  const cardMd = `[![AgentAvow scores](${cardUrl})](${link})`
-  const copyIt = (which: 'badge' | 'card', text: string) => {
-    if (navigator.clipboard) navigator.clipboard.writeText(text)
-    trackBadgeCopied(which)
-    setCopied(which); setTimeout(() => setCopied(null), 1400)
+/** The share panel ("Share this result"), anchored for the next-steps line. */
+function SharePanel({ label, score }: { label: string; score: number }) {
+  return (
+    <Reveal>
+      <div id="share" className="mt-4 glass rounded-2xl p-6 flex items-center justify-between gap-4 flex-wrap scroll-mt-24">
+        <div>
+          <h3 className="text-[15px] font-bold">Share this result</h3>
+          <p className="text-text-muted text-[13.5px] mt-0.5">The link opens this signed, always-current result.</p>
+        </div>
+        <ShareRow label={label} score={score} />
+      </div>
+    </Reveal>
+  )
+}
+
+/** The hosted, always-current assets for a result. */
+interface BadgeAssets {
+  /** the result page link the badge points to */
+  link: string
+  badgeUrl: string
+  cardUrl: string
+  /** the widget.js data-tool coordinate, where the widget can render this tool */
+  widgetTool?: string
+  /** extra copy-paste HTML for the card (MCP endpoints embed it on websites) */
+  cardHtml?: string
+}
+
+function badgeMarkdownOf(a: BadgeAssets): string {
+  return `[![AgentAvow](${a.badgeUrl})](${a.link})`
+}
+
+/** "Show this result in your README" — Badge / Card / Widget tabs. Every asset is a
+ * hosted image or script that regenerates from the live signed result: it can't go
+ * stale or be faked. */
+function BadgeTabs({ assets, unavailable }: { assets?: BadgeAssets; unavailable?: string }) {
+  const [tab, setTab] = useState<'badge' | 'card' | 'widget'>('badge')
+  const [copied, setCopied] = useState<string | null>(null)
+  if (!assets) {
+    return <EmptyPanel title="Badge">{unavailable || 'No public badge for this result yet.'}</EmptyPanel>
   }
-  const codeBox = (which: 'badge' | 'card', text: string) => (
+  const badgeMd = badgeMarkdownOf(assets)
+  const cardMd = `[![AgentAvow scores](${assets.cardUrl})](${assets.link})`
+  const widget = assets.widgetTool ? `<script src="${typeof window !== 'undefined' ? window.location.origin : 'https://agentavow.com'}/widget.js"\n        data-tool="${assets.widgetTool}"></script>` : ''
+  const copyIt = (format: 'badge' | 'card' | 'widget', key: string, text: string) => {
+    if (navigator.clipboard) navigator.clipboard.writeText(text)
+    trackBadgeCopied(format)
+    setCopied(key); setTimeout(() => setCopied(null), 1400)
+  }
+  const codeBox = (format: 'badge' | 'card' | 'widget', key: string, text: string) => (
     <div className="relative mt-3">
       <pre className="font-mono text-[11.5px] bg-surface border border-border rounded-lg px-3 py-2.5 pr-14 text-text-muted overflow-x-auto whitespace-pre-wrap break-all">{text}</pre>
-      <button onClick={() => copyIt(which, text)} className="absolute top-1.5 right-1.5 font-mono text-[10.5px] px-2 py-0.5 rounded bg-surface-hover border border-border text-text-muted hover:text-primary-light">{copied === which ? 'copied ✓' : 'copy'}</button>
+      <button onClick={() => copyIt(format, key, text)} className="absolute top-1.5 right-1.5 font-mono text-[10.5px] px-2 py-0.5 rounded bg-surface-hover border border-border text-text-muted hover:text-primary-light">{copied === key ? 'copied ✓' : 'copy'}</button>
     </div>
   )
+  const tabs: Array<['badge' | 'card' | 'widget', string]> = [['badge', 'Badge'], ['card', 'Card'], ['widget', 'Widget']]
   return (
-    <div className="glass rounded-2xl p-6 relative overflow-hidden">
-      <div className="absolute -right-20 -top-20 w-48 h-48 rounded-full bg-accent/10 blur-3xl pointer-events-none" />
-      <div className="relative">
-        <div className="font-mono text-[11px] uppercase tracking-wide text-accent">Show it off</div>
-        <h3 className="mt-1 text-lg font-bold">Put your signed mark anywhere.</h3>
-        <p className="mt-1 text-text-muted text-[13.5px] max-w-[56ch]">Both are hosted, always-current images that regenerate from the live signed verdict — they can&apos;t go stale or be faked. Free, no account.</p>
-
-        <div className="mt-5 grid md:grid-cols-2 gap-4 items-stretch">
-          {/* README badge — compact: the answer + trust and adoption meters */}
-          <div className="rounded-xl border border-border bg-surface/40 p-5 flex flex-col">
-            <div className="flex items-center justify-between gap-2">
-              <div className="font-semibold text-[14px]">README badge</div>
-              <Link to={rp('/rebrand/badge')} className="font-mono text-[11px] text-primary-light hover:text-primary">more styles →</Link>
-            </div>
-            <a href={link} target="_blank" rel="noopener noreferrer" className="mt-4 flex items-center justify-center rounded-lg border border-border/60 bg-surface py-7 px-2 overflow-x-auto">
-              <img src={badge.url} alt={badge.alt} className="h-[20px] w-auto max-w-none" />
-            </a>
-            {codeBox('badge', badgeMd)}
-            <p className="mt-2 font-mono text-[10.5px] text-text-muted/70">the badge row · regenerates on every view</p>
-          </div>
-          {/* Live card — the hosted dual-mark image */}
-          <div className="rounded-xl border border-border bg-surface/40 p-5 flex flex-col">
-            <div className="flex items-center justify-between gap-2">
-              <div className="font-semibold text-[14px]">Live card</div>
-              <a href={cardUrl} target="_blank" rel="noopener noreferrer" className="font-mono text-[11px] text-primary-light hover:text-primary">open ↗</a>
-            </div>
-            <a href={link} target="_blank" rel="noopener noreferrer" className="mt-4 block rounded-lg overflow-hidden border border-border/60">
-              <img src={cardUrl} alt="AgentAvow trust + adoption card" className="w-full block" />
-            </a>
-            {codeBox('card', cardMd)}
-            <p className="mt-2 font-mono text-[10.5px] text-text-muted/70">a richer, always-current image · a Security section or product page</p>
-          </div>
+    <Reveal>
+      <div className="mt-4 glass rounded-2xl p-6">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <h3 className="text-[15px] font-bold">Show this result in your README</h3>
+          <Link to={rp('/rebrand/badge')} className="font-mono text-[11px] text-primary-light hover:text-primary">badge builder →</Link>
         </div>
-        <Link to={rp('/rebrand/badge')} className="mt-4 inline-flex items-center gap-1.5 text-[13px] font-semibold text-primary-light hover:text-primary">Badge builder — pick a badge, theme, and format →</Link>
+        <p className="mt-1 text-text-muted text-[13px] max-w-[60ch]">Hosted, always-current images that regenerate from the live signed result: they can&apos;t go stale or be faked. Free, no account.</p>
+        <div className="mt-4 flex gap-1.5" role="tablist">
+          {tabs.map(([k, l]) => (
+            <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+              className={`text-[12.5px] px-3 py-1 rounded-lg border transition-colors ${tab === k ? 'border-primary-light text-primary-light bg-primary/10' : 'border-border text-text-muted hover:text-text'}`}>{l}</button>
+          ))}
+        </div>
+        {tab === 'badge' && (
+          <>
+            <a href={assets.link} target="_blank" rel="noopener noreferrer" className="mt-4 flex items-center justify-center rounded-lg border border-border/60 bg-surface py-6 px-2 overflow-x-auto">
+              <img src={assets.badgeUrl} alt="AgentAvow" className="h-[20px] w-auto max-w-none" />
+            </a>
+            {codeBox('badge', 'badge', badgeMd)}
+            <p className="mt-2 font-mono text-[10.5px] text-text-muted/70">the README badge · the answer, the trust score and the adoption score · regenerates on every view</p>
+          </>
+        )}
+        {tab === 'card' && (
+          <>
+            <a href={assets.link} target="_blank" rel="noopener noreferrer" className="mt-4 block rounded-lg overflow-hidden border border-border/60 max-w-[420px]">
+              <img src={assets.cardUrl} alt="AgentAvow trust + adoption card" className="w-full block" loading="lazy" />
+            </a>
+            {codeBox('card', 'card', cardMd)}
+            {assets.cardHtml && codeBox('card', 'cardHtml', assets.cardHtml)}
+            <p className="mt-2 font-mono text-[10.5px] text-text-muted/70">a richer, always-current image · a Security section or product page · <a href={assets.cardUrl} target="_blank" rel="noopener noreferrer" className="text-primary-light">open ↗</a></p>
+          </>
+        )}
+        {tab === 'widget' && (widget ? (
+          <>
+            <p className="mt-4 text-[13px] text-text-muted">One script tag: the live card plus an in-browser signature check.</p>
+            {codeBox('widget', 'widget', widget)}
+          </>
+        ) : (
+          <p className="mt-4 text-[13px] text-text-muted">The live widget doesn&apos;t render this kind of result yet. Use the badge or the card; both regenerate from the live result.</p>
+        ))}
       </div>
-    </div>
+    </Reveal>
+  )
+}
+
+/** A claim panel for surfaces claimed on My Tools (MCP endpoints, skills, …). */
+function ClaimPanel({ href, title = 'Is this your tool?', text }: { href: string | null; title?: string; text?: string }) {
+  return (
+    <Reveal>
+      <div id="claim" className="mt-4 glass rounded-2xl p-6 flex items-center justify-between gap-4 flex-wrap scroll-mt-24">
+        <div>
+          <h3 className="text-[15px] font-bold">{title}</h3>
+          <p className="text-text-muted text-[13.5px] mt-0.5 max-w-[56ch]">{text || 'Claim it to get alerts first, add a declared scope, and show a claimed badge.'}</p>
+        </div>
+        {href && <Link to={rp(href)} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors shrink-0">Claim this tool</Link>}
+      </div>
+    </Reveal>
+  )
+}
+
+/** The panels every "What's inside" shares: capabilities, tools and blast radius,
+ * advisories and declared scope — each says plainly when it's empty. */
+function InsideCommon({ scan, kind, what }: { scan: PublicScanResponse; kind: ResultKind; what: string }) {
+  const o = scan as unknown as { capabilities?: unknown[] | null; advisories?: unknown[] | null; incident_history?: { advisories?: unknown[] } | null; package_version?: string | null; declared_scope?: { present?: boolean; egress?: string[]; capabilities?: string[]; note?: string }; surface_detail?: { blast_radius?: Record<string, unknown> } | null; behavioral?: { tool_surface?: { blast_radius?: Record<string, unknown> } } | null }
+  const caps = (o.capabilities ?? []).length
+  const advisories = (o.advisories?.length ? o.advisories : o.incident_history?.advisories) ?? []
+  const br = o.surface_detail?.blast_radius ?? o.behavioral?.tool_surface?.blast_radius
+  const tools = hasToolList(scan)
+  return (
+    <>
+      {kind === 'mcp'
+        ? <McpWhatItCanDo scan={scan} />
+        : caps > 0
+          ? <><CapabilitiesPanel scan={scan} /><p className="mt-1.5 px-1 text-[12px] text-text-muted/80">Normal for many tools. Listed so you know, not counted as defects.</p></>
+          : <EmptyPanel title="What it can do">No capabilities found in the code it ships: it doesn&apos;t write files, run commands or open sockets in ways we detect.</EmptyPanel>}
+      {tools ? <McpToolList scan={scan} /> : (kind === 'mcp' || kind === 'skill' || (scan as { surface_detail?: { is_mcp_server?: boolean } }).surface_detail?.is_mcp_server)
+        ? <EmptyPanel title="Tools it serves">No tool list for this result yet. A sandbox run of the published package lists the tools its server serves.</EmptyPanel>
+        : null}
+      {br?.level ? <BlastRadius scan={{ surface_detail: { blast_radius: br } }} /> : null}
+      {kind === 'mcp'
+        ? <EmptyPanel title="Advisories">Doesn&apos;t apply: security advisories are published against packages, not hosted endpoints. Scan its package or repo for them.</EmptyPanel>
+        : advisories.length > 0 ? <AdvisoriesPanel scan={scan} />
+          : <EmptyPanel title="Advisories">None known{o.package_version ? ` for ${o.package_version}` : ''}.</EmptyPanel>}
+      <DeclaredScopePanel scope={o.declared_scope} what={what} />
+    </>
   )
 }
 
@@ -559,7 +721,7 @@ function OwnershipCTA({ owner, repo, token }: { owner: string; repo: string; tok
   if (owned) {
     return (
       <Reveal>
-        <div className="mt-6 glass rounded-2xl p-6 border-l-4 border-success/60 flex items-center justify-between gap-4 flex-wrap">
+        <div id="claim" className="scroll-mt-24 mt-4 glass rounded-2xl p-6 border-l-4 border-success/60 flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h3 className="text-[15px] font-bold text-success">✓ You own this</h3>
             <p className="text-text-muted text-[13.5px] mt-0.5">This tool is claimed under your account. Manage it, run re-scans, and control alerts.</p>
@@ -573,7 +735,7 @@ function OwnershipCTA({ owner, repo, token }: { owner: string; repo: string; tok
   if (user && token) {
     return (
       <Reveal>
-        <div className="mt-6 glass rounded-2xl p-6 flex items-center justify-between gap-4 flex-wrap">
+        <div id="claim" className="scroll-mt-24 mt-4 glass rounded-2xl p-6 flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h3 className="text-[15px] font-bold">Own this private repo?</h3>
             <p className="text-text-muted text-[13.5px] mt-0.5">Claim it now — your read token verifies ownership, no topic needed.</p>
@@ -588,7 +750,7 @@ function OwnershipCTA({ owner, repo, token }: { owner: string; repo: string; tok
   }
   return (
     <Reveal>
-      <div className="mt-6 glass rounded-2xl p-6 flex items-center justify-between gap-4 flex-wrap">
+      <div id="claim" className="scroll-mt-24 mt-4 glass rounded-2xl p-6 flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h3 className="text-[15px] font-bold">Own this tool?</h3>
           <p className="text-text-muted text-[13.5px] mt-0.5">Claim it to scan it privately, get change alerts, and own how it appears on AgentAvow.</p>
@@ -621,7 +783,7 @@ function PrivateSearchSlot({ owner, repo, score, published }: { owner: string; r
         className="flex flex-col items-center gap-2"
       >
         <div className="text-[12px] text-success font-medium">🌐 Listed in search — share it</div>
-        <ShareRow owner={owner} repo={repo} score={score} />
+        <ShareRow label={`${owner}/${repo}`} score={score} />
       </motion.div>
     )
   }
@@ -636,18 +798,6 @@ function PrivateSearchSlot({ owner, repo, score, published }: { owner: string; r
   )
 }
 
-/** The A+ "Certified" panel (roadmap §7.5) — the transparent 6-point checklist.
- * Renders only when the backend supplied a `certified.checks` map (a full public
- * scan). Certified means every check currently passes; otherwise it doubles as a
- * "how to earn A+" guide by showing exactly which requirements aren't met yet. */
-const _CERT_LABELS: Array<[string, string]> = [
-  ['artifact_scanned', 'Published artifact scanned — not just the repo'],
-  ['provenance_verified', 'Build provenance verified & cryptographically bound to source'],
-  ['no_drift', 'No artifact-vs-source drift and no install-time hooks'],
-  ['no_critical_or_high', 'Zero critical/high findings · no known-malicious dependencies'],
-  ['recompute_ready', 'Signed verdict recomputes offline against pinned snapshots'],
-  ['full_coverage', 'Complete scan — the whole tree was read, nothing sampled or truncated'],
-]
 /** A neutral provenance line: the published artifact matches its source. Shown on every
  * result whose provenance verified, whatever the answer — it says "this is the real
  * artifact", not "this is safe", so it carries no Certified seal. */
@@ -656,48 +806,6 @@ function ProvenanceChip() {
     <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light" title="The published artifact's build provenance verified and is bound to its source">
       ✓ Provenance verified · artifact matches source
     </span>
-  )
-}
-
-function CertifiedPanel({ scan }: { scan: unknown }) {
-  const certified = (scan as { certified?: { eligible?: boolean; checks?: Record<string, boolean> } }).certified
-  const checks = certified?.checks
-  if (!checks || Object.keys(checks).length === 0) return null
-  const eligible = !!certified?.eligible
-  const mark = isCertified(scan)
-  // Eligible but no mark: say why rather than silently dropping it.
-  const note = mark ? '' : certifiedMarkNote(scan)
-  const accent = mark ? '#14B8A6' : 'var(--color-border)'
-  return (
-    <Reveal>
-      <div className="mt-4 glass rounded-2xl p-6 border-l-4" style={{ borderLeftColor: accent }}>
-        <div className="flex items-center gap-2 flex-wrap">
-          {mark ? (
-            <span className="inline-flex items-center gap-1.5 font-bold text-[15px]" style={{ color: '#14B8A6' }}>
-              <span aria-hidden>✦</span> AgentAvow Certified
-            </span>
-          ) : (
-            <h3 className="text-[15px] font-bold">{eligible ? 'Certified checks pass' : 'Not yet Certified'}</h3>
-          )}
-        </div>
-        <p className="text-text-muted text-[13.5px] mt-1 max-w-[62ch]">
-          {mark
-            ? 'This tool passes every Certified check and reads Safe to connect at a score of 81 or above. It is re-checked on every scan, so it stays true only while it stays true.'
-            : eligible
-              ? `${note || 'Certified checks pass; the mark shows when the answer is Safe to connect.'} The six checks:`
-              : 'Certified is earned, not just a high score: it takes all six checks below, plus a Safe to connect answer at a score of 81 or above. Anything unchecked shows exactly what to fix:'}
-        </p>
-        <ul className="mt-3 flex flex-col gap-1.5">
-          {_CERT_LABELS.filter(([k]) => checks[k] !== undefined).map(([k, label]) => (
-            <li key={k} className="flex items-start gap-2 text-[13px]">
-              <span className={checks[k] ? 'text-success' : 'text-text-muted'} aria-hidden>{checks[k] ? '✓' : '○'}</span>
-              <span className={checks[k] ? 'text-text' : 'text-text-muted'}>{label}</span>
-            </li>
-          ))}
-        </ul>
-        <Link to={rp('/rebrand/certified')} className="inline-block mt-3 text-[12.5px] font-semibold text-primary-light hover:text-primary">Learn about Certified →</Link>
-      </div>
-    </Reveal>
   )
 }
 
@@ -885,65 +993,6 @@ function ScanningLoader({ owner, repo }: { owner: string; repo: string }) {
     </div>
   )
 }
-
-/** Adoption panel — the real 5-axis "do independent parties rely on this?" score,
- * DISTINCT from safety. Surfaces the tier + rising/established badge + per-axis
- * breakdown from the /adoption endpoint. Hidden when there's no signal (cold-start
- * tools would just show an empty panel). */
-const _ADOPTION_AXES: Record<string, string> = {
-  A: 'Downloads + trend', B: 'Reverse-dependents', C: 'Stars + velocity',
-  D: 'First-party (AgentAvow)', E: 'MCP / registry usage',
-}
-interface AdoptionResp {
-  adoption_score_100?: number; tier?: string; badge?: string; insufficient_data?: boolean
-  axes?: Array<{ axis: string; label: string; absolute: number; momentum: number }>
-}
-function AdoptionPanel({ owner, repo }: { owner: string; repo: string }) {
-  const { data } = useQuery({
-    queryKey: ['rebrand-adoption', owner, repo],
-    queryFn: async () => (await publicApi.get<AdoptionResp>(`/public/scan/${owner}/${repo}/adoption`)).data,
-    retry: 0,
-  })
-  const axes = data?.axes ?? []
-  if (!data || axes.length === 0) return null  // no independent signal → don't clutter
-  const score = data.adoption_score_100 ?? 0
-  const badge = data.badge
-  return (
-    <Reveal>
-      <div className="mt-4 glass rounded-2xl p-6 border-l-4 border-accent/50">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <h3 className="text-[15px] font-bold">Adoption</h3>
-          {badge && (
-            <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded"
-              style={{ background: badge === 'rising' ? 'rgba(56,189,248,.14)' : 'rgba(129,140,248,.14)', color: badge === 'rising' ? '#7dd3fc' : '#a5b4fc' }}>
-              {badge === 'rising' ? '↑ Rising' : `◆ ${badge}`}
-            </span>
-          )}
-        </div>
-        <p className="text-text-muted text-[13px] mt-1 max-w-[62ch]">Do real, independent parties rely on this? A <span className="text-text">separate</span> score from safety — popular is not the same as safe.</p>
-        {!data.insufficient_data && (
-          <div className="mt-3 flex items-center gap-3">
-            <div className="flex-1 h-2 rounded-full bg-surface-hover overflow-hidden"><div className="h-full rounded-full bg-gradient-to-r from-primary to-accent" style={{ width: `${score}%` }} /></div>
-            <span className="font-mono text-[12px] text-text-muted tabular-nums">{score}/100</span>
-          </div>
-        )}
-        <div className="mt-4 flex flex-col gap-2">
-          {axes.map((a) => {
-            const w = Math.round((a.absolute || 0) * 100)
-            return (
-              <div key={a.axis} className="grid grid-cols-[140px_1fr_auto] items-center gap-3 text-[12px]">
-                <span className="text-text-muted truncate">{_ADOPTION_AXES[a.axis] || a.label}</span>
-                <span className="h-1.5 rounded-full bg-surface-hover overflow-hidden"><span className="block h-full rounded-full bg-accent" style={{ width: `${w}%` }} /></span>
-                <span className="font-mono text-[11px] text-text-muted/70 tabular-nums">{a.momentum > 0.05 ? '↑' : a.momentum < -0.05 ? '↓' : '·'} {w}</span>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-    </Reveal>
-  )
-}
-
 /** One copyable command/config row. */
 function CopyRow({ cmd, label, multiline }: { cmd: string; label?: string; multiline?: boolean }) {
   const [copied, setCopied] = useState(false)
@@ -1556,12 +1605,31 @@ function SkillCollection({ owner, repo, scan }: { owner: string; repo: string; s
   )
 }
 
+const ORIGIN = () => (typeof window !== 'undefined' ? window.location.origin : 'https://agentavow.com')
+const encPath = (name: string) => name.split('/').map(encodeURIComponent).join('/')
+
+/** The repo-level badge, card and widget (a GitHub repo, or a skill collection whose
+ * repo badge leads with the collection's answer). */
+function repoBadgeAssets(owner: string, repo: string): BadgeAssets {
+  const origin = ORIGIN()
+  return {
+    link: `${origin}/check/${owner}/${repo}`,
+    badgeUrl: `${origin}/api/v1/public/scan/${owner}/${repo}/badge`,
+    cardUrl: `${origin}/api/v1/public/scan/${owner}/${repo}/card.svg`,
+    widgetTool: `${owner}/${repo}`,
+  }
+}
+
 function SkillResult({ owner, repo, skill }: { owner: string; repo: string; skill?: string }) {
+  const key = ['rebrand-skill-scan', owner, repo, skill ?? '']
   const { data: scan, isLoading, isError } = useQuery({
-    queryKey: ['rebrand-skill-scan', owner, repo, skill ?? ''],
+    queryKey: key,
     queryFn: () => fetchSkillScan(owner, repo, false, skill),
     retry: 0,
   })
+  const recheck = useRecheck(key, () => fetchSkillScan(owner, repo, true, skill))
+  const adoptionData = useSurfaceAdoption('openclaw', owner, repo, !!scan)
+  const driftPath = `/public/drift/pkg/skill/${owner}/${repo}${skill ? `/${encPath(skill)}` : ''}`
   useResultView(!!scan)
   if (isLoading) return <ScanningLoader owner="skill" repo={`${owner}/${repo}${skill ? `/${skill}` : ''}`} />
   if (isError || !scan) {
@@ -1574,10 +1642,15 @@ function SkillResult({ owner, repo, skill }: { owner: string; repo: string; skil
     )
   }
   const t = getTrustTier(scan.trust_score)
-  const f = scan.findings
   const verdict = scanVerdict(scan)
+  const sd = (scan as { surface_detail?: { collection?: boolean; skill_name?: string; allowed_tools?: string[]; has_lifecycle_hooks?: boolean; script_count?: number } }).surface_detail
+  const collection = !!sd?.collection
+  const skillName = sd?.skill_name || (skill ? skill.split('/').pop() : '')
+  const label = `${owner}/${repo}${skill ? `/${skill}` : ''}`
+  const tools = sd?.allowed_tools ?? []
+  const badge = collection && !skill ? repoBadgeAssets(owner, repo) : undefined
   return (
-    <div className="max-w-[760px] mx-auto px-6 py-14">
+    <>
       <SEOHead
         title={`Is ${skill ? `the ${skill.split('/').pop()} skill (${owner}/${repo})` : `the ${owner}/${repo} skill`} safe? ${decisionHeadline(scan)} · trust score ${scan.trust_score}/100`}
         description={`${verdict}. AgentAvow's signed capability score for the ${owner}/${repo} Agent Skill: ${scan.trust_score}/100 (${t.name}), verifiable offline.`}
@@ -1585,86 +1658,69 @@ function SkillResult({ owner, repo, skill }: { owner: string; repo: string; skil
         image={`https://agentavow.com/api/v1/public/scan/${owner}/${repo}/og-image`}
         jsonLd={scanReviewJsonLd(`${owner}/${repo}`, scan.trust_score)}
       />
-      <Reveal>
-        <div className="glass rounded-2xl relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${t.color}12, transparent 55%), var(--color-surface)` }}>
-          <div className="relative px-7 pt-7">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">Agent Skill</span>
-              <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-success/15 text-success">🔒 Capability-checked</span>
-              <ClaimedBadge surface="openclaw" owner={owner} repo={repo} />
-            </div>
-            <h1 className="mt-2 text-xl font-extrabold tracking-tight break-all font-mono">{owner}/{repo}{skill && <span className="text-text-muted">/{skill}</span>}</h1>
-            {skill && <Link to={rp(`/rebrand/check/skill/${owner}/${repo}`)} className="mt-1 inline-block text-[12.5px] text-primary-light hover:text-primary">← All skills in {owner}/{repo}</Link>}
-            {!skill && (scan as { surface_detail?: { collection?: boolean } }).surface_detail?.collection && <p className="mt-1 text-[12.5px] text-text-muted max-w-[62ch]">This repo is a collection of agent skills, so its answer is its worst skill&apos;s. <Link to={`${rp(`/rebrand/check/${owner}/${repo}`)}?code=1`} className="text-primary-light hover:text-primary">See the repository code scan →</Link></p>}
-            {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{skillDescription((scan as { tool_description?: string }).tool_description)}</div>}
-            {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
-          </div>
-          <div className="px-7 mt-3"><VerdictBadge scan={scan} verb="install" /></div>
-          <IncidentBanner scan={scan} />
-          <ScoreDuo trustScore={scan.trust_score} trustLabel="Capability Trust" surface="openclaw" owner={owner} repo={repo} certified={isCertified(scan)} />
-        </div>
-      </Reveal>
-
-      {/* PRIMARY ACTIONS — watch + install, consistent across every score page */}
-      <div className="mt-4"><WatchCTA surface="openclaw" owner={owner} repo={repo} /></div>
-      {decisionOf(scan).decision !== 'do_not_connect' && !(scan as { surface_detail?: { collection?: boolean } }).surface_detail?.collection && <AddToAgent kind="skill" owner={owner} repo={repo} skillName={(scan as { surface_detail?: { skill_name?: string } }).surface_detail?.skill_name} />}
-
-      <SkillCollection owner={owner} repo={repo} scan={scan} />
-      <BlastRadius scan={scan} />
-      <CapabilitiesPanel scan={scan} />
-
-      {skill && (
-        <p className="mt-4 px-1 text-[12.5px] text-text-muted">
-          The sandbox runs the whole <span className="font-mono">{owner}/{repo}</span> repo, so the run below covers every skill in it, not only <span className="font-mono">{skill.split('/').pop()}</span>.
-        </p>
-      )}
-      <BehavioralPanel owner={owner} repo={repo} surface="skill" skill auto={(scan as { behavioral?: BehavioralData | null }).behavioral} effect={(scan as { behavioral_score_effect?: ScoreEffect | null }).behavioral_score_effect} />
-
-      <Reveal>
-        <div className="mt-4 glass rounded-2xl p-6">
-          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">What we checked</h3>
-          <p className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">A skill&apos;s <span className="text-text">SKILL.md is injected into your model every session</span>, and its <span className="text-text font-mono">allowed-tools</span> pre-approves tools to run <span className="text-text">without asking</span>. We checked that auto-exec grant, hidden instructions in the always-loaded description, lifecycle-hook escalation, and credential-exfil in the bundled scripts.</p>
-          {(() => {
-            const sd = (scan as { surface_detail?: { skill_name?: string; allowed_tools?: string[]; has_lifecycle_hooks?: boolean } }).surface_detail
-            const tools = sd?.allowed_tools ?? []
-            if (!sd?.skill_name && tools.length === 0) return null
-            return (
+      <ResultPage
+        scan={scan as unknown as Record<string, unknown> & { trust_score: number }}
+        kind="skill"
+        eyebrow={['Agent Skill', label]}
+        name={skillName && !collection ? `the ${skillName} skill` : `${owner}/${repo}`}
+        recheck={recheck}
+        banner={<IncidentBanner scan={scan} />}
+        chips={<>
+          <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">Agent Skill</span>
+          <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-success/15 text-success">🔒 Capability-checked</span>
+          <ClaimedBadge surface="openclaw" owner={owner} repo={repo} />
+        </>}
+        intro={<>
+          {skill && <Link to={rp(`/rebrand/check/skill/${owner}/${repo}`)} className="mt-2 inline-block text-[12.5px] text-primary-light hover:text-primary">← All skills in {owner}/{repo}</Link>}
+          {!skill && collection && <p className="mt-2 text-[12.5px] text-text-muted max-w-[62ch]">This repo is a collection of agent skills, so its answer is its worst skill&apos;s. <Link to={`${rp(`/rebrand/check/${owner}/${repo}`)}?code=1`} className="text-primary-light hover:text-primary">See the repository code scan →</Link></p>}
+          {(scan as { tool_description?: string }).tool_description && <div className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">{skillDescription((scan as { tool_description?: string }).tool_description)}</div>}
+          {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
+        </>}
+        adoption={adoptionFrom(adoptionData, 'No usage data: no installs or stars we can count yet')}
+        allFindings={<CategoryFindings categoryScores={null} findings={scan.findings} maxFindings={15} emptyMessage={coverageGapNotes(scan).length ? '✓ No capability-surface risks found in what was read; see what we couldn’t check above.' : '✓ No capability-surface risks found: clean skill.'} />}
+        install={!collection ? <AddToAgent kind="skill" owner={owner} repo={repo} skillName={sd?.skill_name} /> : undefined}
+        watch={<WatchCTA surface="openclaw" owner={owner} repo={repo} />}
+        badgeMarkdown={badge ? badgeMarkdownOf(badge) : undefined}
+        keepWatching={{
+          history: <FeedHistory path={driftPath} current={scan.trust_score} />,
+          adoption: <AdoptionDetail data={adoptionData} />,
+          drift: <DefinitionChanges path={driftPath} />,
+        }}
+        inside={<>
+          <SkillCollection owner={owner} repo={repo} scan={scan} />
+          {skill && (
+            <p className="mt-4 px-1 text-[12.5px] text-text-muted">
+              The sandbox runs the whole <span className="font-mono">{owner}/{repo}</span> repo, so the run below covers every skill in it, not only <span className="font-mono">{skill.split('/').pop()}</span>.
+            </p>
+          )}
+          <BehavioralPanel owner={owner} repo={repo} surface="skill" skill auto={(scan as { behavioral?: BehavioralData | null }).behavioral} effect={(scan as { behavioral_score_effect?: ScoreEffect | null }).behavioral_score_effect} />
+          <Reveal>
+            <div className="mt-4 glass rounded-2xl p-6">
+              <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">What runs without asking</h3>
               <div className="mt-3 flex flex-col gap-2 text-[12.5px]">
                 {sd?.skill_name && <div className="flex justify-between gap-3"><span className="text-text-muted">Skill</span><span className="font-mono">{sd.skill_name}</span></div>}
                 <div className="flex justify-between gap-3 items-start"><span className="text-text-muted shrink-0">Auto-approved tools</span><span className="font-mono text-right">{tools.length ? tools.join(', ') : 'none'}</span></div>
-                {sd?.has_lifecycle_hooks && <div className="flex justify-between gap-3"><span className="text-text-muted">Lifecycle hooks</span><span className="font-mono text-warning">present</span></div>}
+                <div className="flex justify-between gap-3"><span className="text-text-muted">Lifecycle hooks</span><span className={`font-mono ${sd?.has_lifecycle_hooks ? 'text-warning' : ''}`}>{sd?.has_lifecycle_hooks ? 'present' : 'none'}</span></div>
+                {typeof sd?.script_count === 'number' && <div className="flex justify-between gap-3"><span className="text-text-muted">Bundled scripts</span><span className="font-mono">{sd.script_count}</span></div>}
               </div>
-            )
-          })()}
-        </div>
-      </Reveal>
-
-      {f?.items && f.items.length > 0 ? (
-        <>
-          <Reveal><h3 className="mt-8 text-[13px] font-mono uppercase tracking-wide text-text-muted">The details ({f.items.length})</h3></Reveal>
-          <div className="flex flex-col gap-2 mt-3">
-            {f.items.slice(0, 15).map((it, i) => (
-              <div key={i} className="glass rounded-xl px-4 py-3 flex gap-3 items-start">
-                <span className={`font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${SEV_CLASS[it.severity] || SEV_CLASS.info}`}>{it.severity}</span>
-                <div className="min-w-0">
-                  <div className="text-[14px]">{it.name}</div>
-                  <div className="font-mono text-[11.5px] text-text-muted break-all">{it.file_path}{(it as {shipped?: boolean}).shipped === false && <span className="ml-2 font-sans text-[9.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface border border-border text-text-muted/60" title="In a test/doc/example file — scored at a fraction of shipped code">in tests</span>}</div>
-                  {it.remediation && <div className="text-[12px] text-text-muted/85 mt-1">→ {it.remediation}</div>}
-                </div>
-              </div>
-            ))}
+            </div>
+          </Reveal>
+          <InsideCommon scan={scan} kind="skill" what="skill" />
+        </>}
+        badgeClaimShare={<>
+          <BadgeTabs assets={badge} unavailable="A badge for a single skill isn't available yet. The repo's own badge shows its code scan, which can read differently from this skill's answer." />
+          <ClaimPanel href={`/rebrand/tools?coord=${encodeURIComponent(`skill:${owner}/${repo}`)}`} text="Claim this skill's repo to get alerts first, add a declared scope, and show a claimed badge. Proof is a GitHub topic on the repo." />
+          <SharePanel label={label} score={scan.trust_score} />
+        </>}
+        proof={<VerifyPanel scan={scan} />}
+        whatWeChecked={
+          <div className="mt-4 rounded-xl border border-border/60 p-5">
+            <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">What we checked</h3>
+            <p className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">A skill&apos;s <span className="text-text">SKILL.md is injected into your model every session</span>, and its <span className="text-text font-mono">allowed-tools</span> pre-approves tools to run <span className="text-text">without asking</span>. We checked that auto-exec grant, hidden instructions in the always-loaded description, lifecycle-hook escalation, and credential-exfil in the bundled scripts.</p>
           </div>
-        </>
-      ) : (
-        <Reveal><div className="mt-6 glass rounded-2xl p-6 text-[13.5px] text-success">{coverageGapNotes(scan).length ? '✓ No capability-surface risks found in what was read — see “Not checked” above.' : '✓ No capability-surface risks found — clean skill.'}</div></Reveal>
-      )}
-
-      <VerifyPanel scan={scan} />
-
-      <div className="mt-8 flex justify-center">
-        <ShareRow owner={owner} repo={repo} score={scan.trust_score} />
-      </div>
-    </div>
+        }
+      />
+    </>
   )
 }
 
@@ -1700,7 +1756,7 @@ function IncidentHistoryBanner({ scan }: { scan: PublicScanResponse }) {
   const when = (latest.published || '').slice(0, 10)
   const id = latest.id || 'advisory'
   return (
-    <div className={`mx-7 mt-3 rounded-xl border-l-4 px-4 py-3 text-[13px] leading-relaxed ${affected ? 'border-red-500 bg-red-500/10' : 'border-amber-500 bg-amber-500/10'}`}>
+    <div className={`mt-3 rounded-xl border-l-4 px-4 py-3 text-[13px] leading-relaxed ${affected ? 'border-red-500 bg-red-500/10' : 'border-amber-500 bg-amber-500/10'}`}>
       {affected ? (
         <><span className="font-bold text-red-500">🚨 Known compromise — this version is flagged malicious.</span> Do not install this version.</>
       ) : (
@@ -1749,142 +1805,218 @@ function BlastRadius({ scan }: { scan: unknown }) {
   )
 }
 
+/** The API's own words for a failed check (FastAPI `detail`), if it sent any. */
+function errorDetail(err: unknown): string {
+  const d = (err as AxiosError<{ detail?: unknown }> | null)?.response?.data?.detail
+  return typeof d === 'string' ? d : ''
+}
+
+/** The couldn't-check state for a live MCP server we could not read (a sign-in wall, no
+ * handshake). There is no signed result, so there is no answer or score to show: the
+ * page says what we couldn't read and what to check instead. */
+function McpCouldntCheck({ endpoint, detail }: { endpoint: string; detail: string }) {
+  const signIn = /sign-in|oauth|401|403|credential/i.test(detail)
+  const host = mcpHostLabel(endpoint)
+  const rows = [
+    { label: 'Reads Safe to connect at 81+', state: 'fail' as const, evidence: "No answer: the live tools couldn't be read" },
+    { label: 'Published package matches its source', state: 'fail' as const, evidence: 'A server checked by URL has no published package to match' },
+    { label: 'Every file read, nothing changed', state: 'fail' as const, evidence: "The live tool list couldn't be read" },
+    { label: 'Sandbox ran it, anyone can recompute', state: 'fail' as const, evidence: 'no signed result for this server' },
+  ]
+  return (
+    <div className="max-w-[860px] mx-auto px-6 py-14" data-result-kind="mcp" data-state="couldnt-check">
+      <SEOHead title={`Is ${host} safe to connect? We couldn't check it`} description={`AgentAvow couldn't read the tools served at ${host}.`} path={`/check/mcp?endpoint=${encodeURIComponent(endpoint)}`} noindex />
+      <ResultTitle eyebrow={['MCP server', host, signIn ? 'sign-in required' : 'not reachable']} checked="just now" name={host} />
+      <Reveal>
+        <div className="mt-6 glass rounded-2xl border border-warning/40 px-6 py-6" data-testid="answer-card">
+          <div className="flex items-center gap-2.5 text-[22px] sm:text-[26px] font-extrabold tracking-tight text-warning"><span aria-hidden="true">!</span><span>We couldn&apos;t check this server</span></div>
+          <p className="mt-2 text-[14.5px] text-text-muted max-w-[68ch]">
+            {signIn
+              ? 'The live server needs a sign-in, so its tool list isn’t public and we can’t read it. There is no signed answer or score for it.'
+              : <>We couldn&apos;t handshake it. It needs to be a reachable <span className="text-text">Streamable-HTTP</span> MCP endpoint (stdio and SSE-only servers aren&apos;t supported yet). There is no signed answer or score for it.</>}
+          </p>
+          {detail && <p className="mt-2 font-mono text-[11.5px] text-text-muted/80 break-words">{detail}</p>}
+        </div>
+      </Reveal>
+      <CertifiedChecklist scan={{}} kind="mcp" rowsOverride={rows} statusOverride={{ lead: 'Not Certified', rest: "the live server couldn't be read" }} />
+      <Section id="not-checked" title="What we couldn't check">
+        <Reveal>
+          <div className="mt-4 glass rounded-2xl px-5 py-4 flex flex-col gap-2 text-[13.5px] text-text-muted border border-warning/35" data-testid="not-checked">
+            <p><b>The live server&apos;s tools:</b> not read{signIn ? `, because ${host} requires a sign-in` : ''}. Connect it and ask Claude or ChatGPT to check the tools it shows you.</p>
+            <p><b>What to check instead:</b> its published source repo or package. Paste either into the <Link to={rp('/rebrand/check')} className="text-primary-light hover:text-primary font-semibold">check box</Link> for a signed answer.</p>
+          </div>
+        </Reveal>
+      </Section>
+      <Section id="next-steps" title="Next steps">
+        <NextStepCards oneTime />
+      </Section>
+    </div>
+  )
+}
+
 function McpResult({ endpoint }: { endpoint: string }) {
-  const { data: scan, isLoading, isError } = useQuery({
-    queryKey: ['rebrand-mcp-scan', endpoint],
+  const key = ['rebrand-mcp-scan', endpoint]
+  const { data: scan, isLoading, isError, error } = useQuery({
+    queryKey: key,
     queryFn: () => fetchMcpScan(endpoint),
     retry: 0,
   })
+  const recheck = useRecheck(key, () => fetchMcpScan(endpoint, true))
+  const adoptionData = useSurfaceAdoption('mcp', 'mcp', endpoint, !!scan)
+  const driftPath = `/public/drift/mcp?endpoint=${encodeURIComponent(endpoint)}`
   useResultView(!!scan)
   if (isLoading) return <ScanningLoader owner="MCP server" repo={endpoint} />
-  if (isError || !scan) {
-    return (
-      <div className="max-w-[560px] mx-auto px-6 py-24 text-center">
-        <h1 className="text-2xl font-extrabold tracking-tight">Couldn&apos;t reach that MCP server</h1>
-        <p className="mt-3 text-text-muted text-[14px]">We couldn&apos;t handshake it — it needs to be a reachable <span className="text-text">Streamable-HTTP</span> MCP endpoint (stdio / SSE-only servers aren&apos;t supported yet).</p>
-        <Link to={rp('/rebrand/check')} className="mt-6 inline-block text-primary-light hover:text-primary font-semibold">← Scan something else</Link>
-      </div>
-    )
-  }
+  if (isError || !scan) return <McpCouldntCheck endpoint={endpoint} detail={errorDetail(error)} />
   const t = getTrustTier(scan.trust_score)
   const f = scan.findings
   const verdict = scanVerdict(scan)
+  const origin = ORIGIN()
+  const q = `endpoint=${encodeURIComponent(endpoint)}`
+  const assets: BadgeAssets = {
+    link: `${origin}/check/mcp?${q}`,
+    badgeUrl: `${origin}/api/v1/public/scan/mcp/badge?${q}`,
+    cardUrl: `${origin}/api/v1/public/scan/mcp/card.svg?${q}`,
+  }
+  assets.cardHtml = `<a href="${assets.link}"><img src="${assets.cardUrl}" alt="AgentAvow Trust" width="360"></a>`
+  const sd = (scan as { surface_detail?: {
+    server_name?: string; tool_count?: number; resource_count?: number;
+    prompt_count?: number; capabilities?: Record<string, number>;
+    lethal_trifecta?: boolean } }).surface_detail || {}
+  const caps = sd.capabilities && Object.keys(sd.capabilities).length ? Object.keys(sd.capabilities) : []
+  const facts: string[] = []
+  if (sd.tool_count != null) facts.push(`${sd.tool_count} tool${sd.tool_count === 1 ? '' : 's'} checked`)
+  if (sd.resource_count) facts.push(`${sd.resource_count} resource${sd.resource_count === 1 ? '' : 's'}`)
+  if (sd.prompt_count) facts.push(`${sd.prompt_count} prompt${sd.prompt_count === 1 ? '' : 's'}`)
   return (
-    <div className="max-w-[760px] mx-auto px-6 py-14">
+    <>
       <SEOHead
         title={`Is ${mcpHostLabel(endpoint)} safe? ${decisionHeadline(scan)} · trust score ${scan.trust_score}/100`}
         description={`${verdict}. AgentAvow live-checked this MCP server's served tool surface: ${scan.trust_score}/100 (${t.name}).`}
         path={`/check/mcp?endpoint=${encodeURIComponent(endpoint)}`}
         jsonLd={scanReviewJsonLd(endpoint, scan.trust_score)}
       />
-      <Reveal>
-        <div className="glass rounded-2xl relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${t.color}12, transparent 55%), var(--color-surface)` }}>
-          <div className="relative px-7 pt-7">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">MCP server</span>
-              <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-success/15 text-success">⚡ Live-checked</span>
-              <ClaimedBadge surface="mcp" repo={endpoint} />
+      <ResultPage
+        scan={scan as unknown as Record<string, unknown> & { trust_score: number }}
+        kind="mcp"
+        eyebrow={['MCP server', mcpHostLabel(endpoint)]}
+        name={mcpHostLabel(endpoint)}
+        recheck={recheck}
+        banner={<IncidentBanner scan={scan} />}
+        chips={<>
+          <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">MCP server</span>
+          <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-success/15 text-success">⚡ Live-checked</span>
+          <ClaimedBadge surface="mcp" repo={endpoint} />
+        </>}
+        intro={<>
+          <div className="mt-2 font-mono text-[12px] text-text-muted break-all">{endpoint}</div>
+          {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{(scan as { tool_description?: string }).tool_description}</div>}
+          {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
+        </>}
+        adoption={adoptionFrom(adoptionData, 'No usage data: a hosted URL has no public download count')}
+        allFindings={<CategoryFindings categoryScores={null} findings={f} maxFindings={15} emptyMessage={coverageGapNotes(scan).length ? '✓ No capability-surface risks found in what was read; see what we couldn’t check above.' : '✓ No capability-surface risks found: clean tool set.'} />}
+        gapNotes={[
+          <p key="code"><b>Server code:</b> not read. A live endpoint is graded on the tools it serves; its hosted code isn&apos;t visible to us, so the code categories (secret hygiene, code safety, data handling, filesystem, dependencies) aren&apos;t scored. Scan its repo or package for those.</p>,
+        ]}
+        gapPanel={<McpNotes endpoint={endpoint} />}
+        install={<AddToAgent kind="mcp" url={endpoint} />}
+        watch={<WatchCTA surface="mcp" owner="mcp" repo={endpoint} />}
+        badgeMarkdown={badgeMarkdownOf(assets)}
+        keepWatching={{
+          history: <FeedHistory path={driftPath} current={scan.trust_score} />,
+          adoption: <AdoptionDetail data={adoptionData} />,
+          drift: <DefinitionChanges path={driftPath} toolCount={sd.tool_count} />,
+        }}
+        inside={<>
+          {/* Opt-in live probe — nothing is called until the user presses the button */}
+          <BehavioralPanel owner="mcp" repo={endpoint} probe={{ endpoint }} auto={(scan as { behavioral?: BehavioralData | null }).behavioral} />
+          <InsideCommon scan={scan} kind="mcp" what="server" />
+        </>}
+        badgeClaimShare={<>
+          <BadgeTabs assets={assets} />
+          <ClaimPanel href={`/rebrand/tools?coord=${encodeURIComponent(`mcp:${endpoint}`)}`} title="Run this server?" text="Claim it to get alerts first, add a declared scope, and show a claimed badge." />
+          <SharePanel label={mcpHostLabel(endpoint)} score={scan.trust_score} />
+        </>}
+        proof={<VerifyPanel scan={scan} />}
+        whatWeChecked={
+          <div className="mt-4 rounded-xl border border-border/60 p-5">
+            <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">What we checked</h3>
+            <p className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">We connected to the server and checked the <span className="text-text">tool surface it actually serves</span>: input-schema risk, hidden instructions in tool descriptions, dangerous capabilities, and the lethal trifecta across its tools. This is what a repo scan can&apos;t see.</p>
+            <div className="mt-3 flex flex-col gap-2 text-[13px]">
+              <div className="flex justify-between gap-3"><span className="text-text-muted">Server</span><span className="font-mono break-all">{sd.server_name || 'unnamed'}</span></div>
+              <div className="flex justify-between gap-3"><span className="text-text-muted">Endpoint</span><span className="font-mono text-success">live · streamable-HTTP</span></div>
+              <div className="flex justify-between gap-3"><span className="text-text-muted">Point-in-time</span><span className="font-mono">served surface, checked now</span></div>
+              {sd.lethal_trifecta != null && (
+                <div className="flex justify-between gap-3"><span className="text-text-muted">Lethal trifecta</span><span className={`font-mono ${sd.lethal_trifecta ? 'text-danger' : 'text-success'}`}>{sd.lethal_trifecta ? 'present ⚠' : 'not present ✓'}</span></div>
+              )}
             </div>
-            <h1 className="mt-2 text-lg font-extrabold tracking-tight break-all font-mono">{endpoint}</h1>
-            {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{(scan as { tool_description?: string }).tool_description}</div>}
-            {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
-          </div>
-          <div className="px-7 mt-3"><VerdictBadge scan={scan} verb="connect" /></div>
-          <IncidentBanner scan={scan} />
-          <ScoreDuo trustScore={scan.trust_score} trustLabel="Capability Trust" surface="mcp" owner="mcp" repo={endpoint} certified={isCertified(scan)} />
-        </div>
-      </Reveal>
-
-      {/* PRIMARY ACTIONS — watch + install, consistent across every score page */}
-      <div className="mt-4"><WatchCTA surface="mcp" owner="mcp" repo={endpoint} /></div>
-      {decisionOf(scan).decision !== 'do_not_connect' && <AddToAgent kind="mcp" url={endpoint} />}
-
-      <BlastRadius scan={scan} />
-
-      {/* Opt-in live probe — nothing is called until the user presses the button */}
-      <BehavioralPanel owner="mcp" repo={endpoint} probe={{ endpoint }} auto={(scan as { behavioral?: BehavioralData | null }).behavioral} />
-
-      <Reveal>
-        <div className="mt-4 glass rounded-2xl p-6">
-          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">What we checked</h3>
-          <p className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">We connected to the server and checked the <span className="text-text">tool surface it actually serves</span> — input-schema risk, hidden instructions in tool descriptions, dangerous capabilities, and the lethal trifecta across its tools. This is what a repo scan can&apos;t see.</p>
-        </div>
-      </Reveal>
-
-      {/* WHAT WE CONNECTED TO — the live server facts (tools/resources/prompts/caps) */}
-      {(() => {
-        const sd = (scan as { surface_detail?: {
-          server_name?: string; tool_count?: number; resource_count?: number;
-          prompt_count?: number; capabilities?: Record<string, number>;
-          lethal_trifecta?: boolean } }).surface_detail || {}
-        const caps = sd.capabilities && Object.keys(sd.capabilities).length
-          ? Object.keys(sd.capabilities) : []
-        const facts: string[] = []
-        if (sd.tool_count != null) facts.push(`${sd.tool_count} tool${sd.tool_count === 1 ? '' : 's'} checked`)
-        if (sd.resource_count) facts.push(`${sd.resource_count} resource${sd.resource_count === 1 ? '' : 's'}`)
-        if (sd.prompt_count) facts.push(`${sd.prompt_count} prompt${sd.prompt_count === 1 ? '' : 's'}`)
-        return (
-          <Reveal>
-            <div className="mt-4 glass rounded-2xl p-6">
-              <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">What we connected to</h3>
-              <div className="mt-3 flex flex-col gap-2 text-[13px]">
-                <div className="flex justify-between gap-3"><span className="text-text-muted">Server</span><span className="font-mono break-all">{sd.server_name || 'unnamed'}</span></div>
-                <div className="flex justify-between gap-3"><span className="text-text-muted">Endpoint</span><span className="font-mono text-success">live · streamable-HTTP</span></div>
-                <div className="flex justify-between gap-3"><span className="text-text-muted">Point-in-time</span><span className="font-mono">served surface, checked now</span></div>
-                {sd.lethal_trifecta != null && (
-                  <div className="flex justify-between gap-3"><span className="text-text-muted">Lethal trifecta</span><span className={`font-mono ${sd.lethal_trifecta ? 'text-danger' : 'text-success'}`}>{sd.lethal_trifecta ? 'present ⚠' : 'not present ✓'}</span></div>
-                )}
+            {facts.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {facts.map((fct) => <span key={fct} className="text-[12.5px] text-text-muted bg-surface border border-border rounded-full px-3 py-1">{fct}</span>)}
               </div>
-              {facts.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {facts.map((fct) => <span key={fct} className="text-[12.5px] text-text-muted bg-surface border border-border rounded-full px-3 py-1">{fct}</span>)}
+            )}
+            {caps.length > 0 && (
+              <div className="mt-3">
+                <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted mb-1.5">Capabilities detected</div>
+                <div className="flex flex-wrap gap-2">
+                  {caps.map((c) => <span key={c} className="font-mono text-[12px] text-warning bg-warning/10 border border-warning/25 rounded-full px-3 py-1">{c}</span>)}
                 </div>
-              )}
-              {caps.length > 0 && (
-                <div className="mt-3">
-                  <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted mb-1.5">Capabilities detected</div>
-                  <div className="flex flex-wrap gap-2">
-                    {caps.map((c) => <span key={c} className="font-mono text-[12px] text-warning bg-warning/10 border border-warning/25 rounded-full px-3 py-1">{c}</span>)}
-                  </div>
-                </div>
-              )}
-            </div>
-          </Reveal>
-        )
-      })()}
-
-      <McpToolList scan={scan} />
-
-      {/* A live endpoint is graded on the tool definitions it serves; its server code is
-          never fetched, so the code-category scores would read as passes we didn't earn. */}
-      <CategoryFindings categoryScores={null} findings={f} maxFindings={15} emptyMessage={coverageGapNotes(scan).length ? '✓ No capability-surface risks found in what was read — see “Not checked” above.' : '✓ No capability-surface risks found — clean tool set.'} />
-      <Reveal><p className="mt-3 text-[12px] text-text-muted/80">Code categories (secret hygiene, code safety, data handling, filesystem, dependencies) are not scored for a live endpoint: we check the tools it serves, not its server code, which we can&apos;t see. Scan its repo or package for those.</p></Reveal>
-
-      <McpWhatItCanDo scan={scan} />
-      <VerifyPanel scan={scan} />
-      <McpHistory endpoint={endpoint} />
-      <McpBadge endpoint={endpoint} />
-      <McpNotes endpoint={endpoint} />
-
-      <div className="mt-8 flex justify-center">
-        <ShareRow owner="mcp" repo={endpoint} score={scan.trust_score} />
-      </div>
-    </div>
+              </div>
+            )}
+          </div>
+        }
+      />
+    </>
   )
 }
 
-/** Native npm/PyPI package score view — the published artifact, graded by
- * coordinate (no repo). Leads with the artifact/provenance trust-chain + the
- * Certified panel (this is where A+ is actually earned), then the findings.
- * Skips the GitHub-only surfaces (stars, adoption, README badge). */
+/** The package version control in the eyebrow: latest, the pinned version, or another
+ * one typed in (it rides in `?version=`, the same pin the MCP connector links to). The
+ * API returns no version list, so the picker can't offer one. */
+function VersionPicker({ scanned, pinned }: { scanned?: string | null; pinned?: string }) {
+  const [sp, setSp] = useSearchParams()
+  const [other, setOther] = useState(false)
+  const [val, setVal] = useState('')
+  const go = (v?: string) => {
+    const n = new URLSearchParams(sp)
+    if (v) n.set('version', v); else n.delete('version')
+    setSp(n)
+    setOther(false)
+  }
+  if (other) {
+    return (
+      <form onSubmit={(e) => { e.preventDefault(); if (val.trim()) go(val.trim()) }} className="inline-flex items-center gap-1.5">
+        <input autoFocus value={val} onChange={(e) => setVal(e.target.value)} placeholder="1.2.3" aria-label="Version to check"
+          className="w-[96px] bg-surface border border-border rounded-md px-1.5 py-0.5 font-mono text-[11.5px] text-text outline-none focus:border-primary-light" />
+        <button type="submit" className="text-primary-light hover:text-primary">check</button>
+        <button type="button" onClick={() => setOther(false)} className="text-text-muted hover:text-text">cancel</button>
+      </form>
+    )
+  }
+  return (
+    <select aria-label="Version" value={pinned ? 'pinned' : 'latest'}
+      onChange={(e) => { const v = e.target.value; if (v === 'latest') go(undefined); else if (v === 'other') setOther(true) }}
+      className="font-mono text-[11.5px] bg-surface border border-border rounded-md px-1.5 py-0.5 text-text cursor-pointer">
+      <option value="latest">{pinned ? 'latest' : `${scanned || 'latest'} (latest)`}</option>
+      {pinned && <option value="pinned">{scanned && scanned !== pinned ? `${pinned} → ${scanned}` : pinned} (pinned)</option>}
+      <option value="other">another version…</option>
+    </select>
+  )
+}
+
+/** Native package score view (npm, PyPI, crates, Docker, Hugging Face) — the published
+ * artifact, graded by coordinate. */
 function PackageResult({ surface, name, version }: { surface: string; name: string; version?: string }) {
   // `version` is the `?version=` the MCP connector / plugin link to for a pinned scan:
   // it rides into the fetch, the canonical path and the share link unchanged.
+  const key = ['rebrand-pkg-scan', surface, name, version ?? '']
   const { data: scan, isLoading, isError } = useQuery({
-    queryKey: ['rebrand-pkg-scan', surface, name, version ?? ''],
+    queryKey: key,
     queryFn: () => fetchPackageScan(surface, name, false, version),
     retry: 0,
   })
+  const recheck = useRecheck(key, () => fetchPackageScan(surface, name, true, version))
+  const adoptionData = useSurfaceAdoption(surface, '', name, !!scan)
+  const driftPath = `/public/drift/pkg/${surface}/${encPath(name)}`
   useResultView(!!scan)
   const versionQs = version ? `?version=${encodeURIComponent(version)}` : ''
   if (isLoading) return <ScanningLoader owner={surface} repo={name} />
@@ -1892,112 +2024,92 @@ function PackageResult({ surface, name, version }: { surface: string; name: stri
     return (
       <div className="max-w-[560px] mx-auto px-6 py-24 text-center">
         <h1 className="text-2xl font-extrabold tracking-tight">Couldn&apos;t scan {surface}:{name}</h1>
-        <p className="mt-3 text-text-muted text-[14px]">We couldn&apos;t fetch that from the {surface} registry — check the name{surface === 'npm' ? ' (scoped packages look like @scope/name)' : ''} and try again.</p>
+        <p className="mt-3 text-text-muted text-[14px]">We couldn&apos;t fetch that from the {surface} registry — check the name{surface === 'npm' ? ' (scoped packages look like @scope/name)' : ''}{version ? ` and the version (${version})` : ''} and try again.</p>
         <Link to={rp('/rebrand/check')} className="mt-6 inline-block text-primary-light hover:text-primary font-semibold">← Scan something else</Link>
       </div>
     )
   }
   const t = getTrustTier(scan.trust_score)
-  const f = scan.findings
   const cov = (scan as { coverage?: { artifact_digest?: string } }).coverage || {}
   const prov = (scan as { provenance?: { verified?: boolean; present?: boolean } }).provenance || {}
-  const certified = (scan as { certified?: { eligible?: boolean; checks?: Record<string, boolean> } }).certified
   const digest = (cov.artifact_digest || '').replace(/^sha256:/, '').slice(0, 16)
   const verdict = scanVerdict(scan)
+  const origin = ORIGIN()
+  const assets: BadgeAssets = {
+    link: `${origin}/check/pkg/${surface}/${encPath(name)}`,
+    badgeUrl: packageBadgeUrl(origin, surface, name),
+    cardUrl: `${origin}/api/v1/public/scan/package/${surface}/${encPath(name)}/card.svg`,
+    widgetTool: `${surface}/${name}`,
+  }
+  const claimable = ['npm', 'pypi', 'crates'].includes(surface)
   return (
-    <div className="max-w-[760px] mx-auto px-6 py-14">
+    <>
       <SEOHead
         title={`Is ${name} (${surface}) safe? ${decisionHeadline(scan)} · trust score ${scan.trust_score}/100`}
         description={`${verdict}. AgentAvow's signed score for ${surface}:${name}${version ? `@${version}` : ''}: ${scan.trust_score}/100 (${t.name}) — scanned on the published artifact, verifiable offline.`}
         path={`/check/pkg/${surface}/${name}${versionQs}`}
         jsonLd={scanReviewJsonLd(`${surface}:${name}`, scan.trust_score)}
       />
-      <Reveal>
-        <div className="glass rounded-2xl relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${t.color}12, transparent 55%), var(--color-surface)` }}>
-          <div className="relative px-7 pt-7">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">{surface}</span>
-              <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-success/15 text-success">🔒 Artifact-scanned</span>
-              {prov.verified && <ProvenanceChip />}
-              <ClaimedBadge surface={surface} repo={name} />
+      <ResultPage
+        scan={scan as unknown as Record<string, unknown> & { trust_score: number }}
+        kind="package"
+        eyebrow={[surface, name]}
+        version={<VersionPicker scanned={scan.package_version} pinned={version} />}
+        name={name}
+        recheck={recheck}
+        banner={<IncidentBanner scan={scan} />}
+        chips={<>
+          <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">{surface}</span>
+          <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-success/15 text-success">🔒 Artifact-scanned</span>
+          {version && <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-surface border border-border text-text-muted" title={`Scanned exactly this published version${scan.package_version && scan.package_version !== version ? ` (resolved to ${scan.package_version})` : ''}`}>pinned to {version}</span>}
+          {prov.verified && <ProvenanceChip />}
+          <ClaimedBadge surface={surface} repo={name} />
+        </>}
+        intro={<>
+          {(scan as { tool_description?: string }).tool_description && <div className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">{(scan as { tool_description?: string }).tool_description}</div>}
+          {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
+        </>}
+        adoption={adoptionFrom(adoptionData, 'No usage data: no downloads or outside adoption signals yet')}
+        allFindings={<CategoryFindings categoryScores={(scan.category_scores || null) as Record<string, number> | null} findings={scan.findings} maxFindings={20} emptyMessage={coverageGapNotes(scan).length ? '✓ No risks found in what was read; see what we couldn’t check above.' : '✓ No risks found in the published package.'} />}
+        install={<AddToAgent kind="package" surface={surface} name={name} isMcp={!!(scan as { surface_detail?: { is_mcp_server?: boolean } }).surface_detail?.is_mcp_server} />}
+        watch={<WatchCTA surface={surface} owner={surface} repo={name} />}
+        badgeMarkdown={badgeMarkdownOf(assets)}
+        keepWatching={{
+          history: <FeedHistory path={driftPath} current={scan.trust_score} />,
+          adoption: <AdoptionDetail data={adoptionData} />,
+          drift: <DefinitionChanges path={driftPath} />,
+        }}
+        inside={<>
+          {/* Behavioral deep scan — auto-runs for npm/PyPI packages */}
+          <BehavioralPanel owner={surface} repo={name} surface={surface} pkg={{ surface, name, version }} auto={(scan as { behavioral?: BehavioralData | null }).behavioral} effect={(scan as { behavioral_score_effect?: ScoreEffect | null }).behavioral_score_effect} />
+          <PackageFacts scan={scan} surface={surface} />
+          <InsideCommon scan={scan} kind="package" what="package" />
+        </>}
+        badgeClaimShare={<>
+          <BadgeTabs assets={assets} />
+          {version && <p className="mt-2 px-1 text-[12px] text-text-muted">The badge, card and widget show the latest release&apos;s result, not this pinned version.</p>}
+          {claimable
+            ? <div id="claim" className="scroll-mt-24"><PackageClaim surface={surface} name={name} /></div>
+            : <ClaimPanel href={null} title="Maintain this package?" text={`Claiming a ${surface} package isn't available yet. Watch it to get an alert when its result changes.`} />}
+          <SharePanel label={`${surface}:${name}${version ? `@${version}` : ''}`} score={scan.trust_score} />
+        </>}
+        proof={<VerifyPanel scan={scan} />}
+        whatWeChecked={
+          <div className="mt-4 rounded-xl border border-border/60 p-5">
+            <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">What we checked</h3>
+            <div className="mt-3 flex flex-col gap-2 text-[13px]">
+              <div className="flex justify-between gap-3"><span className="text-text-muted">Coordinate</span><span className="font-mono break-all">{scan.repo}{scan.package_version ? `@${scan.package_version}` : ''}</span></div>
+              {surface === 'docker'
+                ? <ImageScanDepth scan={scan} />
+                : <div className="flex justify-between gap-3"><span className="text-text-muted">Scan depth</span><span className="font-mono text-success text-right">artifact (real published bytes)</span></div>}
+              <div className="flex justify-between gap-3"><span className="text-text-muted">Artifact digest</span><span className="font-mono break-all">{digest ? `sha256:${digest}…` : '—'}</span></div>
+              <div className="flex justify-between gap-3"><span className="text-text-muted">Provenance</span><span className="font-mono">{prov.verified ? 'verified ✓' : prov.present ? 'present · unverified' : 'none published (N/A)'}</span></div>
+              {typeof scan.metadata?.files_scanned === 'number' && <div className="flex justify-between gap-3"><span className="text-text-muted">Files read</span><span className="font-mono">{scan.metadata.files_scanned}</span></div>}
             </div>
-            <h1 className="mt-2 text-2xl font-extrabold tracking-tight break-all">
-              {name}
-              {version && <span className="ml-2 align-middle inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-surface border border-border text-text-muted tracking-normal" title={`Scanned exactly this published version${scan.package_version && scan.package_version !== version ? ` (resolved to ${scan.package_version})` : ''}`}>pinned to {version}</span>}
-            </h1>
-            {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{(scan as { tool_description?: string }).tool_description}</div>}
-            {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
           </div>
-          <div className="px-7 mt-3"><VerdictBadge scan={scan} verb="use" /></div>
-          <IncidentBanner scan={scan} />
-          <ScoreDuo trustScore={scan.trust_score} trustLabel="Attestation Trust" surface={surface} repo={name} certified={isCertified(scan)} />
-        </div>
-      </Reveal>
-
-      {/* PRIMARY ACTIONS — watch + install, consistent across every score page */}
-      <div className="mt-4"><WatchCTA surface={surface} owner={surface} repo={name} /></div>
-      {decisionOf(scan).decision !== 'do_not_connect' && <AddToAgent kind="package" surface={surface} name={name} isMcp={!!(scan as { surface_detail?: { is_mcp_server?: boolean } }).surface_detail?.is_mcp_server} />}
-
-      {/* Certified panel — the A+ story for packages */}
-      {(scan.trust_score >= 81 || certified?.eligible) && <CertifiedPanel scan={scan} />}
-
-      {/* The verified chain */}
-      <Reveal>
-        <div className="mt-4 glass rounded-2xl p-6">
-          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">The chain we verified</h3>
-          <div className="mt-3 flex flex-col gap-2 text-[13px]">
-            <div className="flex justify-between gap-3"><span className="text-text-muted">Coordinate</span><span className="font-mono break-all">{scan.repo}</span></div>
-            {surface === 'docker'
-              ? <ImageScanDepth scan={scan} />
-              : <div className="flex justify-between gap-3"><span className="text-text-muted">Scan depth</span><span className="font-mono text-success text-right">artifact (real published bytes)</span></div>}
-            <div className="flex justify-between gap-3"><span className="text-text-muted">Artifact digest</span><span className="font-mono break-all">{digest ? `sha256:${digest}…` : '—'}</span></div>
-            <div className="flex justify-between gap-3"><span className="text-text-muted">Provenance</span><span className="font-mono">{prov.verified ? 'verified ✓' : prov.present ? 'present · unverified' : 'none published (N/A)'}</span></div>
-          </div>
-        </div>
-      </Reveal>
-
-      <PackageFacts scan={scan} surface={surface} />
-      <McpToolList scan={scan} />
-      {(() => {
-        // An MCP server shipped as a package: the blast radius its served tools imply,
-        // from the sandbox run that started it (same rule the live-endpoint page uses).
-        const ts = (scan as { behavioral?: { tool_surface?: { blast_radius?: Record<string, unknown> } } | null }).behavioral?.tool_surface
-        return ts?.blast_radius ? <BlastRadius scan={{ surface_detail: { blast_radius: ts.blast_radius } }} /> : null
-      })()}
-      <CapabilitiesPanel scan={scan} />
-      <AdvisoriesPanel scan={scan} />
-
-      {/* Behavioral deep scan — auto-runs for npm/PyPI packages */}
-      <BehavioralPanel owner={surface} repo={name} surface={surface} pkg={{ surface, name, version }} auto={(scan as { behavioral?: BehavioralData | null }).behavioral} effect={(scan as { behavioral_score_effect?: ScoreEffect | null }).behavioral_score_effect} />
-
-      {/* findings detail */}
-      {f?.items && f.items.length > 0 && (
-        <>
-          <Reveal><h3 className="mt-8 text-[13px] font-mono uppercase tracking-wide text-text-muted">The details ({f.items.length})</h3></Reveal>
-          <div className="flex flex-col gap-2 mt-3">
-            {f.items.slice(0, 12).map((it, i) => (
-              <div key={i} className="glass rounded-xl px-4 py-3 flex gap-3 items-start">
-                <span className={`font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${SEV_CLASS[it.severity] || SEV_CLASS.info}`}>{it.severity}</span>
-                <div className="min-w-0">
-                  <div className="text-[14px]">{it.name}</div>
-                  <div className="font-mono text-[11.5px] text-text-muted break-all">{it.file_path}{it.line_number ? `:${it.line_number}` : ''}{(it as {shipped?: boolean}).shipped === false && <span className="ml-2 font-sans text-[9.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface border border-border text-text-muted/60" title="In a test/doc/example file — scored at a fraction of shipped code">in tests</span>}</div>
-                  {it.remediation && <div className="text-[12px] text-text-muted/85 mt-1">→ {it.remediation}</div>}
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      <VerifyPanel scan={scan} />
-      {!version && <PackageHistory surface={surface} name={name} />}
-      {!version && <PackageBadge surface={surface} name={name} />}
-      {!version && <PackageClaim surface={surface} name={name} />}
-
-      <div className="mt-8 flex justify-center">
-        <ShareRow owner={surface} repo={name} score={scan.trust_score} />
-      </div>
-    </div>
+        }
+      />
+    </>
   )
 }
 
@@ -2078,12 +2190,14 @@ function Result({ owner, repo, privateResult, showCode = false }: {
     retry: 0,
     enabled: checkCollection,
   })
+  const scanKey = ['rebrand-scan', owner, repo]
   const { data: fetched, isLoading } = useQuery({
-    queryKey: ['rebrand-scan', owner, repo],
+    queryKey: scanKey,
     queryFn: () => fetchPublicScan(owner, repo),
     retry: 0,
     enabled: !oneTimePrivate && (!checkCollection || (collectionChecked && !collectionLead)),
   })
+  const recheck = useRecheck(scanKey, () => fetchPublicScan(owner, repo, true))
   // When the public scan finds nothing and the viewer is signed in, fall back to the
   // owner's stored private report (via the GitHub App). 404 → they have none stored.
   const publicMissing = !oneTimePrivate && !isLoading && !fetched
@@ -2108,15 +2222,14 @@ function Result({ owner, repo, privateResult, showCode = false }: {
     retry: 0,
     enabled: !!scan && !isPrivate,
   })
-  // The canonical 0–100 adoption score + tier (same query the detail panel uses, so
-  // the hero needle and the panel always agree). Deduped by react-query.
+  // The canonical 0–100 adoption score, tier and 5-axis breakdown (the needle and the
+  // adoption detail panel read the same query, so they always agree).
   const { data: adoptionScore } = useQuery({
     queryKey: ['rebrand-adoption', owner, repo],
-    queryFn: async () => (await publicApi.get<{ adoption_score_100?: number; tier?: string }>(`/public/scan/${owner}/${repo}/adoption`)).data,
+    queryFn: async () => (await publicApi.get<AdoptionResp>(`/public/scan/${owner}/${repo}/adoption`)).data,
     retry: 0,
     enabled: !!scan && !isPrivate,
   })
-  const heroBig = useIsDesktop() ? 1.5 : 1  // scale marks up on desktop; MUST be before any early return (hooks order)
   const collection = (scan as { skill_collection?: SkillCollectionLead | null } | null)?.skill_collection
   // Private results are not reported, and a skill collection reports from the page it redirects to.
   useResultView(!!scan && !isPrivate && !(checkCollection && collectionLead) && (!collection || showCode))
@@ -2149,30 +2262,56 @@ function Result({ owner, repo, privateResult, showCode = false }: {
     )
   }
 
-  // Prefer the backend's letter grade (it applies the A+ "Certified" gate); fall
-  // back to deriving from the score for older responses that omit it. Identical to
-  // score-derived while the gate is off, so the display is unchanged until it flips.
   const t = getTrustTier(scan.trust_score)
   const f = scan.findings
   const cats = scan.category_scores || {}
   const sum = summarize(scan, scan.repo)
-  const adoption = adoptionData
-    ? {
-        label: adoptionData.stars != null && adoptionData.stars > 0
-          ? `★ ${adoptionData.stars.toLocaleString()}`
-          : `${adoptionData.checks.toLocaleString()} check${adoptionData.checks === 1 ? '' : 's'}`,
-        sub: `${adoptionData.stars != null && adoptionData.stars > 0 ? `${adoptionData.checks.toLocaleString()} checks · ` : ''}${adoptionData.watchers} watching · on AgentAvow`,
-      }
-    : null
-
-  // Adoption ring content — compact number + unit, or "New" when there's no adoption yet.
+  // Adoption needle — compact number + unit, or no usage data when there's none yet.
   const adStars = adoptionData?.stars && adoptionData.stars > 0 ? adoptionData.stars : 0
   const adChecks = adoptionData?.checks ?? 0
-  const adCount = adStars || adChecks
-  const adUnit = adStars ? 'stars' : 'checks'
+  const adoption: ResultAdoption | null = isPrivate
+    ? { count: 0, sub: 'Not shown for a private repo' }
+    : adoptionData
+      ? {
+          count: adStars || adChecks,
+          unit: adStars ? 'stars' : 'checks',
+          scorePct: adoptionScore?.adoption_score_100,
+          sub: `${adStars ? `${adStars.toLocaleString('en-US')} stars · ` : ''}${adChecks.toLocaleString('en-US')} check${adChecks === 1 ? '' : 's'} · ${adoptionData.watchers} watching on AgentAvow${adoptionScore?.badge === 'rising' ? ' · rising' : ''}`,
+        }
+      : null
+  const publicPage = !isPrivate || published
+  const assets = publicPage ? repoBadgeAssets(owner, repo) : undefined
+  const driftPath = `/public/drift/${owner}/${repo}`
+
+  // The package coordinate is set only when the package's own registry entry points
+  // back at this repo (a manifest name alone can match a stranger's package). MCP
+  // install only when the PACKAGE is an MCP server — the repo containing MCP code
+  // doesn't make its published package one.
+  const install = (() => {
+    if (isPrivate) return undefined
+    const cov = (scan as { coverage?: { surface?: string } }).coverage || {}
+    const sd = (scan as { surface_detail?: { name?: string; is_mcp_server?: boolean } }).surface_detail || {}
+    const isMcpServer = !!(scan as { metadata?: { is_mcp_server?: boolean } }).metadata?.is_mcp_server
+    const pc = (scan as { package_coordinate?: { surface?: string; name?: string; is_mcp_server?: boolean } }).package_coordinate || {}
+    const pkg = (pc.surface === 'npm' || pc.surface === 'pypi') && pc.name
+      ? { surface: pc.surface, name: pc.name, isMcp: !!pc.is_mcp_server }
+      : (cov.surface === 'npm' || cov.surface === 'pypi') && sd.name
+        ? { surface: cov.surface, name: sd.name, isMcp: !!sd.is_mcp_server }
+        : undefined
+    return <AddToAgent kind="repo" owner={owner} repo={repo} pkg={pkg} isMcpServer={isMcpServer} />
+  })()
+
+  // The repo's manifest names a published package, but that package's registry entry
+  // doesn't point back at this repo — so it was neither scanned nor run as this repo,
+  // and the grade covers the source alone.
+  const unconfirmed = (() => {
+    const sd = (scan as { surface_detail?: { skipped?: string; ecosystem?: string; name?: string } }).surface_detail || {}
+    if (sd.skipped !== 'unconfirmed' || !sd.name) return null
+    return <p key="unconfirmed"><b>No published package confirmed for this repo:</b> the {sd.ecosystem} package <code className="font-mono">{sd.name}</code> doesn&apos;t point back here, so this result covers the source code only.</p>
+  })()
 
   return (
-    <div className="max-w-[860px] mx-auto px-6 py-14">
+    <>
       <SEOHead
         title={`Is ${owner}/${repo} safe? ${sum.headline} · trust score ${scan.trust_score}/100`}
         description={`${sum.headline} — ${sum.reason}. AgentAvow's signed, offline-verifiable safety score for ${owner}/${repo}: ${scan.trust_score}/100 (tier: ${t.name}).`}
@@ -2181,182 +2320,98 @@ function Result({ owner, repo, privateResult, showCode = false }: {
         noindex={isPrivate}
         jsonLd={isPrivate ? undefined : scanReviewJsonLd(`${owner}/${repo}`, scan.trust_score)}
       />
-      {/* BRANDED HERO — two co-equal scores + primary Watch CTA */}
-      <motion.div className="rounded-2xl overflow-hidden relative border border-border/60"
-        style={{ background: `linear-gradient(135deg, ${t.color}12, transparent 55%), var(--color-surface)` }}
-        initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: 'easeOut' }}>
-        <div className="absolute inset-0 rounded-2xl pointer-events-none" style={{ boxShadow: `inset 0 0 70px -30px ${t.color}2e` }} />
-
-        {/* header: verdict + plain-English headline */}
-        <div className="relative px-7 pt-6">
-          <div className="flex items-center gap-2 flex-wrap">
-            {isPrivate && <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-warning/15 text-warning">{storedPrivate ? '🔒 Private · via GitHub App' : '🔒 Private scan · not public'}</span>}
-            {!isPrivate && <ClaimedBadge surface="github" owner={owner} repo={repo} />}
-            {(scan as { provenance?: { verified?: boolean } }).provenance?.verified && <ProvenanceChip />}
-          </div>
-          <h1 className="mt-3 text-[26px] font-extrabold tracking-tight leading-tight">{sum.headline}</h1>
-          <div className="mt-1.5 font-mono text-[13px] text-text-muted break-all">{scan.repo}</div>
+      <ResultPage
+        scan={scan as unknown as Record<string, unknown> & { trust_score: number }}
+        kind="repo"
+        eyebrow={[isPrivate ? 'Private GitHub repo' : 'GitHub repo', scan.repo || `${owner}/${repo}`]}
+        name={`${owner}/${repo}`}
+        privateScan={oneTimePrivate ? 'one-time' : storedPrivate ? 'stored' : undefined}
+        recheck={isPrivate ? undefined : recheck}
+        banner={<IncidentBanner scan={scan} />}
+        chips={<>
+          {isPrivate && <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-warning/15 text-warning">{storedPrivate ? '🔒 Private · via GitHub App' : '🔒 Private scan · not public'}</span>}
+          {!isPrivate && <ClaimedBadge surface="github" owner={owner} repo={repo} />}
+          {(scan as { provenance?: { verified?: boolean } }).provenance?.verified && <ProvenanceChip />}
+        </>}
+        intro={<>
           {(scan as { tool_description?: string }).tool_description && <div className="mt-2.5 text-[13.5px] text-text-muted max-w-[64ch]">{(scan as { tool_description?: string }).tool_description}</div>}
           {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/70 max-w-[64ch]">{(scan as { long_description?: string }).long_description}</div>}
-        </div>
-
-        {collection && <div className="px-7 mt-3 text-[13px] text-text-muted">Repository code scan. This repo is a collection of agent skills; its answer is <Link to={rp(`/rebrand/check/skill/${owner}/${repo}`)} className="font-semibold text-primary-light hover:text-primary">{decisionPhrase(collection.decision).phrase} · {collection.trust_score}/100</Link> (its worst skill).</div>}
-        <div className="px-7 mt-3"><VerdictBadge scan={scan} verb="connect" /></div>
-        <IncidentBanner scan={scan} />
-        {/* the dual mark — one cohesive instrument: trust (green→red) | adoption (teal→magenta) */}
-        <div className="relative px-4 sm:px-7 py-6">
-          <div className="relative rounded-2xl border border-border/70 overflow-hidden bg-gradient-to-b from-surface/50 to-surface/10">
-            <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(460px 200px at 24% -25%, ${t.color}20, transparent 70%), radial-gradient(460px 200px at 78% -25%, rgba(45,212,191,0.13), transparent 70%)` }} />
-            <div className="relative grid grid-cols-2">
-              <div className="px-2 py-4 sm:p-6 pb-5 text-center flex flex-col items-center min-w-0">
-                <div className="min-h-[100px] sm:min-h-[132px] md:min-h-[150px] flex items-center justify-center">{isCertified(scan) ? <CertifiedMark score={scan.trust_score} scale={heroBig} /> : <TrustBar score={scan.trust_score} scale={heroBig} />}</div>
-                <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em]" style={{ color: t.color }}>Attestation Trust</div>
-                <div className="mt-0.5 text-[11.5px] text-text-muted">Signed · verifiable now</div>
-                <Percentile score={scan.trust_score} />
+          {collection && <div className="mt-2 text-[13px] text-text-muted">Repository code scan. This repo is a collection of agent skills; its answer is <Link to={rp(`/rebrand/check/skill/${owner}/${repo}`)} className="font-semibold text-primary-light hover:text-primary">{decisionPhrase(collection.decision).phrase} · {collection.trust_score}/100</Link> (its worst skill).</div>}
+        </>}
+        adoption={adoption}
+        findingsIntro={
+          <Reveal>
+            <div className="mt-4 glass rounded-2xl p-6">
+              <p className="text-[15px] leading-relaxed">{sum.paragraph}</p>
+              {(sum.goodPractices.length > 0 || sum.risks.length > 0) && (
+                <div className="grid sm:grid-cols-2 gap-4 mt-5">
+                  {sum.goodPractices.length > 0 && (
+                    <div>
+                      <div className="font-mono text-[11px] uppercase tracking-wide text-success mb-2">What's good</div>
+                      <ul className="space-y-1.5">{sum.goodPractices.map((p) => <li key={p} className="text-[13.5px] text-text-muted flex gap-2"><span className="text-success">✓</span>{p}</li>)}</ul>
+                    </div>
+                  )}
+                  {sum.risks.length > 0 && (
+                    <div>
+                      <div className="font-mono text-[11px] uppercase tracking-wide text-warning mb-2">Worth knowing</div>
+                      <ul className="space-y-1.5">{sum.risks.map((p) => <li key={p} className="text-[13.5px] text-text-muted flex gap-2"><span className="text-warning">!</span>{p}</li>)}</ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </Reveal>
+        }
+        allFindings={<CategoryFindings categoryScores={cats as Record<string, number>} findings={f} maxFindings={12} emptyMessage={coverageGapNotes(scan).length ? '✓ No risks found in what was read; see what we couldn’t check above.' : '✓ No risks found: clean across all categories.'} />}
+        gapNotes={unconfirmed ? [unconfirmed] : undefined}
+        install={install}
+        watch={oneTimePrivate ? undefined : <WatchCTA owner={owner} repo={repo} />}
+        badgeMarkdown={assets ? badgeMarkdownOf(assets) : undefined}
+        keepWatching={{
+          history: isPrivate ? undefined : <ScoreHistory history={adoptionData?.history ?? []} current={scan.trust_score} feedHref={`/api/v1${driftPath}`} />,
+          adoption: isPrivate ? undefined : <AdoptionDetail data={adoptionScore} />,
+          drift: isPrivate ? undefined : <DefinitionChanges path={driftPath} />,
+          note: storedPrivate ? <p className="mt-3 text-[13px] text-text-muted">A private repo&apos;s history stays private; watch it and the GitHub App re-checks it for you.</p> : undefined,
+        }}
+        inside={<>
+          {/* Behavioral deep scan — auto-runs for npm/PyPI; re-run on demand */}
+          {isPrivate
+            ? <EmptyPanel title="Behavioral analysis">The sandbox doesn&apos;t run private code.</EmptyPanel>
+            : <BehavioralPanel owner={owner} repo={repo} surface={(scan as { package_coordinate?: { surface?: string } }).package_coordinate?.surface} auto={(scan as { behavioral?: BehavioralData | null }).behavioral} effect={(scan as { behavioral_score_effect?: ScoreEffect | null }).behavioral_score_effect} />}
+          <InsideCommon scan={scan} kind="repo" what="repo" />
+        </>}
+        badgeClaimShare={<>
+          <BadgeTabs assets={assets} unavailable="A private repo has no public badge until you publish it to search." />
+          {/* claim / ownership — a one-time scan is ephemeral (report only, nothing stored) */}
+          {oneTimePrivate ? (
+            <Reveal>
+              <div id="claim" className="mt-4 glass rounded-2xl p-6 border-l-4 border-warning/50 scroll-mt-24">
+                <h3 className="text-[15px] font-bold">This is a one-time scan</h3>
+                <p className="text-text-muted text-[13.5px] mt-1 max-w-[62ch]">Nothing is stored or listed. For continuous scanning + change alerts, connect the GitHub App on your <Link to={rp('/rebrand/tools')} className="text-primary-light hover:text-primary font-semibold">tools page</Link>.</p>
               </div>
-              <div className="px-2 py-4 sm:p-6 pb-5 text-center flex flex-col items-center min-w-0 border-l border-border/50">
-                <div className="min-h-[100px] sm:min-h-[132px] md:min-h-[150px] flex items-center justify-center"><AdoptionNeedle count={adCount} unit={adUnit} scorePct={adoptionScore?.adoption_score_100} scale={heroBig} /></div>
-                <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em] gradient-text">Adoption</div>
-                <div className="mt-0.5 text-[11.5px] text-text-muted">{adoption ? adoption.sub : 'no adoption signal yet'}</div>
-              </div>
+            </Reveal>
+          ) : (
+            <OwnershipCTA owner={owner} repo={repo} />
+          )}
+          {/* a stored private repo publishes to search here (then animates into share) */}
+          {storedPrivate && (
+            <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
+              <PrivateSearchSlot owner={owner} repo={repo} score={scan.trust_score} published={published} />
+            </div>
+          )}
+          {storedPrivate && <PublishStoredCTA owner={owner} repo={repo} published={published} />}
+          {!isPrivate && <SharePanel label={`${owner}/${repo}`} score={scan.trust_score} />}
+        </>}
+        proof={<VerifyPanel scan={scan} />}
+        whatWeChecked={
+          <div className="mt-4 rounded-xl border border-border/60 p-5">
+            <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-2">What we checked</h3>
+            <div className="flex flex-wrap gap-2">
+              {sum.facts.map((fct) => <span key={fct} className="text-[12.5px] text-text-muted bg-surface border border-border rounded-full px-3 py-1">{fct}</span>)}
             </div>
           </div>
-        </div>
-
-        {/* PRIMARY action — watch */}
-        <div className={`relative px-7 ${storedPrivate ? '' : 'pb-7'}`}>
-          <WatchCTA owner={owner} repo={repo} />
-          <p className="mt-2.5 text-center text-[12px] text-text-muted">We re-scan daily and alert you the moment this score drops.</p>
-        </div>
-
-        {/* a stored private repo publishes to search here (then animates into share) */}
-        {storedPrivate && (
-          <div className="relative px-7 pb-6 mt-4 flex items-center justify-center gap-2 flex-wrap border-t border-border/50 pt-4">
-            <PrivateSearchSlot owner={owner} repo={repo} score={scan.trust_score} published={published} />
-          </div>
-        )}
-      </motion.div>
-
-      {/* PRIMARY ACTIONS — install right below watch (watch is in the hero), so the two
-          primary actions lead, consistent with every other score page. No install
-          offer on a Do not connect result. */}
-      {!isPrivate && decisionOf(scan).decision !== 'do_not_connect' && (() => {
-        const cov = (scan as { coverage?: { surface?: string } }).coverage || {}
-        const sd = (scan as { surface_detail?: { name?: string; is_mcp_server?: boolean } }).surface_detail || {}
-        const isMcpServer = !!(scan as { metadata?: { is_mcp_server?: boolean } }).metadata?.is_mcp_server
-        // The package coordinate is set only when the package's own registry entry
-        // points back at this repo (a manifest name alone can match a stranger's
-        // package). MCP install only when the PACKAGE is an MCP server — the repo
-        // containing MCP code doesn't make its published package one.
-        const pc = (scan as { package_coordinate?: { surface?: string; name?: string; is_mcp_server?: boolean } }).package_coordinate || {}
-        const pkg = (pc.surface === 'npm' || pc.surface === 'pypi') && pc.name
-          ? { surface: pc.surface, name: pc.name, isMcp: !!pc.is_mcp_server }
-          : (cov.surface === 'npm' || cov.surface === 'pypi') && sd.name
-            ? { surface: cov.surface, name: sd.name, isMcp: !!sd.is_mcp_server }
-            : undefined
-        return <AddToAgent kind="repo" owner={owner} repo={repo} pkg={pkg} isMcpServer={isMcpServer} />
-      })()}
-
-      {/* The repo's manifest names a published package, but that package's registry
-          entry doesn't point back at this repo — so it was neither scanned nor run as
-          this repo, and the grade covers the source alone. */}
-      {(() => {
-        const sd = (scan as { surface_detail?: { skipped?: string; ecosystem?: string; name?: string } }).surface_detail || {}
-        if (sd.skipped !== 'unconfirmed' || !sd.name) return null
-        return (
-          <p className="mt-3 px-1 text-[13px] text-text-muted">
-            No published package confirmed for this repo: the {sd.ecosystem} package <code className="font-mono">{sd.name}</code> doesn&apos;t point back here, so this result covers the source code only.
-          </p>
-        )
-      })()}
-
-      {/* PLAIN-ENGLISH VERDICT — for any user */}
-      <Reveal>
-        <div className="mt-4 glass rounded-2xl p-6">
-          <p className="text-[15.5px] leading-relaxed">{sum.paragraph}</p>
-          <div className="grid sm:grid-cols-2 gap-4 mt-5">
-            {sum.goodPractices.length > 0 && (
-              <div>
-                <div className="font-mono text-[11px] uppercase tracking-wide text-success mb-2">What's good</div>
-                <ul className="space-y-1.5">{sum.goodPractices.map((p) => <li key={p} className="text-[13.5px] text-text-muted flex gap-2"><span className="text-success">✓</span>{p}</li>)}</ul>
-              </div>
-            )}
-            {sum.risks.length > 0 && (
-              <div>
-                <div className="font-mono text-[11px] uppercase tracking-wide text-warning mb-2">Worth knowing</div>
-                <ul className="space-y-1.5">{sum.risks.map((p) => <li key={p} className="text-[13.5px] text-text-muted flex gap-2"><span className="text-warning">!</span>{p}</li>)}</ul>
-              </div>
-            )}
-          </div>
-        </div>
-      </Reveal>
-
-      {/* A+ "Certified" transparency panel (roadmap §7.5) — only meaningful for
-          A-band-or-above (or already-certified) repos; the "how to earn A+" guide
-          is noise on a low grade. */}
-      {(scan.trust_score >= 81 || (scan as { certified?: { eligible?: boolean } }).certified?.eligible) && (
-        <CertifiedPanel scan={scan} />
-      )}
-
-      {/* Declared scope — the tool's own .agentavow.yml, if present */}
-      <DeclaredScopePanel scope={(scan as { declared_scope?: { present?: boolean; egress?: string[]; capabilities?: string[]; note?: string } }).declared_scope} />
-
-      <CapabilitiesPanel scan={scan} />
-      <AdvisoriesPanel scan={scan} />
-
-      {/* Behavioral deep scan — auto-runs for npm/PyPI; re-run on demand */}
-      {!isPrivate && <BehavioralPanel owner={owner} repo={repo} surface={(scan as { package_coordinate?: { surface?: string } }).package_coordinate?.surface} auto={(scan as { behavioral?: BehavioralData | null }).behavioral} effect={(scan as { behavioral_score_effect?: ScoreEffect | null }).behavioral_score_effect} />}
-
-      {/* Adoption — the real 5-axis metric, distinct from safety (public repos only) */}
-      {!isPrivate && <AdoptionPanel owner={owner} repo={repo} />}
-
-      {/* score history timeline (living record) */}
-      <ScoreHistory history={adoptionData?.history ?? []} current={scan.trust_score} />
-
-      {/* recompute-on-release drift feed — signed-definition integrity over time */}
-      {!isPrivate && <DefinitionDrift owner={owner} repo={repo} />}
-
-      <CategoryFindings categoryScores={cats as Record<string, number>} findings={f} maxFindings={12} emptyMessage={coverageGapNotes(scan).length ? '✓ No risks found in what was read — see “Not checked” above.' : '✓ No risks found — clean across all categories.'} />
-
-      {/* scan facts */}
-      <Reveal>
-        <div className="mt-6 glass rounded-xl p-5">
-          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-2">Scan facts</h3>
-          <div className="flex flex-wrap gap-2">
-            {sum.facts.map((fct) => <span key={fct} className="text-[12.5px] text-text-muted bg-surface border border-border rounded-full px-3 py-1">{fct}</span>)}
-          </div>
-        </div>
-      </Reveal>
-
-      {/* SIGNED & VERIFIABLE — copy the JWS and check it offline */}
-      <VerifyPanel scan={scan} />
-
-      {/* the distribution showcase — README badge (trust / trust+adoption) + share card */}
-      <Reveal>
-        <div className="mt-6"><BadgePromo owner={owner} repo={repo} /></div>
-      </Reveal>
-
-      {/* claim / ownership CTA — a one-time scan is ephemeral (report only, nothing stored) */}
-      {oneTimePrivate ? (
-        <Reveal>
-          <div className="mt-6 glass rounded-2xl p-6 border-l-4 border-warning/50">
-            <h3 className="text-[15px] font-bold">This is a one-time scan</h3>
-            <p className="text-text-muted text-[13.5px] mt-1 max-w-[62ch]">Nothing is stored or listed. For continuous scanning + change alerts, connect the GitHub App on your <Link to={rp('/rebrand/tools')} className="text-primary-light hover:text-primary font-semibold">tools page</Link>.</p>
-          </div>
-        </Reveal>
-      ) : (
-        <OwnershipCTA owner={owner} repo={repo} />
-      )}
-      {storedPrivate && <PublishStoredCTA owner={owner} repo={repo} published={published} />}
-
-      {/* findings detail */}
-
-      {/* share — floats at the bottom, consistent with every other score page */}
-      {!isPrivate && (
-        <div className="mt-8 flex justify-center">
-          <ShareRow owner={owner} repo={repo} score={scan.trust_score} />
-        </div>
-      )}
-    </div>
+        }
+      />
+    </>
   )
 }
