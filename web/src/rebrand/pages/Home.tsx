@@ -1,46 +1,42 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { rp } from '../basePath'
 import { unsupportedRepoHost, unsupportedRepoHostMessage } from '../lib/unsupportedHost'
 import { NoticeText } from '../components/NoticeText'
 import { motion, useReducedMotion } from 'framer-motion'
 import { useQuery } from '@tanstack/react-query'
-import { fetchCatalog, fetchFlaggedStat, rowIdentity } from '../catalog'
-import { publicApi } from '../../lib/scanApi'
-import { decisionOf, getTrustTier } from '../../components/trust/gradeSystem'
-import { TrustBar, AdoptionNeedle, CertifiedMark, TrustOrCertifiedMini, AdoptionMini, DecisionLine } from '../components/TrustMark'
-import { Reveal, CountUp } from '../components/motion'
-import { currentPath, trackCheckSubmit, trackCta, trackEvent } from '../../lib/analytics'
+import { fetchCatalog, type CatalogRow } from '../catalog'
+import { decisionOf, decisionPhrase, getTrustTier, isCertified } from '../../components/trust/gradeSystem'
+import { TrustBar, AdoptionNeedle, CertifiedMark } from '../components/TrustMark'
+import { Reveal } from '../components/motion'
+import { currentPath, trackCheckSubmit, trackEvent } from '../../lib/analytics'
 import { useRotatingPlaceholder } from '../lib/hooks'
-import { SandboxTotalsStrip } from '../components/SandboxStats'
 import SEOHead from '../../components/SEOHead'
 import { inSnapshot } from '../lib/snapshot'
+import { AnswerMixBar, StatCards } from '../components/AnswerMix'
+import { DNC_LIST, useAnswerMix } from '../lib/answerMix'
+import { AppsButtons, AppsStrip } from '../components/AppsStrip'
+import { BuiltInTheOpenLine } from '../components/BuiltInTheOpen'
 
-const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'crates:serde', 'hf:openai-community/gpt2', 'mcp:https://…', 'a repo, package, model, or MCP server']
+const CHECK_HINTS = ['Paste a link to check', 'github.com/owner/repo', 'npmjs.com/package/…', 'https://mcp.example.com/mcp', 'pypi:requests']
 
 /**
- * AgentAvow rebrand homepage.
- * The /check input IS the hero. Live catalog for counts + browse teaser.
- * Section order: hero → proof strip → two-audience fork → signed-result example →
- * how it works → three axes → browse teaser → developer → change-alerts/CI.
+ * AgentAvow homepage (website build spec 2026-11-07). Six sections:
+ * hero (the check itself + the Claude/ChatGPT strip) → the three answers, on live
+ * examples → how the catalog reads → where you work → Certified → why believe it.
  */
 
-// Real, scannable example repos — clicking a chip runs a real scan (works on prod;
-// on-demand scans 502 locally without a GitHub token — see the /check note).
-// Recognizable, non-self-referential mix with a credible C→A spread of live scores.
-const EXAMPLES = [
-  'modelcontextprotocol/servers',    // ~45 · C — canonical MCP servers repo
-  'langchain-ai/langchain',          // ~78 · B
-  'anthropics/anthropic-sdk-python', // ~88 · A
-  'vercel/next.js',                  // ~90 · A
+/**
+ * The example chips. Each fills the check box and shows that tool's live catalog row
+ * in the card below; the card links to the full report.
+ */
+type ExampleKey = 'safe' | 'deep' | 'review'
+const EXAMPLES: { key: ExampleKey; chip: string; input: string; surface: string; q: string; match: (r: CatalogRow) => boolean }[] = [
+  { key: 'safe', chip: 'An MCP server package', input: 'npmjs.com/package/@notionhq/notion-mcp-server', surface: 'npm', q: '@notionhq/notion-mcp-server', match: (r) => r.full_name === 'npm:@notionhq/notion-mcp-server' },
+  { key: 'deep', chip: 'A live MCP server', input: 'https://mcp.deepwiki.com/mcp', surface: 'mcp', q: 'mcp.deepwiki.com', match: (r) => r.endpoint_url === 'https://mcp.deepwiki.com/mcp' },
+  { key: 'review', chip: 'A deprecated server', input: 'npmjs.com/package/@modelcontextprotocol/server-puppeteer', surface: 'npm', q: '@modelcontextprotocol/server-puppeteer', match: (r) => r.full_name === 'npm:@modelcontextprotocol/server-puppeteer' },
 ]
-
-const CHATGPT_LISTING = 'https://chatgpt.com/plugins/plugin_asdk_app_6ac830ccc2d48191ac27974dec7d8344'
-const CLAUDE_LISTING = 'https://claude.ai/directory/connectors/agentavow'
-
-function Eyebrow({ children }: { children: React.ReactNode }) {
-  return <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">{children}</span>
-}
+type Tab = ExampleKey | 'dnc'
 
 /** Large animated trust-seal for the hero — echoes the logo, draws itself in on load. */
 function HeroSeal() {
@@ -56,8 +52,6 @@ function HeroSeal() {
         <linearGradient id="seal-g" gradientUnits="userSpaceOnUse" x1="8" y1="8" x2="88" y2="88">
           <stop stopColor="#2DD4BF" /><stop offset="1" stopColor="#E879F9" />
         </linearGradient>
-        {/* Dedicated gradient across the checkmark's own bounds so it reads vibrant
-            teal→magenta (the shared ring gradient only crosses its pale midpoint). */}
         <linearGradient id="seal-check" x1="0" y1="0" x2="1" y2="1">
           <stop stopColor="#2DD4BF" /><stop offset="1" stopColor="#E879F9" />
         </linearGradient>
@@ -81,13 +75,132 @@ function HeroSeal() {
   )
 }
 
+/**
+ * A pasted link with no scheme ("npmjs.com/package/x", "mcp.example.com/mcp") gets
+ * https:// so it routes like the full URL. GitHub user and org names can't contain a
+ * dot, so a first segment with one is a host, not an owner/repo.
+ */
+function withScheme(v: string): string {
+  if (/^[a-z][\w+.-]*:/i.test(v)) return v
+  const host = v.split('/')[0]
+  const dots = (host.match(/\./g) ?? []).length
+  if (!/^[\w-]+(\.[\w-]+)+(:\d+)?$/.test(host) || !/\.[a-z]{2,}(:\d+)?$/i.test(host)) return v
+  if (v.includes('/') || dots >= 2) return `https://${v}`
+  return v
+}
+
+const SEG_STYLE: Record<Tab, string> = {
+  safe: 'text-[#a6e3a1] border-[#a6e3a1]/50 bg-[#a6e3a1]/[0.08]',
+  deep: 'text-[#a6e3a1] border-[#a6e3a1]/50 bg-[#a6e3a1]/[0.08]',
+  review: 'text-[#f9e2af] border-[#f9e2af]/50 bg-[#f9e2af]/[0.08]',
+  dnc: 'text-[#f38ba8] border-[#f38ba8]/50 bg-[#f38ba8]/[0.08]',
+}
+
+const sentence = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s)
+
+function reportHref(row: CatalogRow): string {
+  if (row.surface === 'mcp' && row.endpoint_url) return rp('/rebrand/check/mcp') + '?endpoint=' + encodeURIComponent(row.endpoint_url)
+  if (['npm', 'pypi', 'crates', 'huggingface', 'docker'].includes(row.surface)) return rp(`/rebrand/check/pkg/${row.surface}/${row.name}`)
+  return rp(row.full_name?.includes('/') ? `/rebrand/check/${row.full_name}` : '/rebrand/check')
+}
+
+function VerdictLine({ value, certified }: { value: 'safe' | 'review' | 'do_not_connect'; certified?: boolean }) {
+  const p = decisionPhrase(value)
+  const icon = value === 'safe' ? '✓' : value === 'review' ? '!' : '✕'
+  const color = value === 'safe' ? '#a6e3a1' : value === 'review' ? '#f9e2af' : '#f38ba8'
+  return (
+    <div className="mt-[7px] flex items-center gap-[9px] flex-wrap text-[21px] font-bold tracking-[-0.01em]" style={{ color }} data-decision={value}>
+      <span className="w-6 h-6 rounded-full inline-grid place-items-center text-[13px] font-extrabold shrink-0" style={{ background: `${color}26` }} aria-hidden="true">{icon}</span>
+      {p.phrase}
+      {certified && <span className="font-mono text-[11.5px] font-extrabold tracking-[0.14em] text-[#06231f] px-[9px] py-[3px] rounded-full" style={{ background: 'linear-gradient(90deg,#2DD4BF,#E879F9)' }}>CERTIFIED</span>}
+    </div>
+  )
+}
+
+function ExampleCard({ row }: { row: CatalogRow }) {
+  const d = decisionOf({ ...row, findings: { critical: row.critical ?? 0, high: row.high ?? 0 } }).decision
+  const certified = d === 'safe' && isCertified(row)
+  const score = row.trust_score as number
+  const t = getTrustTier(score)
+  const n = row.findings_count ?? 0
+  const finds = [
+    row.critical ? `${row.critical} critical` : null,
+    row.high ? `${row.high} high` : null,
+    `${n} ${n === 1 ? 'finding' : 'findings'} (any severity)`,
+  ].filter(Boolean).join(' · ')
+  return (
+    <>
+      <div className="px-5 py-[18px] border-b border-border/60">
+        <div className="font-mono text-[13.5px] break-all text-text-muted">{row.endpoint_url || row.name}</div>
+        <VerdictLine value={d} certified={certified} />
+        {row.decision_reason && <p className="mt-1.5 text-[14.5px] text-text">{sentence(row.decision_reason)}.</p>}
+      </div>
+      <div className="grid grid-cols-2">
+        <div className="px-5 py-[18px] max-[520px]:px-2 flex flex-col items-center gap-[9px] text-center">
+          <div className="min-h-[90px] flex items-center justify-center">{certified ? <CertifiedMark score={score} /> : <TrustBar score={score} />}</div>
+          <div className="font-mono text-[10.5px] font-bold uppercase tracking-[0.14em]" style={{ color: certified ? undefined : t.color }}>Trust score</div>
+        </div>
+        <div className="px-5 py-[18px] max-[520px]:px-2 flex flex-col items-center gap-[9px] text-center border-l border-border/60">
+          <div className="min-h-[90px] flex items-center justify-center"><AdoptionNeedle count={row.adoption_count} unit={row.adoption_unit ?? undefined} scorePct={row.adoption_score} /></div>
+          <div className="font-mono text-[10.5px] font-bold uppercase tracking-[0.14em] text-text-muted">Adoption score</div>
+        </div>
+      </div>
+      <div className="px-5 py-3 border-t border-border/60 text-[13px] text-text-muted">{finds}</div>
+      <div className="flex gap-3.5 flex-wrap items-center px-5 py-[13px] border-t border-dashed border-border text-[13px]">
+        <span className="font-mono text-[12px] text-[#a6e3a1]">✓ Signed · Ed25519 / JWS</span>
+        <Link to={reportHref(row)} className="sm:ml-auto font-semibold text-primary-light hover:text-primary">See the full report →</Link>
+      </div>
+    </>
+  )
+}
+
+/** No named tool here until someone has read its report: the answer, what triggers it, and the live list. */
+function DoNotConnectCard() {
+  const { data: mix } = useAnswerMix()
+  return (
+    <>
+      <div className="px-5 py-[18px] border-b border-border/60">
+        <VerdictLine value="do_not_connect" />
+        <p className="mt-1.5 text-[14.5px] text-text">A critical finding in what the tool ships caps its trust score at 45. The report names the finding and points at the exact file and line.</p>
+      </div>
+      <div className="flex gap-3.5 flex-wrap items-center px-5 py-[13px] text-[13px]">
+        <span className="font-mono text-[12px] text-[#a6e3a1]">✓ Signed · Ed25519 / JWS</span>
+        <Link to={rp(DNC_LIST)} className="sm:ml-auto font-semibold text-primary-light hover:text-primary">
+          {mix ? `See the ${mix.dnc.toLocaleString()} tools that read Do not connect →` : 'See the tools that read Do not connect →'}
+        </Link>
+      </div>
+    </>
+  )
+}
+
+function Card3({ title, children, lead = false }: { title: string; children: React.ReactNode; lead?: boolean }) {
+  return (
+    <div className={`glass rounded-2xl p-[22px] flex flex-col gap-[9px] min-w-0 ${lead ? 'border-primary-light/45' : ''}`}>
+      <h3 className="text-[19px] font-bold tracking-[-0.01em]">{title}</h3>
+      {children}
+    </div>
+  )
+}
+
+const BTN = 'inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow'
+const BTN_GHOST = 'inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors'
+
+const CERT_ROWS: [string, string][] = [
+  ['Reads Safe to connect at 81+', 'no critical or high finding, nothing known-malicious'],
+  ['Published package matches its source', 'verified build provenance (Sigstore / PEP 740)'],
+  ['Every file read, nothing changed', 'full coverage, no drift since the last signed check'],
+  ['Sandbox ran it, anyone can recompute', 'finished sandbox run, offline-verifiable result'],
+]
+
 export default function RebrandHome() {
   const [value, setValue] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
+  const [tab, setTab] = useState<Tab>('safe')
+  const resultRef = useRef<HTMLElement>(null)
   const navigate = useNavigate()
   const hint = useRotatingPlaceholder(CHECK_HINTS)
   const runCheck = (input: string) => {
-    const v = input.trim()
+    const v = withScheme(input.trim())
     if (v) {
       trackEvent('guest_cta_click', currentPath(), 'check_a_tool')
       trackCheckSubmit()
@@ -134,48 +247,39 @@ export default function RebrandHome() {
     navigate(rp(m ? `/rebrand/check/${m[1]}/${m[2]}` : '/rebrand/check'))
   }
 
-  const { data: cat } = useQuery({
-    queryKey: ['rebrand-home-catalog'],
-    queryFn: () => fetchCatalog({ surface: 'mcp', sort: 'score-desc', limit: 6 }),
-    staleTime: 5 * 60_000,
+  // The example rows, live from the catalog. Kept out of the prerender: static HTML
+  // names no tool and its answer (see prerender-entry.tsx).
+  const { data: examples, isError: examplesFailed } = useQuery({
+    queryKey: ['home-examples'],
+    queryFn: async () => {
+      const found = await Promise.all(EXAMPLES.map(async (ex) => {
+        const data = await fetchCatalog({ surface: ex.surface, q: ex.q, limit: 5 })
+        const row = (data.rows ?? []).find((r) => ex.match(r) && r.trust_score != null)
+        return [ex.key, row ?? null] as const
+      }))
+      return Object.fromEntries(found) as Record<ExampleKey, CatalogRow | null>
+    },
+    staleTime: 60 * 60_000,
   })
-  const s = cat?.summary
-  // Live headline stat from ONE server-computed source, shared with the Index (same query
-  // key) so the two pages always show the identical number.
-  const { data: stat } = useQuery({ queryKey: ['flagged-stat'], queryFn: fetchFlaggedStat, staleTime: 60_000 })
-  const flaggedPct = stat?.pct ?? null
-  const teaser = (cat?.rows ?? []).filter((r) => r.trust_score != null).slice(0, 3)
-  // A real scored tool for the signed-result example (no mock/fabricated data).
-  const example = (() => {
-    const row = teaser[0]
-    if (!row) return null
-    const { display, repoPath } = rowIdentity(row)
-    // The Certified mark as the report shows it: the row's certified_mark when the
-    // catalog carries it, else the stored A+.
-    const mark = (row as { certified_mark?: boolean | null }).certified_mark
-    const certified = decisionOf({ ...row, findings: { critical: row.critical ?? 0, high: row.high ?? 0 } }).decision === 'safe'
-      && (typeof mark === 'boolean' ? mark : row.grade === 'A+')
-    return { row, display, repoPath, certified, t: getTrustTier(row.trust_score as number) }
-  })()
-  // Real adoption for the example card (stars/checks/watchers) — no "coming soon".
-  const { data: exAdopt } = useQuery({
-    queryKey: ['home-ex-adopt', example?.repoPath],
-    queryFn: async () => (await publicApi.get<{ checks: number; watchers: number; stars: number | null }>(`/public/scan/${example!.repoPath}/checks`)).data,
-    enabled: !!example?.repoPath,
-    staleTime: 5 * 60_000,
-  })
-  const exCount = exAdopt ? (exAdopt.stars && exAdopt.stars > 0 ? exAdopt.stars : exAdopt.checks) : 0
-  const exUnit = exAdopt?.stars && exAdopt.stars > 0 ? 'stars' : 'checks'
+  const chooseExample = (key: ExampleKey) => {
+    const ex = EXAMPLES.find((e) => e.key === key)!
+    setValue(ex.input)
+    setTab(key)
+    resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  const pressed = (k: Tab) => tab === k || (k === 'safe' && tab === 'deep')
+  const shown = tab === 'dnc' ? null : examples?.[tab]
 
   return (
     <div>
       <SEOHead
         title="Is this AI tool safe to connect?"
-        description="Scan any tool, MCP server, package, or skill your agent connects to and get a signed trust score (0–100) and adoption score. Free, no signup, verifiable."
+        description="Paste a link to any app, connector or package and get a clear answer: Safe to connect, Review before you connect, or Do not connect, with a signed trust score and an adoption score."
         path="/"
       />
-      {/* ① HERO = the check itself */}
-      <section className="text-center pt-16 pb-8 px-6">
+
+      {/* 1 · HERO = the check itself */}
+      <section className="text-center pt-16 pb-10 px-6">
         <motion.div
           className="max-w-[1080px] mx-auto"
           initial={inSnapshot() ? false : { opacity: 0, y: 14 }}
@@ -186,22 +290,21 @@ export default function RebrandHome() {
           <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold leading-[1.06] tracking-tight">
             Is this AI tool <span className="gradient-text-bio">safe</span> to connect?
           </h1>
-          <p className="mt-5 mx-auto max-w-[50ch] text-lg text-text-muted font-light">
-            Scan any tool, MCP server, or skill your agent connects to, and get a signed safety score before
-            you wire it in. Free, no signup, verifiable offline.
+          <p className="mt-5 mx-auto max-w-[58ch] text-lg text-text-muted font-light">
+            Paste a link to any app, connector or package. Get a clear answer, <b className="text-text font-semibold">Safe to connect</b>, <b className="text-text font-semibold">Review before you connect</b>, or <b className="text-text font-semibold">Do not connect</b>, with the reasons.
           </p>
 
           <form
             onSubmit={(e) => { e.preventDefault(); runCheck(value) }}
             className="glass mt-8 mx-auto max-w-[600px] flex gap-2.5 rounded-2xl p-2 pl-4 shadow-lg shadow-primary/10"
           >
-            <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 self-center text-text-muted shrink-0">
+            <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 self-center text-text-muted shrink-0" aria-hidden="true">
               <path d="M11 19a8 8 0 1 1 5.7-2.3L21 21" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
             </svg>
             <input
               value={value}
               onChange={(e) => setValue(e.target.value)}
-              aria-label="Check a tool"
+              aria-label="Link to check"
               placeholder={value ? '' : hint}
               className="flex-1 min-w-0 bg-transparent outline-none font-mono text-[15.5px] text-text placeholder:text-text-muted"
             />
@@ -212,386 +315,132 @@ export default function RebrandHome() {
           {notice && <p role="alert" className="mt-3 mx-auto max-w-[600px] text-[13px] text-amber-300"><NoticeText text={notice} /></p>}
 
           <div className="mt-4 flex flex-wrap gap-2 justify-center items-center">
-            <span className="font-mono text-[11.5px] text-text-muted/70">try one:</span>
-            {EXAMPLES.map((c) => (
+            <span className="text-[13px] text-text-muted">Try one:</span>
+            {EXAMPLES.map((ex) => (
               <button
-                key={c}
-                onClick={() => { setValue(c); runCheck(c) }}
-                className="font-mono text-[12.5px] text-text-muted bg-surface border border-border rounded-full px-3 py-1.5 hover:border-primary-light hover:text-primary-light transition-colors"
+                key={ex.key}
+                type="button"
+                onClick={() => chooseExample(ex.key)}
+                className="text-[13px] text-text-muted bg-surface border border-border rounded-full px-[13px] py-1.5 hover:border-primary-light hover:text-primary-light transition-colors"
               >
-                {c}
+                {ex.chip}
               </button>
             ))}
           </div>
+          <p className="mt-3.5 text-[13px] text-text-muted">Free. No account. Every answer is signed.</p>
+          <AppsStrip className="mt-[18px]" />
         </motion.div>
       </section>
 
-      {/* ①.5 HEADLINE STAT — the "why this matters" number, computed live, links to the Index. */}
-      {flaggedPct != null && flaggedPct > 0 && (
-        <section className="max-w-[820px] mx-auto px-6 pt-8 pb-2">
-          <Reveal>
-            <Link to={rp('/rebrand/index')} className="block text-center group">
-              <p className="text-[26px] md:text-[32px] font-extrabold tracking-tight leading-snug text-balance">
-                <span className="gradient-text-bio">{flaggedPct}%</span> of the tools your agent connects to carry a serious security flaw.
-              </p>
-              <p className="mt-2.5 text-text-muted text-[14.5px]">
-                You'd never run code from a stranger — your agent does it every day.
-                <span className="text-primary-light group-hover:underline"> See the public index →</span>
-              </p>
-            </Link>
-          </Reveal>
-        </section>
-      )}
-
-      {/* ② PROOF-OF-SCALE STRIP — LIVE, numbers count up. Moved up: scale credibility first. */}
-      <section className="max-w-[1080px] mx-auto px-6 pt-4 pb-10">
-        <Reveal>
-          <div className="glass rounded-2xl p-8 flex flex-wrap gap-x-10 gap-y-4 justify-center text-center">
-            {[
-              [s?.total_scans ?? 0, 'tools scanned'],
-              [s?.by_surface?.mcp ?? 0, 'MCP servers'],
-              [s?.by_surface?.x402 ?? 0, 'x402 endpoints'],
-              [s?.repo_scans_scanned ?? s?.repo_scans_total ?? 0, 'repos scanned'],
-              [12, 'detection categories'],
-            ].map(([n, l]) => (
-              <div key={l as string}>
-                {s || n === 12
-                  ? <CountUp value={n as number} className="block text-3xl tracking-tight tabular-nums gradient-text font-bold" />
-                  : <b className="block text-3xl tracking-tight tabular-nums gradient-text">—</b>}
-                <span className="text-[13px] text-text-muted">{l}</span>
-              </div>
-            ))}
-            <div className="basis-full font-mono text-[11.5px] text-text-muted/70 mt-1">
-              live from the scan catalog · a one-time launch corpus (not continuously re-scanned)
-            </div>
-          </div>
-          <SandboxTotalsStrip className="mt-3 px-2" linkLabel="Behavioral sandbox →" />
-        </Reveal>
-      </section>
-
-      {/* ②b WORKS WHERE YOUR AGENT DOES — the assistant listings + how the check runs in each */}
-      <section id="assistants" className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
+      {/* 2 · THE THREE ANSWERS, on live examples */}
+      <section ref={resultRef} id="result" className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60 scroll-mt-20">
         <Reveal>
           <div className="text-center max-w-[60ch] mx-auto">
-            <Eyebrow>Works where your agent does</Eyebrow>
-            <h2 className="mt-2.5 text-2xl md:text-3xl font-bold">Check a tool before your agent connects it, from the assistant you already use.</h2>
-            <p className="mt-3 text-text-muted">AgentAvow is in the ChatGPT and Claude directories. Ask about a repo, a package or an MCP server and get the answer before anything is installed.</p>
+            <h2 className="text-2xl md:text-3xl font-bold">Every check ends in one of three answers.</h2>
+            <p className="mt-3 text-text-muted">The answer comes first, with its reason. Under it sit two scores: a signed 0-100 trust score and an adoption score.</p>
           </div>
-          <div className="flex gap-2.5 flex-wrap justify-center mt-6">
-            <a href={CHATGPT_LISTING} target="_blank" rel="noopener noreferrer" onClick={() => { trackEvent('guest_cta_click', currentPath(), 'add_chatgpt'); trackCta('add_chatgpt') }} className="inline-flex items-center font-semibold text-[14px] px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Add to ChatGPT ↗</a>
-            <a href={CLAUDE_LISTING} target="_blank" rel="noopener noreferrer" onClick={() => { trackEvent('guest_cta_click', currentPath(), 'add_claude'); trackCta('add_claude') }} className="inline-flex items-center font-semibold text-[14px] px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Add to Claude ↗</a>
-            <Link to={rp('/rebrand/docs/auto-scan-claude-code')} className="inline-flex items-center font-semibold text-[14px] px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Claude Code plugin →</Link>
-            <Link to={rp('/rebrand/for-developers')} className="inline-flex items-center font-semibold text-[14px] px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Cursor · VS Code · any MCP client →</Link>
-          </div>
-          <div className="grid md:grid-cols-3 rounded-2xl overflow-hidden border border-border/60 mt-8 glass">
-            {[
-              ['01', 'You ask', '"Add the Notion MCP server", "Is this package safe to install?", or "Check this repo before I use it."'],
-              ['02', 'AgentAvow checks it first', 'Its code, dependencies and published advisories, the tool definitions a server serves, and where it applies a sandbox run that watches what it actually does.'],
-              ['03', 'You get the answer', 'Safe to connect, Review before you connect, or Do not connect, with the reason, a signed trust score and an adoption score. Then you decide.'],
-            ].map(([n, h, p], i) => (
-              <div key={n} className={`p-6 ${i < 2 ? 'md:border-r border-border/60' : ''}`}>
-                <div className="font-mono text-[12px] text-primary-light tracking-wide">{n}</div>
-                <h3 className="mt-2.5 text-[17px] font-semibold">{h}</h3>
-                <p className="mt-2 text-text-muted text-[14px]">{p}</p>
-              </div>
+          <div className="mt-[22px] flex gap-1.5 flex-wrap justify-center" role="group" aria-label="Example answers">
+            {([['safe', 'Safe to connect'], ['review', 'Review before you connect'], ['dnc', 'Do not connect']] as [Tab, string][]).map(([k, label]) => (
+              <button key={k} type="button" aria-pressed={pressed(k)} onClick={() => setTab(k)}
+                className={`rounded-[10px] border px-[13px] py-2 text-[13.5px] font-semibold transition-colors ${pressed(k) ? SEG_STYLE[k] : 'bg-surface border-border text-text-muted hover:text-text'}`}>
+                {label}
+              </button>
             ))}
           </div>
-          <div className="grid md:grid-cols-2 gap-4 mt-4">
-            <div className="glass rounded-2xl p-6">
-              <div className="font-mono text-[11.5px] uppercase tracking-wide text-primary-light">ChatGPT and Claude chat</div>
-              <p className="mt-2 text-text-muted text-[14px]">The check runs when you ask, and the bundled skill steps in when you're about to add a tool. You see the answer and a trust card before you run any install command.</p>
-            </div>
-            <div className="glass rounded-2xl p-6">
-              <div className="font-mono text-[11.5px] uppercase tracking-wide text-accent">Claude Code</div>
-              <p className="mt-2 text-text-muted text-[14px]">The plugin checks automatically: each new MCP server when a session starts, and the answer on file before each tool call. A server that reads Do not connect is stopped; a tool whose definition changed asks you first.</p>
-            </div>
+          <div className="glass rounded-2xl overflow-hidden max-w-[640px] mx-auto mt-[18px] text-left">
+            {tab === 'dnc'
+              ? <DoNotConnectCard />
+              : shown
+                ? <ExampleCard row={shown} />
+                : examplesFailed || examples
+                  ? <div className="p-8 text-center text-[14px] text-text-muted">This example isn't available right now. <Link to={rp('/rebrand/browse')} className="text-primary-light hover:text-primary font-semibold">Browse the catalog →</Link></div>
+                  : <div className="h-[300px] animate-pulse" aria-hidden="true" />}
+          </div>
+          <div className="grid sm:grid-cols-2 gap-3.5 max-w-[640px] mx-auto mt-4 text-[14px] text-text-muted text-left">
+            <p><b className="text-text font-semibold">Trust score.</b> How safe the tool looks, worked out from what the check found.</p>
+            <p><b className="text-text font-semibold">Adoption score.</b> How much people really use it. Popular doesn't mean safe, so the two stay separate.</p>
           </div>
         </Reveal>
       </section>
 
-      {/* ④→② SIGNED RESULT EXAMPLE — moved up, right below the scan count */}
-      <section id="proof" className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
-        <Reveal>
-          <div className="text-center max-w-[56ch] mx-auto">
-            <Eyebrow>A trust score you can verify</Eyebrow>
-            <h2 className="mt-3 text-2xl md:text-3xl font-bold">Two scores, one signed record.</h2>
-            <p className="mt-3 text-text-muted">
-              Attestation Trust is your signed safety score. Adoption shows how much the ecosystem actually
-              uses a tool — real usage, not opinions.
-            </p>
-          </div>
-
-          {example ? (
-            <div className="glass rounded-2xl overflow-hidden max-w-[620px] mx-auto mt-8">
-              <div className="flex items-center gap-3 p-5 border-b border-border/60">
-                <div className="min-w-0 flex-1">
-                  <div className="font-mono text-[13.5px] break-all">{example.display}</div>
-                  <DecisionLine row={example.row} className="mt-1" />
-                </div>
-                <span className="font-mono text-[11px] text-text-muted shrink-0">a real scan</span>
-              </div>
-              {/* the dual mark — real artwork, tier-tinted, a preview of the score page */}
-              <div className="relative border-b border-border/60 overflow-hidden">
-                <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(340px 130px at 25% -10%, ${example.t.color}1c, transparent 70%), radial-gradient(340px 130px at 78% -10%, rgba(45,212,191,0.12), transparent 70%)` }} />
-                <div className="relative grid grid-cols-2">
-                  <div className="p-5 text-center flex flex-col items-center">
-                    <div className="min-h-[100px] sm:min-h-[126px] flex items-center justify-center">{example.certified ? <CertifiedMark score={example.row.trust_score as number} /> : <TrustBar score={example.row.trust_score as number} />}</div>
-                    <div className="mt-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: example.t.color }}>Attestation Trust</div>
-                  </div>
-                  <div className="p-5 text-center flex flex-col items-center border-l border-border/50">
-                    <div className="min-h-[100px] sm:min-h-[126px] flex items-center justify-center"><AdoptionNeedle count={exCount} unit={exUnit} /></div>
-                    <div className="mt-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em] gradient-text">Adoption</div>
-                  </div>
-                </div>
-              </div>
-              <div className="p-5 flex flex-wrap gap-5 text-[13px] text-text-muted">
-                <span><b className="text-danger tabular-nums">{example.row.critical ?? 0}</b> critical</span>
-                <span><b className="text-warning tabular-nums">{example.row.high ?? 0}</b> high</span>
-                <span><b className="text-text tabular-nums">{example.row.findings_count ?? 0}</b> {(example.row.findings_count ?? 0) === 1 ? 'finding' : 'findings'} (any severity)</span>
-              </div>
-              <div className="flex items-center gap-2.5 p-4 border-t border-dashed border-border flex-wrap">
-                <span className="flex items-center gap-2 font-mono text-[12px] text-success">
-                  <svg viewBox="0 0 24 24" fill="none" className="w-[18px] h-[18px]">
-                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.6" />
-                    <path d="M7.5 12.4l3 3 6-6.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  Signed · Ed25519 / JWS
-                </span>
-                {example.repoPath && <Link to={rp(`/rebrand/check/${example.repoPath}`)} className="ml-auto text-[13px] font-semibold text-primary-light hover:text-primary">See the full report →</Link>}
-              </div>
-              <div className="px-5 py-3.5 border-t border-border/60 text-[12.5px] text-text-muted leading-relaxed">
-                A signed record means a tool can't show you one score and be another. Don't take our word for it — <Link to={rp('/rebrand/how-it-works#verify')} className="text-primary-light hover:text-primary font-semibold">verify the signature yourself, or tamper with it and watch it fail →</Link>
-              </div>
-            </div>
-          ) : (
-            <div className="glass rounded-2xl max-w-[620px] mx-auto mt-8 h-[260px] animate-pulse" />
-          )}
-
-          {/* CELEBRATE THE TOP TIER — Certified, the earned & gated pinnacle */}
-          <div className="mt-4 max-w-[620px] mx-auto rounded-2xl overflow-hidden relative border border-accent/25" style={{ background: 'linear-gradient(135deg, rgba(45,212,191,0.08), rgba(232,121,249,0.06) 60%), var(--color-surface)' }}>
-            <div className="absolute -right-16 -top-24 w-56 h-56 rounded-full blur-3xl pointer-events-none" style={{ background: 'radial-gradient(circle, rgba(232,121,249,0.16), transparent 70%)' }} />
-            <div className="relative p-7 flex items-center gap-8 flex-wrap justify-center sm:justify-start">
-              <CertifiedMark />
-              <div className="min-w-0 flex-1 text-center sm:text-left">
-                <div className="font-mono text-[11px] uppercase tracking-[0.16em] gradient-text font-semibold">The top tier</div>
-                <h3 className="mt-1.5 text-xl font-bold">Certified — the earned pinnacle.</h3>
-                <p className="mt-1.5 text-text-muted text-[13.5px] max-w-[44ch] mx-auto sm:mx-0">Verified provenance, no drift, nothing sampled — <em>and</em> a Safe to connect answer at a trust score of 81 or above. Revocable the moment any of it slips. Not a sticker you buy; a bar you clear.</p>
-                <p className="mt-2 text-[12.5px] text-text-muted/90 max-w-[44ch] mx-auto sm:mx-0"><span className="text-text">sigstore</span>, <span className="text-text">react</span>, <span className="text-text">axios</span> and more clear it today — not theoretical.</p>
-                <Link to={rp('/rebrand/certified')} className="inline-block mt-2.5 text-[13px] font-semibold text-primary-light hover:text-primary">See the gate + who's Certified →</Link>
-              </div>
-            </div>
-          </div>
-        </Reveal>
-      </section>
-
-      {/* ③ THREE-AUDIENCE FORK — checking a tool / building a tool / shipping to a store */}
-      <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
-        <Reveal className="grid md:grid-cols-3 gap-4">
-          <Link to={rp("/rebrand/browse")} className="group glass card-hover rounded-2xl p-6 flex flex-col gap-2 border-l-4 border-primary/60 relative overflow-hidden">
-            <div className="absolute -right-8 -top-8 w-28 h-28 rounded-full bg-primary/10 blur-2xl group-hover:bg-primary/20 transition-colors" />
-            <div className="font-mono text-[11px] uppercase tracking-wide text-primary-light">Checking a tool</div>
-            <h3 className="text-xl font-bold">Browse the trust catalog</h3>
-            <p className="text-text-muted text-[14.5px] flex-1">
-              See tools ranked by score before you connect one — with the exact reason for each score, not a
-              star rating.
-            </p>
-            <span className="mt-2 self-start text-[14.5px] font-semibold text-primary-light group-hover:translate-x-1 transition-transform">Browse the catalog →</span>
-          </Link>
-          <Link to={rp("/rebrand/badge")} className="group glass card-hover rounded-2xl p-6 flex flex-col gap-2 border-l-4 border-accent/60 relative overflow-hidden">
-            <div className="absolute -right-8 -top-8 w-28 h-28 rounded-full bg-accent/10 blur-2xl group-hover:bg-accent/20 transition-colors" />
-            <div className="font-mono text-[11px] uppercase tracking-wide text-accent">Building a tool</div>
-            <h3 className="text-xl font-bold">Get a signed badge</h3>
-            <p className="text-text-muted text-[14.5px] flex-1">
-              Drop a signed trust badge in your README in one line. Every viewer can verify the score — and
-              gate your CI on it.
-            </p>
-            <span className="mt-2 self-start text-[14.5px] font-semibold text-accent group-hover:translate-x-1 transition-transform">Get your badge →</span>
-          </Link>
-          <Link to={rp("/rebrand/preflight")} className="group glass card-hover rounded-2xl p-6 flex flex-col gap-2 border-l-4 relative overflow-hidden" style={{ borderLeftColor: '#A78BFA' }}>
-            <div className="absolute -right-8 -top-8 w-28 h-28 rounded-full blur-2xl transition-colors" style={{ background: 'rgba(167,139,250,0.12)' }} />
-            <div className="font-mono text-[11px] uppercase tracking-wide" style={{ color: '#A78BFA' }}>Shipping to an app store</div>
-            <h3 className="text-xl font-bold">Preflight your connector</h3>
-            <p className="text-text-muted text-[14.5px] flex-1">
-              Submitting to the Claude connectors or OpenAI apps directory? Check it against their review
-              gates first — and walk in knowing you pass.
-            </p>
-            <span className="mt-2 self-start text-[14.5px] font-semibold group-hover:translate-x-1 transition-transform" style={{ color: '#A78BFA' }}>Run a preflight →</span>
-          </Link>
-        </Reveal>
-      </section>
-
-      {/* ⑧→ STAY SAFE OVER TIME — moved right below the two audience cards */}
+      {/* 3 · HOW THE CATALOG READS — live */}
       <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
         <Reveal>
-          <div className="text-center max-w-[56ch] mx-auto">
-            <Eyebrow>Protection that keeps working</Eyebrow>
-            <h2 className="mt-2.5 text-2xl md:text-3xl font-bold">Safe before you connect it, and after it <span className="gradient-text">changes</span>.</h2>
-            <p className="mt-3 text-text-muted">One scan is a snapshot. Three ways to make the check automatic and continuous, so nothing unsafe slips through the moment you stop looking.</p>
-            <p className="mt-2.5 text-[13px] text-text-muted/80">Every score page keeps a <strong className="text-text">public, signed timeline</strong> — score-over-time plus signed-definition drift, verifiable offline. <Link to={rp('/rebrand/check/modelcontextprotocol/servers')} className="text-primary-light hover:text-primary font-semibold">See a live timeline →</Link></p>
+          <div className="max-w-[980px] mx-auto">
+            <AnswerMixBar size="big" />
+            <StatCards set="home" />
           </div>
-          <div className="grid md:grid-cols-3 gap-4 mt-8">
-            <div className="glass rounded-2xl p-7 flex flex-col">
-              <div className="font-mono text-[11.5px] uppercase tracking-wide text-primary-light">For anyone</div>
-              <h3 className="mt-2 text-xl font-semibold">Check before it connects</h3>
-              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Add AgentAvow to your agent (ChatGPT, Claude, Claude Code, Cursor, or your own runtime). It pulls a tool's signed answer and score before your agent connects, so an unsafe tool is stopped in the loop, not found after the fact.</p>
-              <Link to={rp("/rebrand/how-it-works") + "#mcp-check"} className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Set it up →</Link>
-            </div>
-            <div className="glass rounded-2xl p-7 flex flex-col">
-              <div className="font-mono text-[11.5px] uppercase tracking-wide text-primary-light">For anyone</div>
-              <h3 className="mt-2 text-xl font-semibold">Get change alerts</h3>
-              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Watch the tools you depend on. We re-scan them and alert you the moment a score drops or a signed definition changes — the rug-pull you'd otherwise miss. <a href="https://github.com/AgentAvow/AgentAvow/tree/main/demos/rugpull" target="_blank" rel="noopener noreferrer" className="text-primary-light hover:underline">See the rug-pull demo ↗</a></p>
-              <Link to={rp("/rebrand/login")} className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Get change alerts →</Link>
-            </div>
-            <div className="glass rounded-2xl p-7 flex flex-col">
-              <div className="font-mono text-[11.5px] uppercase tracking-wide text-accent">For developers</div>
-              <h3 className="mt-2 text-xl font-semibold">Add to your CI</h3>
-              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Run the scan on every pull request with the GitHub Action. Gate merges on a minimum score so a dependency can never silently regress in your pipeline.</p>
-              <Link to={rp("/rebrand/badge")} className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Add to your CI →</Link>
-            </div>
-          </div>
+          <p className="mt-3.5 text-center text-[13px] text-text-muted">Hundreds of Claude Code machines connect every day. A check you run here is never more than an hour old.</p>
+          <BuiltInTheOpenLine className="mt-5" />
         </Reveal>
       </section>
 
-      {/* ⑤ HOW IT WORKS — moved above browse */}
-      <section id="how" className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
-        <Reveal>
-          <div className="max-w-[56ch]">
-            <Eyebrow>How it works</Eyebrow>
-            <h2 className="mt-3 text-2xl md:text-3xl font-bold">Paste, scan, verify.</h2>
-          </div>
-          <div className="grid md:grid-cols-3 rounded-2xl overflow-hidden border border-border/60 mt-8 glass">
-            {[
-              ['01', 'Paste a URL', 'A repo, MCP server, npm/PyPI package, or skill. No signup.'],
-              ['02', 'We scan it', 'Across 12 categories — secrets, exec sinks, exfiltration, prompt injection, obfuscation, deps.'],
-              ['03', 'Get a signed score', 'A 0–100 trust score plus a signed attestation anyone can verify offline against our public key.'],
-            ].map(([n, h, p], i) => (
-              <div key={n} className={`p-6 ${i < 2 ? 'md:border-r border-border/60' : ''}`}>
-                <div className="font-mono text-[12px] text-primary-light tracking-wide">{n}</div>
-                <h3 className="mt-2.5 text-[17px] font-semibold">{h}</h3>
-                <p className="mt-2 text-text-muted text-[14px]">{p}</p>
-              </div>
-            ))}
-          </div>
-          <Link to={rp('/rebrand/how-it-works') + '#mcp-check'} className="mt-4 glass rounded-2xl px-6 py-4 flex items-center gap-4 flex-wrap hover:border-primary-light/50 border border-transparent transition-colors group">
-            <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-1 rounded bg-primary/15 text-primary-light shrink-0">New</span>
-            <div className="min-w-0 flex-1">
-              <div className="text-[15px] font-semibold">Running an agent? Give it a built-in safety check.</div>
-              <div className="text-[13.5px] text-text-muted mt-0.5">Add AgentAvow to ChatGPT, Claude, Claude Code or Cursor, and your agent asks "is this safe?" before it connects anything.</div>
-            </div>
-            <span className="text-[14px] font-semibold text-primary-light group-hover:translate-x-1 transition-transform shrink-0">Add it →</span>
-          </Link>
-        </Reveal>
-      </section>
-
-      {/* ⑤b THREE AXES — where AgentAvow fits (identity kept on the homepage as reference) */}
+      {/* 4 · WHERE YOU WORK */}
       <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
         <Reveal>
-          <div className="max-w-[60ch]">
-            <Eyebrow>Where AgentAvow fits</Eyebrow>
-            <h2 className="mt-3 text-2xl md:text-3xl font-bold">Identity and authorization are being solved. The tool it connects to isn't.</h2>
-            <p className="mt-3 text-text-muted">A perfectly identified, fully authorized agent can still connect to a poisoned tool. We build <em>on</em> the identity and authorization work — interoperating with those standards rather than reinventing them — and own the third axis: is the thing it connects to actually safe, and can you prove it?</p>
-            <p className="mt-3 text-text-muted">And we're an <strong className="text-text">independent, unaffiliated auditor</strong> — not a scanner owned by a vendor that also sells the gateway it gates, and not a directory grading its own listings. Even our independence you don't have to take on faith: every score is <strong className="text-text">signed and recheckable offline</strong>, so you verify the number yourself instead of trusting who issued it.</p>
+          <h2 className="text-2xl md:text-3xl font-bold">Get the check where you work.</h2>
+          <div className="grid md:grid-cols-3 gap-3.5 mt-[26px]">
+            <Card3 title="In Claude Code, Cursor or CI" lead>
+              <p className="text-text-muted text-[14.5px] flex-1">In Claude Code it runs by itself: your servers at session start, and new servers and packages before they install. In Cursor, your agent checks when you ask. In CI, the build fails on Do not connect.</p>
+              <div className="flex flex-col gap-[9px] items-start mt-[7px]">
+                <Link to={rp('/rebrand/claude-code')} className={BTN}>Add it to Claude Code</Link>
+                <Link to={rp('/rebrand/get')} className="text-[14px] font-semibold text-primary-light hover:text-primary">Cursor, VS Code and CI →</Link>
+              </div>
+            </Card3>
+            <Card3 title="Check your connectors in Claude or ChatGPT">
+              <p className="text-text-muted text-[14.5px] flex-1">Add AgentAvow and ask before you connect anything. Nothing runs by itself in chat, so it checks when you ask.</p>
+              <AppsButtons className="mt-[7px]" />
+            </Card3>
+            <Card3 title="For your team">
+              <p className="text-text-muted text-[14.5px] flex-1">Gate CI on the answer, get an alert when a tool changes, and verify every result offline.</p>
+              <div className="mt-[7px]"><Link to={rp('/rebrand/teams')} className={BTN_GHOST}>See how teams use it</Link></div>
+            </Card3>
           </div>
-          <div className="grid md:grid-cols-3 gap-4 mt-8">
-            <div className="glass rounded-2xl p-6">
-              <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted">Axis 01 · Identity</div>
-              <h3 className="mt-2 text-lg font-semibold">Who's behind this agent?</h3>
-              <p className="mt-2 text-text-muted text-[14px]">Verifiable identity + provenance — DIDs, operator accountability. Solved by the identity standards we plug into, not compete with.</p>
-            </div>
-            <div className="glass rounded-2xl p-6">
-              <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted">Axis 02 · Authorization</div>
-              <h3 className="mt-2 text-lg font-semibold">Is it allowed to act?</h3>
-              <p className="mt-2 text-text-muted text-[14px]">Permission + policy for what an agent may do — OAuth-style controls, handled by the authorization layer.</p>
-            </div>
-            <div className="glass card-hover rounded-2xl p-6 border-l-4 border-primary relative overflow-hidden">
-              <div className="absolute -right-8 -top-8 w-28 h-28 rounded-full bg-primary/15 blur-2xl" />
-              <div className="font-mono text-[11px] uppercase tracking-wide text-primary-light">Axis 03 · Tool-safety</div>
-              <h3 className="mt-2 text-lg font-semibold gradient-text">Is what it connects to safe?</h3>
-              <p className="mt-2 text-text-muted text-[14px]">The unguarded surface — the tools, MCP servers, and skills an agent uses — scanned and <strong>signed so you can verify it</strong>. This is AgentAvow.</p>
-            </div>
-          </div>
-          <p className="mt-5 text-[14px] text-text-muted">Our evidence format and conformance vectors are public and built in the open with the agent-trust standards community. <Link to={rp("/rebrand/how-it-works")} className="text-primary-light hover:text-primary font-semibold">See how it works & who we build with →</Link></p>
+          <p className="mt-5 text-[14.5px] text-text-muted">Publish a tool? Get a signed badge and claim your listing. <Link to={rp('/rebrand/for-developers')} className="font-semibold text-primary-light hover:text-primary">For tool authors →</Link></p>
         </Reveal>
       </section>
 
-      {/* ⑥ BROWSE TEASER (live) */}
+      {/* 5 · CERTIFIED — the concept band, Home only */}
       <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
         <Reveal>
-          <div className="max-w-[56ch]">
-            <Eyebrow>Browse</Eyebrow>
-            <h2 className="mt-3 text-2xl md:text-3xl font-bold">See how the tools you're about to trust actually score.</h2>
-            <p className="mt-3 text-text-muted">Safest-first. Open any tool for the evidence behind its score.</p>
-          </div>
-          <div className="grid md:grid-cols-3 gap-3.5 mt-8">
-            {teaser.length > 0
-              ? teaser.map((row) => {
-                  const { display, repoPath } = rowIdentity(row)
-                  return (
-                    <Link key={display} to={rp(repoPath ? `/rebrand/check/${repoPath}` : '/rebrand/browse')} className="glass card-hover rounded-xl p-[18px] block">
-                      <div className="flex items-center justify-between gap-2.5">
-                        <span className="font-mono text-[13.5px] break-all">{display}</span>
-                        <div className="flex items-center gap-3 shrink-0">
-                          <TrustOrCertifiedMini row={row as unknown as Record<string, unknown> & { trust_score: number }} />
-                          {(row as { adoption_count?: number }).adoption_count ? <AdoptionMini count={(row as { adoption_count?: number }).adoption_count} unit={(row as { adoption_unit?: string | null }).adoption_unit} /> : null}
-                        </div>
-                      </div>
-                      <DecisionLine row={row} className="mt-2" />
-                      <div className="mt-2 text-[12.5px] text-primary-light">Why this answer →</div>
-                    </Link>
-                  )
-                })
-              : Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="glass rounded-xl p-[18px] animate-pulse h-[86px]" />
-                ))}
-          </div>
-          <div className="mt-6"><Link to={rp("/rebrand/browse")} className="text-[14px] font-semibold text-primary-light hover:text-primary">Browse the full catalog →</Link></div>
-        </Reveal>
-      </section>
-
-      {/* ⑦ DEVELOPER STRIP — the badge loop */}
-      <section id="developers" className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
-        <Reveal>
-          <div className="max-w-[56ch]">
-            <Eyebrow>For developers</Eyebrow>
-            <h2 className="mt-3 text-2xl md:text-3xl font-bold">One line. A signed trust badge in your README.</h2>
-            <p className="mt-3 text-text-muted">Check your repo, copy the badge. Every reader can verify the score — and clicking it re-checks your tool.</p>
-          </div>
-          <div className="grid md:grid-cols-2 gap-6 items-center mt-6">
-            <div className="min-w-0">
-              {/* the live badges (compact README badge + website card) for our own repo */}
-              <div className="flex flex-col items-start gap-3">
-                <img src="/api/v1/public/scan/AgentAvow/AgentAvow/badge" alt="AgentAvow compact badge for AgentAvow/AgentAvow"
-                  height={20} className="h-5 w-auto" loading="lazy" />
-                <img src="/api/v1/public/scan/AgentAvow/AgentAvow/badge?style=card" alt="AgentAvow website card for AgentAvow/AgentAvow"
-                  width={320} className="w-full max-w-[320px] h-auto" loading="lazy" />
-              </div>
-              <div className="mt-4 font-mono text-[12.5px] bg-surface border border-border rounded-xl px-4 py-3.5 text-text-muted overflow-x-auto whitespace-pre-wrap break-all">
-                [![AgentAvow Trust](https://agentavow.com/api/v1/public/scan/you/your-repo/badge)](https://agentavow.com/check/you/your-repo)
-              </div>
+          <div className="grid gap-x-7 gap-y-[22px] items-center rounded-2xl px-6 py-5 grid-cols-1 sm:grid-cols-[auto_minmax(0,1fr)] lg:grid-cols-[auto_minmax(0,1fr)_minmax(0,1.35fr)]"
+            style={{ background: 'linear-gradient(100deg,rgba(45,212,191,.12),rgba(232,121,249,.10) 70%), var(--color-surface)', border: '1.5px solid rgba(232,121,249,.35)' }}>
+            <div className="flex sm:flex-col items-center gap-1.5 sm:min-w-[96px]">
+              <div className="w-[62px] h-[62px] rounded-full grid place-items-center text-[28px] font-black text-[#06231f]" style={{ background: 'conic-gradient(from 210deg,#2DD4BF,#E879F9,#2DD4BF)' }} aria-hidden="true">✓</div>
+              <div className="font-mono text-[10.5px] font-extrabold tracking-[0.18em] gradient-text">CERTIFIED</div>
             </div>
             <div className="min-w-0">
-              <p className="text-text-muted text-[14.5px]">The badge regenerates on every view, so it never goes stale. It's signed and links back to a full, verifiable report — no account required to mint one.</p>
-              <Link to={rp("/rebrand/badge")} className="inline-block mt-4 font-mono text-[13px] text-primary-light hover:text-primary">Wire it into CI with the GitHub Action · SDK · CLI →</Link>
+              <h3 className="text-[18px] font-bold leading-tight">Certified is a bar a tool has to clear.</h3>
+              <p className="mt-1 text-[13.5px] text-text-muted">It sits beside Safe to connect, it comes off the moment any check slips, and nobody can buy it. <b className="text-text font-medium">zod</b>, <b className="text-text font-medium">Notion's MCP server</b> and <b className="text-text font-medium">click</b> clear it today.</p>
+              <Link to={rp('/rebrand/certified')} className="inline-block mt-2 text-[13.5px] font-semibold text-primary-light hover:text-primary">See the gate and who's Certified →</Link>
             </div>
+            <ul className="grid sm:grid-cols-2 gap-x-3.5 gap-y-2 sm:col-span-2 lg:col-span-1 list-none m-0 p-0">
+              {CERT_ROWS.map(([h, s]) => (
+                <li key={h} className="flex gap-[9px] items-start text-[13.5px] leading-[1.35] text-text">
+                  <i className="not-italic shrink-0 font-mono text-[10.5px] font-extrabold tracking-[0.06em] px-[7px] py-0.5 rounded-[5px] mt-px bg-[#a6e3a1]/[0.16] text-[#a6e3a1]">PASS</i>
+                  <span>{h}<small className="block text-text-muted text-[12px]">{s}</small></span>
+                </li>
+              ))}
+            </ul>
           </div>
         </Reveal>
       </section>
 
-      {/* Claim CTA band */}
+      {/* 6 · WHY BELIEVE IT */}
       <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
         <Reveal>
-          <div className="glass rounded-2xl p-8 md:p-10 flex items-center justify-between gap-6 flex-wrap"
-            style={{ background: 'linear-gradient(120deg, rgba(99,102,241,0.10), transparent 60%), var(--color-surface)' }}>
-            <div className="max-w-[54ch]">
-              <Eyebrow>Own a tool?</Eyebrow>
-              <h2 className="mt-3 text-2xl md:text-3xl font-bold">Claim it — and own how it shows up.</h2>
-              <p className="mt-3 text-text-muted">Prove you own a repo to run private scans, get alerted the moment its score changes, and own how it appears in the catalog &amp; search. <span className="text-text">Public repos</span> verify with a GitHub topic; <span className="text-text">private repos</span> connect the GitHub App — scanned continuously, no token to paste.</p>
-            </div>
-            <Link to={rp("/rebrand/tools")} className="shrink-0 font-semibold px-6 py-3 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 hover:-translate-y-0.5 transition-all">Claim your tool →</Link>
+          <h2 className="text-2xl md:text-3xl font-bold">You don't have to take our word for it.</h2>
+          <div className="grid md:grid-cols-3 gap-3.5 mt-[26px]">
+            <Card3 title="Findings you can read"><p className="text-text-muted text-[14.5px]">Each finding has a severity and points at the exact file, line or manifest entry.</p></Card3>
+            <Card3 title="Results you can verify"><p className="text-text-muted text-[14.5px]">Every result is signed with Ed25519. Anyone can check it offline against our public keys.</p></Card3>
+            <Card3 title="Limits we state"><p className="text-text-muted text-[14.5px]">A check reads code, dependencies, advisories and tool definitions. It can miss things, so the report says what it couldn't read.</p></Card3>
+          </div>
+          <div className="mt-8 flex gap-3 justify-center flex-wrap">
+            <Link to={rp('/rebrand/check')} className="font-semibold px-6 py-3 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25">Check a tool</Link>
+            <Link to={rp('/rebrand/get')} className="font-semibold px-6 py-3 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Get AgentAvow</Link>
           </div>
         </Reveal>
       </section>
-
     </div>
   )
 }

@@ -2,11 +2,13 @@ import { useState, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
-import { fetchCatalog, rowIdentity, type CatalogRow, type CatalogSandbox, type CatalogSummary } from '../catalog'
+import { fetchCatalog, fetchRecent, rowIdentity, type CatalogRow, type CatalogSandbox } from '../catalog'
 import { TrustOrCertifiedMini, AdoptionMini } from '../components/TrustMark'
 import { DECISIONS, decide, decisionPhrase } from '../../components/trust/gradeSystem'
 
-import { Reveal, RevealStagger, CountUp } from '../components/motion'
+import { RevealStagger } from '../components/motion'
+import { AnswerMixBar } from '../components/AnswerMix'
+import { DNC_LIST, useAnswerMix } from '../lib/answerMix'
 import SEOHead from '../../components/SEOHead'
 
 /**
@@ -28,6 +30,7 @@ const SURFACES = [
   { key: 'docker', label: 'Container images' },
   { key: 'x402', label: 'x402 endpoints' },
   { key: 'community', label: 'All on-demand scans' },
+  { key: 'all', label: 'All tools' },
 ]
 
 const SORTS = [
@@ -219,39 +222,6 @@ function ToolCard({ row }: { row: CatalogRow }) {
   )
 }
 
-function StatCard({ label, value, hint }: { label: string; value: number; hint: string }) {
-  return (
-    <div className="glass rounded-xl p-4">
-      <div className="font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1">{label}</div>
-      <CountUp value={value} className="block text-2xl font-bold tabular-nums gradient-text" />
-      <div className="text-[11.5px] text-text-muted mt-1">{hint}</div>
-    </div>
-  )
-}
-
-function SummaryStrip({ s }: { s: CatalogSummary }) {
-  const bs = s.by_surface || {}
-  const bc = s.by_surface_critical || {}
-  const bh = s.by_surface_high || {}
-  const npmPypi = (bs.npm ?? 0) + (bs.pypi ?? 0)
-  const npmPypiCrit = (bc.npm ?? 0) + (bc.pypi ?? 0)
-  const npmPypiHigh = (bh.npm ?? 0) + (bh.pypi ?? 0)
-  const x402Total = s.x402_endpoints_total ?? bs.x402 ?? 0
-  // Count the surfaces that actually have rows ("community" is a bucket of on-demand
-  // scans across surfaces, not a surface), so the hint can't go stale as surfaces
-  // are added (it said "5" long after crates, Docker and Hugging Face joined).
-  const surfaceCount = Object.entries(bs).filter(([k, n]) => k !== 'community' && (n ?? 0) > 0).length
-  return (
-    <Reveal className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mt-6">
-      <StatCard label="Total scans" value={s.total_scans} hint={`across ${surfaceCount} ${surfaceCount === 1 ? 'surface' : 'surfaces'}`} />
-      <StatCard label="x402 endpoints" value={x402Total} hint={s.x402_compliant != null ? `${s.x402_compliant} compliant` : 'payment-gated APIs'} />
-      <StatCard label="MCP servers" value={bs.mcp ?? 0} hint={`${bc.mcp ?? 0} critical · ${bh.mcp ?? 0} high`} />
-      <StatCard label="OpenClaw skills" value={bs.openclaw ?? 0} hint={`${bc.openclaw ?? 0} critical · ${bh.openclaw ?? 0} high`} />
-      <StatCard label="npm + PyPI" value={npmPypi} hint={`${npmPypiCrit} critical · ${npmPypiHigh} high`} />
-    </Reveal>
-  )
-}
-
 const DEFAULT_SURFACE = SURFACES[0].key
 const DEFAULT_SORT = 'adoption'
 
@@ -303,7 +273,7 @@ export default function RebrandBrowse() {
   // filter so search spans the whole catalog, not just the active tab.
   const { data, isLoading, isError, isFetching } = useQuery({
     queryKey: ['rebrand-catalog', surface, sort, severity, grade, decision, category, q, page],
-    queryFn: () => fetchCatalog({ surface: q ? '' : surface, sort, severity, grade, decision, category, q, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
+    queryFn: () => fetchCatalog({ surface: q || surface === 'all' ? '' : surface, sort, severity, grade, decision, category, q, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
     placeholderData: keepPreviousData,
   })
   // Category options come from the catalog's own breakdown (stable across filters).
@@ -313,9 +283,21 @@ export default function RebrandBrowse() {
   const rows = data?.rows ?? []
   // The prerender keeps the page's totals but not its tool rows (see prerender-entry.tsx).
   const rowsLoading = isLoading || import.meta.env.SSR
-  const summary = data?.summary
-  const total = summary?.total_scans
   const matching = data?.total
+  const { data: mix } = useAnswerMix()
+  // The newest checks for the "Just checked" card. Kept out of the prerender, which
+  // names no tool and its answer.
+  const { data: recent } = useQuery({ queryKey: ['recent-scans', 3], queryFn: () => fetchRecent(3), staleTime: 60_000 })
+
+  // The quick filters under search. A surface chip keeps the other filters; Certified
+  // and Do not connect toggle their filter and look across every surface.
+  const QUICK: { label: string; on: boolean; go: () => void }[] = [
+    { label: 'MCP servers', on: surface === 'mcp', go: () => patch({ surface: '' }) },
+    { label: 'Agent skills', on: surface === 'openclaw', go: () => patch({ surface: 'openclaw' }) },
+    { label: 'Packages', on: surface === 'npm', go: () => patch({ surface: 'npm' }) },
+    { label: 'Certified', on: grade === 'certified', go: () => patch(grade === 'certified' ? { grade: '' } : { grade: 'certified', surface: 'all' }) },
+    { label: 'Do not connect', on: decision === 'do_not_connect', go: () => patch(decision === 'do_not_connect' ? { dec: '' } : { dec: 'do_not_connect', surface: 'all' }) },
+  ]
   const totalPages = matching != null ? Math.ceil(matching / PAGE_SIZE) : 0
 
   return (
@@ -325,44 +307,86 @@ export default function RebrandBrowse() {
         description="The public catalog of scanned repos, packages, MCP servers, and skills — each with a signed trust score and adoption score you can recompute yourself."
         path="/browse"
       />
-      {/* header block */}
+      {/* header block: the hero, how the catalog reads, then search */}
       <div className="max-w-[1080px] mx-auto px-6 pt-14">
         <div className="max-w-[62ch]">
-          <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Browse</span>
-          <h1 className="mt-3 text-3xl md:text-4xl font-extrabold tracking-tight">Find tools your agent can trust</h1>
-          <p className="mt-3 text-text-muted">
-            Repos, npm &amp; PyPI packages, MCP servers, and skills — every listing carries a <span className="text-text">signed safety score</span> you can recompute, and a one-click <span className="text-text">add to your agent</span>. Not star ratings; cryptographic evidence.{total != null && <> {total.toLocaleString()} scored so far.</>}
-          </p>
-          <p className="mt-2.5 text-[13.5px] text-text-muted">Own one of these? <Link to={rp("/rebrand/tools")} className="text-primary-light hover:text-primary font-medium">Claim it →</Link> to run private scans, get change alerts, and own how it appears.</p>
+          <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight">Find tools your agent can trust.</h1>
+          <p className="mt-3 text-text-muted text-[17px]">Every tool we've checked, with its answer, trust score and adoption score.</p>
         </div>
-        {summary && <SummaryStrip s={summary} />}
+
+        <div className="mt-7"><AnswerMixBar size="slim" /></div>
+
+        <form
+          onSubmit={(e) => { e.preventDefault(); applySearch() }}
+          className="glass mt-3.5 flex gap-2.5 rounded-2xl p-2 pl-4 shadow-lg shadow-primary/10"
+        >
+          <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 self-center text-text-muted shrink-0" aria-hidden="true">
+            <path d="M11 19a8 8 0 1 1 5.7-2.3L21 21" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          </svg>
+          <input
+            value={qInput}
+            onChange={(e) => setQInput(e.target.value)}
+            placeholder="Search by name, package or server"
+            aria-label="Search tools"
+            className="flex-1 min-w-0 bg-transparent outline-none text-[15.5px] text-text placeholder:text-text-muted"
+          />
+          {qInput && <button type="button" onClick={clearSearch} aria-label="Clear search" className="text-text-muted hover:text-text px-1 text-[18px] leading-none">×</button>}
+          <button type="submit" className="font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow whitespace-nowrap">Search</button>
+        </form>
+        <div className="mt-3.5 flex flex-wrap gap-2 items-center">
+          <span className="text-[13px] text-text-muted">Show:</span>
+          {QUICK.map((c) => (
+            <button key={c.label} type="button" aria-pressed={c.on} onClick={c.go}
+              className={`text-[13px] rounded-full border px-[13px] py-1.5 transition-colors ${c.on ? 'border-primary-light text-primary-light bg-primary/10' : 'border-border bg-surface text-text-muted hover:border-primary-light hover:text-primary-light'}`}>
+              {c.label}
+            </button>
+          ))}
+        </div>
+
+        {/* three small cards */}
+        <div className="glass rounded-2xl mt-4 px-[18px] py-3.5 grid gap-x-[18px] gap-y-3 grid-cols-1 sm:grid-cols-3 items-center">
+          <Link to={rp('/rebrand/certified')} className="flex flex-col gap-0.5 min-w-0 group">
+            <span className="font-mono text-[11px] tracking-[0.12em] uppercase text-primary-light">Certified</span>
+            <b className="text-[24px] leading-tight gradient-text tabular-nums">{mix ? mix.certified.toLocaleString() : '—'}</b>
+            <small className="text-[12px] text-text-muted group-hover:text-text">cleared the bar →</small>
+          </Link>
+          <Link to={rp(DNC_LIST)} className="flex flex-col gap-0.5 min-w-0 group">
+            <span className="font-mono text-[11px] tracking-[0.12em] uppercase text-primary-light">Do not connect</span>
+            <b className="text-[24px] leading-tight text-[#f38ba8] tabular-nums">{mix ? mix.dnc.toLocaleString() : '—'}</b>
+            <small className="text-[12px] text-text-muted group-hover:text-text">see them →</small>
+          </Link>
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="font-mono text-[11px] tracking-[0.12em] uppercase text-primary-light">Just checked</span>
+            <small className="text-[12px] text-text-muted">
+              {recent?.length
+                ? recent.map((it, i) => {
+                    const href = listingHref(it as unknown as CatalogRow)
+                    const label = <>{it.name || it.full_name}{it.trust_score != null && <b className="ml-1 text-primary-light text-[13px]">{it.trust_score}</b>}</>
+                    return (
+                      <span key={`${it.surface}:${it.name}`}>
+                        {i > 0 && ' · '}
+                        {href ? <Link to={href} className="hover:text-text">{label}</Link> : label}
+                      </span>
+                    )
+                  })
+                : '—'}
+            </small>
+          </div>
+        </div>
+        <div className="mt-2.5 text-[13px]">
+          <Link to={rp('/rebrand/index')} className="font-semibold text-primary-light hover:text-primary">See the full Trust Index →</Link>
+        </div>
       </div>
 
-      {/* sticky controls — search-first, scrollable surface chips, and a filter
-          set that's inline dropdowns on desktop but a bottom sheet on mobile. */}
-      <div className="sticky top-[62px] z-20 mt-6 bg-background/85 backdrop-blur-sm relative after:absolute after:left-0 after:right-0 after:bottom-0 after:translate-y-full after:h-4 after:bg-gradient-to-b after:from-background/50 after:to-transparent after:pointer-events-none">
+      {/* sticky controls: the filter set (inline dropdowns on desktop, a bottom sheet
+          on mobile) and the scrollable surface chips. Solid background: no blur on a
+          persistent element. */}
+      <div className="sticky top-[62px] z-20 mt-6 bg-background relative after:absolute after:left-0 after:right-0 after:bottom-0 after:translate-y-full after:h-4 after:bg-gradient-to-b after:from-background/50 after:to-transparent after:pointer-events-none">
         <div className="max-w-[1080px] mx-auto px-4 sm:px-6 py-3 flex flex-col gap-2.5">
-          {/* row 1 — search (full-width on mobile) + inline filters on desktop */}
+          {/* row 1 — inline filters on desktop, a Filters button on mobile */}
           <div className="flex items-center gap-2">
-            <form
-              onSubmit={(e) => { e.preventDefault(); applySearch() }}
-              className="flex-1 min-w-0 sm:flex-none sm:w-[280px] flex items-center gap-2 rounded-full border border-border bg-surface pl-3.5 pr-1.5 py-1.5"
-            >
-              <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4 text-text-muted shrink-0">
-                <path d="M11 19a8 8 0 1 1 5.7-2.3L21 21" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-              </svg>
-              <input
-                value={qInput}
-                onChange={(e) => setQInput(e.target.value)}
-                placeholder="Search tools…"
-                aria-label="Search the catalog"
-                className="flex-1 min-w-0 bg-transparent outline-none text-[14px] text-text placeholder:text-text-muted"
-              />
-              {qInput && <button type="button" onClick={clearSearch} aria-label="Clear search" className="text-text-muted hover:text-text px-1 text-[15px] leading-none">×</button>}
-              <button type="submit" className="text-[12px] font-semibold px-3 py-1 rounded-full text-white bg-primary/80 hover:bg-primary shrink-0">Go</button>
-            </form>
             {/* desktop: inline filter dropdowns */}
-            <div className="hidden sm:flex items-center gap-2 ml-auto">
+            <div className="hidden sm:flex items-center gap-2 flex-wrap">
               {[{ v: category, set: setCategory, opts: CATEGORIES }, { v: decision, set: setDecision, opts: DECISION_OPTS }, { v: grade, set: setGrade, opts: GRADES }, { v: severity, set: setSeverity, opts: SEVERITIES }, { v: sort, set: setSort, opts: SORTS }].map((f, i) => (
                 <select key={i} value={f.v} onChange={(e) => f.set(e.target.value)}
                   className="text-[13px] rounded-full border border-border bg-surface text-text-muted px-3 py-1.5 outline-none hover:border-primary-light max-w-[190px]">
@@ -371,7 +395,7 @@ export default function RebrandBrowse() {
               ))}
             </div>
             {/* mobile: one Filters button → bottom sheet */}
-            <button onClick={() => setSheetOpen(true)} className="sm:hidden shrink-0 flex items-center gap-1.5 text-[13px] font-medium rounded-full border border-border bg-surface text-text px-3.5 py-2">
+            <button onClick={() => setSheetOpen(true)} className="sm:hidden shrink-0 ml-auto flex items-center gap-1.5 text-[13px] font-medium rounded-full border border-border bg-surface text-text px-3.5 py-2">
               <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4"><path d="M4 6h16M7 12h10M10 18h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
               Filters{activeFilters > 0 && <span className="grid place-items-center min-w-[18px] h-[18px] text-[10px] font-bold rounded-full bg-primary text-white">{activeFilters}</span>}
             </button>
