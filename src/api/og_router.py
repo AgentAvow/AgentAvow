@@ -27,6 +27,21 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/og", tags=["og-meta"])
 
+
+async def _page_mark(data: dict | None, coordinate: tuple[str, str] | None = None) -> bool:
+    """The Certified mark the tool's own result page shows: the cached sandbox block
+    folded in (``public_scan_router._mark_for_cached``), so a run still pending, or one
+    that never started the tool, shows no mark here either. The cached scan alone is
+    static and would read final. Cache-only; False on any error (fail closed)."""
+    if not isinstance(data, dict):
+        return False
+    try:
+        from src.api.public_scan_router import _mark_for_cached
+        return bool(await _mark_for_cached(data, coordinate))
+    except Exception:  # noqa: BLE001 — an unknown sandbox state never earns the mark
+        logger.debug("og mark lookup failed", exc_info=True)
+        return False
+
 BASE_URL = "https://agentavow.com"
 
 
@@ -142,7 +157,8 @@ async def og_check(
     _composite = bool(entity_trust and entity_trust.get("imported")
                       and entity_trust.get("composite_score") is not None)
     verdict = headline(dec, certified=not _composite and bool(scan_data)
-                       and certified_mark(scan_data, dec))
+                       and certified_mark(scan_data, dec)
+                       and await _page_mark(scan_data, (owner, repo)))
     title = f"{full_name}: {verdict} · trust score {score}/100"
     description = f"{verdict}: {dec.reason}."
 
@@ -260,7 +276,10 @@ async def og_profile(
 # /check/mcp, /check/skill/* here; real users still get the SPA.
 
 def _og_image_url(title: str, score, subtitle: str,
-                  data: dict | None = None, adoption: tuple | None = None) -> str:
+                  data: dict | None = None, adoption: tuple | None = None,
+                  mark: bool | None = None) -> str:
+    """``mark`` = the page's Certified mark (``_page_mark``); None reads it from ``data``
+    alone, which is static and never knows the sandbox state."""
     from urllib.parse import urlencode
     params = {
         # Clip the title like the subtitle — a long HF/docker coordinate would otherwise
@@ -272,7 +291,7 @@ def _og_image_url(title: str, score, subtitle: str,
         params["decision"] = decide(data).decision
         # The Certified MARK (eligible AND a final Safe answer at 81+), never raw
         # eligibility — the card never reads "Review · Certified".
-        if certified_mark(data):
+        if certified_mark(data) if mark is None else (mark and certified_mark(data)):
             params["certified"] = "1"
     if adoption is not None:
         # (score_0_100, count, unit) from surface_adoption_summary; "0" = no signal.
@@ -286,7 +305,8 @@ def _og_image_url(title: str, score, subtitle: str,
     return f"{BASE_URL}/api/v1/public/scan/og.png?{q}"
 
 
-def _og_verdict(score: int | None, data: dict | None = None) -> str:
+def _og_verdict(score: int | None, data: dict | None = None,
+                mark: bool | None = None) -> str:
     """The card subtitle: the three-phrase headline + its reason (``decide``), with
     " · Certified" when the tool carries the mark. With only a score, the phrase is
     decided from the score alone and no reason is given."""
@@ -294,7 +314,8 @@ def _og_verdict(score: int | None, data: dict | None = None) -> str:
         return "A signed safety score — verify it offline."
     if data:
         dec = decide(data)
-        return (f"{headline(dec, certified=certified_mark(data, dec))}: {dec.reason}"
+        shown = certified_mark(data, dec) and (mark is None or mark)
+        return (f"{headline(dec, certified=shown)}: {dec.reason}"
                 " · signed, verifiable offline.")
     return f"{headline(decide({'trust_score': score}))} · signed, verifiable offline."
 
@@ -315,7 +336,8 @@ async def og_package(surface: str, name: str) -> HTMLResponse:
     if cached:
         score = cached.get("trust_score")
         subtitle = (cached.get("tool_description") or "").strip()
-    verdict = _og_verdict(score, cached)
+    mark = await _page_mark(cached, (surface, name)) if cached else False
+    verdict = _og_verdict(score, cached, mark)
     if not subtitle:
         subtitle = verdict
     title = f"{name} ({surface})"
@@ -325,7 +347,7 @@ async def og_package(surface: str, name: str) -> HTMLResponse:
                         "connect, or Do not connect, signed and verifiable offline.")
     image_url = _og_image_url(full, score, subtitle, cached,
                               adoption=await _adoption_for(surface, surface, name)
-                              if cached else None)
+                              if cached else None, mark=mark)
     return HTMLResponse(content=_render_og_html(title, description, image_url, canonical_url))
 
 
@@ -363,16 +385,20 @@ async def _og_skill_page(owner: str, repo: str, skill_path: str | None) -> HTMLR
     canonical_url = f"{BASE_URL}/check/skill/{key}"
     score = None
     cached = await _get_cached("skill", key) or await _get_stale_cached("skill", key)
+    mark = False
     if cached:
         score = cached.get("trust_score")
-    verdict = _og_verdict(score, cached)
+        # Every skill in a repo shares the repo's sandbox run (the skill route's probe).
+        mark = await _page_mark(
+            {**cached, "repo_full_name": full_name, "surface_kind": "skill"})
+    verdict = _og_verdict(score, cached, mark)
     skill_name = skill_path.rsplit("/", 1)[-1] if skill_path else None
     subtitle = "Agent Skill · " + verdict
     title = (f"{skill_name} skill ({full_name})" if skill_name
              else f"{full_name} — Agent Skill")
     _shown = "—" if score is None else f"{int(score)}/100"
     description = f"{title} scored {_shown} on AgentAvow — {verdict}"
-    image_url = _og_image_url(skill_name or full_name, score, subtitle, cached)
+    image_url = _og_image_url(skill_name or full_name, score, subtitle, cached, mark=mark)
     return HTMLResponse(content=_render_og_html(title, description, image_url, canonical_url))
 
 

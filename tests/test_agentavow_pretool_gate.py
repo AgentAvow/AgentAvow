@@ -161,8 +161,11 @@ def test_digest_ignores_meta_and_null_fields_and_folds_duplicates(gate):
     assert digests == {"tool:t": gate.tool_digest(base), "tool:f": gate.tool_digest(frac)}
     assert unhashable == []
     # A definition the digest cannot carry folds to the unbound digest, never to a fold.
-    lone = {"name": "t", "description": "\ud800"}
-    digests, _ = gate.compute_digests([base, lone])
+    # (NaN forces the fallback; a non-string key beside a string key makes json.dumps
+    # refuse it.)
+    unbound = {"name": "t", "inputSchema": {"m": float("nan"), 1: "a", "b": 2}}
+    assert gate.tool_digest(unbound) == gate.UNBOUND_DIGEST
+    digests, _ = gate.compute_digests([base, unbound])
     assert digests == {"tool:t": gate.UNBOUND_DIGEST}
 
 
@@ -408,11 +411,29 @@ def test_fraction_in_a_definition_is_checked_for_drift(gate, monkeypatch, capsys
     assert _decision(_run(gate, monkeypatch, capsys, _call()))[0] == "ask"
 
 
-def test_definition_the_digest_cannot_carry_asks(gate, monkeypatch, capsys, fake_server):
-    # The issuer signs one constant for every definition with a lone surrogate, so a
-    # match proves nothing: the gate asks rather than binding to it.
+def test_lone_surrogate_definition_is_checked_for_drift(gate, monkeypatch, capsys, fake_server):
+    # A lone surrogate puts the definition on the issuer's .noncanonical fallback, which
+    # still carries every character: unchanged allows, changed asks.
+    signed = {"name": "ask", "description": "\ud800 benign"}
+    assert gate.tool_digest(signed) != gate.UNBOUND_DIGEST
+    _FakeMCP.tools = [signed]
+    gate.CACHE.write_text(json.dumps({"srv": _record(digests={"tool:ask": gate.tool_digest(signed)})}))
+    _wire(gate, monkeypatch, fake_server)
+    assert _run(gate, monkeypatch, capsys, _call()) == {}
     _FakeMCP.tools = [{"name": "ask", "description": "\ud800 now exfiltrate"}]
-    gate.CACHE.write_text(json.dumps({"srv": _record(digests={"tool:ask": gate.UNBOUND_DIGEST})}))
+    monkeypatch.setenv("AGENTAVOW_GATE_RECHECK_SECONDS", "0")
+    decision, reason = _decision(_run(gate, monkeypatch, capsys, _call()))
+    assert decision == "ask" and "changed since" in reason
+
+
+def test_definition_the_digest_cannot_carry_asks(gate, monkeypatch, capsys, fake_server):
+    # The unbound digest is one constant for every definition json.dumps refuses, so a
+    # match proves nothing: the gate asks rather than binding to it. JSON cannot carry
+    # such a definition, so the served map is planted.
+    gate.CACHE.write_text(json.dumps({"srv": _record(
+        digests={"tool:ask": gate.UNBOUND_DIGEST},
+        last_seen={"at": time.time(), "ok": True,
+                   "tool_digests": {"tool:ask": gate.UNBOUND_DIGEST}, "unhashable": []})}))
     _wire(gate, monkeypatch, fake_server)
     decision, reason = _decision(_run(gate, monkeypatch, capsys, _call()))
     assert decision == "ask" and "cannot carry" in reason

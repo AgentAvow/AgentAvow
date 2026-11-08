@@ -284,3 +284,4 @@ who performs it.
 - [v1-annotations](../tool-manifest-digest-vectors-v1-annotations/): a separate pinned packet adding an annotation-only drift case; this packet and its run records are unchanged.
 - [w3c-v01](w3c-v01/): the runs of this set by `verify.mjs`, the Probity reader and heldfast, written as v0.1 reports of the W3C Agent Conformance CG reporting format, with the command that re-runs them.
 - [v1-numbers](../tool-manifest-digest-vectors-v1-numbers/): unsigned derivation vectors for how a number in a definition is read (a fraction, 2^53, 2^53 + 1, a large exponent, -0), computed by the issuer; this packet and its run records are unchanged.
+- [v1-noncanonical](../tool-manifest-digest-vectors-v1-noncanonical/): unsigned vectors for the issuer's fallback digest on definitions JCS cannot carry (a lone surrogate, a number too large for a double), computed by the issuer; this packet and its run records are unchanged.

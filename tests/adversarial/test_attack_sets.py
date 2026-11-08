@@ -18,6 +18,8 @@ production package path (npm_result_from_tarball -> apply_artifact_scan -> trust
   paths, not an npm tarball)
 * ``cases_bytecode`` - shipped Python bytecode, the PyCache trap (2026-11-07; skill,
   repo-tree and wheel paths)
+* ``cases_skill_prose`` - plain-text injection in a skill's body and shipped markdown,
+  with the context rules for skills that talk about injection (2026-11-07; skill path)
 * ``cases_a2a_cards`` - A2A Agent Card grading: interfaces, auth, skill text, the card
   signature (2026-11-07; runs ``analyze_a2a_card``, not an npm tarball)
 
@@ -40,7 +42,8 @@ HERE = Path(__file__).resolve().parent
 EXPECTED = json.loads((HERE / "expected.json").read_text())
 SETS = ("cases_npm_scripts", "cases_printed_hint", "cases_trifecta", "cases_exfil_precision",
         "cases_browser_profile", "cases_signing_key",
-        "cases_encoded_instructions", "cases_bytecode", "cases_a2a_cards")
+        "cases_encoded_instructions", "cases_bytecode", "cases_skill_prose",
+        "cases_a2a_cards")
 
 # Attacks that still read safe today, with the label they should read.
 KNOWN_GAPS: dict[tuple[str, str], str] = {
@@ -62,14 +65,14 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     ("cases_encoded_instructions", "gap_b64_short_chunks"): "review",
     # \uXXXX escapes and HTML entities are not decoded.
     ("cases_encoded_instructions", "gap_unicode_escapes"): "review",
-    # Older than this set: analyze_skill reads only the SKILL.md frontmatter (name +
-    # description) and scripts with the injection matcher, not the body in plain text.
-    ("cases_encoded_instructions", "gap_plain_text_body_injection"): "review",
     # A .pyc renamed to another extension in a skill, loaded by a bundled script: the
     # skill scan fetches only text files, and the loader reads low.
     ("cases_bytecode", "gap_skill_renamed_pyc_with_loader"): "review",
     # Wheels are not graded for bytecode by design; a swapped .pyc in one is unseen.
     ("cases_bytecode", "gap_wheel_shadow_pyc"): "review",
+    # A file that names prompt injection once can carry a live payload as a catalog
+    # entry (a fenced block, a quoted list item): it reads medium.
+    ("cases_skill_prose", "gap_security_doc_fenced_payload"): "review",
     # Card analysis is pure: a hostname that resolves to a private address is not seen.
     ("cases_a2a_cards", "gap_dns_name_to_private"): "review",
 }

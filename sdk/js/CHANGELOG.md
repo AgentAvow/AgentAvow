@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.2 (unreleased; prepared 2026-11-07)
+
+- `gate`: a served definition the gate cannot bind now fails closed. Before, a definition `canonicalize` refused (a number literal too large for a double, such as `1e400`, parses to `Infinity`) was allowed with the warning "drift not checked". Now it is a `drift` outcome, routed by `onDrift` (default `block`), and the deprecated `evaluate` blocks it the same way.
+- `gate`: `toolDigest` now computes the issuer's `.noncanonical` fallback digest for a definition RFC 8785 cannot carry (a lone surrogate or a non-finite number), so a gate binds to such a tool when it is unchanged. When the gate cannot rebuild the issuer's bytes (a number written as `1.0` or `1e2`, an integer beyond 2^53), the digest does not match, and the gate reports drift, never a match. See `docs/standards/tool-manifest-digest-vectors-v1-noncanonical`.
+- `gate`: new export `UNBOUND_DIGEST`, the issuer's content-free `.unhashable` digest. A tool signed with it is never treated as a match.
+- `toolDigestInput` returns `null` for such definitions (there is no JCS preimage).
+- The User-Agent / `clientInfo` version now reads 0.4.2. Before, it still said 0.4.0.
+
 ## 0.4.1 (unreleased; prepared 2026-10-11)
 
 - `openai-agents`: `wrap()` now finds the URL of a real `@openai/agents` `MCPServerStreamableHttp` / `MCPServerSSE`, which keeps it on `server.underlying.params.url`. In 0.4.0 such a server was passed through with a "not gated" warning unless you gave it a coordinate. Found by a smoke test against the real SDK (0.20.0).

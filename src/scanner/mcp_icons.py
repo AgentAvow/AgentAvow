@@ -388,8 +388,9 @@ def _canon_bytes(obj: Any) -> bytes:
     try:
         return rfc8785.dumps(_as_ijson(obj))
     except Exception:
+        # surrogatepass: a lone surrogate (from a \ud800 escape) must not crash the scan.
         return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-                          default=str).encode("utf-8")
+                          default=str).encode("utf-8", "surrogatepass")
 
 
 def _canon_icons(icons: Any) -> Any:

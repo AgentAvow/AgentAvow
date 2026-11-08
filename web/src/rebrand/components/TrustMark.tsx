@@ -1,6 +1,7 @@
 import { useId, type ReactNode } from 'react'
 import { getTrustTier, coverageGapNotes, decisionOf, decisionPhrase, isCertified } from '../../components/trust/gradeSystem'
 import { shortUnit } from '../lib/adoptionUnit'
+import { sandboxSummary } from '../lib/resultPage'
 
 /**
  * The AgentAvow dual mark (0–100 pivot 2026-08).
@@ -310,33 +311,7 @@ export function VerdictBadge(
   const d = decisionOf(scan)
   const p = decisionPhrase(d.decision)
   const certified = isCertified(scan)
-  const b = scan.behavioral
-  const bFindings = (b?.ran && !b.pending ? b.findings : []) ?? []
-  // One line about the sandbox for the card, whatever the decision.
-  const calls = b?.exercise?.calls?.length ?? 0
-  const reason = (b?.grade_summary?.start_reason ?? '').replace(/_/g, ' ')
-  const delta = scan.behavioral_score_effect?.applied ? scan.behavioral_score_effect.delta ?? 0 : 0
-  const deltaTxt = delta ? ` · score ${delta > 0 ? '+' : ''}${delta}` : ''
-  const severe = bFindings.filter((f) => f.severity === 'critical' || f.severity === 'high')
-  const leaked = !!(b?.ran && (b.canary_exfil?.length ?? 0) > 0)
-  // A run that hit its time limit is partial: the card must not read "clean" while the
-  // behavioral panel below says "results may be partial".
-  const partial = !!(b?.timed_out || b?.exercise?.timed_out)
-  const sandboxLine = !b ? null
-    : b.pending && b.state === 'queued' ? 'Sandbox: waiting for a free slot — this answer may move to Review when it lands'
-    : b.pending ? 'Sandbox: still running — this answer may move to Review when it lands'
-    : b.state === 'unavailable' ? 'Sandbox: unavailable — this answer is static analysis only'
-    : !b.ran ? (b.reason ? `Sandbox: did not run (${b.reason}) — this answer is static analysis only` : null)
-    : leaked ? `Sandbox: caught — a planted credential left the sandbox${deltaTxt}`
-    : severe.length ? `Sandbox: caught — ${severe[0].name ?? 'a behavioral finding'}${deltaTxt}`
-    : bFindings.length ? `Sandbox: ran${partial ? ' partly (hit its time limit)' : ''}, ${bFindings.length} minor finding${bFindings.length === 1 ? '' : 's'}${deltaTxt}`
-    : b.exercise?.launch_ok ? (partial
-      ? `Sandbox: ran partly (hit its time limit), called ${calls} tool${calls === 1 ? '' : 's'}, nothing caught${deltaTxt}`
-      : `Sandbox: called ${calls} tool${calls === 1 ? '' : 's'}, clean${deltaTxt}`)
-    : reason === 'install failed' ? 'Sandbox: the install failed, so nothing ran — not a finding'
-    : reason && reason !== 'not applicable' && reason !== 'started' ? `Sandbox: installed; server not started (${reason}) — not a finding`
-    : partial ? `Sandbox: ran partly (hit its time limit), nothing caught${deltaTxt}`
-    : 'Sandbox: installed and imported, clean'
+  const sandboxLine = sandboxSummary(scan)
   const cfg = {
     safe: { box: 'bg-success/10 border-success/30', fg: 'text-success', icon: '✓' },
     review: { box: 'bg-warning/10 border-warning/30', fg: 'text-warning', icon: '⚠' },

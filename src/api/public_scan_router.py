@@ -661,11 +661,59 @@ def _other_version_block() -> dict:
             "reason": BEHAVIORAL_OTHER_VERSION_REASON}
 
 
-def _sandbox_gap(block: dict | None) -> str | None:
+def _is_exec_plan(plan: object) -> bool:
+    """A sandbox plan that exists to START the tool: an MCP server plan (``npm-mcp``,
+    ``pypi-mcp``, ``npm-git-mcp``, ``pypi-git-mcp``) or a skill's hooks and scripts
+    (``skill``). The plain install/import plans (``npm``, ``pypi``, ``*-git``) launch
+    nothing, so "did it start" does not apply to them (``not_applicable``)."""
+    p = str(plan or "").strip().lower()
+    return p.endswith("-mcp") or p == "skill"
+
+
+def _instruction_only_skill(block: dict, data: dict | None) -> bool:
+    """A skill run that reported ``no_entrypoint`` because the skill truly has nothing
+    to run, not because its runnable code sat where the exerciser does not look. Both
+    signals must agree: the exerciser found no entrypoint at all (no tools, no calls),
+    AND the static scan of the cloned repo's full tree counted no file that could run
+    (``surface_detail.runnable_files == 0``: no executable bit, symlink, script, binary,
+    extensionless file or hook / package manifest anywhere, ``node_modules`` and
+    ``.venv`` included) with no bundled scripts and no lifecycle hooks. A missing,
+    unknown (partial tree) or non-integer count is not instruction-only (fail closed)."""
+    gs = block.get("grade_summary") if isinstance(block.get("grade_summary"), dict) else {}
+    if str(block.get("plan") or gs.get("plan") or "").strip().lower() != "skill":
+        return False
+    if str(gs.get("start_reason") or "").strip().lower() != "no_entrypoint":
+        return False
+    ex = block.get("exercise") if isinstance(block.get("exercise"), dict) else {}
+    if ex.get("tools") or ex.get("calls") or ex.get("launch_ok") is True:
+        return False
+    data = data if isinstance(data, dict) else {}
+    sd = data.get("surface_detail") or data.get("artifact_scan") or {}
+    if not isinstance(sd, dict):
+        return False
+    n = sd.get("runnable_files")
+    if not isinstance(n, int) or isinstance(n, bool) or n != 0:
+        return False
+    scripts = sd.get("script_count")
+    return (isinstance(scripts, int) and not isinstance(scripts, bool) and scripts == 0
+            and sd.get("has_lifecycle_hooks") is False)
+
+
+def _sandbox_gap(block: dict | None, data: dict | None = None) -> str | None:
     """Why the sandbox observed nothing, for ``coverage_gaps.sandbox_not_observed``:
     ``other_version``, ``unavailable`` (the run did not happen), or the plain-words
-    start reason of a server that never started. None when a run is still coming, there
-    was nothing to run, or the tool was observed. Advisory live probes are never a gap."""
+    start reason of a tool that never started. None when a run is still coming, there
+    was nothing to run, or the tool was observed. Advisory live probes are never a gap.
+
+    "Never started" is any start reason on a launch that failed, and, on an exec plan
+    (``_is_exec_plan``), also a run that stopped before the launch was even attempted
+    (an install that failed, the wall clock, the resource cap, no transcript at all):
+    the plan was meant to start the tool and did not. An install-only plan
+    (``not_applicable``) is never a gap, and neither is an instruction-only skill's
+    ``no_entrypoint`` (``_instruction_only_skill``: nothing to start, so nothing went
+    unobserved; Kenne, 2026-11-07). ``data`` is the static scan, for that check. Every
+    value but ``unavailable`` withholds the Certified mark
+    (``verdict.cheap_coverage_gap``); none moves the score or decision."""
     if not isinstance(block, dict) or block.get("pending") or is_advisory_block(block):
         return None
     if block.get("other_version"):
@@ -674,9 +722,16 @@ def _sandbox_gap(block: dict | None) -> str | None:
         return "unavailable" if block.get("state") == "unavailable" or block.get("error") \
             else None
     gs = block.get("grade_summary") if isinstance(block.get("grade_summary"), dict) else {}
+    reason = str(gs.get("start_reason") or "").strip().lower()
     if not gs.get("server_failed_to_start"):
+        ex = block.get("exercise") if isinstance(block.get("exercise"), dict) else {}
+        launched = gs.get("launch_ok") is True or ex.get("launch_ok") is True
+        if (launched or reason in ("started", "not_applicable")
+                or not _is_exec_plan(block.get("plan") or gs.get("plan"))):
+            return None
+    if _instruction_only_skill(block, data):
         return None
-    return str(gs.get("start_reason") or "unknown").replace("_", " ")
+    return (reason or "unknown").replace("_", " ")
 
 
 def _apply_behavioral_score(data: dict, block: dict | None) -> dict:
@@ -687,12 +742,19 @@ def _apply_behavioral_score(data: dict, block: dict | None) -> dict:
     from src.scanner.behavioral.score_effect import behavioral_score_effect
     eff = behavioral_score_effect(int(data.get("trust_score") or 0), block)
     out = dict(data)
-    gap = _sandbox_gap(block)
+    gap = _sandbox_gap(block, data)
     if gap:
         out["coverage_gaps"] = {**(data.get("coverage_gaps") or {}), "sandbox_not_observed": gap}
     out["behavioral_score_effect"] = {k: eff[k] for k in
                                       ("applied", "static_score", "score", "delta", "reason")}
     if not eff["applied"]:
+        if gap and out.get("grade") == "A+":
+            # The legacy letter follows the mark: A+ was set on the static scan, and a
+            # gap that withholds the mark takes it back to the plain letter for the score.
+            crit = int(((data.get("findings") or {}).get("critical")) or 0)
+            out["grade"] = _display_grade(
+                int(data.get("trust_score") or 0),
+                _certified_mark({**out, "behavioral": block}), crit)
         return out
     score = eff["score"]
     tier = _compute_tier(score)

@@ -180,10 +180,9 @@ CASES = {
         "Parts: " + " ".join(b64(P)[i:i + 8] for i in range(0, len(b64(P)), 8)) + "\n"),
     # \\uXXXX escapes and HTML entities are not decoded.
     "gap_unicode_escapes": skill("Note: " + "".join(f"\\u{ord(c):04x}" for c in P) + "\n"),
-    # Plain-text injection in the SKILL.md BODY: found while building this set, older
-    # than it. analyze_skill reads only the frontmatter name + description and scripts
-    # with the injection matcher; the body and other markdown are not read in plain text.
-    "gap_plain_text_body_injection": skill(f"House rule: {P}\n"),
+    # Plain-text injection in the SKILL.md BODY (a known gap here until
+    # src/scanner/skill_prose.py; its own set is cases_skill_prose).
+    "plain_text_body_injection": skill(f"House rule: {P}\n"),
 
     # ── controls ─────────────────────────────────────────────────────────────────────
     "ctl_benign_b64_example_in_fence": skill(
