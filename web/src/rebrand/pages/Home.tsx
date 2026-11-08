@@ -16,7 +16,7 @@ import { SandboxTotalsStrip } from '../components/SandboxStats'
 import SEOHead from '../../components/SEOHead'
 import { inSnapshot } from '../lib/snapshot'
 
-const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'crates:serde', 'hf:openai-community/gpt2', 'mcp:https://…', 'a repo, package, model, or MCP server']
+const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'crates:serde', 'hf:openai-community/gpt2', 'mcp:https://…', 'a2a:https://…', 'a repo, package, model, MCP server, or A2A agent card']
 
 /**
  * AgentAvow rebrand homepage.
@@ -99,6 +99,11 @@ export default function RebrandHome() {
     // Live MCP server: `mcp:https://…`.
     const mcp = v.match(/^mcp\s*:\s*(https?:\/\/.+)$/i)
     if (mcp) { navigate(rp('/rebrand/check/mcp') + '?endpoint=' + encodeURIComponent(mcp[1].trim())); return }
+    // A2A Agent Card: `a2a:https://…`, or a pasted URL to a well-known card path.
+    const a2a = v.match(/^a2a\s*:\s*(https?:\/\/.+)$/i)
+    if (a2a || /^https?:\/\/\S+\/\.well-known\/agent(?:-card)?\.json(?:[?#]\S*)?$/i.test(v)) {
+      navigate(rp('/rebrand/check/a2a') + '?card=' + encodeURIComponent(a2a ? a2a[1].trim() : v)); return
+    }
     // Agent Skill: `skill:owner/repo`.
     const sk = v.match(/^skill\s*:\s*(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i)
     if (sk) { navigate(rp(`/rebrand/check/skill/${sk[1]}/${sk[2]}`)); return }
@@ -461,7 +466,7 @@ export default function RebrandHome() {
           </div>
           <div className="grid md:grid-cols-3 rounded-2xl overflow-hidden border border-border/60 mt-8 glass">
             {[
-              ['01', 'Paste a URL', 'A repo, MCP server, npm/PyPI package, or skill. No signup.'],
+              ['01', 'Paste a URL', 'A repo, MCP server, npm/PyPI package, skill, or A2A Agent Card. No signup.'],
               ['02', 'We scan it', 'Across 12 categories — secrets, exec sinks, exfiltration, prompt injection, obfuscation, deps.'],
               ['03', 'Get a signed score', 'A 0–100 trust score plus a signed attestation anyone can verify offline against our public key.'],
             ].map(([n, h, p], i) => (

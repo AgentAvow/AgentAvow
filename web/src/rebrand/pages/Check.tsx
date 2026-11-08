@@ -199,7 +199,7 @@ function CategoryFindings({ categoryScores, findings, maxFindings = 15, emptyMes
   )
 }
 
-const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'crates:serde', 'hf:openai-community/gpt2', 'mcp:https://…', 'a repo, package, model, or MCP server']
+const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'crates:serde', 'hf:openai-community/gpt2', 'mcp:https://…', 'a2a:https://…', 'a repo, package, model, MCP server, or A2A agent card']
 
 /** "Watch this tool" — the PRIMARY action. Full-width gradient CTA.
  * Works across every surface: pass the coordinate as stored server-side
@@ -808,12 +808,14 @@ function Hero() {
     ['HF model', 'hf:openai-community/gpt2'],
     ['Container', 'docker:nginx'],
     ['MCP server', 'mcp:https://mcp.deepwiki.com/mcp'],
+    ['A2A agent card', 'a2a:https://agentavow.com/.well-known/agent-card.json'],
   ]
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-20 text-center">
       <SEOHead title="Check a tool" description="Is this tool safe for your agent to connect? Paste a GitHub repo, MCP server, npm/PyPI/crates package, Docker image, Hugging Face model or agent skill for Safe to connect, Review before you connect, or Do not connect, with a signed trust score." path="/check" />
       <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight">Is this tool <span className="gradient-text-bio">safe</span>?</h1>
       <p className="mt-4 text-text-muted max-w-[46ch] mx-auto">Paste anything your agent connects to. We'll tell you — in plain English — whether it's safe, and prove it with a signed score.</p>
+      <p className="mt-2 text-[13px] text-text-muted max-w-[56ch] mx-auto">Paste any A2A Agent Card URL for an answer, findings and a signed attestation, including whether the card&apos;s own signature verifies.</p>
       <form onSubmit={(e) => { e.preventDefault(); go() }} className="glass mt-7 mx-auto max-w-[560px] flex gap-2.5 rounded-2xl p-2 pl-4 shadow-lg shadow-primary/10">
         <input value={value} onChange={(e) => setValue(e.target.value)} placeholder={value ? '' : hint}
           className="flex-1 min-w-0 bg-transparent outline-none font-mono text-[15px] text-text placeholder:text-text-muted" />

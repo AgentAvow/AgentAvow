@@ -654,6 +654,13 @@ def analyze_a2a_card(raw: dict, *, card_url: str, signature: dict | None = None
         res.coverage_gaps[SIGNATURE_UNVERIFIED_GAP] = 1
     elif sig.get("state") == SIG_VERIFIED:
         res.positive_signals.append("Agent card signature verifies")
+    else:
+        # Most published cards are unsigned (48 of 55 in the 2026-11-07 sample), and
+        # A2A 1.0 makes signing optional: a note only, never a score or decision input.
+        res.findings.append(_finding(
+            "card_signature", "The card is not signed", "info", "card:signatures",
+            "Signing the card (A2A 1.0 §8.4) lets a client check it was not altered"
+            " between your site and theirs."))
 
     res.coverage_gaps.update(budget.gaps())
     res.capabilities = cap_counts

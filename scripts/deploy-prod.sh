@@ -221,6 +221,25 @@ if $FRONTEND; then
     done
     ok "Frontend built to web/dist/"
   fi
+  # The build copied the UNSIGNED web/public agent card into web/dist; sign it on the
+  # host with the catalog key (scripts/refresh_agent_card.sh). Warn-only: an unsigned
+  # card still serves, and the A2A check reads it as an info note.
+  step "Signing /.well-known/agent-card.json (A2A 1.0 §8.4)"
+  if $DRY_RUN; then
+    echo "    Would run: cd ~/${PROJECT_DIR} && ./scripts/refresh_agent_card.sh"
+  else
+    if card_out=$(remote "cd ~/${PROJECT_DIR} && bash scripts/refresh_agent_card.sh" 2>&1); then
+      card_signed=true
+    else
+      card_signed=false
+    fi
+    printf '%s\n' "$card_out" | sed 's/^/    /'
+    if $card_signed; then
+      ok "Agent card signed"
+    else
+      warn "Agent card left unsigned; run scripts/refresh_agent_card.sh on the host"
+    fi
+  fi
 fi
 
 # --- Step 5: Restart services ---

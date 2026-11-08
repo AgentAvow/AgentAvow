@@ -64,7 +64,8 @@ def card_v1(**over) -> dict:
 
 
 def names(res) -> list[tuple[str, str, str]]:
-    return [(f.severity, f.category, f.name) for f in res.findings]
+    """Findings that are not the info-only "not signed" note."""
+    return [(f.severity, f.category, f.name) for f in res.findings if f.severity != "info"]
 
 
 def sev_of(res, category: str) -> list[str]:
@@ -571,6 +572,32 @@ def test_absent_signature():
     assert names(res) == []
 
 
+def test_unsigned_card_is_an_info_note_only():
+    """Kenne, 2026-11-07: an unsigned card gets an info note with no score or
+    decision effect."""
+    from src.scanner.scan import ScanResult, _calculate_category_scores, _calculate_trust_score
+
+    unsigned = analyze_a2a_card(card_v1(), card_url=CARD_URL)
+    note = [f for f in unsigned.findings if f.category == "card_signature"]
+    assert [(f.severity, f.name, f.file_path) for f in note] == [
+        ("info", "The card is not signed", "card:signatures")]
+    assert unsigned.coverage_gaps == {}
+    # Same card, with and without the note: identical score, axes and answer.
+    def scored(findings):
+        sr = ScanResult(repo="a2a:x", stars=0, description="", framework="a2a")
+        sr.findings, sr.files_scanned = findings, unsigned.skill_count
+        return _calculate_trust_score(sr), _calculate_category_scores(sr)
+    without = [f for f in unsigned.findings if f.severity != "info"]
+    assert scored(unsigned.findings) == scored(without)
+    d = decide(_data(unsigned))
+    assert (d.decision, d.reason) == ("safe", "agent card clean; agent code not inspected")
+    # A verified or unverified signature carries no "not signed" note.
+    for state in (SIG_VERIFIED, SIG_UNVERIFIED):
+        res = analyze_a2a_card(card_v1(), card_url=CARD_URL,
+                               signature={"state": state, "count": 1, "reason": "x"})
+        assert not any(f.name == "The card is not signed" for f in res.findings)
+
+
 def test_unverified_signature_is_review_never_do_not_connect():
     sig = {"state": SIG_UNVERIFIED, "count": 1, "reason": "no key matches its kid"}
     res = analyze_a2a_card(card_v1(), card_url=CARD_URL, signature=sig)
@@ -717,7 +744,8 @@ def test_our_own_agent_card_grades_and_says_what_it_is():
     p = Path(__file__).resolve().parent.parent / "web/public/.well-known/agent-card.json"
     card = json.loads(p.read_text())
     res = analyze_a2a_card(card, card_url="https://agentavow.com/.well-known/agent-card.json")
-    assert [f.severity for f in res.findings if f.severity != "low"] == []
+    assert [f.severity for f in res.findings if f.severity not in ("low", "info")] == []
+    assert "signatures" not in card  # signed on the host at deploy time
     assert decide(_data(res)).decision == "safe"
     assert card["supportedInterfaces"] == []  # we serve no A2A endpoint yet
     assert "does not serve the A2A message protocol" in card["description"]
