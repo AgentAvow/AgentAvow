@@ -1,0 +1,51 @@
+{
+  "suite": "tool-manifest-digest-v1-numbers",
+  "profile": "agentavow.mcp-tool-definition.v1",
+  "status": "additive to tool-manifest-digest-v1; v1's vector file is unchanged",
+  "rule": "Every JSON number is read as an IEEE 754 double, as ECMAScript JSON.parse reads it, and printed as ECMAScript Number::toString prints it (RFC 8785 section 3.2.2.3). Fractions are digestible. An integer beyond 2^53 is hashed at its double value. -0 prints as 0.",
+  "derivation": "digest = 'sha256:' + hex(sha256(preimage)); preimage = JCS({profile, tool}) with tool restricted to name, title, description, inputSchema, outputSchema, annotations; parse definition_json with JSON.parse or equivalent",
+  "produced_by": "src/scanner/mcp_scan.py tool_definition_digest (the issuer), via generate.py",
+  "same_digest": [
+    [
+      "integer-2^53",
+      "integer-2^53+1"
+    ]
+  ],
+  "cases": [
+    {
+      "name": "fraction",
+      "note": "Fractions in inputSchema. Each is written as the shortest decimal that reads back to the same double.",
+      "definition_json": "{\"name\":\"set_limit\",\"description\":\"Set a numeric limit.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"number\",\"minimum\":-273.15,\"multipleOf\":0.1}},\"required\":[\"value\"]}}",
+      "preimage": "{\"profile\":\"agentavow.mcp-tool-definition.v1\",\"tool\":{\"description\":\"Set a numeric limit.\",\"inputSchema\":{\"properties\":{\"value\":{\"minimum\":-273.15,\"multipleOf\":0.1,\"type\":\"number\"}},\"required\":[\"value\"],\"type\":\"object\"},\"name\":\"set_limit\"}}",
+      "digest": "sha256:39ad9056a44669e93df7979a688e516d9b16fb3928d3c6a1ec1dc91083b62117"
+    },
+    {
+      "name": "integer-2^53",
+      "note": "An integer at 2^53, one past Number.MAX_SAFE_INTEGER. A double holds it exactly.",
+      "definition_json": "{\"name\":\"set_limit\",\"description\":\"Set a numeric limit.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"integer\",\"maximum\":9007199254740992}},\"required\":[\"value\"]}}",
+      "preimage": "{\"profile\":\"agentavow.mcp-tool-definition.v1\",\"tool\":{\"description\":\"Set a numeric limit.\",\"inputSchema\":{\"properties\":{\"value\":{\"maximum\":9007199254740992,\"type\":\"integer\"}},\"required\":[\"value\"],\"type\":\"object\"},\"name\":\"set_limit\"}}",
+      "digest": "sha256:879d4ebf29d98c29810f072b3f248b4f3a00c630a361c3822ed88e6d3e3ace41"
+    },
+    {
+      "name": "integer-2^53+1",
+      "note": "An integer at 2^53 + 1. No double holds it: JSON.parse reads it as 2^53, and the issuer does the same. So its digest equals the integer-2^53 case's.",
+      "definition_json": "{\"name\":\"set_limit\",\"description\":\"Set a numeric limit.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"integer\",\"maximum\":9007199254740993}},\"required\":[\"value\"]}}",
+      "preimage": "{\"profile\":\"agentavow.mcp-tool-definition.v1\",\"tool\":{\"description\":\"Set a numeric limit.\",\"inputSchema\":{\"properties\":{\"value\":{\"maximum\":9007199254740992,\"type\":\"integer\"}},\"required\":[\"value\"],\"type\":\"object\"},\"name\":\"set_limit\"}}",
+      "digest": "sha256:879d4ebf29d98c29810f072b3f248b4f3a00c630a361c3822ed88e6d3e3ace41"
+    },
+    {
+      "name": "large-exponent",
+      "note": "A large exponent (1e300), and 1e21, the first integer ECMAScript prints in exponent form.",
+      "definition_json": "{\"name\":\"set_limit\",\"description\":\"Set a numeric limit.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"number\",\"maximum\":1e300,\"exclusiveMinimum\":1e21}},\"required\":[\"value\"]}}",
+      "preimage": "{\"profile\":\"agentavow.mcp-tool-definition.v1\",\"tool\":{\"description\":\"Set a numeric limit.\",\"inputSchema\":{\"properties\":{\"value\":{\"exclusiveMinimum\":1e+21,\"maximum\":1e+300,\"type\":\"number\"}},\"required\":[\"value\"],\"type\":\"object\"},\"name\":\"set_limit\"}}",
+      "digest": "sha256:7270f32abd13f6fad32b4ecab8dea92844cde038b19402cca72a38593674829b"
+    },
+    {
+      "name": "negative-zero",
+      "note": "-0 written as an integer and as a fraction. Both canonicalize to 0.",
+      "definition_json": "{\"name\":\"set_limit\",\"description\":\"Set a numeric limit.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"number\",\"minimum\":-0,\"default\":-0.0}},\"required\":[\"value\"]}}",
+      "preimage": "{\"profile\":\"agentavow.mcp-tool-definition.v1\",\"tool\":{\"description\":\"Set a numeric limit.\",\"inputSchema\":{\"properties\":{\"value\":{\"default\":0,\"minimum\":0,\"type\":\"number\"}},\"required\":[\"value\"],\"type\":\"object\"},\"name\":\"set_limit\"}}",
+      "digest": "sha256:3114f775e61ae15aff2408481493fed7fbfed53a8c1baa96588792722761f108"
+    }
+  ]
+}
