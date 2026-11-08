@@ -139,6 +139,9 @@ const RebrandFAQ = lazyWithReload(() => import('./rebrand/pages/FAQ'))
 const RebrandSettings = lazyWithReload(() => import('./rebrand/pages/Settings'))
 const RebrandAvatar = lazyWithReload(() => import('./rebrand/pages/Avatar'))
 const RebrandSandbox = lazyWithReload(() => import('./rebrand/pages/Sandbox'))
+const RebrandClaudeCode = lazyWithReload(() => import('./rebrand/pages/ClaudeCode'))
+const RebrandGet = lazyWithReload(() => import('./rebrand/pages/Get'))
+const RebrandTeams = lazyWithReload(() => import('./rebrand/pages/Teams'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -290,6 +293,9 @@ function AppRoutes() {
           <Route path="settings" element={<RebrandSettings />} />
           <Route path="avatar" element={<RebrandAvatar />} />
           <Route path="sandbox" element={<RebrandSandbox />} />
+          <Route path="claude-code" element={<RebrandClaudeCode />} />
+          <Route path="get" element={<RebrandGet />} />
+          <Route path="teams" element={<RebrandTeams />} />
           <Route path="legal" element={<RebrandLegal />} />
           <Route path="legal/:section" element={<RebrandLegal />} />
           <Route path="*" element={<RebrandNotFound />} />

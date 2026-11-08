@@ -482,6 +482,9 @@ def coverage_gap_notes(data: dict) -> list[str]:
     n = _int(g.get("encoded_text_unread"))
     if n > 0:
         notes.append(f"{_files_phrase(n, 'agent-facing text')} {_was(n)} not fully decoded")
+    n = _int(g.get("bytecode_unread"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n, 'Python bytecode file')} {_was(n)} not read")
     n = _int(g.get("oversized_files"))
     if n > 0:
         notes.append(f"{_files_phrase(n)} over 500 KB {_was(n)} not fully read")
@@ -804,6 +807,9 @@ def cheap_coverage_gap(data: dict) -> bool:
     if _int(g.get("oversized_agent_files")) > 0 or _int(g.get("skill_refs_unread")) > 0:
         return True
     if _int(g.get("encoded_text_unread")) > 0:
+        return True
+    # Shipped bytecode is code nobody read, and it costs an attacker nothing to add.
+    if _int(g.get("bytecode_unread")) > 0:
         return True
     if _int(g.get("skills_ungraded")) > 0:
         return True
