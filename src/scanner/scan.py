@@ -485,6 +485,52 @@ def _tree_blobs(tree: list[dict], oversized_out: list | None = None) -> list[dic
     return out
 
 
+# Files that cannot run on their own: what an instruction-only Agent Skill is made of.
+# An ALLOWLIST, so anything else (a script in any language, a binary, an extensionless
+# file, a manifest an installer or agent runs) counts as runnable. Used only to tell an
+# instruction-only skill from one whose runnable code the sandbox did not find.
+_INERT_EXTS = frozenset({
+    ".md", ".markdown", ".mdx", ".txt", ".rst", ".adoc",
+    ".json", ".yaml", ".yml", ".toml", ".csv", ".tsv", ".xml",
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".pdf",
+})
+_INERT_NAMES = frozenset({
+    "license", "licence", "copying", "notice", "authors", "contributors", "codeowners",
+    "readme", "changelog", ".gitignore", ".gitattributes", ".editorconfig",
+})
+# Manifests an installer, a hook runner or an agent executes, though they look inert.
+_RUNNABLE_NAMES = frozenset({
+    "hooks.json", "plugin.json", ".mcp.json", "package.json", "pyproject.toml",
+    "setup.cfg", "pnpm-workspace.yaml", "taskfile.yml", "taskfile.yaml",
+})
+_RUNNABLE_DIRS = frozenset({"scripts", "bin", "hooks"})
+
+
+def _runnable_tree_files(items: list) -> int:
+    """How many entries of a GitHub tree listing could run: an executable bit or a
+    symlink (git mode 100755 / 120000), a hook / MCP / package manifest, anything under
+    a ``scripts/`` / ``bin/`` / ``hooks/`` directory, or any file that is not plainly
+    documentation, data or an image (``_INERT_EXTS``). Counts EVERY directory, including
+    the ones the sandbox skips (``node_modules``, ``.venv``): code an agent is told to
+    run from there still runs. 0 means the tree is instruction-only."""
+    n = 0
+    for it in items or []:
+        if not isinstance(it, dict) or it.get("type", "blob") != "blob":
+            continue
+        path = str(it.get("path") or "")
+        if not path:
+            continue
+        parts = path.lower().split("/")
+        base = parts[-1]
+        ext = posixpath.splitext(base)[1]
+        if (str(it.get("mode") or "") in ("100755", "120000")
+                or base in _RUNNABLE_NAMES
+                or any(p in _RUNNABLE_DIRS for p in parts[:-1])
+                or not (ext in _INERT_EXTS or base in _INERT_NAMES)):
+            n += 1
+    return n
+
+
 async def _note_github(resp: httpx.Response, context: str) -> None:
     """Route a metered GitHub response through real-time rate-limit protection.
 
@@ -6860,6 +6906,12 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
         if extra:
             gaps["oversized_files"] = int(gaps.get("oversized_files") or 0) + extra
     _fold_fetch_gaps(gaps, eco, fetched)
+    # Python bytecode in an sdist (never read): medium + the gap. Wheels and images are
+    # not graded (bytecode is normal there).
+    from src.scanner.bytecode import artifact_bytecode
+    _bc_findings, _bc_gaps = artifact_bytecode(fetched)
+    result.findings = result.findings + _bc_findings
+    gaps.update(_bc_gaps)
     result.coverage_gaps = gaps
     # Declared-scope manifest shipped INSIDE the artifact (same file the repo scan reads
     # at the repo root). Fail-open: absent/malformed = no declaration. The behavioral
@@ -6994,11 +7046,14 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
     from src.scanner.mcp_scan import client_view_findings, oversize_findings
     result.findings.extend(oversize_findings(data.get("lists_too_large")))
     _view = data.get("client_view")
+    _view_gaps: dict = {}
     if _view and _view.get("differs"):
         result.findings.extend(client_view_findings(_view, data.get("tools")))
         _seen = {(f.name, f.file_path) for f in result.findings}
-        for f in analyze_mcp(_view.get("tools"), server_info=data.get("server_info"),
-                             server_url=endpoint_url).findings:
+        _vmcp = analyze_mcp(_view.get("tools"), server_info=data.get("server_info"),
+                            server_url=endpoint_url)
+        _view_gaps = _vmcp.coverage_gaps
+        for f in _vmcp.findings:
             if (f.name, f.file_path) not in _seen:
                 result.findings.append(f)
     # Pin the served tool definitions, one digest per tool name. A later scan whose
@@ -7019,6 +7074,7 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
         else compute_icon_fingerprint(data.get("tools"), data.get("server_info")))
     from src.scanner.mcp_tool_list import build_tool_list
     result.tool_list = build_tool_list(data.get("tools"))
+    from src.preflight.tool_review import tool_review_facts
     result.files_scanned = mcp.tool_count
     result.total_scannable_files = mcp.tool_count
     result.primary_language = "MCP"
@@ -7036,6 +7092,9 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
         "prompt_count": mcp.prompt_count, "capabilities": mcp.capabilities,
         "lethal_trifecta": mcp.lethal_trifecta,
         "blast_radius": mcp.blast_radius,
+        # Per-tool facts the store review rules ask about (title, hints, name length,
+        # read/write split). Unsigned display data for Connector Preflight; not scored.
+        "review_facts": tool_review_facts(data.get("tools")),
     }
     result.coverage = build_coverage(
         surface="mcp", scan_depth=SCAN_DEPTH_ARTIFACT_LIVE, live_observed=True,
@@ -7059,6 +7118,10 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
     for _m in data.get("lists_too_large") or ():
         if _m in _lists:
             _gaps[f"{_lists[_m]}_list_too_large"] = True
+    # Encoded agent-facing text the decode budget did not cover (both views).
+    for _g in (mcp.coverage_gaps, _view_gaps):
+        for _k, _v in (_g or {}).items():
+            _gaps[_k] = int(_gaps.get(_k) or 0) + int(_v)
     result.coverage_gaps = _gaps
     result.trust_score = _calculate_trust_score(result)
     result.category_scores = _calculate_category_scores(result)
@@ -7126,7 +7189,11 @@ async def scan_skill(owner: str, repo: str, skill: str | None = None) -> ScanRes
         # one in its directory) is disclosed as not read (coverage gaps).
         big = [str(it.get("path")) for it in (tree_meta.get("oversized") or [])
                if isinstance(it, dict) and it.get("path")]
-        tree_info = {"oversized": big, "truncated": bool(trunc)}
+        tree_info = {"oversized": big, "truncated": bool(trunc),
+                     # What could run anywhere in the repo the sandbox clones (over-cap
+                     # blobs included); unknown (None) on a partial tree.
+                     "runnable_files": None if trunc else _runnable_tree_files(
+                         list(tree) + list(tree_meta.get("oversized") or []))}
         skill_mds = [p for p in blobs if p.lower().endswith("skill.md")]
         if not skill_mds:
             result.error = "No SKILL.md found — this repo isn't a recognizable Agent Skill."
@@ -7244,7 +7311,8 @@ async def _grade_skill_at(
         if info.get("truncated") is True:
             sgaps["tree_truncated"] = True
 
-        skill = analyze_skill(files, skill_md_path=skill_md_path)
+        skill = analyze_skill(files, skill_md_path=skill_md_path, tree_paths=blobs + big)
+        sgaps.update(skill.coverage_gaps)
 
         # Env vars the skill's scripts read: the behavioral sandbox fills each
         # secret-named one with a canary when it runs the hooks and scripts.
@@ -7264,6 +7332,10 @@ async def _grade_skill_at(
             "has_lifecycle_hooks": skill.has_lifecycle_hooks, "script_count": skill.script_count,
             "blast_radius": skill.blast_radius,
             "tree_digest": skill.tree_digest,
+            # Files in the cloned repo that could run (``_runnable_tree_files``); 0 =
+            # instruction-only, None = unknown. Lets a sandbox "no entrypoint" on an
+            # instruction-only skill keep the Certified mark (Kenne, 2026-11-07).
+            "runnable_files": (tree_info or {}).get("runnable_files"),
         }
         if skill.script_count == 0 and not skill.has_lifecycle_hooks and result.critical_count == 0:
             result.positive_signals.append("No bundled scripts or lifecycle hooks")
@@ -7784,6 +7856,15 @@ async def scan_repo(
             gaps["fetch_failed"] = fetch_failed
         if scan_errors:
             gaps["scan_errors"] = scan_errors
+        # Python bytecode committed to the repo (the PyCache trap): never read, so it is
+        # reported by itself. The tree lists tracked files only.
+        from src.scanner.bytecode import repo_bytecode
+        _bc_findings, _bc_gaps = repo_bytecode(
+            [it["path"] for it in tree if isinstance(it, dict) and it.get("path")]
+            + [str(it.get("path")) for it in (_repo_meta.get("oversized") or [])
+               if isinstance(it, dict) and it.get("path")])
+        result.findings.extend(_bc_findings)
+        gaps.update(_bc_gaps)
         npm_scripts.restore_externally_invoked(result.findings, repo_texts)
         # A test-named file that is not test code (or that running code uses) is graded
         # as shipped code.

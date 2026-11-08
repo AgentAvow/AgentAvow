@@ -310,6 +310,9 @@ class McpScanResult:
     server_name: str | None = None
     lethal_trifecta: bool = False
     blast_radius: dict = field(default_factory=dict)  # {level, capabilities, why}
+    # What this analysis selected but could not cover (``encoded_text_unread``); the
+    # caller merges it into the scan's coverage_gaps.
+    coverage_gaps: dict = field(default_factory=dict)
 
 
 # Human labels for the capability taxonomy, for the blast-radius UI.
@@ -445,6 +448,11 @@ def analyze_mcp(
     )
     caps_union: set[str] = set()
     cap_counts: dict[str, int] = {}
+    # Encoded instructions (base64 / hex / percent / rot13 / Caesar, up to two layers)
+    # in every description an agent reads, decoded and read with the injection matcher.
+    from src.scanner.encoded_instructions import Budget as _EncBudget
+    from src.scanner.encoded_instructions import scan_text as _scan_encoded
+    enc_budget = _EncBudget()
     mutates_any = False  # a destructive-verb tool name / lead, outside the cap taxonomy
 
     for t in tools:
@@ -460,6 +468,11 @@ def analyze_mcp(
         # 2. input-schema risk
         schema = t.get("inputSchema") or t.get("input_schema") or {}
         pdescs = _schema_descriptions(schema)
+        result.findings.extend(_scan_encoded(
+            f"{tname}\n{t.get('title') or ''}\n{tdesc}", where, enc_budget, lines=False))
+        for ppath, pdesc in pdescs:
+            result.findings.extend(_scan_encoded(
+                pdesc, f"{where}:param:{ppath}", enc_budget, lines=False))
         pnames = sorted({p.rsplit(".", 1)[-1] for p, _d in pdescs})
         exfil_where = None
         ttitle = str(t.get("title", "") or "")
@@ -559,10 +572,17 @@ def analyze_mcp(
         if isinstance(r, dict):
             result.findings.extend(_scan_text_for_injection(
                 str(r.get("description", "") or ""), f"resource:{r.get('name', '?')}"))
+            result.findings.extend(_scan_encoded(
+                str(r.get("description", "") or ""), f"resource:{r.get('name', '?')}",
+                enc_budget, lines=False))
     for p in prompts:
         if isinstance(p, dict):
             result.findings.extend(_scan_text_for_injection(
                 str(p.get("description", "") or ""), f"prompt:{p.get('name', '?')}"))
+            result.findings.extend(_scan_encoded(
+                str(p.get("description", "") or ""), f"prompt:{p.get('name', '?')}",
+                enc_budget, lines=False))
+    result.coverage_gaps.update(enc_budget.gaps())
 
     # icons (MCP 2025-11-25): active content, outside content, non-https / private /
     # third-party hosts, non-image or oversized data: URIs. Not part of any digest.
@@ -657,9 +677,14 @@ def tool_definition_digest(tool: dict) -> str:
     restricted to ``_TOOL_DIGEST_FIELDS``; a missing or null field is omitted.
 
     Never raises. A definition JCS cannot represent (NaN/Infinity, which Python's
-    JSON parser accepts) gets a digest over sorted-key JSON under a distinct
+    JSON parser accepts; a number too large for a double; a lone surrogate, which
+    ``\\ud800`` escapes produce) gets a digest over sorted-key JSON under a distinct
     profile label: still stable for drift detection, but not reproducible by an
-    independent verifier, and never equal to a portable digest.
+    independent verifier, and never equal to a portable digest. That text is encoded
+    as UTF-8 with lone surrogates passed through (``surrogatepass``), so it carries
+    every character of the definition: a change to such a definition is drift.
+    ``.unhashable`` is left only for a body ``json.dumps`` itself refuses, which a
+    parsed ``tools/list`` does not produce.
     """
     body = {f: tool[f] for f in _TOOL_DIGEST_FIELDS if tool.get(f) is not None}
     try:
@@ -669,8 +694,9 @@ def tool_definition_digest(tool: dict) -> str:
     except Exception:
         pass
     try:
-        return _sha256(MCP_TOOL_DIGEST_PROFILE + ".noncanonical\n" + json.dumps(
-            body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str))
+        text = MCP_TOOL_DIGEST_PROFILE + ".noncanonical\n" + json.dumps(
+            body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+        return "sha256:" + hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
     except Exception:
         return _sha256(MCP_TOOL_DIGEST_PROFILE + ".unhashable")
 

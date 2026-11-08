@@ -17,8 +17,10 @@ import Badge from './rebrand/pages/Badge'
 import Browse from './rebrand/pages/Browse'
 import Certified from './rebrand/pages/Certified'
 import Check from './rebrand/pages/Check'
+import ClaudeCode from './rebrand/pages/ClaudeCode'
 import FAQ from './rebrand/pages/FAQ'
 import ForDevelopers from './rebrand/pages/ForDevelopers'
+import Get from './rebrand/pages/Get'
 import Home from './rebrand/pages/Home'
 import HowItWorks from './rebrand/pages/HowItWorks'
 import Preflight from './rebrand/pages/Preflight'
@@ -26,6 +28,7 @@ import Research from './rebrand/pages/Research'
 import Sandbox from './rebrand/pages/Sandbox'
 import StateOfAgentSecurityQ3 from './rebrand/pages/StateOfAgentSecurityQ3'
 import Submit from './rebrand/pages/Submit'
+import Teams from './rebrand/pages/Teams'
 import TrustIndex from './rebrand/pages/TrustIndex'
 
 /**
@@ -47,18 +50,22 @@ const PAGES: Record<string, ReactNode> = {
   '/preflight': <Preflight />,
   '/badge': <Badge />,
   '/sandbox': <Sandbox />,
+  '/claude-code': <ClaudeCode />,
+  '/get': <Get />,
+  '/teams': <Teams />,
 }
 
 export const ROUTES = Object.keys(PAGES)
 
 /**
- * The only queries the build fetches: aggregate figures, plus the home page's example
- * of a top-scoring tool. Lists that name tools and their answers stay out of static
- * HTML until conflicting catalog rows are resolved (audit fix 5), so /index ships
- * without its boards and /browse without its rows. home-ex-adopt stays out as well:
- * its endpoint adds to a tool's public check count on every call.
+ * The only queries the build fetches: aggregate figures. answer-mix (the answer mix and
+ * the Certified count) and sandbox-stats carry numbers only. Lists that name tools and
+ * their answers stay out of static HTML until conflicting catalog rows are resolved
+ * (audit fix 5), so /index ships without its boards and feed, /browse without its rows
+ * and the home page without its example card. home-ex-adopt stays out as well: its
+ * endpoint adds to a tool's public check count on every call.
  */
-const BUILD_QUERIES = new Set(['flagged-stat', 'rebrand-home-catalog', 'rebrand-catalog', 'trust-index'])
+const BUILD_QUERIES = new Set(['flagged-stat', 'answer-mix', 'sandbox-stats', 'rebrand-catalog', 'trust-index'])
 
 /** Fetched for their totals only: the rows are dropped, and the browser fetches its own. */
 const TOTALS_ONLY_QUERIES = new Set(['rebrand-catalog', 'trust-index'])

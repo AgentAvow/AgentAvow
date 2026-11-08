@@ -130,3 +130,19 @@ export async function fetchFlaggedStat(): Promise<FlaggedStat> {
   const { data } = await publicApi.get<FlaggedStat>('/public/scan-catalog/flagged-stat')
   return data
 }
+
+/** One /public/scan-catalog/recent item: the newest checks, newest first. */
+export interface RecentItem {
+  surface: string
+  name: string
+  full_name: string | null
+  trust_score: number | null
+  critical?: number | null
+  high?: number | null
+  at: string | null
+}
+
+export async function fetchRecent(limit: number): Promise<RecentItem[]> {
+  const { data } = await publicApi.get<{ items: RecentItem[] }>('/public/scan-catalog/recent', { params: { limit } })
+  return data.items || []
+}

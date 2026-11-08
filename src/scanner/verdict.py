@@ -201,6 +201,9 @@ SKILL_REF_UNREAD_REASON = "a file the skill's instructions use could not be read
 # A Hugging Face model's custom .py (too large, past the file cap, or not fetched):
 # custom code runs on load with trust_remote_code.
 CUSTOM_CODE_UNREAD_REASON = "the model's custom code could not be read"
+# Encoded text in an agent-facing file or description past the scan's decode budget
+# (src/scanner/encoded_instructions.py): padding past the cap is the cheap evasion.
+ENCODED_TEXT_UNREAD_REASON = "encoded text the agent reads could not all be decoded"
 
 # A hardcoded credential shipped in a tool (category ``secret``, e.g. an AWS key in
 # yt-dlp's extractors) exposes the vendor whose key leaked, not the person installing
@@ -476,6 +479,12 @@ def coverage_gap_notes(data: dict) -> list[str]:
     n = _int(g.get("custom_code_unread"))
     if n > 0:
         notes.append(f"{_files_phrase(n, 'custom code file')} in the model {_was(n)} not read")
+    n = _int(g.get("encoded_text_unread"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n, 'agent-facing text')} {_was(n)} not fully decoded")
+    n = _int(g.get("bytecode_unread"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n, 'Python bytecode file')} {_was(n)} not read")
     n = _int(g.get("oversized_files"))
     if n > 0:
         notes.append(f"{_files_phrase(n)} over 500 KB {_was(n)} not fully read")
@@ -719,6 +728,8 @@ def decide(data: dict) -> Decision:
         return done(DECISION_REVIEW, SKILL_REF_UNREAD_REASON)
     if _int(gap.get("custom_code_unread")) > 0:
         return done(DECISION_REVIEW, CUSTOM_CODE_UNREAD_REASON)
+    if _int(gap.get("encoded_text_unread")) > 0:
+        return done(DECISION_REVIEW, ENCODED_TEXT_UNREAD_REASON)
 
     found = any(sev(i) in ("critical", "high", "medium") and i.get("kind") != "capability"
                 and i.get("installed") is not False for i in items)
@@ -777,7 +788,8 @@ PADDED_FINDING = "Oversized source file padded with filler"
 
 def cheap_coverage_gap(data: dict) -> bool:
     """Whether ``coverage_gaps`` holds a gap that is cheap for an attacker to cause: a
-    fetch that failed, an MCP tool list unread or only partly read, a skill file not
+    fetch that failed, a sandbox run that never started the tool (or a pinned version
+    the sandbox has not run), an MCP tool list unread or only partly read, a skill file not
     read (any gap on a skill scan, or a collection skill not graded), an
     agent-instruction file over the read cap, or an oversized file the padding rule
     fired on. A plain big file (a bundled ``.js``) is not one: its head and tail were
@@ -788,12 +800,22 @@ def cheap_coverage_gap(data: dict) -> bool:
         return False
     if _int(g.get("fetch_failed")) > 0:
         return True
-    # A pinned version has no sandbox run of its own, and the mark waits for a final one.
-    if g.get("sandbox_not_observed") == "other_version":
+    # The sandbox was meant to start the tool and observed nothing: a pinned version
+    # with no run of its own (``other_version``), or a tool that never started, for any
+    # start reason (crashed, install failed, timeout, needs credentials, ...). Crashing on
+    # purpose under the sandbox is cheap, and the mark promises a finished, clean run
+    # (Kenne, 2026-11-07). ``unavailable`` (our sandbox did not run) is not one.
+    why = g.get("sandbox_not_observed")
+    if isinstance(why, str) and why and why != "unavailable":
         return True
     if g.get("tool_list_unread") is True or g.get("tool_list_paged") is True:
         return True
     if _int(g.get("oversized_agent_files")) > 0 or _int(g.get("skill_refs_unread")) > 0:
+        return True
+    if _int(g.get("encoded_text_unread")) > 0:
+        return True
+    # Shipped bytecode is code nobody read, and it costs an attacker nothing to add.
+    if _int(g.get("bytecode_unread")) > 0:
         return True
     if _int(g.get("skills_ungraded")) > 0:
         return True

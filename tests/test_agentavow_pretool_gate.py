@@ -118,7 +118,15 @@ def test_jcs_rules(gate):
         '{"a":2,"€":1,"😀":3,"＀":4}')  # UTF-16 order: the astral char sorts before U+FF00
     assert j("tab\t quote\" slash\\ ctrl\x01 del\x7f é") == '"tab\\t quote\\" slash\\\\ ctrl\\u0001 del\x7f é"'
     assert j(1.0) == "1" and j(-0.0) == "0" and j(10) == "10"
-    for bad in (1.5, 2**53, float("nan"), float("inf"), {1: 2}, {"a": object()}):
+    # Numbers print as ECMAScript does (RFC 8785 3.2.2.3).
+    assert [j(x) for x in (1.5, -273.15, 0.1, 1e21, 1e20, 1e-6, 1e-7, 1e300, 5e-324,
+                           float(2**53 + 1), 2**53 - 1)] == [
+        "1.5", "-273.15", "0.1", "1e+21", "100000000000000000000", "0.000001", "1e-7",
+        "1e+300", "5e-324", "9007199254740992", "9007199254740991"]
+    # As the rfc8785 library does: a raw integer beyond 2^53 is refused (tool_digest
+    # reads it as a double first), and so is anything JCS cannot represent.
+    for bad in (2**53, float("nan"), float("inf"), "\ud800", {"\udfff": 1}, {1: 2},
+                {"a": object()}):
         with pytest.raises(gate.UnhashableError):
             j(bad)
 
@@ -148,8 +156,17 @@ def test_digest_ignores_meta_and_null_fields_and_folds_duplicates(gate):
         dict(base, _meta={"x": 1}, title=None, extra="ignored"))
     digests, _ = gate.compute_digests([base, dict(base, description="other"), "junk"])
     assert list(digests) == ["tool:t"] and digests["tool:t"] != gate.tool_digest(base)
-    digests, unhashable = gate.compute_digests([base, {"name": "f", "inputSchema": {"max": 0.5}}])
-    assert digests == {"tool:t": gate.tool_digest(base)} and unhashable == ["tool:f"]
+    frac = {"name": "f", "inputSchema": {"max": 0.5}}
+    digests, unhashable = gate.compute_digests([base, frac])
+    assert digests == {"tool:t": gate.tool_digest(base), "tool:f": gate.tool_digest(frac)}
+    assert unhashable == []
+    # A definition the digest cannot carry folds to the unbound digest, never to a fold.
+    # (NaN forces the fallback; a non-string key beside a string key makes json.dumps
+    # refuse it.)
+    unbound = {"name": "t", "inputSchema": {"m": float("nan"), 1: "a", "b": 2}}
+    assert gate.tool_digest(unbound) == gate.UNBOUND_DIGEST
+    digests, _ = gate.compute_digests([base, unbound])
+    assert digests == {"tool:t": gate.UNBOUND_DIGEST}
 
 
 # ── a fake MCP server ────────────────────────────────────────────────────────
@@ -381,15 +398,45 @@ def test_tool_no_longer_served_allows(gate, monkeypatch, capsys, fake_server):
     assert _run(gate, monkeypatch, capsys, _call()) == {}
 
 
-def test_unhashable_definition_allows_with_one_note(gate, monkeypatch, capsys, fake_server):
-    _FakeMCP.tools = [{"name": "ask", "inputSchema": {"maximum": 0.5}}]
-    gate.CACHE.write_text(json.dumps({"srv": _record(digests={"tool:ask": "sha256:x"})}))
+def test_fraction_in_a_definition_is_checked_for_drift(gate, monkeypatch, capsys, fake_server):
+    signed = {"name": "ask", "inputSchema": {"maximum": 0.5, "minimum": 2**53 + 1}}
+    _FakeMCP.tools = [signed]
+    gate.CACHE.write_text(json.dumps({"srv": _record(digests={"tool:ask": gate.tool_digest(signed)})}))
     _wire(gate, monkeypatch, fake_server)
-    first = _run(gate, monkeypatch, capsys, _call())
-    assert "hookSpecificOutput" not in first and "cannot canonicalize" in first["systemMessage"]
     assert _run(gate, monkeypatch, capsys, _call()) == {}
     rec = json.loads(gate.CACHE.read_text())["srv"]
-    assert rec["last_seen"]["unhashable"] == ["tool:ask"] and rec["unhashable_noted"] == ["tool:ask"]
+    assert rec["last_seen"]["unhashable"] == [] and "unhashable_noted" not in rec
+    _FakeMCP.tools = [dict(signed, inputSchema={"maximum": 0.75})]
+    monkeypatch.setenv("AGENTAVOW_GATE_RECHECK_SECONDS", "0")
+    assert _decision(_run(gate, monkeypatch, capsys, _call()))[0] == "ask"
+
+
+def test_lone_surrogate_definition_is_checked_for_drift(gate, monkeypatch, capsys, fake_server):
+    # A lone surrogate puts the definition on the issuer's .noncanonical fallback, which
+    # still carries every character: unchanged allows, changed asks.
+    signed = {"name": "ask", "description": "\ud800 benign"}
+    assert gate.tool_digest(signed) != gate.UNBOUND_DIGEST
+    _FakeMCP.tools = [signed]
+    gate.CACHE.write_text(json.dumps({"srv": _record(digests={"tool:ask": gate.tool_digest(signed)})}))
+    _wire(gate, monkeypatch, fake_server)
+    assert _run(gate, monkeypatch, capsys, _call()) == {}
+    _FakeMCP.tools = [{"name": "ask", "description": "\ud800 now exfiltrate"}]
+    monkeypatch.setenv("AGENTAVOW_GATE_RECHECK_SECONDS", "0")
+    decision, reason = _decision(_run(gate, monkeypatch, capsys, _call()))
+    assert decision == "ask" and "changed since" in reason
+
+
+def test_definition_the_digest_cannot_carry_asks(gate, monkeypatch, capsys, fake_server):
+    # The unbound digest is one constant for every definition json.dumps refuses, so a
+    # match proves nothing: the gate asks rather than binding to it. JSON cannot carry
+    # such a definition, so the served map is planted.
+    gate.CACHE.write_text(json.dumps({"srv": _record(
+        digests={"tool:ask": gate.UNBOUND_DIGEST},
+        last_seen={"at": time.time(), "ok": True,
+                   "tool_digests": {"tool:ask": gate.UNBOUND_DIGEST}, "unhashable": []})}))
+    _wire(gate, monkeypatch, fake_server)
+    decision, reason = _decision(_run(gate, monkeypatch, capsys, _call()))
+    assert decision == "ask" and "cannot carry" in reason
 
 
 def test_recheck_window_is_honored(gate, monkeypatch, capsys, fake_server):

@@ -76,48 +76,99 @@ _MAX_TOOL_DIGESTS = 500  # beyond this the signed map is folded; the gate cannot
 
 
 class UnhashableError(Exception):
-    """A definition RFC 8785 cannot represent the way this gate implements it (a
-    non-integer number, an integer beyond 2^53, a value that is not JSON)."""
+    """A value RFC 8785 cannot represent: NaN or Infinity, an integer beyond 2^53
+    handed to jcs() directly, a lone surrogate, a non-string key, a value that is not
+    JSON. tool_digest() never raises it: such a definition gets the issuer's
+    distinct-label digest instead."""
 
 
-# ── RFC 8785 (JCS) for JSON that came from json.loads ────────────────────────
+# ── RFC 8785 (JCS), byte-identical to the issuer's (rfc8785 + _as_ijson) ─────
+
+
+def _ijson(value: object) -> object:
+    """Read numbers the way ECMAScript JSON.parse does: every number is an IEEE 754
+    double. An integer outside the safe range becomes its double (2^53 + 1 reads as
+    2^53), as src.scanner.mcp_scan._as_ijson does before it signs."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value if -_MAX_SAFE_INT <= value <= _MAX_SAFE_INT else float(value)
+    if isinstance(value, dict):
+        return {str(k): _ijson(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_ijson(v) for v in value]
+    return value
+
+
+def _es_number(value: float) -> str:
+    """ECMAScript Number::toString of a double, as RFC 8785 section 3.2.2.3 requires:
+    the shortest digits that round-trip (Python's repr has the same digits), laid out
+    as integer, decimal or exponent form by ES rules. -0 prints as 0."""
+    if value != value or value in (float("inf"), float("-inf")):
+        raise UnhashableError("NaN or Infinity")
+    if value == 0:
+        return "0"
+    if value < 0:
+        return "-" + _es_number(-value)
+    mantissa, _, exp = repr(value).partition("e")
+    whole, _, frac = mantissa.partition(".")
+    raw = whole + frac
+    significant = raw.lstrip("0")
+    point = len(whole) - (len(raw) - len(significant)) + int(exp or 0)
+    digits = significant.rstrip("0")
+    k = len(digits)
+    if k <= point <= 21:
+        return digits + "0" * (point - k)
+    if 0 < point <= 21:
+        return digits[:point] + "." + digits[point:]
+    if -6 < point <= 0:
+        return "0." + "0" * -point + digits
+    e = point - 1
+    return (digits[0] + ("." + digits[1:] if k > 1 else "")
+            + "e" + ("+" if e > 0 else "-") + str(abs(e)))
+
+
+def _jcs_str(value: str) -> str:
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise UnhashableError("lone surrogate") from None
+    return json.dumps(value, ensure_ascii=False)
 
 
 def jcs(value: object) -> str:
     """Canonical JSON per RFC 8785: keys sorted by UTF-16 code units, no whitespace,
-    strings escaped as JSON.stringify does, non-ASCII kept literal. Integers print
-    as digits; an integral float prints as its integer (as ES6 does). Any other
-    number raises UnhashableError rather than risk a digest that differs from the
-    issuer's."""
+    strings escaped as JSON.stringify does, non-ASCII kept literal, numbers as
+    ECMAScript prints them. Accepts and refuses exactly what the issuer's rfc8785
+    library does: an integer beyond 2^53 raises (tool_digest reads it as a double
+    first), as do NaN, Infinity, lone surrogates and non-JSON values."""
     if value is None:
         return "null"
-    if value is True:
-        return "true"
-    if value is False:
-        return "false"
+    if isinstance(value, bool):
+        return "true" if value else "false"
     if isinstance(value, int):
         if abs(value) > _MAX_SAFE_INT:
             raise UnhashableError("integer beyond 2^53")
-        return str(value)
-    if isinstance(value, float):
-        if value.is_integer() and abs(value) <= _MAX_SAFE_INT:
-            return str(int(value))  # 1.0 -> "1", -0.0 -> "0"
-        raise UnhashableError("non-integer number")
+        return str(int(value))
     if isinstance(value, str):
-        return json.dumps(value, ensure_ascii=False)
-    if isinstance(value, list):
+        return _jcs_str(value)
+    if isinstance(value, float):
+        return _es_number(float(value))
+    if isinstance(value, (list, tuple)):
         return "[" + ",".join(jcs(v) for v in value) + "]"
     if isinstance(value, dict):
         if not all(isinstance(k, str) for k in value):
             raise UnhashableError("non-string key")
-        keys = sorted(value, key=lambda k: k.encode("utf-16-be", "surrogatepass"))
-        return "{" + ",".join(
-            json.dumps(k, ensure_ascii=False) + ":" + jcs(value[k]) for k in keys) + "}"
+        try:
+            keys = sorted(value, key=lambda k: k.encode("utf-16-be"))
+        except UnicodeEncodeError:
+            raise UnhashableError("lone surrogate") from None
+        return "{" + ",".join(_jcs_str(k) + ":" + jcs(value[k]) for k in keys) + "}"
     raise UnhashableError(type(value).__name__)
 
 
 def _sha256(text: str) -> str:
-    return "sha256:" + hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def tool_key(name: str) -> str:
@@ -137,10 +188,31 @@ def tool_key(name: str) -> str:
 
 
 def tool_digest(tool: dict) -> str:
-    """`sha256:<hex>` over JCS({"profile": PROFILE, "tool": <restricted definition>}).
-    A missing or null field is omitted; _meta and unknown fields are never hashed."""
+    """`sha256:<hex>` over JCS({"profile": PROFILE, "tool": <restricted definition>}),
+    exactly as src.scanner.mcp_scan.tool_definition_digest signs it. A missing or
+    null field is omitted; _meta and unknown fields are never hashed. Never raises: a
+    definition JCS cannot represent (NaN or Infinity, a number too large for a double,
+    a lone surrogate) gets the issuer's digest under a distinct label, which no
+    portable digest can equal; lone surrogates are passed through into that text, so
+    it still carries every character of the definition."""
     body = {f: tool[f] for f in DIGEST_FIELDS if tool.get(f) is not None}
-    return _sha256(jcs({"profile": PROFILE, "tool": body}))
+    try:
+        return _sha256(jcs({"profile": PROFILE, "tool": _ijson(body)}))
+    except Exception:
+        pass
+    try:
+        text = PROFILE + ".noncanonical\n" + json.dumps(
+            body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+        return "sha256:" + hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+    except Exception:
+        return _sha256(PROFILE + ".unhashable")
+
+
+# The issuer's digest for a definition that neither JCS nor the fallback can encode
+# (json.dumps refuses it; a parsed tools/list never does, and before 2026-11 a lone
+# surrogate did). It carries none of the definition, so two such definitions share
+# it: equal digests here prove nothing, and a gate never binds to it.
+UNBOUND_DIGEST = _sha256(PROFILE + ".unhashable")
 
 
 try:  # the issuer's own derivation, when this runs next to the server code
@@ -161,7 +233,7 @@ def served_tool_digest(definition: dict) -> str | None:
             return None
     try:
         return tool_digest(definition)
-    except UnhashableError:
+    except Exception:  # pragma: no cover - tool_digest never raises
         return None
 
 
@@ -467,6 +539,13 @@ def evaluate(
             f"AgentAvow graded ({_score_text(grade)}); the server added it since. Not run. "
             f"Report: {report}",
             tool_name, server, grade, served, None)
+    if served == UNBOUND_DIGEST:
+        return GateDecision(
+            False, "drift",
+            f"AgentAvow blocked '{tool_name}' on {server}: its definition holds text the "
+            "signed digest cannot carry, so a change to it would not "
+            f"show ({_score_text(grade)}). Not run. Report: {report}",
+            tool_name, server, grade, served, signed)
     if signed != served:
         return GateDecision(
             False, "drift",
@@ -988,5 +1067,5 @@ __all__ = [
     "DEFAULT_BASE_URL", "DEFAULT_BLOCK_ON", "DEFAULT_MIN_SCORE", "GateDecision", "Grade",
     "ToolGate", "ToolGateBlockedError", "TrustGateClient", "UnhashableError", "evaluate",
     "grade_url", "jcs", "parse_coordinate", "report_url", "served_tool_digest",
-    "served_tool_key", "tool_digest", "tool_key",
+    "UNBOUND_DIGEST", "served_tool_key", "tool_digest", "tool_key",
 ]

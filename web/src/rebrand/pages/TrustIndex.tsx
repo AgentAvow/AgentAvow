@@ -4,21 +4,19 @@ import { Link } from 'react-router-dom'
 import { rp } from '../basePath'
 import { Reveal } from '../components/motion'
 import { TrustOrCertifiedMini, AdoptionMini } from '../components/TrustMark'
-import { fetchCatalog, fetchFlaggedStat, rowIdentity, type CatalogRow } from '../catalog'
-import { publicApi } from '../../lib/scanApi'
+import { fetchCatalog, fetchFlaggedStat, fetchRecent, rowIdentity, type CatalogRow, type FlaggedStat } from '../catalog'
+import { AnswerMixBar, StatCards } from '../components/AnswerMix'
 import { SandboxFindingsBlock } from '../components/SandboxStats'
 import SEOHead from '../../components/SEOHead'
-
-interface RecentItem { surface: string; name: string; full_name: string | null; trust_score: number | null; at: string | null }
 
 /** Live "just scanned…" feed — real recent scans, refreshed on an interval. */
 function RecentFeed() {
   const { data } = useQuery({
-    queryKey: ['recent-scans'],
-    queryFn: async () => (await publicApi.get<{ items: RecentItem[] }>('/public/scan-catalog/recent?limit=12')).data,
+    queryKey: ['recent-scans', 8],
+    queryFn: () => fetchRecent(8),
     staleTime: 30_000, refetchInterval: 45_000,
   })
-  const items = data?.items || []
+  const items = data || []
   if (!items.length) return null
   const ago = (iso: string | null) => {
     if (!iso) return ''
@@ -29,10 +27,10 @@ function RecentFeed() {
     return `${Math.round(s / 86400)}d ago`
   }
   return (
-    <div className="glass rounded-2xl p-5">
+    <div className="glass rounded-2xl p-5 min-w-0 h-full">
       <div className="flex items-center gap-2">
         <span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-60" /><span className="relative inline-flex rounded-full h-2 w-2 bg-success" /></span>
-        <h2 className="text-[16px] font-bold">Just scanned</h2>
+        <h2 className="text-[16px] font-bold">Just checked</h2>
       </div>
       <div className="mt-3 flex flex-col divide-y divide-border/40">
         {items.map((it, i) => {
@@ -49,6 +47,42 @@ function RecentFeed() {
           return href ? <Link key={i} to={href} className="block">{inner}</Link> : <div key={i}>{inner}</div>
         })}
       </div>
+    </div>
+  )
+}
+
+const RISK_LABEL: Record<string, string> = {
+  openclaw: 'Agent skills', mcp: 'MCP servers', npm: 'npm packages', github: 'GitHub repos',
+  crates: 'Rust crates', pypi: 'PyPI packages', docker: 'Container images', huggingface: 'Hugging Face models',
+}
+// A share over a few dozen rows says little, so small surfaces stay off the chart.
+const RISK_MIN_ROWS = 100
+
+/** Share of checked tools with a critical finding, by kind. Catalog rows, not unique repos. */
+function WhereTheRiskIs({ stat }: { stat: FlaggedStat | undefined }) {
+  const rows = Object.entries(stat?.by_surface ?? {})
+    .filter(([k, v]) => RISK_LABEL[k] && v.scanned_total >= RISK_MIN_ROWS)
+    .map(([k, v]) => ({ k, label: RISK_LABEL[k], share: v.critical / v.scanned_total }))
+    .sort((a, b) => b.share - a.share)
+  const top = rows[0]?.share || 1
+  return (
+    <div className="glass rounded-2xl p-5 min-w-0">
+      <h2 className="font-mono text-[11px] tracking-[0.12em] uppercase text-primary-light">Where the risk is</h2>
+      <p className="mt-1 text-[13.5px] text-text-muted">Share of checked tools with a critical finding, by kind</p>
+      {rows.length ? (
+        <div className="mt-2">
+          {rows.map((r) => (
+            <div key={r.k} className="grid grid-cols-[120px_1fr_52px] gap-2.5 items-center text-[13px] mt-2">
+              <span className="text-text-muted">{r.label}</span>
+              <div className="h-2.5 rounded-full bg-surface-hover overflow-hidden">
+                <b className="block h-full rounded-full" style={{ width: `${Math.max(2, (r.share / top) * 100)}%`, background: 'linear-gradient(90deg,#F59E0B,#f43f5e)' }} />
+              </div>
+              <span className="text-right tabular-nums text-text">{(r.share * 100).toFixed(1)}%</span>
+            </div>
+          ))}
+        </div>
+      ) : <div className="mt-3 h-[150px] rounded-xl bg-surface-hover/40 animate-pulse" aria-hidden="true" />}
+      <p className="mt-3 text-[11.5px] text-text-muted">Critical findings over tools checked, per kind. Counted in catalog rows, not unique repos.</p>
     </div>
   )
 }
@@ -145,7 +179,7 @@ function Board({ title, note, rows, isLoading: fetching, href }: { title: string
     // content — a long tool name in a row was forcing the card past the viewport
     // on mobile (horizontal scroll). Let it clamp to its grid track.
     <div className="glass rounded-2xl p-5 min-w-0">
-      <div className="flex items-baseline justify-between gap-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <h2 className="text-[16px] font-bold">
           {href ? <Link to={href} className="hover:text-primary-light transition-colors">{title}</Link> : title}
         </h2>
@@ -185,9 +219,7 @@ export default function RebrandTrustIndex() {
     return () => cancelAnimationFrame(raf)
   }, [allSettled])
 
-  const summary = mcp.data?.summary || npm.data?.summary
   const { data: stat } = useQuery({ queryKey: ['flagged-stat'], queryFn: fetchFlaggedStat, staleTime: 60_000 })
-  const totalScanned = summary ? (summary.total_scans || 0).toLocaleString() : '—'
 
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-16">
@@ -210,27 +242,20 @@ export default function RebrandTrustIndex() {
         </div>
       </Reveal>
 
-      {/* the manufactured headline stat */}
+      {/* how the catalog reads: the answer mix and the counts under it, all live */}
       <Reveal>
-        <div className="mt-10 grid sm:grid-cols-3 gap-3">
-          <div className="glass rounded-2xl p-6 sm:col-span-2 relative overflow-hidden">
-            <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(420px 160px at 15% -20%, rgba(239,68,68,0.12), transparent 70%)' }} />
-            {/* stack on mobile; on desktop the number + copy sit side-by-side so the
-                wide 2-col box doesn't leave a big empty right half. */}
-            <div className="relative flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6">
-              <div className="text-[52px] md:text-[64px] font-extrabold leading-none tabular-nums shrink-0" style={{ color: '#f59e0b' }}>
-                {stat ? `${stat.pct}%` : '—'}
-              </div>
-              <p className="text-text text-[15px]">
-                of scanned agent tools carry a <strong>high or critical</strong> safety finding.
-                {stat && <span className="text-text-muted"> ({stat.flagged.toLocaleString()} of {stat.scanned.toLocaleString()} scanned.)</span>}
-              </p>
-            </div>
-          </div>
-          <div className="glass rounded-2xl p-6 flex flex-col justify-center">
-            <div className="text-[40px] font-extrabold leading-none tabular-nums gradient-text">{totalScanned}</div>
-            <p className="mt-2 text-text-muted text-[13.5px]">tools, servers &amp; packages scanned — every score signed &amp; recomputable.</p>
-          </div>
+        <div className="mt-10">
+          <AnswerMixBar size="big" />
+          <StatCards set="index" />
+        </div>
+      </Reveal>
+
+      {/* the highlight cards. "Do not connect this week", "Most checked this week" and
+          the share-with-a-serious-finding headline wait on their data (spec 2026-11-07). */}
+      <Reveal>
+        <div className="mt-4 grid md:grid-cols-12 gap-4">
+          <div className="md:col-span-8 min-w-0"><WhereTheRiskIs stat={stat} /></div>
+          <div className="md:col-span-4 min-w-0"><RecentFeed /></div>
         </div>
       </Reveal>
 
@@ -248,9 +273,6 @@ export default function RebrandTrustIndex() {
         <Board title="Safest npm packages" note="by trust" rows={npm.data?.rows} isLoading={npm.isLoading} />
         <Board title="Safest PyPI packages" note="by trust" rows={pypi.data?.rows} isLoading={pypi.isLoading} />
       </div>
-
-      {/* live feed — real recent scans */}
-      <div className="mt-4"><Reveal><RecentFeed /></Reveal></div>
 
       {certified.data?.rows && certified.data.rows.length > 0 && (
         <div id="certified" className="mt-4 scroll-mt-24">

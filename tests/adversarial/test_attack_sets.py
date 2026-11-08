@@ -13,6 +13,13 @@ production package path (npm_result_from_tarball -> apply_artifact_scan -> trust
   (2026-10-28; runs the skill path, ``analyze_skill``, not an npm tarball)
 * ``cases_signing_key`` - a raw wallet key sent out, a private key in a shipped file
   (2026-11-06)
+* ``cases_encoded_instructions`` - base64 / hex / percent / rot13 / Caesar (and two
+  layers) injection in skill markdown and MCP descriptions (2026-11-07; skill and MCP
+  paths, not an npm tarball)
+* ``cases_bytecode`` - shipped Python bytecode, the PyCache trap (2026-11-07; skill,
+  repo-tree and wheel paths)
+* ``cases_skill_prose`` - plain-text injection in a skill's body and shipped markdown,
+  with the context rules for skills that talk about injection (2026-11-07; skill path)
 
 Every case's label is pinned in ``expected.json``. A scanner change that moves one fails
 here; regenerate with ``python -I tests/adversarial/expected_labels.py --write`` in the
@@ -32,7 +39,8 @@ import pytest
 HERE = Path(__file__).resolve().parent
 EXPECTED = json.loads((HERE / "expected.json").read_text())
 SETS = ("cases_npm_scripts", "cases_printed_hint", "cases_trifecta", "cases_exfil_precision",
-        "cases_browser_profile", "cases_signing_key")
+        "cases_browser_profile", "cases_signing_key",
+        "cases_encoded_instructions", "cases_bytecode", "cases_skill_prose")
 
 # Attacks that still read safe today, with the label they should read.
 KNOWN_GAPS: dict[tuple[str, str], str] = {
@@ -47,6 +55,21 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     ("cases_signing_key", "gap_bland_env_name"): "do_not_connect",
     # 64 hex under a bland file name can't be told from a checksum.
     ("cases_signing_key", "gap_hex_key_bland_name"): "review",
+    # A decoded payload with no injection phrase (a bare `curl | sh`) gets only the
+    # medium decode-directive signal.
+    ("cases_encoded_instructions", "gap_decoded_command_no_phrase"): "review",
+    # base64 split into chunks shorter than the 24-character run is not reassembled.
+    ("cases_encoded_instructions", "gap_b64_short_chunks"): "review",
+    # \uXXXX escapes and HTML entities are not decoded.
+    ("cases_encoded_instructions", "gap_unicode_escapes"): "review",
+    # A .pyc renamed to another extension in a skill, loaded by a bundled script: the
+    # skill scan fetches only text files, and the loader reads low.
+    ("cases_bytecode", "gap_skill_renamed_pyc_with_loader"): "review",
+    # Wheels are not graded for bytecode by design; a swapped .pyc in one is unseen.
+    ("cases_bytecode", "gap_wheel_shadow_pyc"): "review",
+    # A file that names prompt injection once can carry a live payload as a catalog
+    # entry (a fenced block, a quoted list item): it reads medium.
+    ("cases_skill_prose", "gap_security_doc_fenced_payload"): "review",
 }
 
 _mods: dict[str, object] = {}

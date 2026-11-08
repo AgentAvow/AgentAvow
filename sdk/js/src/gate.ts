@@ -37,7 +37,7 @@
 // `canonicalize` (RFC 8785), for the per-tool digest.
 
 import canonicalizeImport from 'canonicalize';
-import { sha256Hex } from './sha256.js';
+import { bytesToHex, sha256Bytes, sha256Hex } from './sha256.js';
 import {
   DEFAULT_JWKS_URL, JwksCache, decodeJws, verifyJws, type Jwks,
 } from './jws.js';
@@ -62,7 +62,7 @@ export const ISSUER_DID = 'did:web:agentgraph.co';
 export { DEFAULT_JWKS_URL };
 const WEB = 'https://agentavow.com';
 const MAX_REDIRECTS = 3;
-export const VERSION = '0.4.0';
+export const VERSION = '0.4.2';
 
 // ── the per-tool digest, exactly as the attestation signs it ────────────────
 
@@ -100,13 +100,20 @@ export function toolKey(name: string): string {
   return 'tool:' + enc;
 }
 
-/** The JCS preimage of a tool's digest: `{ profile, tool: <restricted definition> }`;
- *  a missing or null field is omitted, `_meta` and unknown fields never enter. */
-export function toolDigestInput(def: Record<string, unknown>): string | null {
+function digestBody(def: Record<string, unknown>): Record<string, unknown> {
   const body: Record<string, unknown> = {};
   for (const f of DIGEST_FIELDS) {
     if (def[f] !== undefined && def[f] !== null) body[f] = def[f];
   }
+  return body;
+}
+
+/** The JCS preimage of a tool's digest: `{ profile, tool: <restricted definition> }`;
+ *  a missing or null field is omitted, `_meta` and unknown fields never enter. Null
+ *  when RFC 8785 cannot carry the definition (see `toolDigest`). */
+export function toolDigestInput(def: Record<string, unknown>): string | null {
+  const body = digestBody(def);
+  if (needsFallback(body)) return null;
   try {
     return canonicalize({ profile: PROFILE, tool: body }) ?? null;
   } catch {
@@ -114,9 +121,116 @@ export function toolDigestInput(def: Record<string, unknown>): string | null {
   }
 }
 
-/** `sha256:<hex>` over the digest preimage; null when the definition cannot be
- *  canonicalized. */
+// ── the issuer's fallback, for definitions RFC 8785 cannot carry ─────────────
+//
+// A lone surrogate (from a "\ud800" escape) or a number literal too large for a
+// double (1e400, which parses to Infinity) has no JCS form. The issuer then digests
+// LABEL + "\n" + Python json.dumps(tool, sort_keys=True, separators=(",", ":"),
+// ensure_ascii=False), encoded as UTF-8 with lone surrogates as their own three bytes
+// (docs/standards/tool-manifest-digest-vectors-v1-noncanonical). It is rebuilt here
+// where it can be. JSON.parse keeps no mark of whether a number was written as an
+// integer or not, so a definition whose numbers the rule below prints differently
+// (1.0, 1e2, an integer beyond 2^53) gets a digest that does not match: the gate
+// then fails closed, it never matches by accident.
+
+/** The issuer's digest for a definition neither JCS nor the fallback could encode.
+ *  It carries none of the definition, so the gate never binds to it. */
+export const UNBOUND_DIGEST = sha256(PROFILE + '.unhashable');
+const FALLBACK_LABEL = PROFILE + '.noncanonical';
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+function needsFallback(v: unknown): boolean {
+  if (typeof v === 'number') return !Number.isFinite(v);
+  if (typeof v === 'string') return LONE_SURROGATE.test(v);
+  if (v === null || typeof v !== 'object') return false;
+  if (Array.isArray(v)) return v.some(needsFallback);
+  const o = v as Record<string, unknown>;
+  return Object.keys(o).some(k => LONE_SURROGATE.test(k) || needsFallback(o[k]));
+}
+
+const PY_ESCAPES: Record<string, string> = {
+  '"': '\\"', '\\': '\\\\', '\n': '\\n', '\r': '\\r', '\t': '\\t', '\b': '\\b', '\f': '\\f',
+};
+function pyStr(s: string): string {
+  let out = '"';
+  for (const ch of s) {
+    const c = ch.codePointAt(0) as number;
+    out += PY_ESCAPES[ch] ?? (c < 0x20 ? '\\u' + c.toString(16).padStart(4, '0') : ch);
+  }
+  return out + '"';
+}
+// An integer value below 2^53 prints as json.loads' int would; anything else as
+// Python's repr of the double (shortest round-trip digits, exponent form when the
+// decimal point sits past 16 digits or before 4 leading zeros).
+function pyNum(x: number): string {
+  if (Number.isNaN(x)) return 'NaN';
+  if (x === Infinity) return 'Infinity';
+  if (x === -Infinity) return '-Infinity';
+  if (Number.isInteger(x) && Math.abs(x) < 2 ** 53) return String(x === 0 ? 0 : x);
+  const sign = x < 0 ? '-' : '';
+  const [mant = '', exp = '0'] = Math.abs(x).toExponential().split('e');
+  const digits = mant.replace('.', '');
+  const decpt = Number(exp) + 1;
+  if (decpt <= -4 || decpt > 16) {
+    const e = decpt - 1;
+    return sign + digits.charAt(0) + (digits.length > 1 ? '.' + digits.slice(1) : '') +
+      'e' + (e < 0 ? '-' : '+') + String(Math.abs(e)).padStart(2, '0');
+  }
+  if (decpt <= 0) return sign + '0.' + '0'.repeat(-decpt) + digits;
+  if (decpt < digits.length) return sign + digits.slice(0, decpt) + '.' + digits.slice(decpt);
+  return sign + digits + '0'.repeat(decpt - digits.length) + '.0';
+}
+function byCodePoint(a: string, b: string): number {
+  const x = Array.from(a), y = Array.from(b);
+  for (let i = 0; i < Math.min(x.length, y.length); i++) {
+    const d = (x[i] as string).codePointAt(0)! - (y[i] as string).codePointAt(0)!;
+    if (d) return d;
+  }
+  return x.length - y.length;
+}
+function pyDumps(v: unknown): string {
+  if (v === null) return 'null';
+  if (v === true) return 'true';
+  if (v === false) return 'false';
+  if (typeof v === 'number') return pyNum(v);
+  if (typeof v === 'string') return pyStr(v);
+  if (Array.isArray(v)) return '[' + v.map(pyDumps).join(',') + ']';
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    return '{' + Object.keys(o).sort(byCodePoint)
+      .map(k => pyStr(k) + ':' + pyDumps(o[k])).join(',') + '}';
+  }
+  throw new Error(`not JSON: ${typeof v}`);
+}
+// UTF-8 with a lone surrogate written as its own three bytes (Python "surrogatepass").
+function wtf8(s: string): Uint8Array {
+  const out: number[] = [];
+  for (let i = 0; i < s.length; i++) {
+    let c = s.charCodeAt(i);
+    if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
+      const d = s.charCodeAt(i + 1);
+      if (d >= 0xdc00 && d <= 0xdfff) { c = 0x10000 + ((c - 0xd800) << 10) + (d - 0xdc00); i++; }
+    }
+    if (c < 0x80) out.push(c);
+    else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+    else if (c < 0x10000) out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    else out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+  }
+  return new Uint8Array(out);
+}
+
+/** `sha256:<hex>` over the digest preimage, as the issuer signs it: the JCS preimage,
+ *  or for a definition JCS cannot carry the issuer's `.noncanonical` fallback. Null
+ *  only when neither can be built (not JSON); the gate treats that as drift. */
 export function toolDigest(def: Record<string, unknown>): string | null {
+  const body = digestBody(def);
+  if (needsFallback(body)) {
+    try {
+      return 'sha256:' + bytesToHex(sha256Bytes(wtf8(FALLBACK_LABEL + '\n' + pyDumps(body))));
+    } catch {
+      return null;
+    }
+  }
   const canon = toolDigestInput(def);
   return canon === null ? null : sha256(canon);
 }
@@ -665,10 +779,6 @@ export function applyDrift(
   }
   const servedDigest = toolDigest(served);
   d.servedDigest = servedDigest;
-  if (servedDigest === null) {
-    d.warnings.push(`the definition of '${d.toolName}' cannot be canonicalized; drift not checked`);
-    return d;
-  }
   const key = toolKey(String(served.name ?? d.toolName));
   const expected = expectedMap[key];
   d.signedDigest = expected ?? null;
@@ -676,6 +786,13 @@ export function applyDrift(
   if (expected === undefined) {
     d.outcome = 'unknown_tool';
     d.reason = `AgentAvow: '${d.toolName}' on ${server} is not among the tools ${source === 'signed' ? 'AgentAvow graded' : 'you pinned'} (${scoreText(grade)}); the server added it since. ${report}`;
+    return softened(d, policy.onDrift, policy);
+  }
+  // Fail closed: a definition the gate cannot digest, or one bound only to the
+  // issuer's content-free digest, is drift. A change to it would not show.
+  if (servedDigest === null || servedDigest === UNBOUND_DIGEST || expected === UNBOUND_DIGEST) {
+    d.outcome = 'drift';
+    d.reason = `AgentAvow: the definition of '${d.toolName}' on ${server} cannot be bound to the ${source} digest, so a change to it would not show (${scoreText(grade)}). ${report}`;
     return softened(d, policy.onDrift, policy);
   }
   if (expected !== servedDigest) {
@@ -794,11 +911,6 @@ export function evaluate(
   }
   const servedDigest = toolDigest(served);
   decision.servedDigest = servedDigest;
-  if (servedDigest === null) {
-    decision.warnings.push(
-      `the definition of '${toolName}' cannot be canonicalized; drift not checked`);
-    return decision;
-  }
   const key = toolKey(String(served.name ?? toolName));
   const signed = signedMap[key];
   decision.signedDigest = signed ?? null;
@@ -807,6 +919,14 @@ export function evaluate(
       ...decision, allow: false, outcome: 'unknown_tool',
       reason: `AgentAvow blocked '${toolName}' on ${server}: it was not among the tools AgentAvow ` +
         `graded (${scoreText(grade)}); the server added it since. Not run. Report: ${report}`,
+    };
+  }
+  if (servedDigest === null || servedDigest === UNBOUND_DIGEST || signed === UNBOUND_DIGEST) {
+    return {
+      ...decision, allow: false, outcome: 'drift',
+      reason: `AgentAvow blocked '${toolName}' on ${server}: its definition cannot be bound to ` +
+        `the signed digest, so a change to it would not show (${scoreText(grade)}). Not run. ` +
+        `Report: ${report}`,
     };
   }
   if (signed !== servedDigest) {

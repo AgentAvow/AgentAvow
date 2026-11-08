@@ -118,6 +118,8 @@ _TOOL_CONFIG_RE = re.compile(
 # also decides whether a known vendor key leaves for a non-vendor host.
 _EXFIL_RE = re.compile(_EXFIL_PATH_RE.pattern + "|" + _SECRET_ENV_RE.pattern)
 _SCRIPT_EXT = (".sh", ".bash", ".zsh", ".py", ".js", ".ts", ".rb", ".pl", ".ps1")
+# Prose an agent reads when it loads the skill (SKILL.md, references, notes).
+_PROSE_EXT = (".md", ".markdown", ".mdx", ".txt")
 
 
 class SkillScanResult:
@@ -130,6 +132,9 @@ class SkillScanResult:
         self.tree_digest: str | None = None
         self.script_count: int = 0
         self.blast_radius: dict = {}        # {level, capabilities, why} — see below
+        # What this pass selected but could not cover (``encoded_text_unread``,
+        # ``bytecode_unread``); merged into the scan's coverage_gaps by the caller.
+        self.coverage_gaps: dict = {}
 
 
 # Map an OpenClaw / Claude skill `allowed-tools` grant to the shared capability
@@ -227,9 +232,11 @@ def _tool_list(raw) -> list[str]:
     return out
 
 
-def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md") -> SkillScanResult:
+def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md",
+                  tree_paths: list[str] | None = None) -> SkillScanResult:
     """Grade a skill's files. ``files`` maps path -> text for SKILL.md + scripts +
-    hook manifests. Pure + deterministic."""
+    hook manifests. ``tree_paths``: every path in the repo tree (files that are not
+    fetched included), for the bytecode check. Pure + deterministic."""
     result = SkillScanResult()
 
     # full-tree digest (rug-pull anchor) — sha256 over path-sorted content.
@@ -308,6 +315,31 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md") -> Ski
             "skill_capability", "No SKILL.md found — not a recognizable Agent Skill",
             "info", "skill",
         ))
+
+    # 2a. plain-text injection in the skill's prose: the SKILL.md body (its frontmatter
+    # is read above) and every markdown / text file the skill ships, with context rules
+    # for skills that talk about injection (src/scanner/skill_prose.py).
+    from src.scanner.skill_prose import scan_prose as _scan_prose
+    for path in sorted(files):
+        if files[path] and path.lower().endswith(_PROSE_EXT):
+            result.findings.extend(_scan_prose(
+                files[path], path, skip_frontmatter=path.lower().endswith("skill.md")))
+
+    # 2b. encoded instructions in the skill's prose (SKILL.md, every other markdown /
+    # text file it ships): decoded and read with the injection matcher.
+    from src.scanner.encoded_instructions import Budget as _EncBudget
+    from src.scanner.encoded_instructions import scan_text as _scan_encoded
+    enc_budget = _EncBudget()
+    for path in sorted(files):
+        if files[path] and path.lower().endswith(_PROSE_EXT):
+            result.findings.extend(_scan_encoded(files[path], path, enc_budget))
+    result.coverage_gaps.update(enc_budget.gaps())
+    # 2c. Python bytecode in the skill's tree (the PyCache trap): never read, high.
+    from src.scanner.bytecode import skill_bytecode
+    _skill_dir = skill_md_path.rsplit("/", 1)[0] if "/" in skill_md_path else ""
+    _bc_findings, _bc_gaps = skill_bytecode(list(tree_paths or files), _skill_dir)
+    result.findings.extend(_bc_findings)
+    result.coverage_gaps.update(_bc_gaps)
 
     # 3. lifecycle-hook / plugin escalation
     for path, text in files.items():

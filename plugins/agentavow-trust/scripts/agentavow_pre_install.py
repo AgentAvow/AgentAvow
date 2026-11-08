@@ -37,7 +37,7 @@ import sys
 import time
 import urllib.error
 
-__version__ = "0.1.34"
+__version__ = "0.1.36"
 
 TIMEOUT = 12  # seconds per scan: an install is rare, so a slower fresh scan is fine
 _HERE = pathlib.Path(__file__).resolve().parent
