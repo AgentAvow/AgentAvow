@@ -73,25 +73,21 @@ async def _call(arguments: dict) -> types.CallToolResult:
 
 # --- the reviewed maps ---------------------------------------------------------------
 
-@pytest.mark.parametrize("url,vendor,repo,relation", [
-    ("https://api.githubcopilot.com/mcp/", "GitHub", "github/github-mcp-server", "hosted"),
-    ("https://api.githubcopilot.com/mcp/insiders", "GitHub", "github/github-mcp-server",
-     "hosted"),
-    ("https://mcp.sentry.dev/mcp", "Sentry", "getsentry/sentry-mcp", "hosted"),
-    ("https://mcp.neon.tech/mcp", "Neon", "neondatabase/mcp-server-neon", "hosted"),
-    ("https://mcp.supabase.com/mcp", "Supabase", "supabase/mcp", "hosted"),
-    ("https://huggingface.co/mcp", "Hugging Face", "huggingface/hf-mcp-server", "hosted"),
-    ("https://mcp.cloudflare.com/mcp", "Cloudflare", "cloudflare/mcp", "hosted"),
-    ("https://docs.mcp.cloudflare.com/mcp", "Cloudflare", "cloudflare/mcp-server-cloudflare",
-     "hosted"),
-    ("https://mcp.notion.com/mcp", "Notion", "makenotion/notion-mcp-server", "separate"),
-    ("https://MCP.Notion.com/mcp", "Notion", "makenotion/notion-mcp-server", "separate"),
-    ("https://mcp.squareup.com/mcp", "Square", "square/square-mcp-server", "separate"),
+@pytest.mark.parametrize("url,vendor,repo", [
+    ("https://api.githubcopilot.com/mcp/", "GitHub", "github/github-mcp-server"),
+    ("https://api.githubcopilot.com/mcp/insiders", "GitHub", "github/github-mcp-server"),
+    ("https://mcp.sentry.dev/mcp", "Sentry", "getsentry/sentry-mcp"),
+    ("https://mcp.neon.tech/mcp", "Neon", "neondatabase/mcp-server-neon"),
+    ("https://mcp.supabase.com/mcp", "Supabase", "supabase/mcp"),
+    ("https://huggingface.co/mcp", "Hugging Face", "huggingface/hf-mcp-server"),
+    ("https://mcp.cloudflare.com/mcp", "Cloudflare", "cloudflare/mcp"),
+    ("https://docs.mcp.cloudflare.com/mcp", "Cloudflare", "cloudflare/mcp-server-cloudflare"),
 ])
-def test_official_source_map(url, vendor, repo, relation):
+def test_official_source_map(url, vendor, repo):
     src = srcmap.official_source_for(url)
     assert src is not None
-    assert (src.vendor, src.repo, src.relation) == (vendor, repo, relation)
+    assert (src.vendor, src.repo) == (vendor, repo)
+    assert srcmap.no_public_source(url) is None
 
 
 @pytest.mark.parametrize("url", [
@@ -106,17 +102,24 @@ def test_official_source_map(url, vendor, repo, relation):
 ])
 def test_unmapped_urls_have_no_source(url):
     assert srcmap.official_source_for(url) is None
-    assert srcmap.no_public_source_vendor(url) is None
+    assert srcmap.no_public_source(url) is None
 
 
-@pytest.mark.parametrize("url,vendor", [
-    ("https://mcp.linear.app/mcp", "Linear"),
-    ("https://mcp.atlassian.com/v2/mcp", "Atlassian"),
-    ("https://mcp.stripe.com", "Stripe"),
+@pytest.mark.parametrize("url,vendor,self_hosted", [
+    ("https://mcp.linear.app/mcp", "Linear", None),
+    ("https://mcp.atlassian.com/v2/mcp", "Atlassian", None),
+    ("https://mcp.stripe.com", "Stripe", None),
+    # The vendor's separate self-hosted server is a different codebase: named as a next
+    # step, never graded in place of the hosted server.
+    ("https://mcp.notion.com/mcp", "Notion", "makenotion/notion-mcp-server"),
+    ("https://MCP.Notion.com/mcp", "Notion", "makenotion/notion-mcp-server"),
+    ("https://mcp.squareup.com/mcp", "Square", "square/square-mcp-server"),
 ])
-def test_hosts_checked_and_found_without_public_source(url, vendor):
+def test_hosts_checked_and_found_without_public_source(url, vendor, self_hosted):
     assert srcmap.official_source_for(url) is None
-    assert srcmap.no_public_source_vendor(url) == vendor
+    entry = srcmap.no_public_source(url)
+    assert entry is not None
+    assert (entry.vendor, entry.self_hosted_repo) == (vendor, self_hosted)
 
 
 def test_every_source_is_owned_by_the_vendors_own_org():
@@ -126,11 +129,10 @@ def test_every_source_is_owned_by_the_vendors_own_org():
         "Supabase": {"supabase"}, "Hugging Face": {"huggingface"},
         "Cloudflare": {"cloudflare"}, "Notion": {"makenotion"}, "Square": {"square"},
     }
-    sources = [s for s in srcmap.OFFICIAL_SOURCES.values() if s is not None]
-    sources.append(srcmap._CLOUDFLARE_PRODUCTS)
-    for s in sources:
-        assert s.owner in vendor_orgs[s.vendor], s
-        assert s.relation in ("hosted", "separate")
+    entries = list(srcmap.OFFICIAL_SOURCES.values()) + [srcmap._CLOUDFLARE_PRODUCTS]
+    for s in entries:
+        if s.owner is not None:  # a no-source host without a self-hosted repo has none
+            assert s.owner in vendor_orgs[s.vendor], s
 
 
 @pytest.mark.parametrize("name,vendor,endpoint", [
@@ -196,30 +198,48 @@ async def test_signin_server_with_hosted_source_answers_from_that_source(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_separate_source_is_labeled_as_a_separate_server(monkeypatch):
-    monkeypatch.setattr(ms, "_get", _api([]))
-    res = await _call({"endpoint_url": "https://mcp.notion.com/mcp"})
-    assert res.is_error is False
+@pytest.mark.parametrize("url,host,vendor,repo", [
+    ("https://mcp.notion.com/mcp", "mcp.notion.com", "Notion", "makenotion/notion-mcp-server"),
+    ("https://mcp.squareup.com/mcp", "mcp.squareup.com", "Square",
+     "square/square-mcp-server"),
+])
+async def test_separate_self_hosted_server_is_a_next_step_not_an_answer(
+        monkeypatch, url, host, vendor, repo):
+    calls: list = []
+    monkeypatch.setattr(ms, "_get", _api(calls))
+    res = await _call({"endpoint_url": url})
+    # A different codebase is never graded in place of the hosted server.
+    assert res.is_error is True and res.structured_content is None
+    assert [p for p, _ in calls] == ["/public/scan/mcp"]
     text = res.content[0].text
-    assert text.startswith("Based on Notion's published source code "
-                           "(makenotion/notion-mcp-server), not the live server")
-    assert "separate, self-hosted MCP server" in text
-    assert "mcp.notion.com can offer different tools" in text
-    s = res.structured_content
-    assert "a separate self-hosted version" in s["not_checked"][0]
-    assert s["target"] == "makenotion/notion-mcp-server"
+    assert text.startswith(f"Not scanned: {host} requires sign-in (OAuth)")
+    assert f"{vendor}'s hosted server code isn't public" in text
+    assert (f"{vendor} also publishes a self-hosted server, {repo}; you can check that "
+            "with scan_repo.") in text
+    assert "Based on" not in text
 
 
 @pytest.mark.asyncio
 async def test_name_resolves_through_the_reviewed_map_then_the_source(monkeypatch):
     calls: list = []
     monkeypatch.setattr(ms, "_get", _api(calls))
-    res = await _call({"endpoint_url": "Notion"})
+    res = await _call({"endpoint_url": "GitHub"})
     assert res.is_error is False
-    # The reviewed map wins: the catalog (third-party Notion servers) is not consulted.
+    # The reviewed map wins: the catalog (third-party GitHub servers) is not consulted.
     assert [p for p, _ in calls] == ["/public/scan/mcp",
-                                     "/public/scan/makenotion/notion-mcp-server"]
-    assert calls[0][1] == {"endpoint": "https://mcp.notion.com/mcp"}
+                                     "/public/scan/github/github-mcp-server"]
+    assert calls[0][1] == {"endpoint": "https://api.githubcopilot.com/mcp/"}
+
+
+@pytest.mark.asyncio
+async def test_notion_by_name_gets_the_self_hosted_next_step(monkeypatch):
+    calls: list = []
+    monkeypatch.setattr(ms, "_get", _api(calls))
+    res = await _call({"endpoint_url": "Notion"})
+    assert res.is_error is True
+    assert calls == [("/public/scan/mcp", {"endpoint": "https://mcp.notion.com/mcp"})]
+    assert "makenotion/notion-mcp-server; you can check that with scan_repo" in \
+        res.content[0].text
 
 
 @pytest.mark.asyncio
@@ -283,7 +303,9 @@ async def test_signin_server_without_public_source_says_so(monkeypatch):
     assert res.is_error is True and res.structured_content is None
     text = res.content[0].text
     assert text.startswith("Not scanned: mcp.linear.app requires sign-in (OAuth)")
-    assert "Linear does not publish the source code of this hosted server" in text
+    assert "Linear's hosted server code isn't public" in text
+    assert "also publishes a self-hosted server" not in text
+    assert "scan_package" in text
     assert [p for p, _ in calls] == ["/public/scan/mcp"]
 
 

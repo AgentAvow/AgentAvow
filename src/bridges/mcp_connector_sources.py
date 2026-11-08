@@ -7,14 +7,13 @@ tool still give a useful, honest answer:
 * ``OFFICIAL_SOURCES`` maps a hosted endpoint to the vendor's OWN published source
   repository. Every entry was checked on GitHub (2026-11-07): the owner is the vendor's
   organization, the repo is not a fork and not archived, and the vendor's README names
-  the hosted endpoint. ``relation`` says how the two relate:
+  the hosted endpoint AS ITS OWN CODE. Only then is a source answer given.
 
-  - ``"hosted"``: the vendor publishes this repo as the code of the hosted server.
-  - ``"separate"``: the vendor publishes it as a separate, self-hosted MCP server; the
-    hosted server's own code is not public, so its tools can differ.
-
-  ``None`` marks a host checked and found to have NO public source for its server, so
-  the answer can say so instead of pointing at a stranger's clone.
+  A ``NoPublicSource`` entry marks a host checked and found to have NO public code for
+  its hosted server, so the answer says so instead of pointing at a stranger's clone.
+  Where the vendor also publishes a separate, self-hosted server (Notion, Square), the
+  entry names it as a next step; it is never graded in place of the hosted server,
+  because it is a different codebase.
 
 * ``KNOWN_CONNECTORS`` maps a connector NAME (what claude.ai shows; it never shows the
   URL) to the vendor's documented endpoint, only where that endpoint is certain.
@@ -32,65 +31,65 @@ from urllib.parse import urlsplit
 @dataclass(frozen=True)
 class OfficialSource:
     vendor: str
-    repo: str  # GitHub "owner/name"
-    relation: str  # "hosted" | "separate"
+    repo: str  # GitHub "owner/name"; the code of the hosted server
 
     @property
     def owner(self) -> str:
         return self.repo.split("/", 1)[0]
 
 
-# host -> source (or None: checked, no public source). Matched on the exact host; a
-# ``path`` prefix narrows a shared host (huggingface.co serves far more than MCP).
+@dataclass(frozen=True)
+class NoPublicSource:
+    vendor: str
+    self_hosted_repo: str | None = None  # the vendor's separate self-hosted server, if any
+
+    @property
+    def owner(self) -> str | None:
+        return self.self_hosted_repo.split("/", 1)[0] if self.self_hosted_repo else None
+
+
+# host -> source, or NoPublicSource (checked: the hosted server's code is not public).
+# Matched on the exact host; a ``path`` prefix narrows a shared host (huggingface.co
+# serves far more than MCP).
 _HostKey = tuple[str, str]  # (host, path prefix)
 
-OFFICIAL_SOURCES: dict[_HostKey, OfficialSource | None] = {
+OFFICIAL_SOURCES: dict[_HostKey, OfficialSource | NoPublicSource] = {
     # github/github-mcp-server README: "The remote GitHub MCP Server is hosted by GitHub",
     # url https://api.githubcopilot.com/mcp/
-    ("api.githubcopilot.com", "/mcp"): OfficialSource(
-        "GitHub", "github/github-mcp-server", "hosted"),
+    ("api.githubcopilot.com", "/mcp"): OfficialSource("GitHub", "github/github-mcp-server"),
     # getsentry/sentry-mcp README: "This remote MCP server ...", deployed at mcp.sentry.dev
-    ("mcp.sentry.dev", ""): OfficialSource("Sentry", "getsentry/sentry-mcp", "hosted"),
+    ("mcp.sentry.dev", ""): OfficialSource("Sentry", "getsentry/sentry-mcp"),
     # neondatabase/mcp-server-neon README: "This repository provides a remote MCP Server"
-    ("mcp.neon.tech", ""): OfficialSource("Neon", "neondatabase/mcp-server-neon", "hosted"),
+    ("mcp.neon.tech", ""): OfficialSource("Neon", "neondatabase/mcp-server-neon"),
     # supabase/mcp (moved from supabase-community/supabase-mcp): README documents
     # https://mcp.supabase.com/mcp and "Self-hosting the MCP endpoint"
-    ("mcp.supabase.com", ""): OfficialSource("Supabase", "supabase/mcp", "hosted"),
+    ("mcp.supabase.com", ""): OfficialSource("Supabase", "supabase/mcp"),
     # huggingface/hf-mcp-server README: "the official Hugging Face MCP Server",
     # url https://huggingface.co/mcp
     ("huggingface.co", "/mcp"): OfficialSource(
-        "Hugging Face", "huggingface/hf-mcp-server", "hosted"),
+        "Hugging Face", "huggingface/hf-mcp-server"),
     # cloudflare/mcp README: "MCP URL: https://mcp.cloudflare.com/mcp"
-    ("mcp.cloudflare.com", ""): OfficialSource("Cloudflare", "cloudflare/mcp", "hosted"),
+    ("mcp.cloudflare.com", ""): OfficialSource("Cloudflare", "cloudflare/mcp"),
+    # Checked, no public code for the hosted server:
     # makenotion/notion-mcp-server README: "This repository is a separate, self-hosted MCP
     # server"; the hosted Remote Notion MCP is not open source.
-    ("mcp.notion.com", ""): OfficialSource(
-        "Notion", "makenotion/notion-mcp-server", "separate"),
+    ("mcp.notion.com", ""): NoPublicSource("Notion", "makenotion/notion-mcp-server"),
     # square/square-mcp-server README: Square runs the remote server at
     # mcp.squareup.com; "This repository is the local, self-hosted server".
-    ("mcp.squareup.com", ""): OfficialSource(
-        "Square", "square/square-mcp-server", "separate"),
-    # Checked, no public source for the hosted server:
+    ("mcp.squareup.com", ""): NoPublicSource("Square", "square/square-mcp-server"),
     # Linear publishes no MCP server repo or package (github.com/linear has none; its
     # MCP-registry entry app.linear/linear lists no repository).
-    ("mcp.linear.app", ""): None,
+    ("mcp.linear.app", ""): NoPublicSource("Linear"),
     # atlassian/atlassian-mcp-server holds client config, docs and skills, not the
     # server's code.
-    ("mcp.atlassian.com", ""): None,
+    ("mcp.atlassian.com", ""): NoPublicSource("Atlassian"),
     # stripe/ai's @stripe/mcp is a client that connects to the hosted server, not its code.
-    ("mcp.stripe.com", ""): None,
+    ("mcp.stripe.com", ""): NoPublicSource("Stripe"),
 }
 
 # cloudflare/mcp-server-cloudflare README lists each product server it hosts at
 # <product>.mcp.cloudflare.com (docs, containers, browser, ...), one app per directory.
-_CLOUDFLARE_PRODUCTS = OfficialSource("Cloudflare", "cloudflare/mcp-server-cloudflare", "hosted")
-
-# Vendor display names for hosts with no public source (for the answer text).
-_NO_SOURCE_VENDOR: dict[str, str] = {
-    "mcp.linear.app": "Linear",
-    "mcp.atlassian.com": "Atlassian",
-    "mcp.stripe.com": "Stripe",
-}
+_CLOUDFLARE_PRODUCTS = OfficialSource("Cloudflare", "cloudflare/mcp-server-cloudflare")
 
 
 def _split(url: str) -> tuple[str, str]:
@@ -131,12 +130,10 @@ def official_source_for(url: str) -> OfficialSource | None:
     return src if isinstance(src, OfficialSource) else None
 
 
-def no_public_source_vendor(url: str) -> str | None:
-    """The vendor's name when this host was checked and has NO public server source."""
-    src, host = _lookup(url)
-    if src is None:
-        return _NO_SOURCE_VENDOR.get(host)
-    return None
+def no_public_source(url: str) -> NoPublicSource | None:
+    """The entry for a host checked and found to have no public code for its server."""
+    src, _ = _lookup(url)
+    return src if isinstance(src, NoPublicSource) else None
 
 
 # --- connector names ---------------------------------------------------------------

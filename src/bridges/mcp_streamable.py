@@ -402,21 +402,15 @@ def _host_of(url: str) -> str:
 
 def _source_label(src: _sources.OfficialSource, host: str) -> str:
     """The first line of a sign-in server's answer: what was graded, and what was not."""
-    head = (f"Based on {src.vendor}'s published source code ({src.repo}), not the live "
-            "server, which requires sign-in.")
-    if src.relation == "separate":
-        return (head + f" {src.vendor} describes that repository as a separate, "
-                f"self-hosted MCP server, so the hosted server at {host} can offer "
-                "different tools. Its live tool definitions were not read.")
-    return (head + f" {src.vendor} publishes that repository as the code of its hosted "
-            f"server at {host}. Its live tool definitions were not read.")
+    return (f"Based on {src.vendor}'s published source code ({src.repo}), not the live "
+            f"server, which requires sign-in. {src.vendor} publishes that repository as the "
+            f"code of its hosted server at {host}. Its live tool definitions were not read.")
 
 
 def _source_not_checked_note(src: _sources.OfficialSource, host: str) -> str:
-    what = (f"{src.vendor}'s published source ({src.repo}), a separate self-hosted version"
-            if src.relation == "separate" else f"{src.vendor}'s published source ({src.repo})")
     return (f"The live server at {host} requires sign-in (OAuth), so its tool definitions "
-            f"were not read. This answer grades {what}.")
+            f"were not read. This answer grades {src.vendor}'s published source "
+            f"({src.repo}).")
 
 
 def _source_pending_help(src: _sources.OfficialSource, host: str) -> str:
@@ -439,16 +433,23 @@ def _source_failed_help(src: _sources.OfficialSource, host: str) -> str:
     )
 
 
-def _signin_no_source_help(vendor: str, host: str) -> str:
-    return (
+def _signin_no_source_help(entry: _sources.NoPublicSource, host: str) -> str:
+    """A sign-in host whose server code the vendor does not publish. A separate
+    self-hosted server from the same vendor is named as a next step, never graded in
+    its place: it is a different codebase."""
+    head = (
         f"Not scanned: {host} requires sign-in (OAuth), so its tool list isn't public and "
-        f"can't be scanned. {vendor} does not publish the source code of this hosted "
-        "server (AgentAvow checked for an official repository or package), so there is no "
-        "published code to grade either.\n"
-        "Next step: if you run a local server for it instead, pass its npm / PyPI package "
-        "to scan_package or its source repo ('owner/name') to scan_repo. "
-        "Not scanned is neither safe nor unsafe."
+        f"can't be scanned. {entry.vendor}'s hosted server code isn't public either "
+        "(AgentAvow checked for an official repository or package), so there is no "
+        "published code behind this server to grade.\n"
     )
+    if entry.self_hosted_repo:
+        nxt = (f"Next step: {entry.vendor} also publishes a self-hosted server, "
+               f"{entry.self_hosted_repo}; you can check that with scan_repo. ")
+    else:
+        nxt = ("Next step: if you run a local server for it instead, pass its npm / PyPI "
+               "package to scan_package or its source repo ('owner/name') to scan_repo. ")
+    return head + nxt + "Not scanned is neither safe nor unsafe."
 
 
 async def _answer_from_source(
@@ -2605,11 +2606,11 @@ async def _run_tool(
                 src = _sources.official_source_for(url)
                 if src is not None:
                     return await _answer_from_source(src, url, started, force)
-                vendor = _sources.no_public_source_vendor(url)
-                if vendor is None:
+                no_src = _sources.no_public_source(url)
+                if no_src is None:
                     raise
                 await _bump_s("result:error")
-                return _text(_signin_no_source_help(vendor, _host_of(url)))
+                return _text(_signin_no_source_help(no_src, _host_of(url)))
             rescan = force and _schedule_rescan("/public/scan/mcp", params)
             await _bump_s("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
             # A bare MCP endpoint has no registry/stars adoption signal — omit it rather
