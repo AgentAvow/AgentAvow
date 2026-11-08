@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { rp } from '../basePath'
 import { publicApi } from '../../lib/scanApi'
-import { trackBadgeCopied, trackCta } from '../../lib/analytics'
+import { trackBadgeCopied } from '../../lib/analytics'
+import { CHATGPT_LISTING, CLAUDE_LISTING, trackListing } from '../lib/listings'
 import { coverageGapNotes, decisionOf, decisionPhrase, isCertified, type Decision } from '../../components/trust/gradeSystem'
 import { TrustBar, AdoptionNeedle } from './TrustMark'
 import { Reveal } from './motion'
@@ -50,10 +51,8 @@ const SEV_CLASS: Record<string, string> = {
  * Type-specific panels come in as slots; the order and headings are fixed here.
  */
 
-export const CLAUDE_LISTING = 'https://claude.ai/directory/connectors/agentavow'
-export const CHATGPT_LISTING = 'https://chatgpt.com/plugins/plugin_asdk_app_6ac830ccc2d48191ac27974dec7d8344'
-/** Where "Get this check automatically" points until the /claude-code page ships. */
-const CLAUDE_CODE_PAGE = '/rebrand/docs/auto-scan-claude-code'
+/** Where "Get this check automatically" points: the Claude Code landing page. */
+const CLAUDE_CODE_PAGE = '/rebrand/claude-code'
 
 
 export interface ResultAdoption {
@@ -336,8 +335,8 @@ export function NextStepCards({ dnc = false, watch, badgeMarkdown, oneTime = fal
         <Link to={rp(CLAUDE_CODE_PAGE)} className={BTN_SOLID}>Get it for Claude Code</Link>
       </StepCard>
       <StepCard title="Ask in Claude or ChatGPT" text="Add AgentAvow and ask before you connect anything.">
-        <a href={CLAUDE_LISTING} target="_blank" rel="noopener noreferrer" onClick={() => trackCta('add_claude')} className={BTN_GHOST}>Add to Claude ↗</a>
-        <a href={CHATGPT_LISTING} target="_blank" rel="noopener noreferrer" onClick={() => trackCta('add_chatgpt')} className={BTN_GHOST}>Add to ChatGPT ↗</a>
+        <a href={CLAUDE_LISTING} target="_blank" rel="noopener noreferrer" onClick={() => trackListing(CLAUDE_LISTING)} className={BTN_GHOST}>Add to Claude ↗</a>
+        <a href={CHATGPT_LISTING} target="_blank" rel="noopener noreferrer" onClick={() => trackListing(CHATGPT_LISTING)} className={BTN_GHOST}>Add to ChatGPT ↗</a>
       </StepCard>
       {!oneTime && (
         <StepCard title="Keep an eye on it" text="Get an alert if this answer drops or its tool definitions change.">
