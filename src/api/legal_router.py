@@ -21,7 +21,7 @@ _PRIVACY_CLAUSES: list[tuple[str, str]] = [
     ('1. Overview',
      'Effective November 8, 2026. AgentAvow checks whether a software tool is '
      'safe for an AI agent to connect to: a GitHub repository, a published '
-     'package, or a live MCP server. This policy explains what we receive when '
+     'package, a live MCP server, an agent skill, or an A2A agent card. This policy explains what we receive when '
      'you use agentavow.com, our public API, or our connector for AI '
      'assistants, what we do with it, and how long we keep it. Checking a tool '
      'does not require an account.'),
@@ -52,7 +52,10 @@ _PRIVACY_CLAUSES: list[tuple[str, str]] = [
      'catalog. Do not submit anything you consider confidential.'),
     ('4. Accounts and alerts (optional)',
      'If you create an account: your email address, display name, and, if you '
-     'sign in with Google, the basic profile Google shares. If you watch a '
+     'sign in with Google, the basic profile Google shares, or, if you sign in '
+     'with GitHub, your GitHub user ID, username, name, avatar and verified '
+     'email address (read-only access; the GitHub sign-in token is not '
+     'stored). If you watch a '
      'tool: the tools you watch and any webhook URL you configure (its signing '
      'secret is stored encrypted). If you scan a private repository with a '
      'GitHub token, the token is used for that scan only and is not stored.'),
@@ -77,7 +80,7 @@ _PRIVACY_CLAUSES: list[tuple[str, str]] = [
      "<code>ag_session_id</code> in your browser's local storage. It holds no "
      "name or email address. It stays until you clear your browser's data for "
      'our site, and your next visit then creates a new one. If you create an '
-     'account on our /register page, we link the identifier to that '
+     'account, we link the identifier to that '
      'account.</li><li><strong>What those analytics record:</strong> pages you '
      'view, submitting a check box (not what you typed), results shown, clicks '
      'on our add and install links, copies of an install command or a badge, '
@@ -132,7 +135,7 @@ _PRIVACY_CLAUSES: list[tuple[str, str]] = [
      'for us (Amazon Web Services for hosting and email, Resend for email '
      'delivery, Sentry for error tracking, Cloudflare for website analytics, '
      'Meta Platforms for measuring our ads on /claude-code only (section 5), '
-     'and Google only if you choose Google sign-in), and when the law requires '
+     'and Google or GitHub only if you choose to sign in with them), and when the law requires '
      "it. When we check a tool, we contact that tool's public source (GitHub, a "
      'package registry, or the MCP server you named).'),
     ('8. Retention and your rights',

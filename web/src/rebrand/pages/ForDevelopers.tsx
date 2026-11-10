@@ -161,7 +161,7 @@ export default function RebrandForDevelopers() {
               ['GitLab CI', 'run the scanner in your own runner, MR widget included', '/rebrand/docs/run-locally#gitlab-ci-self-managed-behind-a-firewall'],
               ['Bitbucket Pipelines', 'a pipe that posts a Code Insights report on the pull request', '/rebrand/docs/run-locally#bitbucket-pipelines'],
               ['Azure DevOps', 'a pipeline template with a run summary and SARIF', '/rebrand/docs/run-locally#azure-devops'],
-              ['Agent runtime', 'LangChain, Google ADK, Claude Agent SDK and OpenAI Agents SDK gates check each tool before the call', '/rebrand/docs/gate-on-the-grade#gate-your-agent-at-runtime-sdk--bridges'],
+              ['Agent runtime', 'Claude Agent SDK and OpenAI Agents SDK gates (npm; Python versions in the repo) check each tool before the call', '/rebrand/docs/gate-on-the-grade#gate-your-agent-at-runtime-sdk--bridges'],
               ['Vercel AI SDK', 'wrap your tools so a Do not connect answer never runs', '/rebrand/docs/gate-on-the-grade#vercel-ai-sdk'],
               ['Flue', 'gate the tools a Flue agent connects to', '/rebrand/docs/gate-on-the-grade#flue'],
               ['Claude Agent SDK', 'leave out a server that fails, and deny each mcp__ call that does', '/rebrand/docs/gate-on-the-grade#claude-agent-sdk'],
@@ -190,7 +190,7 @@ export default function RebrandForDevelopers() {
           <pre className="font-mono text-[12px] bg-surface border border-border rounded-xl px-4 py-3.5 pr-16 text-text overflow-x-auto whitespace-pre-wrap break-all">{BADGE_MD}</pre>
           <button onClick={copy} className="absolute top-2 right-2 font-mono text-[11px] px-2 py-1 rounded-md bg-surface-hover border border-border text-text-muted hover:text-primary-light">{copied ? 'copied ✓' : 'copy'}</button>
         </div>
-        <p className="mt-2 font-mono text-[11px] text-text-muted/70">swap in your own owner/repo — regenerates on every view, never goes stale</p>
+        <p className="mt-2 font-mono text-[11px] text-text-muted/70">swap in your own owner/repo — refreshes from the current scan, never goes stale</p>
 
         <div className="mt-6 font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1.5">MCP registry — signed score in your server.json</div>
         <div className="relative">
@@ -234,7 +234,7 @@ export default function RebrandForDevelopers() {
             <a href="https://www.npmjs.com/package/agentavow-trust" target="_blank" rel="noopener noreferrer" className="inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">npm ↗</a>
           </div>
           <p className="mt-3 text-[13px] text-text-muted">Claude Code: <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded break-all">{claudeCodeStdio(AA_MCP)}</code></p>
-          <p onCopy={trackPluginCommandCopy} className="mt-2 text-[13px] text-text-muted">Or install the Claude Code plugin, which also scans each new MCP server at session start: <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded break-all">/plugin marketplace add AgentAvow/AgentAvow</code> then <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded break-all">/plugin install agentavow-trust@agentavow</code>. Its verdict line for each server includes the sandbox result (for example <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded">sandbox: clean, 9 tool(s) exercised</code>) and says when the maintainer has deprecated the package. <Link to={rp('/rebrand/docs/auto-scan-claude-code')} className="text-primary-light hover:underline">How it works</Link>.</p>
+          <p onCopy={trackPluginCommandCopy} className="mt-2 text-[13px] text-text-muted">Or install the Claude Code plugin, which also scans each new MCP server at session start: <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded break-all">/plugin marketplace add AgentAvow/AgentAvow</code> then <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded break-all">/plugin install agentavow-trust@agentavow</code>. Its verdict line for each server includes the sandbox result (for example <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded">sandbox: called 9 tools, no network beyond the registry</code>) and says when the maintainer has deprecated the package. <Link to={rp('/rebrand/docs/auto-scan-claude-code')} className="text-primary-light hover:underline">How it works</Link>.</p>
           <div className="mt-4 font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1.5">Or add it by hand (any MCP client)</div>
           <div className="relative">
             <pre className="font-mono text-[12px] bg-surface border border-border rounded-xl px-4 py-3.5 pr-16 text-text overflow-x-auto">{MCP_CONFIG}</pre>

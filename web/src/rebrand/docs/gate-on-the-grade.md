@@ -12,7 +12,7 @@ Every result leads with one of three answers, in `decision`, with the reason in 
 | `review` | Review before you connect | require approval, or allow with limits |
 | `do_not_connect` | Do not connect | deny |
 
-**Do not connect** means a critical finding, a planted credential leaving the sandbox, a critical sandbox finding, or a known-malicious package or dependency. **Review before you connect** means a high finding (code or sandbox), a published advisory on this version, a deprecated package, or a score under 51. A clean scan of very little code reads **Safe to connect**, and its reason says so. Adoption is never an input. `decision_final: false` means the sandbox is still running and the answer may still move to Review. The full rule is in [How scoring works](./how-grading-works.md#the-answer-three-phrases). Certified rides beside the answer, never instead of it: read `certified_mark`, which is true only beside Safe to connect (a final sandbox result, a score of 81 or more, enough code inspected). `certified.eligible` alone can sit beside Review, so don't gate on it.
+**Do not connect** means a critical finding other than a hardcoded credential (that alone reads Review), a planted credential leaving the sandbox, a critical sandbox finding, or a known-malicious package or dependency. **Review before you connect** means a hardcoded credential, a high finding (code or sandbox), a published advisory on this version, a deprecated package, a score under 51, or a scan that couldn't read what it exists to read. A clean scan of very little code reads **Safe to connect**, and its reason says so. Adoption is never an input. `decision_final: false` means the sandbox is still running and the answer may still move to Review. The full rule is in [How scoring works](./how-grading-works.md#the-answer-three-phrases). Certified rides beside the answer, never instead of it: read `certified_mark`, which is true only beside Safe to connect (a final sandbox result, a score of 81 or more, enough code inspected). `certified.eligible` alone can sit beside Review, so don't gate on it.
 
 ## What the score tells a machine to do
 
@@ -54,7 +54,7 @@ For private code, the [local scan](./run-locally.md) gates the same way inside y
 
 ## Gate your agent at runtime (SDK + bridges)
 
-Check a tool's answer **before** your agent connects it. The client SDKs — `agentavow-trust` (npm) and the Python client — read a repo's result over the same free API, so you can enforce it in code. The client takes the API origin; `checkRepo` returns the same JSON as the public scan endpoint:
+Check a tool's answer **before** your agent connects it. The client SDKs — `agentavow-trust` (npm) and the Python client (`agentavow-sdk` on PyPI) — read a repo's result over the same free API, so you can enforce it in code. The client takes the API origin; `checkRepo` returns the same JSON as the public scan endpoint:
 
 ```js
 import { TrustClient } from 'agentavow-trust'
@@ -67,7 +67,7 @@ if (r.decision === 'review') await confirmWithUser(`Review before you connect: $
 
 For a package or a live MCP server, call the scan endpoints under **Gate anything** below; the response shape is the same.
 
-Framework bridges ship in `sdk/bridges/` (LangChain, CrewAI, AutoGen, Pydantic AI) so the pre-flight check drops into an existing agent, and the **trust gateway** (`/api/v1/gateway/check`) enforces a policy server-side when you'd rather not embed the logic: it denies a Do not connect tool whatever its tier, takes the same `fail_on` (`do_not_connect` by default, or `review`), and keeps `min_tier` as an extra floor.
+Framework bridges ship in `sdk/bridges/` (LangChain, CrewAI, AutoGen, Pydantic AI) so the pre-flight check drops into an existing agent, and the **trust gateway** (`POST /api/v1/gateway/check`) enforces a policy server-side when you'd rather not embed the logic: it denies a Do not connect tool whatever its tier, takes the same `fail_on` (`do_not_connect` by default, or `review`), and keeps `min_tier` as an extra floor.
 
 ### LangChain
 
@@ -258,8 +258,8 @@ https servers are graded by the URL in your `mcp_servers` config. A refused call
 |---|---|
 | Claude Code plugin (session-start check, install check, per-call gate) | Shipped; listed in the Claude plugin directory |
 | MCP connector (`https://agentavow.com/mcp`) | Shipped; works in any MCP client |
-| ChatGPT app | In OpenAI review |
-| npm `agentavow-trust`: core gate, Vercel AI SDK, Flue, Claude Agent SDK, OpenAI Agents SDK | Shipped (0.4.1) |
+| ChatGPT app | Shipped; in the ChatGPT plugin directory |
+| npm `agentavow-trust`: core gate, Vercel AI SDK, Flue, Claude Agent SDK, OpenAI Agents SDK | Shipped (0.4.2) |
 | LangChain, Google ADK, Claude Agent SDK and OpenAI Agents SDK gates (Python) | In this repository (`src/bridges/`); not on PyPI yet |
 | GitHub Action, local CLI, GitLab CI component, Bitbucket Pipe, Azure Pipelines template | Shipped |
 | Open Policy Agent policy (with an Envoy `ext_authz` example) | In this repository (`integrations/opa/`) |

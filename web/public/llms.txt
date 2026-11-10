@@ -5,10 +5,13 @@
 ## Check a tool
 - [Check page](https://agentavow.com/check): paste a repo, package, or MCP server URL
 - A2A Agent Cards: paste any A2A Agent Card URL for an answer, findings and a signed attestation, including whether the card's own signature verifies. API: `GET /api/v1/public/scan/a2a?card={url}`
-- [Browse the catalog](https://agentavow.com/browse): every tool we've scanned, filterable by answer
+- [Browse the catalog](https://agentavow.com/browse): every tool we've scanned, filterable by answer (plus indexed x402 endpoints)
 - [Public scan API](https://agentavow.com/docs/check-guide): no account needed, e.g. `GET /api/v1/public/scan/{owner}/{repo}` or `/api/v1/public/scan/package/npm/{name}`
 
 ## Use it from an agent
+- [Get AgentAvow](https://agentavow.com/get): every install path (Claude Code plugin, ChatGPT app, MCP connector, CI, SDK gates)
+- [Claude Code plugin](https://agentavow.com/claude-code): checks your MCP servers, dependencies and new installs
+- [For teams](https://agentavow.com/teams): CI gating, change alerts, offline verification
 - MCP server (streamable HTTP): https://agentavow.com/mcp
 - [MCP connector guide](https://agentavow.com/docs/mcp-connector)
 - [Auto-scan in Claude Code](https://agentavow.com/docs/auto-scan-claude-code)

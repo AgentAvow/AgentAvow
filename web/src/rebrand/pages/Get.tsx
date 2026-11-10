@@ -52,7 +52,7 @@ const GROUPS: { title: string; sub: string; items: Item[] }[] = [
     items: [
       { name: 'GitHub Action', text: code('AgentAvow/AgentAvow/github-action@main'), href: 'https://github.com/AgentAvow/AgentAvow/tree/main/github-action', label: 'Open ↗' },
       { name: 'GitLab, Bitbucket and Azure DevOps', text: 'Run the scanner in your own pipeline.', href: 'https://agentavow.com/docs/run-locally', label: 'Setup →' },
-      { name: 'Agent runtime gates', text: 'Vercel AI SDK, Flue, LangChain, Google ADK and more.', href: 'https://agentavow.com/docs/gate-on-the-grade', label: 'Setup →' },
+      { name: 'Agent runtime gates', text: 'npm gates for the Vercel AI SDK, Flue, Claude Agent SDK and OpenAI Agents SDK; LangChain and Google ADK in the repo.', href: 'https://agentavow.com/docs/gate-on-the-grade', label: 'Setup →' },
     ],
   },
   {

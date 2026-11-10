@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Response
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -128,7 +128,10 @@ class CatalogRow(BaseModel):
     full_name: str | None = None  # owner/repo for repo-based surfaces
     endpoint_url: str | None = None  # for x402 surface
     trust_score: int | None = None
-    grade: str | None = None  # letter grade WITH the A+ certified gate (roadmap §7)
+    # Legacy letter grade WITH the A+ certified gate (roadmap §7); deprecated.
+    grade: str | None = Field(
+        None, json_schema_extra={"deprecated": True},
+        description="Deprecated legacy field; read trust_score and certified_mark.")
     # The Certified display mark (src.scanner.verdict.certified_mark) for this row: a
     # stored A+ written under the mark rule. Lists read this, never ``grade``.
     certified_mark: bool | None = None

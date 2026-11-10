@@ -122,7 +122,7 @@ export default function Submit() {
 
           <div className="mt-12 grid sm:grid-cols-3 gap-4">
             {[
-              ['① Scanned', 'We statically scan the real artifact: one of three answers and a signed 0–100 trust score you can verify offline.'],
+              ['① Scanned', 'We statically scan its code or published artifact: one of three answers and a signed 0–100 trust score you can verify offline.'],
               ['② Listed', 'It appears in Browse under its surface, with its answer, trust score and a live adoption signal.'],
               ['③ Claim it', 'Prove ownership to get change-alerts, control how it appears, and a maintainer badge.'],
             ].map(([h, b]) => (

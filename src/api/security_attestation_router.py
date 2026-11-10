@@ -263,7 +263,7 @@ async def get_composed_slot(
 
     Designed to be dropped into the APS composed-v1 envelope as the
     ``static_analysis`` signal. Does NOT expose AgentAvow's internal
-    scoring weights — only the published gate vocabulary + letter grade.
+    scoring weights — only the published gate vocabulary.
     """
     # Look up entity
     result = await db.execute(

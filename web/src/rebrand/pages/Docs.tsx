@@ -28,9 +28,9 @@ const DOCS = [
   { slug: 'how-grading-works', title: 'How scoring works', body: howGradingWorks,
     blurb: 'How the 0–100 trust score and the adoption score are computed from scan findings, and why anyone can recompute them offline.' },
   { slug: 'gate-on-the-grade', title: 'Gate on the answer', body: gateOnTheGrade,
-    blurb: 'Block a tool below a minimum trust score — per call, in CI with the GitHub Action, at runtime in your agent, or anywhere via the API.' },
+    blurb: 'Gate on the answer (Safe to connect, Review, Do not connect) in CI with the GitHub Action, at runtime in your agent, or anywhere via the API.' },
   { slug: 'check-guide', title: 'Reading your scan score', body: checkGuide,
-    blurb: 'What a check result means: the trust score, the adoption score, subscores, findings, the recommended posture, and the signature under it.' },
+    blurb: 'What a check result means: the answer, the trust and adoption scores, subscores, findings, the recommended posture, and the signature under it.' },
   { slug: 'behavioral-sandbox', title: 'Behavioral sandbox', body: behavioralSandbox,
     blurb: 'What the behavioral sandbox runs, what it observes, how a signed observation moves the trust score, and what a clean run does not prove.' },
   { slug: 'run-locally', title: 'Run locally & in CI', body: runLocally,
@@ -40,7 +40,7 @@ const DOCS = [
   { slug: 'verify-attestations', title: 'Verify an attestation', body: verifyAttestations,
     blurb: 'Verify an AgentAvow attestation offline: fetch the public JWKS, check the Ed25519 signature, and recompute the trust score byte for byte.' },
   { slug: 'mcp-connector', title: 'MCP connector', body: mcpConnector,
-    blurb: 'Connect the AgentAvow MCP server to Claude, Cursor, or VS Code and check any tool’s trust score before your agent connects to it.' },
+    blurb: 'Connect the AgentAvow MCP server to Claude, ChatGPT, Cursor, or VS Code and check any tool’s trust score before your agent connects to it.' },
   { slug: 'auto-scan-claude-code', title: 'Auto-scan in Claude Code', body: autoScanClaudeCode,
     blurb: 'Have Claude Code check every new tool’s trust score automatically — via the plugin, a CLAUDE.md rule, or a SessionStart hook.' },
 ]
@@ -61,7 +61,7 @@ const MORE: [string, string][] = [
   ['How it works', '/rebrand/how-it-works'],
   ['Standards & research', '/rebrand/research'],
   ['CLI (local scan)', 'https://github.com/AgentAvow/AgentAvow/tree/main/src/scanner/local_scan.py'],
-  ['GitHub Action', 'https://github.com/AgentAvow/AgentAvow/tree/main/local-scan-action'],
+  ['GitHub Action', 'https://github.com/AgentAvow/AgentAvow/tree/main/github-action'],
   ['API reference', '/api/v1/redoc'],
 ]
 

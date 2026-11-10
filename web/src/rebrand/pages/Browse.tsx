@@ -71,7 +71,7 @@ function whyLines(row: CatalogRow): string[] {
   const out: string[] = []
   if (row.critical) out.push(`${row.critical} critical finding${row.critical > 1 ? 's' : ''}`)
   if (row.high) out.push(`${row.high} high-severity finding${row.high > 1 ? 's' : ''}`)
-  if (row.findings_count != null) out.push(`${row.findings_count} total findings across 12 categories`)
+  if (row.findings_count != null) out.push(`${row.findings_count} findings in total`)
   if (!out.length) out.push('No high or critical findings · signed clean')
   const sb = row.sandbox
   if (sb?.ran) {
@@ -79,7 +79,7 @@ function whyLines(row: CatalogRow): string[] {
     if (sb.unexpected_egress) parts.push(`${sb.unexpected_egress} unexpected egress host${sb.unexpected_egress > 1 ? 's' : ''}`)
     if (sb.exercised === false) parts.push('server did not start')
     if (sb.timed_out) parts.push('ran partly (hit its time limit)')
-    out.push(`Sandbox run (not part of the signed score): ${parts.join(', ')}`)
+    out.push(`Sandbox run: ${parts.join(', ')}`)
   }
   return out
 }
@@ -192,7 +192,7 @@ function ToolCard({ row }: { row: CatalogRow }) {
         {sbx && (
           <span
             className="font-mono text-[10.5px] px-1.5 py-0.5 rounded bg-surface-hover text-text-muted tabular-nums"
-            title="Observed in the behavioral sandbox (gVisor) — a runtime observation, separate from the signed score"
+            title="Observed in the behavioral sandbox (gVisor) — a runtime observation, signed separately and counted in the score"
           >
             {sbx}
           </span>

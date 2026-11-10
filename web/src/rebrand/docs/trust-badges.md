@@ -10,7 +10,7 @@ Paste this into your `README.md` (swap `owner/repo`):
 [![AgentAvow](https://agentavow.com/api/v1/public/scan/owner/repo/badge)](https://agentavow.com/check/owner/repo)
 ```
 
-That's it. First render triggers a scan; after that it's cached and refreshed automatically. Packages work the same way: `/public/scan/npm/semver/badge`, `/public/scan/pypi/requests/badge`.
+That's it. First render triggers a scan; after that it's cached and refreshed automatically. Packages work the same way: `/public/scan/package/npm/semver/badge`, `/public/scan/package/pypi/requests/badge`.
 
 ## Styles
 

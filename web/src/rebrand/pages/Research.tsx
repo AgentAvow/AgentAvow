@@ -10,12 +10,12 @@ import { fetchFlaggedStat } from '../catalog'
  */
 
 const REPORTS: { title: string; sub: string; date: string; status: 'live' | 'upcoming'; href?: string }[] = [
-  { title: 'State of Agent Security 2026', sub: 'Agent distribution surfaces + the signed-evidence substrate. 35k+ tools scanned, reproducible.', date: 'Q2 2026', status: 'live', href: '/state-of-agent-security-2026' },
+  { title: 'State of Agent Security 2026', sub: 'Agent distribution surfaces + the signed-evidence substrate. 35k+ tools and endpoints indexed, reproducible.', date: 'Q2 2026', status: 'live', href: '/state-of-agent-security-2026' },
   { title: 'State of Agent Security — Q3 2026', sub: 'Of {scanned} agent tools scanned, {pct} carry a high or critical finding. The tool-safety blind spot, sized (live figure).', date: 'Aug 2026', status: 'live', href: '/state-of-agent-security-q3-2026' },
 ]
 
 const PUBLICATIONS: { title: string; sub: string; href: string }[] = [
-  { title: 'CTEF — Cryptographic Trust Evidence Format', sub: 'The signed, reproducible evidence envelope. Versioned in the open.', href: 'https://github.com/AgentAvow/AgentAvow/tree/main/docs/standards' },
+  { title: 'CTEF — Composable Trust Evidence Format', sub: 'The signed, reproducible evidence envelope. Versioned in the open.', href: 'https://github.com/AgentAvow/AgentAvow/tree/main/docs/standards' },
   { title: 'Conformance test vectors', sub: 'Validate your own implementation against ours.', href: 'https://agentgraph.co/.well-known/cte-test-vectors.json' },
   { title: 'Public signing keys (JWKS)', sub: 'Verify any attestation offline.', href: 'https://agentgraph.co/.well-known/jwks.json' },
 ]
@@ -24,9 +24,9 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
   return <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">{children}</span>
 }
 
-// Fallbacks mirror the live flagged-stat endpoint (2026-10-09); the page swaps in the live figure.
-const FALLBACK_SCANNED = '16k+'
-const FALLBACK_PCT = '38%'
+// Fallbacks mirror the live flagged-stat endpoint (2026-11-10); the page swaps in the live figure.
+const FALLBACK_SCANNED = '17k+'
+const FALLBACK_PCT = '34%'
 
 export default function RebrandResearch() {
   const { data: stat } = useQuery({ queryKey: ['flagged-stat'], queryFn: fetchFlaggedStat, staleTime: 60_000 })

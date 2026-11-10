@@ -176,7 +176,7 @@ export default function RebrandSettings() {
       <Reveal>
         <div className="mt-4 glass rounded-2xl p-6 border-l-4 border-danger/50">
           <h2 className="text-[13px] font-mono uppercase tracking-wide text-danger mb-2">Danger zone</h2>
-          <p className="text-[13.5px] text-text-muted mb-3">Deactivating removes your account and signs you out. Public scan results about tools stay public.</p>
+          <p className="text-[13.5px] text-text-muted mb-3">Deactivating disables your account and signs you out. To delete your data, email privacy@agentavow.com. Public scan results about tools stay public.</p>
           {!confirmDelete ? (
             <button onClick={() => setConfirmDelete(true)} className="text-[13px] font-semibold px-4 py-2 rounded-xl border border-danger/50 text-danger hover:bg-danger/10 transition-colors">Deactivate account</button>
           ) : (

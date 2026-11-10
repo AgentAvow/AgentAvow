@@ -242,7 +242,7 @@ export default function RebrandBadge() {
       <h2 className="mt-12 text-xl font-bold">Wire it into your workflow</h2>
       <div className="grid md:grid-cols-3 gap-3.5 mt-4">
         {([
-          ['Local scan (CLI)', 'Scan your working tree offline — no code leaves your machine. SARIF + JSON out, gate on a min score.', 'agentavow scan .', 'https://github.com/AgentAvow/AgentAvow/tree/main/src/scanner/local_scan.py'],
+          ['Local scan (CLI)', 'Scan your working tree offline — no code leaves your machine. SARIF + JSON out, gate on the answer.', 'agentavow scan .', 'https://github.com/AgentAvow/AgentAvow/tree/main/src/scanner/local_scan.py'],
           ['GitHub Action', 'Runs the scan in your runner — works on private repos, gates the build, uploads SARIF.', 'uses: AgentAvow/AgentAvow/local-scan-action@main', 'https://github.com/AgentAvow/AgentAvow/tree/main/local-scan-action'],
           ['REST API', 'The hosted scan + signed attestation, offline-verifiable against our JWKS.', 'GET /public/scan/{owner}/{repo}', '/api/v1/redoc'],
         ] as [string, string, string, string][]).map(([h, p, code, href]) => (
