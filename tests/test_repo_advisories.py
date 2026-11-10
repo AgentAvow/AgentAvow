@@ -228,6 +228,90 @@ def test_fetch_sends_token_when_configured(monkeypatch):
     ih._repo_adv_cache.clear()
 
 
+# ── renamed / transferred repos: one redirect, to the id-based endpoint only ──────
+_MOVED = "https://api.github.com/repositories/17740831/security-advisories"
+
+
+def _redirecting(location, *, then=None, status=301):
+    """First request answers ``status`` with ``location``; later ones ``then(req)``."""
+    calls = []
+
+    def handler(req):
+        calls.append(str(req.url))
+        if len(calls) == 1:
+            return httpx.Response(status, headers={"location": location})
+        return then(req) if then else httpx.Response(200, json=[EVERYTHING])
+    return handler, calls
+
+
+def test_renamed_repo_redirect_is_followed_once(monkeypatch):
+    for status in (301, 302, 307, 308):
+        ih._repo_adv_cache.clear()
+        handler, calls = _redirecting(
+            _MOVED + "?state=published&per_page=100&page=1", status=status)
+        monkeypatch.setattr(ih.httpx, "AsyncClient", _client_factory(handler))
+        got = asyncio.run(ih.fetch_repo_advisories("stevemao/left-pad"))
+        assert got["checked"] is True, status
+        assert got["advisories"][0]["ghsa_id"] == EVERYTHING["ghsa_id"]
+        assert len(calls) == 2 and calls[1].startswith(_MOVED + "?")
+        assert "state=published" in calls[1] and "page=1" in calls[1]
+        # cached under the slug the package declared
+        assert asyncio.run(ih.fetch_repo_advisories("stevemao/left-pad")).get("cached")
+    ih._repo_adv_cache.clear()
+
+
+@pytest.mark.parametrize("location", [
+    "https://evil.example/repositories/1/security-advisories",       # another host
+    "http://api.github.com/repositories/1/security-advisories",      # not https
+    "https://api.github.com:8443/repositories/1/security-advisories",  # another port
+    "https://x@api.github.com/repositories/1/security-advisories",   # credentials
+    "https://api.github.com.evil.example/repositories/1/security-advisories",
+    "https://api.github.com/repos/other/repo/security-advisories",   # another path
+    "https://api.github.com/repositories/1/security-advisories/../../user",
+    "https://api.github.com/repositories/abc/security-advisories",
+    "https://api.github.com/repositories/1/issues",
+    "/repositories/1/security-advisories",                            # relative
+    "",
+])
+def test_redirect_anywhere_else_is_not_followed(monkeypatch, location):
+    ih._repo_adv_cache.clear()
+    handler, calls = _redirecting(location)
+    monkeypatch.setattr(ih.httpx, "AsyncClient", _client_factory(handler))
+    got = asyncio.run(ih.fetch_repo_advisories("stevemao/left-pad"))
+    assert got == {"checked": False, "reason": "http_301"}
+    assert len(calls) == 1
+    ih._repo_adv_cache.clear()
+
+
+def test_a_second_redirect_stops(monkeypatch):
+    ih._repo_adv_cache.clear()
+    handler, calls = _redirecting(_MOVED, then=lambda req: httpx.Response(
+        301, headers={"location": _MOVED.replace("17740831", "2")}))
+    monkeypatch.setattr(ih.httpx, "AsyncClient", _client_factory(handler))
+    got = asyncio.run(ih.fetch_repo_advisories("stevemao/left-pad"))
+    assert got == {"checked": False, "reason": "http_301"} and len(calls) == 2
+    ih._repo_adv_cache.clear()
+
+
+def test_redirect_without_token_behaves_the_same(monkeypatch):
+    ih._repo_adv_cache.clear()
+    seen = []
+
+    def then(req):
+        seen.append(req.headers.get("authorization"))
+        return httpx.Response(200, json=[])
+    handler, _ = _redirecting(_MOVED, then=then)
+    monkeypatch.setattr(ih.httpx, "AsyncClient", _client_factory(handler))
+    assert asyncio.run(ih.fetch_repo_advisories("stevemao/left-pad"))["checked"] is True
+    assert seen == [None]
+    ih._repo_adv_cache.clear()
+    handler, _ = _redirecting(_MOVED, then=then)
+    monkeypatch.setattr(ih.httpx, "AsyncClient", _client_factory(handler))
+    assert asyncio.run(ih.fetch_repo_advisories("stevemao/left-pad", token="t"))["checked"]
+    assert seen[-1] == "Bearer t"  # the token goes only to api.github.com, as before
+    ih._repo_adv_cache.clear()
+
+
 def _result(version="2.0.0"):
     r = scanmod.ScanResult(repo=f"npm:{PKG}", stars=0, description="", framework="")
     r.artifact_scan = {"version": version}

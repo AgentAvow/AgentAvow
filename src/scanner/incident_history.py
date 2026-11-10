@@ -475,6 +475,30 @@ def merge_advisories(existing: list[dict], extra: list[dict]) -> list[dict]:
     return out
 
 
+_REDIRECT_STATUSES = (301, 302, 307, 308)
+_REPO_ID_ADVISORIES_RE = re.compile(r"/repositories/\d+/security-advisories")
+
+
+def _repo_advisory_redirect(location: str | None) -> str | None:
+    """The id-based advisories URL a renamed repo redirects to, or None. Accepted only
+    as ``https://api.github.com/repositories/<id>/security-advisories`` (a query string
+    is allowed and dropped: the caller sends its own); any other host, scheme, port,
+    credentials or path is refused."""
+    from urllib.parse import urlsplit
+    if not isinstance(location, str) or not location:
+        return None
+    try:
+        u = urlsplit(location)
+        port = u.port
+    except ValueError:
+        return None
+    if (u.scheme != "https" or u.hostname != "api.github.com" or port not in (None, 443)
+            or u.username or u.password or u.netloc.lower() != "api.github.com"
+            or not _REPO_ID_ADVISORIES_RE.fullmatch(u.path)):
+        return None
+    return f"https://api.github.com{u.path}"
+
+
 async def fetch_repo_advisories(slug: str, token: str | None = None) -> dict:
     """The repository's published security advisories (raw GitHub records).
     ``{"checked": True, "advisories": [...]}`` on success, cached per repository for
@@ -493,13 +517,24 @@ async def fetch_repo_advisories(slug: str, token: str | None = None) -> dict:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     found: list = []
+    url = GITHUB_REPO_ADVISORIES_URL.format(slug=slug)
+    redirected = False
     try:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
-            for page in range(1, _REPO_ADV_MAX_PAGES + 1):
+            page = 1
+            while page <= _REPO_ADV_MAX_PAGES:
                 resp = await client.get(
-                    GITHUB_REPO_ADVISORIES_URL.format(slug=slug), headers=headers,
+                    url, headers=headers,
                     params={"state": "published", "per_page": 100, "page": page},
                 )
+                if resp.status_code in _REDIRECT_STATUSES and not redirected:
+                    # A renamed or transferred repo: GitHub answers with its id-based
+                    # address. Followed once, and only to that exact endpoint.
+                    moved = _repo_advisory_redirect(resp.headers.get("location"))
+                    if moved is None:
+                        return {"checked": False, "reason": f"http_{resp.status_code}"}
+                    url, redirected = moved, True
+                    continue
                 if resp.status_code != 200:
                     return {"checked": False, "reason": f"http_{resp.status_code}"}
                 batch = resp.json()
@@ -508,6 +543,7 @@ async def fetch_repo_advisories(slug: str, token: str | None = None) -> dict:
                 found.extend(b for b in batch if isinstance(b, dict))
                 if len(batch) < 100:
                     break
+                page += 1
     except (httpx.HTTPError, ValueError):
         return {"checked": False, "reason": "error"}
     _repo_adv_cache[slug] = (now, found)
