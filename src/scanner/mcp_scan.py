@@ -766,6 +766,7 @@ _MCP_HEADERS = {
     "User-Agent": "AgentAvow-MCP-Scanner",
 }
 _MCP_PROTOCOL_VERSION = "2025-06-18"
+_PROTOCOL_VERSION_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def _rpc(method: str, params: dict | None = None, rid: int | None = 1) -> dict:
@@ -923,6 +924,8 @@ class McpSession:
         # The ``WWW-Authenticate`` header of a refused ``initialize`` (None otherwise):
         # how ``fetch_mcp_tools`` tells "needs sign-in" from "unreachable".
         self.init_www_authenticate: str | None = None
+        # The version the server answered in ``initialize`` (sent as MCP-Protocol-Version).
+        self.protocol_version: str | None = None
         self._rid = 1
 
     def _next_id(self) -> int:
@@ -959,6 +962,14 @@ class McpSession:
         if session:
             self.session_id = session
             self._headers["mcp-session-id"] = session
+        # Every request after initialize carries the negotiated version (MCP 2025-06-18,
+        # Streamable HTTP). Without it a server assumes 2025-03-26 and may serve tools
+        # without outputSchema or title, so the signed definition would lack them.
+        negotiated = init_result.get("protocolVersion")
+        if not (isinstance(negotiated, str) and _PROTOCOL_VERSION_RE.fullmatch(negotiated)):
+            negotiated = _MCP_PROTOCOL_VERSION
+        self.protocol_version = negotiated
+        self._headers["MCP-Protocol-Version"] = negotiated
         # notifications/initialized (no id — a notification)
         try:
             await _post_capped(
