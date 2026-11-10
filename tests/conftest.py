@@ -503,6 +503,13 @@ async def _clean_db_once():
             await conn.execute(text(
                 f"ALTER TABLE tool_watches ADD COLUMN IF NOT EXISTS {_col} VARCHAR(128)"
             ))
+        # tool_watches answer baseline (migration t27)
+        await conn.execute(text(
+            "ALTER TABLE tool_watches ADD COLUMN IF NOT EXISTS last_decision VARCHAR(32)"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE tool_watches ADD COLUMN IF NOT EXISTS last_certified BOOLEAN"
+        ))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_webhooks_active "
             "ON webhook_subscriptions (is_active)"

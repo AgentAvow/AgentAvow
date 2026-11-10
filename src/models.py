@@ -2414,6 +2414,12 @@ class ToolWatch(Base):
     # tool-definition digest, so the re-scan loop compares this to alert "icon changed".
     # NULL until observed (non-MCP watches stay NULL).
     last_icon_digest = Column(String(128), nullable=True)
+    # The answer (src/scanner/verdict.py decide(): safe / review / do_not_connect) and
+    # the Certified mark at the last re-scan, so the loop can alert when the answer
+    # gets worse or the mark comes off. NULL until observed: the first re-scan after
+    # the column lands sets the baseline silently.
+    last_decision = Column(String(32), nullable=True)
+    last_certified = Column(Boolean, nullable=True)
     active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_checked_at = Column(DateTime(timezone=True), nullable=True)

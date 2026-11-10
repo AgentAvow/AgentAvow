@@ -281,7 +281,7 @@ Read `decision` / `decision_reason` to decide (`trust_score` / `trust_tier` unde
 
 ## Catch the rug-pull after you've shipped
 
-A one-time gate misses the tool that was clean when you adopted it and turned malicious in v2. **Watch** a tool and AgentAvow re-scans it on a schedule and sends an **HMAC-signed webhook** when its score drops by more than 5 points **or its signed tool definition changes** (`tool_manifest_digest` drift — the silent redefinition you'd otherwise miss). Wire the webhook to Slack or your CI to pull a now-unsafe tool automatically.
+A one-time gate misses the tool that was clean when you adopted it and turned malicious in v2. **Watch** a tool and AgentAvow re-scans it on a schedule and sends an **HMAC-signed webhook** when its score drops by more than 5 points, **its answer gets worse** (Safe to connect → Review before you connect → Do not connect), **its Certified mark comes off**, **or its signed tool definition changes** (`tool_manifest_digest` drift — the silent redefinition you'd otherwise miss). One re-scan sends one alert, listing every reason it fired for. A better answer or a newly earned Certified mark is good news: it shows in your notifications and email, never on the webhook. The first re-scan of a watch records its answer without alerting. Wire the webhook to Slack or your CI to pull a now-unsafe tool automatically.
 
 To see it end to end, run the [rug-pull demo](https://github.com/AgentAvow/AgentAvow/tree/main/demos/rugpull): an MCP server that was clean on approval day redefines its `send_email` tool, the ungated agent leaks the message, and the gated agent refuses the call before anything is sent.
 
@@ -306,7 +306,16 @@ X-AgentAvow-Signature: sha256=<hex>
 
 The body is JSON with a `type` that says what happened:
 
-- `agentavow.alert.grade_change` — `{type, owner, repo, old_score, new_score, reason, decision, decision_final, decision_reason, certified}`, where `reason` is `score dropped` or `signed definition changed` and `decision` is the tool's answer now.
+- `agentavow.alert.grade_change` — `{type, owner, repo, old_score, new_score, reason, triggers[], reasons[], old_decision, old_certified_mark, decision, decision_final, decision_reason, certified}`. `decision` and `certified` are the tool's answer and Certified mark now; `old_decision` and `old_certified_mark` are the ones from the previous re-scan (`null` if none was recorded yet). `triggers[]` lists every reason this one alert fired for, in this order:
+
+  | `triggers[]` | `reasons[]` | fires when |
+  |---|---|---|
+  | `score_drop` | `score dropped` | the score fell by more than 5 points |
+  | `definition_change` | `signed definition changed` | `tool_manifest_digest` changed |
+  | `answer_worse` | `answer changed` | `safe` → `review`, `safe` → `do_not_connect`, or `review` → `do_not_connect` |
+  | `certified_lost` | `Certified mark removed` | `old_certified_mark` was `true` and `certified` is now `false` |
+
+  `reason` is the first entry of `reasons[]`, so a receiver written before `triggers[]` existed keeps working. Read `triggers[]` to act on a specific cause.
 - `agentavow.alert.behavioral_change` — a later [sandbox run](./behavioral-sandbox.md) added findings, leaked a canary or reached a new undeclared host. Carries the run's current state rather than a diff: `findings[]` (`rule`, `severity`, `name`), `unexpected_egress[]`, `canary_exfil[]`, `tools_exercised[]`, `plan`, `score`, the `package` the sandbox exercised, and the tool's answer now (`decision`, `decision_final`, `decision_reason`, `certified`).
 - `agentavow.alert.icon_change` — a watched MCP server now serves different `icons` on its tools or in its `serverInfo`. Icons are not part of the signed tool definition, so this is separate from `signed definition changed` and the grade and attestation are not what moved. Carries `{type, event, owner, repo, surface, score, reason, old_icon_fingerprint, new_icon_fingerprint, icon_findings[]}` (`severity`, `name`, `where` for the icon findings of the new scan) and the tool's answer now (`decision`, `decision_final`, `decision_reason`, `certified`).
 - `agentavow.alert.test` — what `POST …/test` sends, shaped like a grade change with a `message`.
