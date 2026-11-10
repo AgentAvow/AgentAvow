@@ -7,6 +7,9 @@ import { motion, useReducedMotion } from 'framer-motion'
 import api from '../../lib/api'
 import { useAuth } from '../../hooks/useAuth'
 import { Reveal } from '../components/motion'
+import { holdOneTimeScan } from '../lib/oneTimeScan'
+import { AccountSkeleton, ConfirmAction, LoadError } from '../components/AccountBits'
+import { useRequireUser } from '../lib/useRequireUser'
 
 // Confetti pieces — fixed trajectories so the burst is stable across renders.
 // Colors pull from the brand palette (primary / accent / success / warning).
@@ -122,8 +125,12 @@ function claimNextStep(c: Claim): { verified: boolean; text: React.ReactNode } {
 function AddToolForm({ onClaimed }: { onClaimed: (c: Claim) => void }) {
   const qc = useQueryClient()
   const [params] = useSearchParams()
-  // ?coord=npm:chalk (from a package page's "Claim this package") pre-fills the input.
-  const [coord, setCoord] = useState(params.get('coord') || '')
+  // ?coord=npm:chalk (from a package page's "Claim this package") pre-fills the input;
+  // so does ?owner=&repo= (older "Claim this tool" and "Scan it privately" links).
+  const [coord, setCoord] = useState(() => {
+    const o = params.get('owner'), r = params.get('repo')
+    return params.get('coord') || (o && r ? `${o}/${r}` : '')
+  })
   const [privateHint, setPrivateHint] = useState<string | null>(null)
   const [parseErr, setParseErr] = useState(false)
   const [done, setDone] = useState<Claim | null>(null)
@@ -283,7 +290,10 @@ function GitHubAppConnection() {
                 <div className="font-mono text-[12px] text-text-muted truncate">@{i.account_login || 'installed'} · {(i.repos?.length ?? 0)} repos available</div>
               </div>
             </div>
-            <button onClick={() => disconnect.mutate(i.id)} className="shrink-0 text-[12px] text-text-muted hover:text-danger">Disconnect</button>
+            <span className="shrink-0">
+              <ConfirmAction label="Disconnect" question="Stop private scans and alerts for its repos?" confirmLabel="Disconnect"
+                onConfirm={() => disconnect.mutate(i.id)} pending={disconnect.isPending && disconnect.variables === i.id} pendingLabel="Disconnecting…" />
+            </span>
           </div>
         ))
       )}
@@ -302,13 +312,15 @@ function OneTimeScanExpander() {
   const [token, setToken] = useState('')
   const scan = useMutation({
     mutationFn: async () => (await api.post('/account/private-scan', { owner: owner.trim(), repo: repo.trim(), token: token.trim() })).data,
-    onSuccess: (data) => navigate(
-      rp(`/rebrand/check/${owner.trim()}/${repo.trim()}`),
-      { state: { privateResult: data, token: token.trim() } },
-    ),
+    onSuccess: (data) => {
+      // The token is used for this one request and then dropped: it never goes into
+      // router state, the URL or storage. Only an in-memory handle to the result does.
+      setToken('')
+      navigate(rp(`/rebrand/check/${owner.trim()}/${repo.trim()}`), { state: holdOneTimeScan(data) })
+    },
   })
   return (
-    <details className="mt-3">
+    <details className="mt-3" open={params.get('private') === '1' || undefined}>
       <summary className="cursor-pointer text-[12.5px] text-text-muted hover:text-text">Advanced: one-time scan with a token (no ongoing access) →</summary>
       <div className="mt-3">
         <p className="text-text-muted text-[12.5px] mb-2.5">A single scan with no ongoing access — paste a read token, used for this scan only and <strong className="text-text">never stored or logged</strong>. For continuous scanning + alerts, connect the GitHub App above instead.</p>
@@ -471,7 +483,8 @@ function ToolRow({ c, highlight = false }: { c: Claim; highlight?: boolean }) {
     // report live, so always offer it.
     if (c.scanned || !isRepoLike) actions.push(<Link key="rep" to={claimReportHref(c)} className={link}>Report →</Link>)
   }
-  actions.push(<button key="rm" onClick={() => remove.mutate()} className={muted}>Remove</button>)
+  actions.push(<ConfirmAction key="rm" label="Remove" className={muted} question="Remove this claim?" confirmLabel="Remove"
+    onConfirm={() => remove.mutate()} pending={remove.isPending} pendingLabel="Removing…" />)
 
   return (
     <div className={`glass rounded-xl p-4 relative overflow-hidden transition-shadow duration-500 ${ring ? 'ring-2 ring-primary-light shadow-lg shadow-primary/20' : ''}`}>
@@ -532,14 +545,10 @@ function ToolRow({ c, highlight = false }: { c: Claim; highlight?: boolean }) {
  */
 export default function RebrandMyTools() {
   const { user, isLoading: authLoading } = useAuth()
-  const navigate = useNavigate()
   const location = useLocation()
+  useRequireUser(user, authLoading)
 
-  useEffect(() => {
-    if (!authLoading && !user) navigate(rp('/rebrand/login'))
-  }, [authLoading, user, navigate])
-
-  const { data, isLoading: cLoading } = useClaims(!!user)
+  const { data, isLoading: cLoading, isError: cError, refetch: refetchClaims, isRefetching: cRefetching } = useClaims(!!user)
   const { data: appData } = useAppStatus(!!user)
   const [justClaimedId, setJustClaimedId] = useState<string | null>(null)
 
@@ -551,7 +560,7 @@ export default function RebrandMyTools() {
     }
   }, [location.hash, cLoading])
 
-  if (!user) return null
+  if (!user) return <AccountSkeleton width="max-w-[680px]" />
   const claims = data?.claims ?? []
   const claimByName = new Map(claims.map((c) => [c.full_name.toLowerCase(), c]))
   // Every repo the connected App can reach (deduped across installs). Claimed ones
@@ -598,6 +607,8 @@ export default function RebrandMyTools() {
         <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-3">Your tools {tools.length > 0 && `· ${tools.length}`}</h2>
         {cLoading ? (
           <div className="flex flex-col gap-2.5">{[0, 1].map((i) => <div key={i} className="glass rounded-xl h-[64px] animate-pulse" />)}</div>
+        ) : cError ? (
+          <LoadError what="your tools" onRetry={() => void refetchClaims()} retrying={cRefetching} />
         ) : tools.length === 0 ? (
           <div className="text-text-muted text-[13px]">No tools yet. Claim a public repo above, or connect the GitHub App to claim a private one.</div>
         ) : (

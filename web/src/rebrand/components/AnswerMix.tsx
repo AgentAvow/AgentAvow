@@ -109,7 +109,7 @@ export function StatCards({ set }: { set: 'home' | 'index' }) {
   const cards: Card[] = set === 'home'
     ? [
         { n: stat?.by_surface?.mcp?.scanned_total, label: 'MCP servers checked', to: '/rebrand/browse' },
-        { n: runs, label: 'sandbox runs', to: '/rebrand/sandbox' },
+        { n: runs, label: 'sandbox runs', to: '/rebrand/docs/behavioral-sandbox' },
         { n: mix?.certified, label: 'Certified', to: '/rebrand/certified', tone: 'grad' },
         // The detection categories are a fixed part of the scanner, not a catalog count.
         { n: 12, label: 'detection categories', to: '/rebrand/how-it-works' },
@@ -118,7 +118,7 @@ export function StatCards({ set }: { set: 'home' | 'index' }) {
         { n: mix?.dnc, label: 'Do not connect', to: DNC_LIST, tone: 'bad' },
         { n: mix?.certified, label: 'Certified', to: '/rebrand/certified', tone: 'grad' },
         { n: stat?.flagged, label: 'with a high or critical finding', to: '/rebrand/browse?surface=all&sev=high' },
-        { n: runs, label: 'sandbox runs', to: '/rebrand/sandbox' },
+        { n: runs, label: 'sandbox runs', to: '/rebrand/docs/behavioral-sandbox' },
       ]
   return (
     <div className="grid grid-cols-2 min-[760px]:grid-cols-4 gap-3 mt-4">

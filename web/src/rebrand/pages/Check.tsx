@@ -25,6 +25,8 @@ import { trackBadgeCopied, trackCheckSubmit, trackResultView } from '../../lib/a
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
 import { useRotatingPlaceholder } from '../lib/hooks'
 import { summarize } from '../lib/summarize'
+import { oneTimeScanFor } from '../lib/oneTimeScan'
+import { here, loginHref } from '../lib/returnTo'
 import { CapabilitiesPanel, AdvisoriesPanel, McpToolList, PackageFacts, PackageClaim, VerifyPanel, McpWhatItCanDo, McpNotes, hasToolList, packageBadgeUrl } from '../components/ScanEvidence'
 import type { AxiosError } from 'axios'
 
@@ -208,6 +210,7 @@ const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'cra
  * (github → owner/repo · npm/pypi → surface/pkg · mcp → mcp/url · openclaw → owner/repo). */
 function WatchCTA({ surface = 'github', owner, repo }: { surface?: string; owner: string; repo: string }) {
   const { user } = useAuth()
+  const location = useLocation()
   const [clicked, setClicked] = useState(false)
   // Reflect whether this tool is already watched — the CTA must not offer "Watch"
   // when the user already watches it. Only queried when signed in.
@@ -226,7 +229,8 @@ function WatchCTA({ surface = 'github', owner, repo }: { surface?: string; owner
   const base = 'w-full flex items-center justify-center gap-2.5 text-[15px] font-semibold px-5 py-3 rounded-xl transition-all'
   const cta = 'text-primary-light border border-primary/45 bg-primary/[0.06] hover:bg-primary/[0.12] hover:border-primary/70'
   const star = <svg viewBox="0 0 24 24" fill="currentColor" className="w-[16px] h-[16px] shrink-0"><path d="M12 2.5l2.9 6.1 6.6.9-4.8 4.6 1.2 6.6L12 18.6 6.1 21.3l1.2-6.6L2.5 9.5l6.6-.9z"/></svg>
-  if (!user) return <Link to={rp('/rebrand/login')} className={`${base} ${cta}`}>{star} Watch this tool</Link>
+  // Signed out: sign in, then come back to this result (with its query, e.g. ?endpoint=).
+  if (!user) return <Link to={loginHref(here(location))} className={`${base} ${cta}`}>{star} Watch this tool</Link>
   if (watching) return <div className={`${base} bg-success/10 text-success border border-success/40`}>✓ Watching — we'll alert you if the score drops</div>
   return (
     <button onClick={() => mutation.mutate()} disabled={mutation.isPending} className={`${base} ${cta} disabled:opacity-70`}>
@@ -700,19 +704,12 @@ function InsideCommon({ scan, kind, what }: { scan: PublicScanResponse; kind: Re
 
 /** Claim CTA that becomes an owned state for signed-in users who've claimed this repo.
  * Only queries claims when signed in — the anonymous check flow never fires it. */
-function OwnershipCTA({ owner, repo, token }: { owner: string; repo: string; token?: string }) {
+function OwnershipCTA({ owner, repo }: { owner: string; repo: string }) {
   const { user } = useAuth()
-  const qc = useQueryClient()
   const { data: claimsData } = useQuery({
     queryKey: ['rebrand-claims'],
     queryFn: async () => (await api.get<{ claims: { owner: string; repo: string; status: string }[] }>('/account/claims')).data,
     enabled: !!user,
-  })
-  // From a private scan we hold the token, so claiming can verify ownership in
-  // one step (no topic needed for a private repo).
-  const claimWithToken = useMutation({
-    mutationFn: async () => (await api.post('/account/claims', { owner, repo, token })).data,
-    onSuccess: () => qc.refetchQueries({ queryKey: ['rebrand-claims'] }),
   })
   const owned = !!user && (claimsData?.claims ?? []).some(
     (c) => c.owner.toLowerCase() === owner.toLowerCase() && c.repo.toLowerCase() === repo.toLowerCase()
@@ -731,23 +728,6 @@ function OwnershipCTA({ owner, repo, token }: { owner: string; repo: string; tok
       </Reveal>
     )
   }
-  // Private scan (token in hand): claim + verify in one click.
-  if (user && token) {
-    return (
-      <Reveal>
-        <div id="claim" className="scroll-mt-24 mt-4 glass rounded-2xl p-6 flex items-center justify-between gap-4 flex-wrap">
-          <div>
-            <h3 className="text-[15px] font-bold">Own this private repo?</h3>
-            <p className="text-text-muted text-[13.5px] mt-0.5">Claim it now — your read token verifies ownership, no topic needed.</p>
-            {claimWithToken.isError && <p className="text-danger text-[12.5px] mt-1">Couldn't claim — the token may no longer have access.</p>}
-          </div>
-          <button onClick={() => claimWithToken.mutate()} disabled={claimWithToken.isPending}
-            className="text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shrink-0 disabled:opacity-60">
-            {claimWithToken.isPending ? 'Claiming…' : 'Claim & verify'}</button>
-        </div>
-      </Reveal>
-    )
-  }
   return (
     <Reveal>
       <div id="claim" className="scroll-mt-24 mt-4 glass rounded-2xl p-6 flex items-center justify-between gap-4 flex-wrap">
@@ -755,46 +735,9 @@ function OwnershipCTA({ owner, repo, token }: { owner: string; repo: string; tok
           <h3 className="text-[15px] font-bold">Own this tool?</h3>
           <p className="text-text-muted text-[13.5px] mt-0.5">Claim it to scan it privately, get change alerts, and own how it appears on AgentAvow.</p>
         </div>
-        <Link to={rp(`/rebrand/claim?owner=${owner}&repo=${repo}`)} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors shrink-0">Claim this tool</Link>
+        <Link to={rp('/rebrand/tools') + '?coord=' + encodeURIComponent(`${owner}/${repo}`)} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors shrink-0">Claim this tool</Link>
       </div>
     </Reveal>
-  )
-}
-
-/** The secondary-action slot for a stored PRIVATE repo, sitting right below the
- * watch CTA. Not listed → a clear "Publish to search" CTA; on publish it animates
- * into the share row (which is also what shows if it's already listed). */
-function PrivateSearchSlot({ owner, repo, score, published }: { owner: string; repo: string; score: number; published: boolean }) {
-  const qc = useQueryClient()
-  const reduce = useReducedMotion()
-  const publish = useMutation({
-    mutationFn: async () => (await api.post(`/account/private-report/${owner}/${repo}/publish`)).data,
-    onSuccess: () => {
-      qc.refetchQueries({ queryKey: ['rebrand-private-report', owner, repo] })
-      qc.refetchQueries({ queryKey: ['rebrand-claims'] })
-    },
-  })
-  if (published || publish.isSuccess) {
-    return (
-      <motion.div
-        initial={reduce ? false : { opacity: 0, y: 10, scale: 0.96 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.45, ease: 'easeOut' }}
-        className="flex flex-col items-center gap-2"
-      >
-        <div className="text-[12px] text-success font-medium">🌐 Listed in search — share it</div>
-        <ShareRow label={`${owner}/${repo}`} score={score} />
-      </motion.div>
-    )
-  }
-  return (
-    <div className="flex flex-col items-center gap-1.5">
-      <button onClick={() => publish.mutate()} disabled={publish.isPending}
-        className="text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">
-        {publish.isPending ? 'Publishing…' : '🌐 Publish to search'}</button>
-      <p className="text-[11.5px] text-text-muted text-center max-w-[42ch]">List the score in search — your code stays private.</p>
-      {publish.isError && <div className="text-[11.5px] text-danger">Couldn&apos;t publish — try again.</div>}
-    </div>
   )
 }
 
@@ -810,7 +753,7 @@ function ProvenanceChip() {
 }
 
 /** Owner opt-in: publish a connected private repo's stored grade to public search. */
-function PublishStoredCTA({ owner, repo, published }: { owner: string; repo: string; published: boolean }) {
+function PublishStoredCTA({ owner, repo, score, published }: { owner: string; repo: string; score: number; published: boolean }) {
   const qc = useQueryClient()
   const publish = useMutation({
     mutationFn: async () => (await api.post(`/account/private-report/${owner}/${repo}/publish`)).data,
@@ -828,7 +771,10 @@ function PublishStoredCTA({ owner, repo, published }: { owner: string; repo: str
         <h3 className="text-[15px] font-bold">Publish to search</h3>
         <p className="text-text-muted text-[13.5px] mt-1 max-w-[62ch]">Private repos aren&apos;t listed in AgentAvow search. Publishing makes this score public and findable — your choice as the owner.</p>
         {done ? (
-          <div className="mt-3 text-[13px] text-success">✓ Published — anyone can now find {owner}/{repo} in search.</div>
+          <div id="share" className="scroll-mt-24">
+            <div className="mt-3 text-[13px] text-success">✓ Published — anyone can now find {owner}/{repo} in search. Share it:</div>
+            <div className="mt-2.5"><ShareRow label={`${owner}/${repo}`} score={score} /></div>
+          </div>
         ) : (
           <button onClick={() => publish.mutate()} disabled={publish.isPending}
             className="mt-3 text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">
@@ -2045,6 +1991,7 @@ function A2aResult({ card }: { card: string }) {
       <ResultPage
         scan={scan as unknown as Record<string, unknown> & { trust_score: number }}
         kind="a2a"
+        claim={false}
         eyebrow={['A2A agent card', host]}
         name={name}
         recheck={recheck}
@@ -2307,12 +2254,13 @@ export default function RebrandCheck() {
   // ?code=1 keeps the repository code scan in view for a repo that is a skill
   // collection (otherwise it leads with the collection result, see Result).
   const showCode = sp.get('code') === '1'
-  // A private scan hands its result here via router state so the owner gets the
-  // full detailed report on the real score page (a private repo can't be
-  // re-fetched publicly). The token rides along so the Publish CTA can work.
-  const state = location.state as { privateResult?: PublicScanResponse; token?: string } | null
+  // A one-time private scan hands its result here so the owner gets the full report
+  // on the real score page (a private repo can't be re-fetched publicly). Router state
+  // carries only an id; the result stays in memory (lib/oneTimeScan) and the GitHub
+  // token never leaves the My Tools form.
+  const privateResult = oneTimeScanFor<PublicScanResponse>(location.state)
   if (!owner || !repo) return <Hero />
-  return <Result owner={owner} repo={repo} privateResult={state?.privateResult} showCode={showCode} />
+  return <Result owner={owner} repo={repo} privateResult={privateResult} showCode={showCode} />
 }
 
 function Result({ owner, repo, privateResult, showCode = false }: {
@@ -2395,7 +2343,7 @@ function Result({ owner, repo, privateResult, showCode = false }: {
           <h2 className="text-xl font-semibold">Couldn't scan {owner}/{repo}</h2>
           <p className="mt-2 text-text-muted text-[14px]">The scanner didn't return a result. <strong className="text-text">If this is a private repo</strong>, its report isn't public — re-scan it privately with a read-only token to see it. Otherwise the scan service may be busy; try again in a moment.</p>
           <div className="mt-5 flex items-center justify-center gap-4 flex-wrap">
-            <Link to={rp(`/rebrand/tools?owner=${owner}&repo=${repo}`)} className="text-[13.5px] font-semibold text-primary-light hover:text-primary">Scan it privately →</Link>
+            <Link to={rp(`/rebrand/tools?private=1&owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`)} className="text-[13.5px] font-semibold text-primary-light hover:text-primary">Scan it privately →</Link>
             <Link to={rp("/rebrand/browse")} className="text-[13.5px] font-semibold text-text-muted hover:text-text">Browse scored tools →</Link>
           </div>
         </div>
@@ -2467,6 +2415,7 @@ function Result({ owner, repo, privateResult, showCode = false }: {
         eyebrow={[isPrivate ? 'Private GitHub repo' : 'GitHub repo', scan.repo || `${owner}/${repo}`]}
         name={`${owner}/${repo}`}
         privateScan={oneTimePrivate ? 'one-time' : storedPrivate ? 'stored' : undefined}
+        share={!isPrivate || (storedPrivate && published)}
         recheck={isPrivate ? undefined : recheck}
         banner={<IncidentBanner scan={scan} />}
         chips={<>
@@ -2534,13 +2483,8 @@ function Result({ owner, repo, privateResult, showCode = false }: {
           ) : (
             <OwnershipCTA owner={owner} repo={repo} />
           )}
-          {/* a stored private repo publishes to search here (then animates into share) */}
-          {storedPrivate && (
-            <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
-              <PrivateSearchSlot owner={owner} repo={repo} score={scan.trust_score} published={published} />
-            </div>
-          )}
-          {storedPrivate && <PublishStoredCTA owner={owner} repo={repo} published={published} />}
+          {/* a stored private repo publishes to search here; once listed it shows the share row */}
+          {storedPrivate && <PublishStoredCTA owner={owner} repo={repo} score={scan.trust_score} published={published} />}
           {!isPrivate && <SharePanel label={`${owner}/${repo}`} score={scan.trust_score} />}
         </>}
         proof={<VerifyPanel scan={scan} />}

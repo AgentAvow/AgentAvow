@@ -102,6 +102,10 @@ export interface ResultPageProps {
   watch?: ReactNode
   /** markdown for "Copy the badge" (absent where there is no public badge) */
   badgeMarkdown?: string
+  /** false when the page renders no #share panel (e.g. an unpublished private repo) */
+  share?: boolean
+  /** false when the page renders no #claim panel (e.g. an A2A agent card) */
+  claim?: boolean
   keepWatching?: { history?: ReactNode; adoption?: ReactNode; drift?: ReactNode; note?: ReactNode }
   inside: ReactNode
   badgeClaimShare: ReactNode
@@ -330,8 +334,11 @@ export function NextStepCards({ dnc = false, watch, badgeMarkdown, oneTime = fal
     trackBadgeCopied('badge')
     setCopied(true); setTimeout(() => setCopied(false), 1400)
   }
+  // "Keep an eye on it" only when there is something to keep an eye on with: a watch
+  // button or a badge. A one-time scan and an A2A card have neither.
+  const keep = !oneTime && (!!watch || !!badgeMarkdown)
   return (
-    <div className={`mt-4 grid gap-3 ${oneTime ? 'md:grid-cols-2' : 'md:grid-cols-3'}`} data-testid="next-steps">
+    <div className={`mt-4 grid gap-3 ${keep ? 'md:grid-cols-3' : 'md:grid-cols-2'}`} data-testid="next-steps">
       <StepCard lead title={dnc ? 'Stop tools like this automatically' : 'Get this check automatically'}
         text={dnc ? 'Claude Code asks you first before a server or package that reads Do not connect is added.' : 'Claude Code checks new MCP servers and packages before your agent uses them.'}>
         <Link to={rp(CLAUDE_CODE_PAGE)} className={BTN_SOLID}>Get it for Claude Code</Link>
@@ -340,7 +347,7 @@ export function NextStepCards({ dnc = false, watch, badgeMarkdown, oneTime = fal
         <a href={CLAUDE_LISTING} target="_blank" rel="noopener noreferrer" onClick={() => trackListing(CLAUDE_LISTING)} className={BTN_GHOST}>Add to Claude ↗</a>
         <a href={CHATGPT_LISTING} target="_blank" rel="noopener noreferrer" onClick={() => trackListing(CHATGPT_LISTING)} className={BTN_GHOST}>Add to ChatGPT ↗</a>
       </StepCard>
-      {!oneTime && (
+      {keep && (
         <StepCard title="Keep an eye on it" text="Get an alert if this answer drops or its tool definitions change.">
           {watch}
           {badgeMarkdown
@@ -386,6 +393,8 @@ export function ResultPage(props: ResultPageProps) {
   const oneTime = privateScan === 'one-time'
   const dnc = d.decision === 'do_not_connect'
   const kw = props.keepWatching ?? {}
+  const canShare = props.share ?? !oneTime
+  const canClaim = props.claim ?? true
   return (
     <div className="max-w-[860px] mx-auto px-6 py-14" data-result-kind={kind}>
       <ResultTitle banner={props.banner} eyebrow={props.eyebrow} version={props.version} checked={checkedAgo(scan.scanned_at)}
@@ -408,9 +417,11 @@ export function ResultPage(props: ResultPageProps) {
         <NextStepCards dnc={dnc} watch={props.watch} badgeMarkdown={props.badgeMarkdown} oneTime={oneTime} />
         {!dnc && props.install}
         <p className="mt-3 text-[12.5px] text-text-muted">
-          {dnc && 'No install line on a Do not connect result · '}
-          {!oneTime && <><a href="#share" className="text-primary-light hover:text-primary">Share this result</a> · </>}
-          <a href="#claim" className="text-primary-light hover:text-primary">{privateScan ? 'Claim or publish it' : 'Claim this tool'}</a>
+          {[
+            dnc && 'No install line on a Do not connect result',
+            canShare && <a key="share" href="#share" className="text-primary-light hover:text-primary">Share this result</a>,
+            canClaim && <a key="claim" href="#claim" className="text-primary-light hover:text-primary">{privateScan ? 'Claim or publish it' : 'Claim this tool'}</a>,
+          ].filter(Boolean).flatMap((el, i) => (i ? [' · ', el] : [el]))}
         </p>
       </Section>
 

@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
 import { rp } from '../basePath'
 import api from '../../lib/api'
 import { useAuth } from '../../hooks/useAuth'
 import { Reveal } from '../components/motion'
+import { AccountSkeleton } from '../components/AccountBits'
+import { useRequireUser } from '../lib/useRequireUser'
 
 /**
  * AgentAvow avatar picker — reskinned from the legacy /avatar page, focused on
@@ -42,13 +44,12 @@ const avatarUrl = (style: string, seed: string) =>
 
 export default function RebrandAvatar() {
   const { user, isLoading } = useAuth()
-  const navigate = useNavigate()
 
   // `undefined` = not yet touched; fall back to the user's saved avatar during render.
   const [picked, setPicked] = useState<string | null | undefined>(undefined)
   const [activeStyle, setActiveStyle] = useState(STYLES[0].style)
 
-  useEffect(() => { if (!isLoading && !user) navigate(rp('/rebrand/login')) }, [isLoading, user, navigate])
+  useRequireUser(user, isLoading)
 
   const saved = user?.avatar_url ?? LETTER_OPTION
   const selected = picked === undefined ? saved : picked
@@ -65,7 +66,7 @@ export default function RebrandAvatar() {
     },
   })
 
-  if (isLoading || !user) return null
+  if (isLoading || !user) return <AccountSkeleton width="max-w-[720px]" />
 
   const initial = user.display_name?.charAt(0).toUpperCase() || '?'
   const previewUrl = selected === LETTER_OPTION ? null : selected

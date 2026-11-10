@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useAuth } from '../../hooks/useAuth'
 import { trackEvent } from '../../lib/analytics'
 import SEOHead from '../../components/SEOHead'
+import { safeReturnTo } from '../lib/returnTo'
 
 /**
  * Rebrand-styled sign-in / sign-up. Reuses the real auth (useAuth().login/register)
@@ -14,6 +15,9 @@ import SEOHead from '../../components/SEOHead'
 export default function RebrandLogin() {
   const { login, register } = useAuth()
   const navigate = useNavigate()
+  // Pages that need an account send ?returnTo=<where you were>; go back there after sign-in.
+  const [params] = useSearchParams()
+  const returnTo = safeReturnTo(params.get('returnTo'))
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -33,7 +37,7 @@ export default function RebrandLogin() {
       } else {
         await login(email, password)
       }
-      navigate(rp('/rebrand'))
+      navigate(returnTo ?? rp('/rebrand'), { replace: !!returnTo })
     } catch {
       setError(mode === 'signup'
         ? 'Could not create your account — that email may already be registered.'
