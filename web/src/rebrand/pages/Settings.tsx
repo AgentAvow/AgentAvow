@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { rp } from '../basePath'
@@ -6,6 +6,8 @@ import api from '../../lib/api'
 import { useAuth } from '../../hooks/useAuth'
 import { useTheme } from '../../hooks/useTheme'
 import { Reveal } from '../components/motion'
+import { AccountSkeleton } from '../components/AccountBits'
+import { useRequireUser } from '../lib/useRequireUser'
 
 /**
  * AgentAvow account settings — the relevant bits carried over from the legacy
@@ -37,7 +39,7 @@ export default function RebrandSettings() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { theme, toggleTheme } = useTheme()
-  useEffect(() => { if (!isLoading && !user) navigate(rp('/rebrand/login')) }, [isLoading, user, navigate])
+  useRequireUser(user, isLoading)
 
   const [curPass, setCurPass] = useState('')
   const [newPass, setNewPass] = useState('')
@@ -83,7 +85,7 @@ export default function RebrandSettings() {
     onSuccess: () => { logout(); navigate(rp('/rebrand')) },
   })
 
-  if (!user) return null
+  if (!user) return <AccountSkeleton width="max-w-[640px]" />
   const emailOn = prefs?.email_notifications_enabled ?? true
 
   return (

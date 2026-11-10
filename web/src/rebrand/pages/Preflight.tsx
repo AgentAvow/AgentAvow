@@ -292,7 +292,7 @@ export default function RebrandPreflight() {
 
           <div className="mt-5 flex gap-4 text-[13px] flex-wrap">
             {data.signed.report_url && <a href={data.signed.report_url} target="_blank" rel="noopener noreferrer" className="text-primary-light hover:text-primary font-semibold">Full signed report ↗</a>}
-            <Link to={rp('/rebrand/for-developers')} className="text-primary-light hover:text-primary font-semibold">Get your README badge →</Link>
+            <Link to={rp('/rebrand/badge')} className="text-primary-light hover:text-primary font-semibold">Get your README badge →</Link>
             <Link to={rp('/rebrand/certified')} className="text-text-muted hover:text-text">What Certified means →</Link>
           </div>
         </Reveal>

@@ -162,3 +162,74 @@ async def test_mark_nonexistent_notification(client: AsyncClient):
         f"{NOTIF_URL}/{fake_id}/read", headers=_auth(token)
     )
     assert resp.status_code == 404
+
+
+async def _seed_mixed_kinds(db, eid: uuid.UUID) -> None:
+    await create_notification(db, eid, kind="follow", title="F", body="Follow")
+    await create_notification(db, eid, kind="watch_alert", title="A", body="Score dropped")
+    await create_notification(db, eid, kind="watch_good_news", title="G", body="Safer now")
+    await create_notification(db, eid, kind="reply", title="R", body="Reply")
+
+
+@pytest.mark.asyncio
+async def test_kind_filter_single_value_unchanged(client: AsyncClient, db):
+    token, entity_id = await _setup_user(client, USER)
+    await _seed_mixed_kinds(db, uuid.UUID(entity_id))
+
+    resp = await client.get(NOTIF_URL, params={"kind": "watch_alert"}, headers=_auth(token))
+    assert resp.status_code == 200
+    data = resp.json()
+    assert [n["kind"] for n in data["notifications"]] == ["watch_alert"]
+    # total / unread_count stay account-wide
+    assert data["total"] == 4
+    assert data["unread_count"] == 4
+
+
+@pytest.mark.asyncio
+async def test_kind_filter_comma_separated(client: AsyncClient, db):
+    token, entity_id = await _setup_user(client, USER)
+    await _seed_mixed_kinds(db, uuid.UUID(entity_id))
+
+    resp = await client.get(
+        NOTIF_URL,
+        params={"kind": "watch_alert, watch_good_news,", "unread_only": True},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200
+    kinds = sorted(n["kind"] for n in resp.json()["notifications"])
+    assert kinds == ["watch_alert", "watch_good_news"]
+
+
+@pytest.mark.asyncio
+async def test_kind_filter_blank_means_no_filter(client: AsyncClient, db):
+    token, entity_id = await _setup_user(client, USER)
+    await _seed_mixed_kinds(db, uuid.UUID(entity_id))
+
+    resp = await client.get(NOTIF_URL, params={"kind": " , "}, headers=_auth(token))
+    assert resp.status_code == 200
+    assert len(resp.json()["notifications"]) == 4
+
+
+@pytest.mark.asyncio
+async def test_kind_filter_rejects_too_many_kinds(client: AsyncClient, db):
+    token, _ = await _setup_user(client, USER)
+    many = ",".join(f"k{i}" for i in range(21))
+    resp = await client.get(NOTIF_URL, params={"kind": many}, headers=_auth(token))
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_mark_all_as_read_by_kind(client: AsyncClient, db):
+    token, entity_id = await _setup_user(client, USER)
+    await _seed_mixed_kinds(db, uuid.UUID(entity_id))
+
+    resp = await client.post(
+        f"{NOTIF_URL}/read-all",
+        params={"kind": "watch_alert,watch_good_news"},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200
+    assert "2" in resp.json()["message"]
+
+    resp = await client.get(NOTIF_URL, params={"unread_only": True}, headers=_auth(token))
+    assert sorted(n["kind"] for n in resp.json()["notifications"]) == ["follow", "reply"]
