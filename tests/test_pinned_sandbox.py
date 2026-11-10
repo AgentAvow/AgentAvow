@@ -181,3 +181,67 @@ def test_a_run_that_did_not_happen_is_a_gap(block):
     assert _gap(block) == {"sandbox_not_observed": "unavailable"}
     note = "the sandbox could not start the tool (unavailable), so its behavior was not observed"
     assert coverage_gap_notes({"coverage_gaps": _gap(block)}) == [note]
+
+
+# ── The sandbox block carries the release it observed (2026-11-10, server-everything) ──
+# A pin to the release the sandbox ran used to discard that block: 2.2.1 pinned read
+# Safe 90 while unpinned 2.2.1 read Review 70 on the same observation.
+
+def _scan_at(version: str, score: int = 82) -> dict:
+    return {**_scan_dict(score), "package_version": version}
+
+
+async def _get_at(client, params: dict, scan: dict, block: dict | None):
+    with patch.object(psr, "_get_cached", new=AsyncMock(return_value=scan)), \
+         patch.object(psr, "_get_cached_behavioral", new=AsyncMock(return_value=block)), \
+         patch.object(psr, "_start_behavioral_payload",
+                      new=AsyncMock(return_value="started")) as start:
+        r = await client.get(URL, params=params)
+    assert r.status_code == 200
+    return r.json(), start
+
+
+@pytest.mark.asyncio
+async def test_pin_to_the_release_that_ran_reads_like_the_unpinned_view(client, scanner_on):
+    block = {**_block(findings=CAUGHT), "version": "2.2.1"}
+    unpinned, _ = await _get_at(client, {}, _scan_at("2.2.1"), block)
+    pinned, start = await _get_at(client, {"version": "2.2.1"}, _scan_at("2.2.1"), block)
+    assert pinned["trust_score"] == unpinned["trust_score"]
+    assert pinned["decision"] == unpinned["decision"]
+    assert (pinned["behavioral_score_effect"]["applied"]
+            is unpinned["behavioral_score_effect"]["applied"] is True)
+    assert NOT_THIS_VERSION not in pinned["not_checked"]
+    start.assert_not_awaited()  # a pin still never starts a run
+
+
+@pytest.mark.asyncio
+async def test_pin_to_another_release_still_gets_no_observation(client, scanner_on):
+    # Attack twin: a block stamped 2.2.1 must not reach a 2026.8.31 pin, caught or clean.
+    for findings in (None, CAUGHT):
+        block = {**_block(findings=findings), "version": "2.2.1"}
+        body, _ = await _get_at(client, {"version": "2026.8.31"}, _scan_at("2026.8.31"), block)
+        assert body["trust_score"] == 82
+        assert body["behavioral_score_effect"]["applied"] is False
+        assert NOT_THIS_VERSION in body["not_checked"]
+        assert _signed(body)["scan"]["coverageGaps"]["sandbox_not_observed"] == "other_version"
+
+
+@pytest.mark.asyncio
+async def test_pin_never_takes_an_unstamped_block(client, scanner_on):
+    body, _ = await _get_at(client, {"version": "2.2.1"}, _scan_at("2.2.1"), _block())
+    assert body["behavioral_score_effect"]["applied"] is False
+    assert NOT_THIS_VERSION in body["not_checked"]
+
+
+def test_a_block_from_another_release_is_not_applied_to_an_unpinned_scan():
+    out = psr._apply_behavioral_score(_scan_at("2.2.2"),
+                                      {**_block(findings=CAUGHT), "version": "2.2.1"})
+    assert out["trust_score"] == 82
+    assert out["behavioral_score_effect"]["applied"] is False
+    assert out["coverage_gaps"]["sandbox_not_observed"] == "other_version"
+
+
+def test_matching_and_unstamped_blocks_still_apply_to_an_unpinned_scan():
+    for block in ({**_block(findings=CAUGHT), "version": "2.2.1"}, _block(findings=CAUGHT)):
+        out = psr._apply_behavioral_score(_scan_at("2.2.1"), block)
+        assert out["behavioral_score_effect"]["applied"] is True

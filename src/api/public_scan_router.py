@@ -490,6 +490,38 @@ def _behavioral_target(data: dict) -> tuple[str, str] | None:
     return None
 
 
+def _behavioral_version(data: dict) -> str | None:
+    """The exact release the static scan resolved for a package coordinate (npm / PyPI /
+    docker), which the sandbox installs and stamps on its block. None for repos and
+    skills, and when the scan did not resolve one."""
+    pkg = (data or {}).get("package_coordinate") or {}
+    if str(pkg.get("surface") or "").lower() not in ("npm", "pypi", "docker"):
+        return None
+    ver = (data or {}).get("package_version") or pkg.get("version")
+    ver = str(ver).strip() if ver else ""
+    return ver or None
+
+
+def _behavioral_run_kwargs(data: dict, plan: str | None) -> dict:
+    """What a sandbox run for this scan needs beyond the coordinate. ``version`` only
+    when one was resolved, so the queue payload of a repo or skill is unchanged."""
+    out = {"plan": plan, "env_names": _behavioral_env_names(data),
+           "readme_text": _behavioral_readme(data)}
+    ver = _behavioral_version(data)
+    if ver:
+        out["version"] = ver
+    return out
+
+
+def _block_version_mismatch(block: dict | None, version: str | None) -> bool:
+    """A block stamped with a version other than ``version``. A block with no stamp (run
+    before blocks carried one) or a scan with no resolved version is not a mismatch."""
+    if not isinstance(block, dict) or not version:
+        return False
+    stamped = block.get("version")
+    return bool(stamped) and str(stamped) != str(version)
+
+
 def _behavioral_env_names(data: dict) -> list[str]:
     raw = (data or {}).get("env_reads") or []
     return [str(n) for n in raw if isinstance(n, str) and n][:32] if isinstance(raw, list) else []
@@ -502,22 +534,29 @@ def _behavioral_readme(data: dict) -> str | None:
 
 async def _get_cached_behavioral(
     surface: str, name: str, expected_hosts: set[str] | None = None,
-    plan: str | None = None,
+    plan: str | None = None, version: str | None = None,
 ) -> dict | None:
+    """The cached sandbox block, or None. With ``version``, a block stamped for another
+    release is a miss: it says nothing about this one, and the caller re-runs."""
     try:
         from src.redis_client import get_redis
         raw = await get_redis().get(_behavioral_cache_key(surface, name, expected_hosts, plan))
-        return json.loads(raw) if raw else None
+        block = json.loads(raw) if raw else None
     except Exception:
         return None
+    if _block_version_mismatch(block, version):
+        return None
+    return block
 
 
 async def _run_and_cache_behavioral(
     surface: str, name: str, expected_hosts: set[str] | None = None,
     *, plan: str | None = None, env_names: list[str] | None = None,
-    readme_text: str | None = None,
+    readme_text: str | None = None, version: str | None = None,
 ) -> dict | None:
     """Run the sandbox tier once and cache the result (24h). Returns the block.
+    ``version`` = the exact release to install; it is stamped on the block and on the
+    signed observation's subject.
     ``expected_hosts`` = the tool's declared egress (see ``_declared_egress``); without
     it the run is judged against the generic registry allowlist only. ``plan`` /
     ``env_names`` / ``readme_text`` are only forwarded when set, so the call shape for
@@ -531,6 +570,8 @@ async def _run_and_cache_behavioral(
         kwargs["env_names"] = list(env_names)
     if readme_text:
         kwargs["readme_text"] = readme_text
+    if version:
+        kwargs["version"] = version
     _t0 = time.monotonic()
     try:
         res = await run_behavioral(surface, str(name), expected_hosts=expected_hosts or None,
@@ -544,6 +585,8 @@ async def _run_and_cache_behavioral(
         # (src/jobs/sandbox_watchdog.py): sandbox_disk_low means the box itself is sick.
         await _bump_behavioral(f"runner_error:{str(res.error).split(':', 1)[0][:40]}")
     block = res.to_public_dict()
+    if version:
+        block["version"] = str(version)
     block["findings"] = [
         {"category": f.category, "name": f.name, "severity": f.severity,
          "evidence": getattr(f, "snippet", ""), "remediation": f.remediation,
@@ -590,6 +633,15 @@ BEHAVIORAL_OBSERVATION_CONTEXT = (
 )
 
 
+def _observation_subject(surface: str, name: str, version: str | None) -> dict:
+    """``pkg:npm/name@ver`` and a ``version`` member when the run installed an exact
+    release; the unversioned subject otherwise (repos, skills, older blocks)."""
+    if not version:
+        return {"id": f"pkg:{surface}/{name}", "surface": surface, "name": name}
+    return {"id": f"pkg:{surface}/{name}@{version}", "surface": surface, "name": name,
+            "version": str(version)}
+
+
 def _behavioral_observation_payload(surface: str, name: str, block: dict) -> dict:
     """The signed OBSERVATION: what AgentAvow saw when it ran the tool, on this date, in
     this sandbox. Deliberately a different ``type``/``@context`` from the score
@@ -605,7 +657,7 @@ def _behavioral_observation_payload(surface: str, name: str, block: dict) -> dic
         "type": "BehavioralObservation",
         "issuer": {"id": "did:web:agentgraph.co", "name": "AgentAvow",
                    "url": "https://agentgraph.co"},
-        "subject": {"id": f"pkg:{surface}/{name}", "surface": surface, "name": name},
+        "subject": _observation_subject(surface, name, block.get("version")),
         "observedAt": now,
         "issuedAt": now,
         "sandbox": {"isolation": "gvisor", "plan": block.get("plan") or ""},
@@ -652,7 +704,26 @@ def _sign_behavioral_observation(surface: str, name: str, block: dict) -> dict |
         return None
 
 
-BEHAVIORAL_OTHER_VERSION_REASON = "the sandbox runs the latest release, not a pinned version"
+BEHAVIORAL_OTHER_VERSION_REASON = "the sandbox has not observed this release"
+
+
+async def _pinned_behavioral_block(data: dict, version: str) -> dict:
+    """The sandbox block for a version-pinned package scan: the cached block when it was
+    observed on exactly ``version``, else ``_other_version_block()``. Unstamped blocks
+    (from before blocks carried a version) are never used for a pin."""
+    from src.config import settings
+    if not getattr(settings, "scanner_behavioral_enabled", False):
+        return _other_version_block()
+    target = _behavioral_target(data)
+    if not target:
+        return _other_version_block()
+    surface, name = target
+    plan = _behavioral_plan(data, surface)
+    cached = await _get_cached_behavioral(
+        surface, str(name), _declared_egress(data), plan, version)
+    if isinstance(cached, dict) and str(cached.get("version") or "") == str(version):
+        return cached
+    return _other_version_block()
 
 
 def _other_version_block() -> dict:
@@ -740,6 +811,9 @@ def _apply_behavioral_score(data: dict, block: dict | None) -> dict:
     A sandbox that observed nothing is recorded as a coverage gap (signed as
     ``scan.coverageGaps``): disclosure only, it moves neither score nor decision."""
     from src.scanner.behavioral.score_effect import behavioral_score_effect
+    if _block_version_mismatch(block, data.get("package_version")):
+        # Observed on another release: never folded into this release's score.
+        block = _other_version_block()
     eff = behavioral_score_effect(int(data.get("trust_score") or 0), block)
     out = dict(data)
     gap = _sandbox_gap(block, data)
@@ -787,8 +861,8 @@ async def _behavioral_block(data: dict, force: bool = False) -> dict | None:
     surface, name = target
     declared = _declared_egress(data)
     plan = _behavioral_plan(data, surface)
-    run_kwargs = {"plan": plan, "env_names": _behavioral_env_names(data),
-                  "readme_text": _behavioral_readme(data)}
+    run_kwargs = _behavioral_run_kwargs(data, plan)
+    version = run_kwargs.get("version")
     member = _behavioral_cache_key(surface, str(name), declared, plan)
     if force:
         handle = await _acquire_behavioral_slot()
@@ -802,7 +876,7 @@ async def _behavioral_block(data: dict, force: bool = False) -> dict | None:
             return await _run_and_cache_behavioral(
                 surface, str(name), declared, **run_kwargs) or {
                 "ran": False, "reason": "behavioral tier error"}
-    cached = await _get_cached_behavioral(surface, str(name), declared, plan)
+    cached = await _get_cached_behavioral(surface, str(name), declared, plan, version)
     if cached:
         await _bump_behavioral("cache_hit")
         return cached
@@ -877,7 +951,7 @@ async def _start_behavioral_payload(payload: dict, priority: str = "normal", *,
         return "invalid"
     plan = run_kwargs.get("plan")
     if check_cache and not payload.get("force") and await _get_cached_behavioral(
-            surface, name, declared, plan):
+            surface, name, declared, plan, run_kwargs.get("version")):
         return "cached"
     if not await _acquire_behavioral_lock(surface, name, declared, plan):
         return "locked"
@@ -1929,17 +2003,18 @@ async def scan_package_endpoint(
         """Sandbox block first, so a signed observation can be folded into the score
         that gets signed; then sign and shape."""
         block = None
+        shaped = {"package_coordinate": {"surface": surface, "name": name},
+                  "package_version": data.get("package_version"),
+                  "declared_scope": data.get("declared_scope") or {},
+                  "artifact_scan": data.get("artifact_scan") or data.get("surface_detail") or {},
+                  "env_reads": data.get("env_reads") or []}
         if surface in ("npm", "pypi", "docker") and version:
-            # The sandbox runs the latest release under an unversioned key: its result
-            # says nothing about this version and must not reach this signed score.
-            block = _other_version_block()
+            # A pin reads the cached block only, and only when it is stamped with this
+            # exact release. A pin never starts a run: the sandbox observes the release the
+            # unpinned scan resolves, so pinning old versions cannot churn its one slot.
+            block = await _pinned_behavioral_block(shaped, str(version))
         elif surface in ("npm", "pypi", "docker"):
-            block = await _behavioral_block(
-                {"package_coordinate": {"surface": surface, "name": name},
-                 "declared_scope": data.get("declared_scope") or {},
-                 "artifact_scan": data.get("artifact_scan") or data.get("surface_detail") or {},
-                 "env_reads": data.get("env_reads") or []},
-                force=behavioral)
+            block = await _behavioral_block(shaped, force=behavioral)
         scored = _apply_behavioral_score(data, block)
         jws = create_jws(canonicalize(_build_scan_payload(full, scored)))
         resp = _package_response(full, scored, jws, cached=cached, behavioral=block)

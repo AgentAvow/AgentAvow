@@ -61,11 +61,11 @@ _SANDBOX_ENV = (
 # so its install hook + import-time code actually execute inside the sandbox.
 _NPM_CMD = (
     _SANDBOX_ENV
-    + "npm install --no-audit --no-fund {name} && node -e 'require(\"{name}\")'"
+    + "npm install --no-audit --no-fund {spec} && node -e 'require(\"{name}\")'"
 )
 _PIP_CMD = (
     _SANDBOX_ENV
-    + "pip install --no-input --user {name} && python -c 'import {import_name}'"
+    + "pip install --no-input --user {spec} && python -c 'import {import_name}'"
 )
 # MCP plans: install, then the shipped launcher discovers the package's bin(s) and runs
 # the shipped exerciser against the candidates (first that initializes wins; at most 4
@@ -75,7 +75,7 @@ _PIP_CMD = (
 # ``--``; the two are always identical.
 _NPM_MCP_CMD = (
     _SANDBOX_ENV
-    + "npm install --no-audit --no-fund {name} && "
+    + "npm install --no-audit --no-fund {spec} && "
     "sh /work/mcp_launch.sh npm {dist} --canary-value {canary} -- "
     "node /work/mcp_exercise.js {exerciser_args}"
 )
@@ -102,7 +102,7 @@ _ALPINE_GIT_PREFIX = (
 _PIP_MCP_CMD = (
     _SANDBOX_ENV
     + _ALPINE_GIT_PREFIX
-    + "pip install --no-input --user {name} && "
+    + "pip install --no-input --user {spec} && "
     "sh /work/mcp_launch.sh pypi {dist} --canary-value {canary} -- "
     "python /work/mcp_exercise.py {exerciser_args}"
 )
@@ -182,6 +182,31 @@ _SURFACE_PLAN: dict[str, tuple[str, str, str]] = {
     "skill": ("python:3.12-alpine", _SKILL_CMD, "exec"),
 }
 _SKILL_REPO_RE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+# An exact release: semver (with pre-release / build), a PEP 440 public version, or a
+# docker tag. No range or operator characters, no shell metacharacters, no whitespace.
+_VERSION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,127}")
+
+
+def _install_spec(plan: str, coordinate: str, version: str | None) -> str:
+    """What the install step names: the bare coordinate, or the exact release the static
+    scan resolved (``name@ver`` for npm, ``name==ver`` for pip) so the sandbox observes
+    the same code the score is about. Git and skill plans install a repo, not a release."""
+    if not version or "-git" in plan or plan == "skill":
+        return coordinate
+    if plan.startswith("npm"):
+        return f"{coordinate}@{version}"
+    if plan.startswith("pypi"):
+        return f"{coordinate}=={version}"
+    return coordinate
+
+
+def _docker_image(coordinate: str, version: str | None) -> str:
+    """``image:tag`` when a version was resolved and the coordinate carries no tag or
+    digest of its own."""
+    last = coordinate.rsplit("/", 1)[-1]
+    if not version or ":" in last or "@" in coordinate:
+        return coordinate
+    return f"{coordinate}:{version}"
 
 
 def _git_spec(plan: str, coordinate: str) -> str:
@@ -668,8 +693,13 @@ async def run_behavioral(
     env_names: list[str] | None = None,
     readme_text: str | None = None,
     plan: str | None = None,
+    version: str | None = None,
 ) -> BehavioralResult:
     """Run the target in the sandbox and return observed behavior. Fails OPEN.
+
+    ``version`` is the exact release the static scan resolved; when set, the install step
+    pins it (``name@ver`` / ``name==ver`` / ``image:tag``) so the observation belongs to
+    that release and not to whatever the registry calls latest at run time.
 
     ``manifest`` is the tool's optional ``.agentavow.yml`` text; its declared egress hosts
     are added to ``expected_hosts`` so a tool is judged against what its author declared.
@@ -699,6 +729,9 @@ async def run_behavioral(
         return _fail("v2_runner_off")
     if plan == "skill" and not _SKILL_REPO_RE.fullmatch(_git_spec(plan, coordinate)):
         return _fail("bad_coordinate")
+    version = str(version) if version else None  # never stripped: exact or refused
+    if version is not None and not _VERSION_RE.fullmatch(version):
+        return _fail("bad_version")
 
     canary = _new_canary()
     files_b64: str | None = None
@@ -711,14 +744,18 @@ async def run_behavioral(
             plan = _EXEC_FALLBACK[plan]
 
     image_tmpl, cmd_tmpl, mode = _SURFACE_PLAN[plan]
-    image = image_tmpl.format(name=coordinate)
+    image = image_tmpl.format(
+        name=_docker_image(coordinate, version) if plan == "docker" else coordinate)
     if mode == "mcp":
         mcp_timeout = int(getattr(settings, "scanner_behavioral_mcp_timeout", 90) or 90)
         max_tools = int(getattr(settings, "scanner_behavioral_max_tools", 25) or 25)
         timeout = max(int(timeout), mcp_timeout + 45)  # install + exercise budget
         spec = _git_spec(plan, coordinate) if "-git" in plan else coordinate
+        install = _git_spec(plan, coordinate) if "-git" in plan else _install_spec(
+            plan, coordinate, version)
         cmd = cmd_tmpl.format(
-            name=shlex.quote(spec), dist=shlex.quote(_dist_name(coordinate)),
+            name=shlex.quote(spec), spec=shlex.quote(install),
+            dist=shlex.quote(_dist_name(coordinate)),
             canary=shlex.quote(canary),
             exerciser_args=_exerciser_args(
                 timeout=mcp_timeout, max_tools=max_tools, canary=canary,
@@ -738,8 +775,10 @@ async def run_behavioral(
         )
     else:
         spec = _git_spec(plan, coordinate) if "-git" in plan else coordinate
+        install = shlex.quote(spec) if "-git" in plan else _install_spec(
+            plan, coordinate, version)
         cmd = cmd_tmpl.format(name=shlex.quote(spec) if "-git" in plan else coordinate,
-                              import_name=_import_name(coordinate))
+                              spec=install, import_name=_import_name(coordinate))
 
     def _args(resource: list[str], wall: int) -> list[str]:
         out: list[str] = []

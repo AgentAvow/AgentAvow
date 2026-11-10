@@ -245,8 +245,7 @@ async def enqueue_behavioral(data: dict, *, reason: str, priority: str = "normal
     name = str(name)
     declared = psr._declared_egress(data)
     plan = psr._behavioral_plan(data, surface)
-    run_kwargs = {"plan": plan, "env_names": psr._behavioral_env_names(data),
-                  "readme_text": psr._behavioral_readme(data)}
+    run_kwargs = psr._behavioral_run_kwargs(data, plan)
     payload = psr._queue_payload(surface, name, declared, run_kwargs)
     outcome = await psr._start_behavioral_payload(payload, priority)
     if outcome == "started":
