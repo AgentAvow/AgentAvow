@@ -6784,6 +6784,14 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
             name, _ver, (result.incident_history or {}).get("advisories") or [])
     except Exception:
         pass
+    # The declared source repository's own published security advisories. A repo-only
+    # advisory never reaches the global database or OSV (GHSA-mvf5-2qqv-rg3c), so this
+    # is the only place we see it. Same finding as an OSV advisory; deduplicated by id.
+    # A failed lookup or an unparseable range is disclosed, never read as clean.
+    try:
+        await _apply_repo_advisories(result, eco, name, fetched.packaged_manifest)
+    except Exception:  # noqa: BLE001 — fail-open
+        logger.debug("repo advisory lookup failed for %s:%s", eco, name, exc_info=True)
     # An ecosystem OSV covers whose lookup did not complete: "no advisories" was not
     # checked, so say so beside the answer (disclosure only, never scored).
     try:
@@ -6977,6 +6985,57 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
     )
 
 
+def _declared_source_slug(eco: str, manifest: dict | None) -> str | None:
+    """The GitHub ``owner/repo`` a package declares as its source: npm and crates
+    ``repository``, PyPI's declared repository. None for anything else."""
+    m = manifest if isinstance(manifest, dict) else {}
+    if eco == "npm":
+        return _github_slug(_repo_from_manifest(m) or "", allow_shorthand=True)
+    if eco == "crates":
+        return _github_slug(str(m.get("repository") or ""))
+    if eco == "pypi":
+        return _github_slug(str(m.get("declared_repository") or ""))
+    return None
+
+
+async def _apply_repo_advisories(result, eco: str, name: str, manifest: dict | None) -> None:
+    from src.config import settings
+    from src.scanner.incident_history import (
+        _OSV_ECOSYSTEM,
+        fetch_repo_advisories,
+        merge_advisories,
+        summarize_repo_advisories,
+    )
+
+    osv_eco = _OSV_ECOSYSTEM.get(eco)
+    version = (result.artifact_scan or {}).get("version")
+    slug = _declared_source_slug(eco, manifest)
+    if not (osv_eco and version and slug):
+        return
+    got = await fetch_repo_advisories(slug, getattr(settings, "github_token", None))
+    if got.get("checked") is not True:
+        result.coverage_gaps = {**(result.coverage_gaps or {}),
+                                "repo_advisory_lookup": "failed"}
+        return
+    mine = summarize_repo_advisories(got.get("advisories") or [], osv_eco, name, version)
+    if not mine:
+        return
+    inc = dict(result.incident_history or {})
+    existing = list(inc.get("advisories") or [])
+    extra = merge_advisories(existing, mine)
+    if not extra:
+        return
+    inc["advisories"] = sorted(existing + extra,
+                               key=lambda a: (not a.get("affects_scanned_version"),
+                                              a.get("id") or ""))[:20]
+    result.incident_history = inc
+    result.findings = result.findings + _own_advisory_findings(name, version, extra)
+    n = sum(1 for a in extra if a.get("range_unparsed"))
+    if n:
+        result.coverage_gaps = {**(result.coverage_gaps or {}),
+                                "repo_advisory_range_unparsed": n}
+
+
 def _own_advisory_findings(name: str, version: str | None, advisories: list[dict]) -> list:
     """A published advisory (GHSA / PYSEC / CVE) against the package ITSELF that affects
     the scanned version: a known, current vulnerability in exactly what you'd install."""
@@ -6991,7 +7050,7 @@ def _own_advisory_findings(name: str, version: str | None, advisories: list[dict
             name=("Published advisory affects this version: "
                   f"{a.get('summary') or a.get('id')}")[:160],
             severity=a.get("severity") or "medium",
-            file_path="registry advisory",
+            file_path=a.get("source") or "registry advisory",
             line_number=0,
             snippet=f"{name}@{version}: {ids}"[:300],
             remediation=(f"Upgrade to {fixed} or later, which fixes this advisory." if fixed

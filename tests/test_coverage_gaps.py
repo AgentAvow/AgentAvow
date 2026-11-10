@@ -615,6 +615,8 @@ def test_ts_coverage_gap_notes_twin():
         {"oversized_files": 2, "oversized_agent_files": 2, "fetch_failed": 1},
         {"encoded_text_unread": 1}, {"encoded_text_unread": "3", "oversized_files": 1},
         {"bytecode_unread": 1}, {"bytecode_unread": "12", "oversized_files": 1},
+        {"repo_advisory_lookup": "failed"}, {"repo_advisory_range_unparsed": 1},
+        {"repo_advisory_range_unparsed": "1234", "advisory_lookup": "failed"},
     )] + [{"coverage_gaps": ["x"]}, {}]
     script = (
         "const m = await import(process.argv[1]);"

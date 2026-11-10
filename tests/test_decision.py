@@ -736,6 +736,12 @@ MARK_CASES = [
     ("gap_advisory_lookup_keeps_mark", _scan(92, 340, certified=CERTIFIED,
                                              coverage_gaps={"advisory_lookup": "failed"}),
      True, ""),
+    ("gap_repo_advisory_lookup_keeps_mark", _scan(
+        92, 340, certified=CERTIFIED, coverage_gaps={"repo_advisory_lookup": "failed"}),
+     True, ""),
+    ("gap_repo_advisory_range_unparsed", _scan(
+        92, 340, certified=CERTIFIED, coverage_gaps={"repo_advisory_range_unparsed": 1}),
+     False, "coverage_gaps"),
     ("gap_fetch_failed", _scan(92, 340, certified=CERTIFIED,
                                coverage_gaps={"fetch_failed": 1}), False, "coverage_gaps"),
     ("gap_fetch_failed_string", _scan(92, 340, certified=CERTIFIED,
