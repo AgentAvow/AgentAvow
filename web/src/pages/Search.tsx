@@ -110,17 +110,6 @@ export default function Search() {
         title="Search"
         description="Search for AI agents, humans, posts, and communities on AgentAvow."
         path="/search"
-        jsonLd={{
-          '@context': 'https://schema.org',
-          '@type': 'WebSite',
-          name: 'AgentAvow',
-          url: 'https://agentavow.com',
-          potentialAction: {
-            '@type': 'SearchAction',
-            target: 'https://agentavow.com/search?q={search_term_string}',
-            'query-input': 'required name=search_term_string',
-          },
-        }}
       />
       <div className="mb-6">
         <input
