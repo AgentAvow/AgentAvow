@@ -403,9 +403,12 @@ def test_python_subprocess_shell_stays_critical():
 
 
 @pytest.mark.parametrize("src", [
-    # huggingface-hub 2.2.0 cli/_cli_utils.py: the self-update argv
+    # huggingface-hub 2.2.0 cli/_cli_utils.py's self-update argv shape, with a host that
+    # is not a reviewed vendor installer (hf.co is one since 2026-11-10: see
+    # test_hf_official_installer_runs_are_high_not_low)
     'import subprocess\n\ndef _cmd(flags):\n'
-    '    return ["bash", "-c", f"curl -LsSf https://hf.co/cli/install.sh | bash{flags}"]\n\n'
+    '    return ["bash", "-c", f"curl -LsSf https://get.example.com/cli/install.sh | '
+    'bash{flags}"]\n\n'
     'def update():\n    return subprocess.call(_cmd(""))\n',
     # print(..., file=<a shell's stdin>)
     'import subprocess\n\ndef f():\n    p = subprocess.Popen(["sh"], stdin=subprocess.PIPE, '
@@ -424,13 +427,30 @@ def test_python_runs_stay_critical(src):
     _pkg_crit({"pkg/up.py": src}, "pkg/up.py", eco="pypi")
 
 
-def test_hf_skill_text_written_for_agents_stays_critical():
+def _hf_skill_src(host: str) -> str:
     # huggingface-hub 2.2.0 cli/skills.py: the SKILL.md body it writes for agents.
-    src = ('_SKILL_YAML_PREFIX = f"""\\\n---\nname: hf-cli\n---\n\n'
-           'Install: `curl -LsSf https://hf.co/cli/install.sh | bash -s`.\n"""\n\n'
-           'def build():\n    lines = list(_SKILL_YAML_PREFIX.splitlines())\n'
-           '    return "\\n".join(lines)\n')
+    return ('_SKILL_YAML_PREFIX = f"""\\\n---\nname: hf-cli\n---\n\n'
+            f'Install: `curl -LsSf https://{host}/cli/install.sh | bash -s`.\n"""\n\n'
+            'def build():\n    lines = list(_SKILL_YAML_PREFIX.splitlines())\n'
+            '    return "\\n".join(lines)\n')
+
+
+def test_skill_text_written_for_agents_stays_critical():
+    src = _hf_skill_src("get.example.com")
     _pkg_crit({"pkg/skills.py": src}, "pkg/skills.py", eco="pypi")
+
+
+@pytest.mark.parametrize("path,src", [
+    ("pkg/skills.py", _hf_skill_src("hf.co")),
+    ("pkg/up.py",
+     'import subprocess\n\ndef _cmd(flags):\n'
+     '    return ["bash", "-c", f"curl -LsSf https://hf.co/cli/install.sh | bash{flags}"]\n\n'
+     'def update():\n    return subprocess.call(_cmd(""))\n'),
+])
+def test_hf_official_installer_runs_are_high_not_low(path, src):
+    # The hf CLI installer is a reviewed vendor installer (pipe_shell.VENDOR_INSTALLERS,
+    # 2026-11-10): Review, never lowered to a printed hint's low.
+    assert _sev(_pkg({path: src}, "pypi"), path) == {"high"}
 
 
 def test_postinstall_shell_and_markdown_unchanged():

@@ -843,6 +843,29 @@ def _ruamel_safe_receiver(content: str, line: str) -> bool:
     return bool(re.search(r"\b" + recv + r"\s*=\s*(?:ruamel\.yaml\.)?YAML\s*\(", content))
 
 
+def _yaml_receiver_not_pyyaml(content: str, line: str) -> bool:
+    """``YAML.load(...)`` (any receiver spelled other than the module's own ``yaml``)
+    where this file binds that name to its own class: ``class YAML`` or ``from <a
+    module other than yaml> import ... YAML``. The rule ignores case so an alias
+    (``import yaml as YAML``) still fires; Ultralytics' own minimal ``YAML`` reader read
+    as PyYAML 13 times (2026-11-10). Any binding of the name to PyYAML (``import yaml
+    as YAML``, ``YAML = yaml``, ``from yaml import ...``) keeps the finding."""
+    m = re.search(r"\b(\w+)\.(?:unsafe_)?load(?:_all)?\s*\(", line)
+    if not m or m.group(1) == "yaml" or m.group(1).lower() != "yaml":
+        return False
+    recv = re.escape(m.group(1))
+    if re.search(r"\bimport\s+(?:[\w.]+\s+as\s+\w+\s*,\s*)*[\w.]*yaml\w*\s+as\s+" + recv
+                 + r"\b|\b" + recv + r"\s*=\s*[\w.]*yaml\b|\bfrom\s+[\w.]*yaml\s+import\b",
+                 content):
+        return False
+    own = (r"^\s*class\s+" + recv + r"\b"
+           r"|^\s*from\s+(?![\w.]*yaml\b)[\w.]+\s+import\s*\(?[^()\n]*\b" + recv
+           + r"\b(?!\s+as\b)"
+           r"|^\s*from\s+(?![\w.]*yaml\b)[\w.]+\s+import\s*\([^()]*\b" + recv
+           + r"\b(?!\s+as\b)[^()]*\)")
+    return bool(re.search(own, content, re.MULTILINE))
+
+
 _FS_RW_RULES = frozenset({
     "Unrestricted file read (Python)", "Unrestricted file write (Python)",
     "fs.readFileSync / writeFileSync (Node.js)",
@@ -1812,8 +1835,13 @@ def _in_py_string_literal(line: str, pos: int) -> bool:
     return q is not None
 
 
-_JS_METHOD_DEF_PREFIX_RE = re.compile(
-    r"^\s*(?:(?:async|static|public|private|protected|export|override)\s+)*\*?\s*$")
+# A method / function name at a statement or member boundary: the line start, or (in
+# minified code, where a class body is one line) right after `}` `;` `,` `{`
+# (`...query(n,i)}async exec(t,r){`, @electric-sql/pglite 2026-11-10). `name(args) {`
+# there is never a call: a call cannot be followed by a block on the same line.
+_JS_DEF_MODS = r"\s*(?:(?:async|static|public|private|protected|export|override)\s+)*\*?\s*$"
+_JS_METHOD_DEF_PREFIX_RE = re.compile(r"^" + _JS_DEF_MODS)
+_JS_MINIFIED_DEF_PREFIX_RE = re.compile(r"[{};,]" + _JS_DEF_MODS)
 _JS_METHOD_DEF_RE = re.compile(
     r"[\w$]+\s*\([^()]*\)\s*(?::\s*[\w$<>\[\]|,. ]+)?\s*\{")
 
@@ -1855,7 +1883,9 @@ def _js_call_is_text_or_def(line: str, pos: int, start_in: str | None = None) ->
     head = line[:pos]
     if re.search(r"\bfunction\s*\*?\s*$", head):
         return True
-    return bool(_JS_METHOD_DEF_PREFIX_RE.match(head) and _JS_METHOD_DEF_RE.match(line, pos))
+    return bool((_JS_METHOD_DEF_PREFIX_RE.match(head)
+                 or _JS_MINIFIED_DEF_PREFIX_RE.search(head[-96:]))
+                and _JS_METHOD_DEF_RE.match(line, pos))
 
 
 def _classify_exec_match(
@@ -3335,6 +3365,54 @@ def _exfil_host_not_destination(line: str, pattern: re.Pattern[str]) -> bool:
     return True
 
 
+# A bare hostname (or a single label: a TLD such as `'ac'`, an IDN label) as a whole
+# string element: `'ngrok.io',` / `"webhook.site"`. No scheme, no path, no port,
+# nothing else on the line.
+_BARE_HOST_ELEM_RE = re.compile(
+    r"""^\s*(?P<q>['"])[*!]?\.?(?:[\w-]+\.)*[\w-]+(?P=q)\s*,?\s*$""")
+# A domain-list DATA file (the Public Suffix List compiled into happy-dom's
+# lib/cookie/PublicSuffixList.js, 2026-11-10: ngrok.io / ngrok-free.app are PSL
+# entries, 24 matches read as critical exfil URLs) has hundreds of these lines and
+# little else. Below either floor the file is code that happens to hold hosts.
+_DOMAIN_LIST_MIN_ELEMS = 200
+_DOMAIN_LIST_MIN_SHARE = 0.9
+
+
+def _domain_list_entry(lines: list[str], idx: int) -> bool:
+    """Line ``idx`` is one bare-hostname element of a domain-list data file: it holds
+    nothing but the quoted host, the file has at least :data:`_DOMAIN_LIST_MIN_ELEMS`
+    such lines making up :data:`_DOMAIN_LIST_MIN_SHARE` of its non-blank, non-comment
+    lines, and no other line of the file (comments included, so nothing hides behind
+    one) has a network / exec / navigation sink. A host there is data, never a destination
+    the file sends to. A destination the file itself builds (`'https://' + host`) or a
+    sink anywhere in it keeps the critical."""
+    if not _BARE_HOST_ELEM_RE.match(lines[idx]):
+        return False
+    key = (id(lines), len(lines), lines[0] if lines else "")
+    if _DOMAIN_LIST_CACHE.get("key") != key:
+        _DOMAIN_LIST_CACHE.update(key=key, val=_is_domain_list_file(lines))
+    return bool(_DOMAIN_LIST_CACHE["val"])
+
+
+_DOMAIN_LIST_CACHE: dict = {}  # one file at a time: the file-wide check runs once
+
+
+def _is_domain_list_file(lines: list[str]) -> bool:
+    elems = other = 0
+    for ln in lines:
+        if _BARE_HOST_ELEM_RE.match(ln):
+            # Only a quoted host: no sink can sit on it (and `'imagine-proxy.work'`
+            # is not the word Proxy).
+            elems += 1
+            continue
+        if _NET_SINK_CALL_RE.search(ln) or _OTHER_SINK_RE.search(ln):
+            return False
+        if ln.strip() and not _is_line_comment(ln):
+            other += 1
+    return (elems >= _DOMAIN_LIST_MIN_ELEMS
+            and elems >= _DOMAIN_LIST_MIN_SHARE * (elems + other))
+
+
 # Sinks that are not a plain call: assigning a URL to an element / location, a
 # dynamic import, jQuery's ajax, process exec, Python's computed globals.
 _OTHER_SINK_RE = re.compile(
@@ -4024,6 +4102,8 @@ def _scan_content(
                 if name.startswith("yaml.load") and _ruamel_safe_receiver(content, line):
                     # ruamel.yaml's `YAML()` loads round-trip (safe) unless typ='unsafe'.
                     continue
+                if name.startswith("yaml.load") and _yaml_receiver_not_pyyaml(content, line):
+                    continue  # the project's own `YAML` class, not PyYAML
                 if _PY_DESER_CALL_RE.search(line) and not _near(untrusted, idx, _UNTRUSTED_WINDOW):
                     kind, effective_severity, capability = "capability", "low", "data:deserialize"
                     label = "deserializes pickle/marshal data from a local source"
@@ -4140,6 +4220,14 @@ def _scan_content(
                     # tunnel subdomain (`wss://<sub>.ngrok-free.app`) names no
                     # destination. Low, kept visible.
                     if _exfil_host_not_destination(line, pattern):
+                        findings.append(Finding(
+                            category="exfiltration", name=name, severity="low",
+                            file_path=file_path, line_number=line_num,
+                            snippet=stripped[:120]))
+                        continue
+                    # A bare host in a domain-list data file (the Public Suffix List)
+                    # is data. Low, kept visible; see _domain_list_entry.
+                    if _domain_list_entry(lines, idx):
                         findings.append(Finding(
                             category="exfiltration", name=name, severity="low",
                             file_path=file_path, line_number=line_num,

@@ -9,7 +9,7 @@ trust score, by fixed rules anyone can recompute (see [How the sandbox moves the
 | Target | What the sandbox does |
 |---|---|
 | npm or PyPI package | Installs it and imports it, so install hooks and import-time code execute. |
-| MCP server published as a package | Installs it, starts it over stdio, completes the MCP handshake, lists its tools, and **calls every tool** with synthetic arguments. |
+| MCP server published as a package | Installs it, starts it over stdio, completes the MCP handshake, lists its tools, and **calls each tool (up to 25)** with synthetic arguments. |
 | Container image | Runs the image's own entrypoint for a bounded time. |
 | GitHub repo | Runs the package the repo publishes. A JavaScript/TypeScript or Python repo with no published package is installed straight from GitHub instead (and exercised as an MCP server if it is one). Other repos have nothing defined to execute. |
 | MCP server reached by URL | Not run automatically. Calling tools on someone else's live server could have real side effects, so remote servers get definition analysis only. On the score page (or `?probe=true` on the API) you can opt in to a **live probe**: it calls only tools whose annotations declare them read-only (and not destructive), at most 10, once each, with synthetic inputs, and reports what came back — injection text or a credential-looking value in a result, a read-only tool that errors. The probe is advisory and never scored: a live answer cannot be recomputed by a verifier. Use it on servers you own or are allowed to test. If the same server ships as a package, scan the package for the full sandbox run. |
@@ -17,7 +17,7 @@ trust score, by fixed rules anyone can recompute (see [How the sandbox moves the
 | Rust crates, Hugging Face models | Static analysis only today. |
 
 Each run is a fresh **gVisor** container on a dedicated host: read-only root, no capabilities,
-one CPU, 1 GB of memory, a hard time limit. It is destroyed when the run ends. Nothing from one run can
+one CPU, 1 GB of memory (2 GB on a retry), a hard time limit. It is destroyed when the run ends. Nothing from one run can
 reach the next, and nothing in the sandbox can reach a private network.
 
 ## What is observed

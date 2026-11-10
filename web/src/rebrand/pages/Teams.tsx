@@ -23,16 +23,16 @@ const CAPABILITIES: { h: string; p: string; pre?: string }[] = [
   { h: 'Gate CI on the answer', p: 'Fail the build on Do not connect. Works on GitHub, GitLab, Bitbucket and Azure DevOps.', pre: '- uses: AgentAvow/AgentAvow/github-action@main\n  with:\n    fail_on: do_not_connect' },
   { h: 'Get an alert when a tool changes', p: "Watch the tools you depend on. An HMAC-signed webhook fires when a score drops or a signed tool definition changes, the rug-pull you'd otherwise miss." },
   { h: 'Verify every result offline', p: "Recompute a result byte for byte and check its Ed25519 signature against our public keys. Your auditors don't have to trust us." },
-  { h: 'Scan private code', p: 'Pass a GitHub token for one scan and we never store it. Or run the scanner in your own CI, where your code stays on your runner.' },
-  { h: 'Use the API', p: 'The answer, both scores, the findings and the Certified mark come back as JSON, so a policy can require any of them.' },
-  { h: 'Gate agents at runtime', p: 'Check each tool before the call with gates for the Vercel AI SDK, Flue, LangChain, Google ADK, Open Policy Agent and LiteLLM.' },
+  { h: 'Scan private code', p: 'Pass a GitHub token for one scan (signed in) and we never store it. Or run the scanner in your own CI, where your code stays on your runner.' },
+  { h: 'Use the API', p: 'The answer, the trust score, the findings and the Certified mark come back as JSON (adoption from its own endpoint), so a policy can require any of them.' },
+  { h: 'Gate agents at runtime', p: 'Check each tool before the call with npm gates for the Vercel AI SDK, Flue, the Claude Agent SDK and the OpenAI Agents SDK. LangChain, Google ADK, Open Policy Agent and LiteLLM integrations are in the repo.' },
 ]
 
 const STANDARDS: [string, React.ReactNode][] = [
-  ['TRACE spec', <>Our tool-definition digest is in the TRACE runtime-attestation spec as <code className="font-mono text-[13px]">trace.mcp-tool-definition.v1</code>. Change alerts use the same digest, so a pinned tool can be re-checked by anyone.</>],
+  ['TRACE spec', <>Our tool-definition digest derivation is in the TRACE runtime-attestation spec, under its own label <code className="font-mono text-[13px]">trace.mcp-tool-definition.v1</code>. Change alerts use our digest, so a pinned tool can be re-checked by anyone.</>],
   ['Linux Foundation Decentralized Trust lab', 'An outside party reproduced our conformance test vectors byte for byte. The vectors are Apache-2.0.'],
   ['IETF', 'Our founder co-authors the action-ref Internet-Draft, an individual submission.'],
-  ['W3C', 'Participant in the AI Knowledge Representation and Agent Conformance Community Groups.'],
+  ['W3C', 'Contributed to the AI Knowledge Representation Community Group.'],
   ['Signatures', <>Ed25519 / JWS (RFC 7515) over RFC 8785 canonical JSON. Public keys at a <a href="/.well-known/jwks.json" target="_blank" rel="noopener noreferrer" className="text-primary-light hover:underline">fixed URL</a>.</>],
   ['MCP Registry', <>Our own server is listed in the <a href="https://registry.modelcontextprotocol.io/v0/servers?search=agentavow" target="_blank" rel="noopener noreferrer" className="text-primary-light hover:underline">official MCP Registry</a>.</>],
 ]
@@ -100,7 +100,7 @@ export default function RebrandTeams() {
             <a href="#talk" className="inline-flex items-center font-semibold text-[15px] px-5 py-[11px] rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Talk to us</a>
             <Link to={rp('/rebrand/check')} className="inline-flex items-center font-semibold text-[15px] px-5 py-[11px] rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Check a tool</Link>
           </div>
-          <p className="mt-3.5 text-[13px] text-text-muted">Public scanning is free forever. Team pilots are free through Q1 2027.</p>
+          <p className="mt-3.5 text-[13px] text-text-muted">Public scanning is free forever.</p>
         </div>
       </div>
 
@@ -141,9 +141,9 @@ export default function RebrandTeams() {
         <div className="max-w-[1080px] mx-auto px-6">
           <h2 className={h2}>Straight answers for your review.</h2>
           <div className="grid gap-[7px] mt-3.5 text-[15px] max-w-[68ch]">
-            <p><b className="font-semibold">Certified.</b> <span className="text-text-muted">The top mark. It sits beside Safe to connect, and it comes off the moment a check fails.</span> <Link to={rp('/rebrand/certified')} className="text-primary-light hover:underline">What Certified means →</Link></p>
+            <p><b className="font-semibold">Certified.</b> <span className="text-text-muted">The top mark. It sits beside Safe to connect, and it comes off at the next scan that fails a check.</span> <Link to={rp('/rebrand/certified')} className="text-primary-light hover:underline">What Certified means →</Link></p>
             <p><b className="font-semibold">SOC 2.</b> <span className="text-text-muted">No SOC 2 yet. Controls shared on request.</span></p>
-            <p><b className="font-semibold">Standards.</b> <span className="text-text-muted">Our tool definition digest is in the TRACE spec. An outside party reproduced our conformance vectors in a Linux Foundation Decentralized Trust lab.</span></p>
+            <p><b className="font-semibold">Standards.</b> <span className="text-text-muted">Our tool definition digest derivation is in the TRACE spec. An outside party reproduced our conformance vectors in a Linux Foundation Decentralized Trust lab.</span></p>
           </div>
         </div>
       </div>

@@ -190,7 +190,7 @@ const BTN_GHOST = 'inline-flex items-center font-semibold text-[13.5px] px-4 py-
 const CERT_ROWS: [string, string][] = [
   ['Reads Safe to connect at 81+', 'no critical or high finding, nothing known-malicious'],
   ['Published package matches its source', 'verified build provenance (Sigstore / PEP 740)'],
-  ['Every file read, nothing changed', 'full coverage, no drift since the last signed check'],
+  ['Every file read, nothing changed', 'full coverage; the published package matches its source, no added files or install hook'],
   ['Sandbox ran it, anyone can recompute', 'finished sandbox run, offline-verifiable result'],
 ]
 
@@ -377,7 +377,7 @@ export default function RebrandHome() {
             <AnswerMixBar size="big" />
             <StatCards set="home" />
           </div>
-          <p className="mt-3.5 text-center text-[13px] text-text-muted">Hundreds of Claude Code machines connect every day. A check you run here is never more than an hour old.</p>
+          <p className="mt-3.5 text-center text-[13px] text-text-muted">Hundreds of Claude Code machines connect every day. A check you run here is normally no more than an hour old.</p>
           <BuiltInTheOpenLine className="mt-5" />
         </Reveal>
       </section>
@@ -418,7 +418,7 @@ export default function RebrandHome() {
             </div>
             <div className="min-w-0">
               <h3 className="text-[18px] font-bold leading-tight">Certified is a bar a tool has to clear.</h3>
-              <p className="mt-1 text-[13.5px] text-text-muted">It sits beside Safe to connect, it comes off the moment any check slips, and nobody can buy it. <b className="text-text font-medium">zod</b>, <b className="text-text font-medium">Notion's MCP server</b> and <b className="text-text font-medium">click</b> clear it today.</p>
+              <p className="mt-1 text-[13.5px] text-text-muted">It sits beside Safe to connect, it comes off the moment any check slips, and nobody can buy it. <b className="text-text font-medium">zod</b>, <b className="text-text font-medium">react</b> and <b className="text-text font-medium">requests</b> clear it today.</p>
               <Link to={rp('/rebrand/certified')} className="inline-block mt-2 text-[13.5px] font-semibold text-primary-light hover:text-primary">See the gate and who's Certified →</Link>
             </div>
             <ul className="grid sm:grid-cols-2 gap-x-3.5 gap-y-2 sm:col-span-2 lg:col-span-1 list-none m-0 p-0">

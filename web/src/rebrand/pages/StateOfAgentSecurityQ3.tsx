@@ -16,18 +16,19 @@ import SEOHead from '../../components/SEOHead'
  * rows the scanner skipped or could not fetch are not in any denominator.
  */
 
+// Certified at the end of Q3 2026 (a dated snapshot; the live list has changed since).
 const CERTIFIED = ['sigstore', 'react', 'axios', 'undici', 'vue', '@langchain/core']
 
-// Fallbacks mirror the live flagged-stat endpoint (last synced 2026-10-01, after the
+// Fallbacks mirror the live flagged-stat endpoint (last synced 2026-11-10, after the
 // exclusive-count fix). The page renders the live figure; these only show if the
 // endpoint is unreachable, so keep them at the last verified live value.
 const FALLBACK: FlaggedCounts = {
-  scanned_total: 14366, critical: 1191, high_only: 4700, flagged: 5891, clean: 8475,
-  skipped: 0, total: 14366, pct: 41, flagged_pct: 41.0, critical_pct: 8.3,
+  scanned_total: 17782, critical: 774, high_only: 5240, flagged: 6014, clean: 11768,
+  skipped: 8534, total: 26316, pct: 34, flagged_pct: 33.8, critical_pct: 4.4,
 }
 const FALLBACK_MCP: FlaggedCounts = {
-  scanned_total: 12420, critical: 925, high_only: 4195, flagged: 5120, clean: 7300,
-  skipped: 7804, total: 20224, pct: 41, flagged_pct: 41.2, critical_pct: 7.4,
+  scanned_total: 13603, critical: 502, high_only: 4370, flagged: 4872, clean: 8731,
+  skipped: 8205, total: 21808, pct: 36, flagged_pct: 35.8, critical_pct: 3.7,
 }
 
 export default function StateOfAgentSecurityQ3() {
@@ -59,7 +60,7 @@ export default function StateOfAgentSecurityQ3() {
           Not "could be risky." A concrete finding: a leaked secret, an unsafe exec path, an injected instruction
           in a tool description, a lethal-trifecta flow, with a file and a line, in a tool an agent is being told
           to connect to <em>right now</em>. That is {flagged.toLocaleString()} of {scanned.toLocaleString()} scanned
-          tools, each counted once. {critical.toLocaleString()} of them ({criticalPct}%) carry at least one critical finding.
+          tools (live figure), each counted once. {critical.toLocaleString()} of them ({criticalPct}%) carry at least one critical finding.
         </p>
       </Reveal>
 
@@ -101,9 +102,9 @@ export default function StateOfAgentSecurityQ3() {
         <div className="mt-14 rounded-2xl p-7 glass border-l-4" style={{ borderLeftColor: '#2dd4bf', background: 'linear-gradient(120deg, rgba(45,212,191,0.06), rgba(232,121,249,0.05))' }}>
           <h2 className="text-2xl font-bold">The counter-example: it can be done right</h2>
           <p className="mt-3 text-text-muted text-[15px] leading-relaxed">
-            The flip side of {pct}% is that a real top tier exists and is being cleared today. <strong className="text-text">21 tools
-            are AgentAvow Certified</strong>: verified build provenance, zero critical/high, no manifest drift, full
-            offline-recomputable coverage, every check public. Among them:
+            The flip side of {pct}% is that a real top tier exists and is being cleared. <strong className="text-text">At the end of Q3, 21 tools
+            were AgentAvow Certified</strong>: verified build provenance, zero critical/high, no manifest drift, full
+            offline-recomputable coverage, every check public. Among them were:
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             {CERTIFIED.map((n) => (
@@ -114,6 +115,7 @@ export default function StateOfAgentSecurityQ3() {
             ))}
           </div>
           <p className="mt-4 text-text-muted text-[14px] leading-relaxed">
+            As of Q3 2026; the live Certified list has changed since.
             The gap between {pct}%-flagged and 21-Certified is the whole story: the ceiling is reachable. Most tools
             just are not near it yet. <Link to={rp('/rebrand/certified')} className="text-primary-light hover:text-primary font-semibold">See the Certified gate →</Link>
           </p>
@@ -136,7 +138,7 @@ export default function StateOfAgentSecurityQ3() {
       <Reveal>
         <h2 className="mt-14 text-xl font-bold">Methodology</h2>
         <ul className="mt-3 flex flex-col gap-2 text-[13.5px] text-text-muted leading-relaxed">
-          <li>· Corpus: {scanned.toLocaleString()} tools with a verdict across GitHub repos, npm, PyPI, MCP servers, and skills, scanned by the public AgentAvow engine (12 detection categories, per-finding severity, exact file:line). Skipped and unfetchable entries are excluded from every figure.</li>
+          <li>· Corpus: {scanned.toLocaleString()} tools with a verdict across GitHub repos, npm, PyPI, crates, container images, Hugging Face models, MCP servers, and skills, scanned by the public AgentAvow engine (12 detection categories, per-finding severity, exact file:line). Skipped and unfetchable entries are excluded from every figure.</li>
           <li>· "Flagged" = at least one high or critical finding on shipped (non-test) code. Buckets are exclusive: critical, high-only, clean. flagged = critical + high-only, so no tool is counted twice.</li>
           <li>· Every verdict is a signed, offline-recomputable attestation. Keys at <a href="https://agentgraph.co/.well-known/jwks.json" target="_blank" rel="noopener noreferrer" className="text-primary-light hover:text-primary">agentgraph.co/.well-known/jwks.json</a>; conformance vectors public.</li>
           <li>· Live figure: <a href="/api/v1/public/scan-catalog/flagged-stat" target="_blank" rel="noopener noreferrer" className="text-primary-light hover:text-primary">the flagged-stat endpoint</a>. This page renders it live, so it never drifts from the number it cites. Each count equals the total of the matching severity filter in <Link to={rp('/rebrand/index')} className="text-primary-light hover:text-primary">the Index</Link>.</li>

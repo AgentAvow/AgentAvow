@@ -12,7 +12,7 @@ Every result leads with one of three answers, in `decision`, with the reason in 
 | `review` | Review before you connect | require approval, or allow with limits |
 | `do_not_connect` | Do not connect | deny |
 
-**Do not connect** means a critical finding, a planted credential leaving the sandbox, a critical sandbox finding, or a known-malicious package or dependency. **Review before you connect** means a high finding (code or sandbox), a published advisory on this version, a deprecated package, or a score under 51. A clean scan of very little code reads **Safe to connect**, and its reason says so. Adoption is never an input. `decision_final: false` means the sandbox is still running and the answer may still move to Review. The full rule is in [How scoring works](./how-grading-works.md#the-answer-three-phrases). Certified rides beside the answer, never instead of it: read `certified_mark`, which is true only beside Safe to connect (a final sandbox result, a score of 81 or more, enough code inspected). `certified.eligible` alone can sit beside Review, so don't gate on it.
+**Do not connect** means a critical finding other than a hardcoded credential (that alone reads Review), a planted credential leaving the sandbox, a critical sandbox finding, or a known-malicious package or dependency. **Review before you connect** means a hardcoded credential, a high finding (code or sandbox), a published advisory on this version, a deprecated package, a score under 51, or a scan that couldn't read what it exists to read. A clean scan of very little code reads **Safe to connect**, and its reason says so. Adoption is never an input. `decision_final: false` means the sandbox is still running and the answer may still move to Review. The full rule is in [How scoring works](./how-grading-works.md#the-answer-three-phrases). Certified rides beside the answer, never instead of it: read `certified_mark`, which is true only beside Safe to connect (a final sandbox result, a score of 81 or more, enough code inspected). `certified.eligible` alone can sit beside Review, so don't gate on it.
 
 ## What the score tells a machine to do
 
@@ -54,7 +54,7 @@ For private code, the [local scan](./run-locally.md) gates the same way inside y
 
 ## Gate your agent at runtime (SDK + bridges)
 
-Check a tool's answer **before** your agent connects it. The client SDKs — `agentavow-trust` (npm) and the Python client — read a repo's result over the same free API, so you can enforce it in code. The client takes the API origin; `checkRepo` returns the same JSON as the public scan endpoint:
+Check a tool's answer **before** your agent connects it. The client SDKs — `agentavow-trust` (npm) and the Python client (`agentavow-sdk` on PyPI) — read a repo's result over the same free API, so you can enforce it in code. The client takes the API origin; `checkRepo` returns the same JSON as the public scan endpoint:
 
 ```js
 import { TrustClient } from 'agentavow-trust'
@@ -67,7 +67,7 @@ if (r.decision === 'review') await confirmWithUser(`Review before you connect: $
 
 For a package or a live MCP server, call the scan endpoints under **Gate anything** below; the response shape is the same.
 
-Framework bridges ship in `sdk/bridges/` (LangChain, CrewAI, AutoGen, Pydantic AI) so the pre-flight check drops into an existing agent, and the **trust gateway** (`/api/v1/gateway/check`) enforces a policy server-side when you'd rather not embed the logic: it denies a Do not connect tool whatever its tier, takes the same `fail_on` (`do_not_connect` by default, or `review`), and keeps `min_tier` as an extra floor.
+Framework bridges ship in `sdk/bridges/` (LangChain, CrewAI, AutoGen, Pydantic AI) so the pre-flight check drops into an existing agent, and the **trust gateway** (`POST /api/v1/gateway/check`) enforces a policy server-side when you'd rather not embed the logic: it denies a Do not connect tool whatever its tier, takes the same `fail_on` (`do_not_connect` by default, or `review`), and keeps `min_tier` as an extra floor.
 
 ### LangChain
 
@@ -258,8 +258,8 @@ https servers are graded by the URL in your `mcp_servers` config. A refused call
 |---|---|
 | Claude Code plugin (session-start check, install check, per-call gate) | Shipped; listed in the Claude plugin directory |
 | MCP connector (`https://agentavow.com/mcp`) | Shipped; works in any MCP client |
-| ChatGPT app | In OpenAI review |
-| npm `agentavow-trust`: core gate, Vercel AI SDK, Flue, Claude Agent SDK, OpenAI Agents SDK | Shipped (0.4.1) |
+| ChatGPT app | Shipped; in the ChatGPT plugin directory |
+| npm `agentavow-trust`: core gate, Vercel AI SDK, Flue, Claude Agent SDK, OpenAI Agents SDK | Shipped (0.4.2) |
 | LangChain, Google ADK, Claude Agent SDK and OpenAI Agents SDK gates (Python) | In this repository (`src/bridges/`); not on PyPI yet |
 | GitHub Action, local CLI, GitLab CI component, Bitbucket Pipe, Azure Pipelines template | Shipped |
 | Open Policy Agent policy (with an Envoy `ext_authz` example) | In this repository (`integrations/opa/`) |
@@ -281,7 +281,7 @@ Read `decision` / `decision_reason` to decide (`trust_score` / `trust_tier` unde
 
 ## Catch the rug-pull after you've shipped
 
-A one-time gate misses the tool that was clean when you adopted it and turned malicious in v2. **Watch** a tool and AgentAvow re-scans it on a schedule and sends an **HMAC-signed webhook** when its score drops by more than 5 points **or its signed tool definition changes** (`tool_manifest_digest` drift — the silent redefinition you'd otherwise miss). Wire the webhook to Slack or your CI to pull a now-unsafe tool automatically.
+A one-time gate misses the tool that was clean when you adopted it and turned malicious in v2. **Watch** a tool and AgentAvow re-scans it on a schedule and sends an **HMAC-signed webhook** when its score drops by more than 5 points, **its answer gets worse** (Safe to connect → Review before you connect → Do not connect), **its Certified mark comes off**, **or its signed tool definition changes** (`tool_manifest_digest` drift — the silent redefinition you'd otherwise miss). One re-scan sends one alert, listing every reason it fired for. A better answer or a newly earned Certified mark is good news: it shows in your notifications and email, never on the webhook. The first re-scan of a watch records its answer without alerting. Wire the webhook to Slack or your CI to pull a now-unsafe tool automatically.
 
 To see it end to end, run the [rug-pull demo](https://github.com/AgentAvow/AgentAvow/tree/main/demos/rugpull): an MCP server that was clean on approval day redefines its `send_email` tool, the ungated agent leaks the message, and the gated agent refuses the call before anything is sent.
 
@@ -306,7 +306,16 @@ X-AgentAvow-Signature: sha256=<hex>
 
 The body is JSON with a `type` that says what happened:
 
-- `agentavow.alert.grade_change` — `{type, owner, repo, old_score, new_score, reason, decision, decision_final, decision_reason, certified}`, where `reason` is `score dropped` or `signed definition changed` and `decision` is the tool's answer now.
+- `agentavow.alert.grade_change` — `{type, owner, repo, old_score, new_score, reason, triggers[], reasons[], old_decision, old_certified_mark, decision, decision_final, decision_reason, certified}`. `decision` and `certified` are the tool's answer and Certified mark now; `old_decision` and `old_certified_mark` are the ones from the previous re-scan (`null` if none was recorded yet). `triggers[]` lists every reason this one alert fired for, in this order:
+
+  | `triggers[]` | `reasons[]` | fires when |
+  |---|---|---|
+  | `score_drop` | `score dropped` | the score fell by more than 5 points |
+  | `definition_change` | `signed definition changed` | `tool_manifest_digest` changed |
+  | `answer_worse` | `answer changed` | `safe` → `review`, `safe` → `do_not_connect`, or `review` → `do_not_connect` |
+  | `certified_lost` | `Certified mark removed` | `old_certified_mark` was `true` and `certified` is now `false` |
+
+  `reason` is the first entry of `reasons[]`, so a receiver written before `triggers[]` existed keeps working. Read `triggers[]` to act on a specific cause.
 - `agentavow.alert.behavioral_change` — a later [sandbox run](./behavioral-sandbox.md) added findings, leaked a canary or reached a new undeclared host. Carries the run's current state rather than a diff: `findings[]` (`rule`, `severity`, `name`), `unexpected_egress[]`, `canary_exfil[]`, `tools_exercised[]`, `plan`, `score`, the `package` the sandbox exercised, and the tool's answer now (`decision`, `decision_final`, `decision_reason`, `certified`).
 - `agentavow.alert.icon_change` — a watched MCP server now serves different `icons` on its tools or in its `serverInfo`. Icons are not part of the signed tool definition, so this is separate from `signed definition changed` and the grade and attestation are not what moved. Carries `{type, event, owner, repo, surface, score, reason, old_icon_fingerprint, new_icon_fingerprint, icon_findings[]}` (`severity`, `name`, `where` for the icon findings of the new scan) and the tool's answer now (`decision`, `decision_final`, `decision_reason`, `certified`).
 - `agentavow.alert.test` — what `POST …/test` sends, shaped like a grade change with a `message`.

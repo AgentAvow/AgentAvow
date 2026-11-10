@@ -211,6 +211,14 @@ async def test_webhook(
         "old_score": 92,
         "new_score": 74,
         "reason": "score dropped",
+        "triggers": ["score_drop", "answer_worse"],
+        "reasons": ["score dropped", "answer changed"],
+        "old_decision": "safe",
+        "old_certified_mark": False,
+        "decision": "review",
+        "decision_final": True,
+        "decision_reason": "sample: one high finding",
+        "certified": False,
     }
     status = await deliver_to_hook(hook, payload)
     from sqlalchemy import func as safunc

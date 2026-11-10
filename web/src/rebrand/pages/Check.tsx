@@ -1141,7 +1141,7 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg, skill, effect, probe
         <p className="mt-1.5 text-text-muted text-[13px] max-w-[64ch]">
           Install and run the tool in an isolated sandbox and watch what it actually does —
           the hosts it contacts, the files it writes. An MCP server is started and each of its
-          tools is called with synthetic arguments, so a tool that claims to be read-only but
+          tools (up to 25) is called with synthetic arguments, so a tool that claims to be read-only but
           writes, or that leaks a credential, is caught in the act. Nothing real is given to it:
           credentials are canaries, and the sandbox is destroyed after the run. Any egress beyond
           the registry and the tool&apos;s declared hosts is flagged. The signed observation also
@@ -1284,7 +1284,7 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg, skill, effect, probe
             {b.attestation?.jws && (
               <p className="text-[12px] text-text-muted">
                 <span className="font-mono text-[10.5px] uppercase tracking-wide mr-2">Signed observation</span>
-                What you see above is signed (EdDSA, key <span className="font-mono">{b.attestation.kid}</span>) as a dated observation, separate from the score.
+                What you see above is signed (EdDSA, key <span className="font-mono">{b.attestation.kid}</span>) as a dated observation; it feeds the score by the rules above.
                 {' '}<a className="underline" href="/docs/verify-attestations#behavioral-observations">Verify it</a>
                 {' '}· <button type="button" className="underline" onClick={() => { void navigator.clipboard?.writeText(b.attestation!.jws) }}>copy JWS</button>
               </p>
@@ -1669,7 +1669,7 @@ function SkillResult({ owner, repo, skill }: { owner: string; repo: string; skil
         whatWeChecked={
           <div className="mt-4 rounded-xl border border-border/60 p-5">
             <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">What we checked</h3>
-            <p className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">A skill&apos;s <span className="text-text">SKILL.md is injected into your model every session</span>, and its <span className="text-text font-mono">allowed-tools</span> pre-approves tools to run <span className="text-text">without asking</span>. We checked that auto-exec grant, hidden instructions in the always-loaded description, lifecycle-hook escalation, and credential-exfil in the bundled scripts.</p>
+            <p className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">A skill&apos;s <span className="text-text">description is loaded into your model every session</span>, and its <span className="text-text font-mono">allowed-tools</span> pre-approves tools to run <span className="text-text">without asking</span>. We checked that auto-exec grant, hidden instructions in the always-loaded description, lifecycle-hook escalation, and credential-exfil in the bundled scripts.</p>
           </div>
         }
       />

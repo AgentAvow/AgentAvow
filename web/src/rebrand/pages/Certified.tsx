@@ -34,15 +34,15 @@ function certLink(row: CatalogRow): string | null {
 const CHECKS: [string, string][] = [
   ['artifact_scanned', 'The published artifact was scanned — not just the source repo.'],
   ['provenance_verified', 'Build provenance is cryptographically verified (npm Sigstore / PyPI PEP 740) and binds to the source repo.'],
-  ['no_drift', 'No unexpected files, modifications, or install hooks added since the last signed scan.'],
+  ['no_drift', 'The published artifact matches its source: no added or modified files, no install hook.'],
   ['no_critical_or_high', 'Zero critical or high findings — and nothing known-malicious.'],
   ['recompute_ready', 'The verdict is offline-recomputable — full coverage metadata is recorded.'],
   ['full_coverage', 'The entire tree was scanned, not sampled.'],
 ]
 
 const DISQUALIFIERS: [string, string][] = [
-  ['Any critical finding', 'A single unresolved critical floors the score to 45 or below — Certified is off the table until it’s fixed.'],
-  ['A known-malicious dependency', 'A dependency flagged malicious (MAL) forces the score to 20 or below. No exceptions.'],
+  ['Any critical finding', 'A shipped critical caps the score at 45 — Certified is off the table until it’s fixed.'],
+  ['A known-malicious dependency', 'A dependency flagged malicious (MAL) costs 70 points and the answer is Do not connect. No exceptions.'],
   ['Unverified build provenance', 'The most common reason a good tool isn’t Certified: it publishes no cryptographic build attestation, so we can’t prove the artifact came from the source you claim.'],
   ['Sampled or partial coverage', 'If we couldn’t scan the whole tree, we won’t certify what we didn’t see.'],
   ['Any answer but Safe to connect', 'A deprecation, an advisory against this version, a high finding or a sandbox catch makes the answer Review, and the mark comes off until it reads Safe again. So does a score under 81, a sandbox run still in progress, or too little code to inspect.'],
