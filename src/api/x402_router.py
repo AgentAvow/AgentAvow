@@ -104,7 +104,7 @@ async def rescan_x402_endpoint(
 
     This is a re-scan helper for x402 operators to refresh their live posture
     without going through the full /gateway/re-verify path. Does NOT return
-    a letter grade — the grade is derived server-side and published at /x402.
+    a trust score — the score is derived server-side and published at /x402.
     """
     url = _safe_endpoint(endpoint)
     from src.ssrf import ssrf_safe_async_client, ssrf_safe_follow

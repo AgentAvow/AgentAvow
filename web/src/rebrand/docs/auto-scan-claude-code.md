@@ -39,8 +39,8 @@ score: **Safe to connect**, **Review before you connect**, or **Do not connect**
 - **A changed definition still pauses** for your confirmation, whatever the answer.
 - **Fail-open.** Any error, timeout or missing result lets the call through.
 
-If you install the plugin, skip Option 2. It is the same pair of hooks, and running
-both scans everything twice.
+If you install the plugin, skip Option 2. It is the same pair of hooks (the plugin also
+checks package installs), and running both scans everything twice.
 
 ## Without the plugin
 
@@ -95,7 +95,7 @@ the session-start verdicts only:
 {
   "hooks": {
     "SessionStart": [
-      { "matcher": "startup|resume",
+      { "matcher": "startup|resume|clear",
         "hooks": [ { "type": "command", "command": "python3 ~/.claude/hooks/agentavow_precheck.py", "timeout": 30 } ] }
     ],
     "PreToolUse": [

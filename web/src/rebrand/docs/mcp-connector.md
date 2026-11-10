@@ -22,7 +22,7 @@ the connector.
   name scans the latest release; a range such as `^1` is ignored and resolves to latest.
   Advisories against the package are reported for the version scanned, with the fixed
   release named.
-- **scan_mcp_server** — scan a live MCP server's tool definitions for poisoning / injection.
+- **scan_mcp_server** — scan a live MCP server's tool definitions for poisoning / injection, by URL or by name (matched against the catalog).
 - **verify_trust**, **check_interaction_safety**, **lookup_identity**, **get_trust_badge**
   — resolve and check an agent's identity and trust before delegating to it.
 - **about_agentavow** — an overview of the service.

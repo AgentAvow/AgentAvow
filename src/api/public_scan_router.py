@@ -1970,7 +1970,7 @@ async def scan_package_endpoint(
     db: AsyncSession = Depends(get_db),
 ) -> PublicScanResponse:
     """Grade a PUBLISHED **npm** or **PyPI** package directly by coordinate — no
-    GitHub repo required. The signed A+..F grade is computed over the real artifact
+    GitHub repo required. The signed 0-100 trust score is computed over the real artifact
     bytes (``scan_depth = artifact``) with the package's own build provenance
     verified. E.g. ``/public/scan/package/npm/chalk`` or
     ``/public/scan/package/pypi/requests?version=2.32.5``. Cached 1h."""
@@ -2719,8 +2719,8 @@ async def _public_scan_repo(
     behavioral: bool = Query(
         False,
         description="Also run the behavioral sandbox tier (deep scan, ~45s; implies "
-        "a fresh scan). Returns a separate `behavioral` block; never affects the "
-        "signed score.",
+        "a fresh scan). Returns a separate `behavioral` block: a signed observation "
+        "that feeds the trust score by fixed rules.",
     ),
     db: AsyncSession = Depends(get_db),
 ) -> PublicScanResponse:
@@ -3966,12 +3966,13 @@ async def scan_adoption(
     repo: str,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Adoption / engagement score — DISTINCT from the trust grade.
+    """Adoption / engagement score — DISTINCT from the trust score.
 
     Adoption answers "do real, independent parties rely on this?"; the trust
-    letter answers "is it safe?". This endpoint never returns or affects the
-    trust grade — it is a separate score with its own tier and "rising" vs
-    "established" badge. First-party raw counts are kept internal; the published
+    score answers "is it safe?". This endpoint never returns or affects the
+    trust score — it is a separate score with a "rising" vs "established"
+    badge. Read `adoption_score_100`; the letter `tier` field is a deprecated
+    legacy field. First-party raw counts are kept internal; the published
     formula and per-axis breakdown are returned. Fail-open across every source.
     """
     try:

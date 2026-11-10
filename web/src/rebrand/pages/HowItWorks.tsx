@@ -32,11 +32,11 @@ const CATEGORIES = [
 const STANDARDS = [
   ['Safety Model spec (v1)', 'Exactly how a scan composes into the 0–100 score, the tiers, and the Certified gate — the model published separately from the code, so anyone can recompute a score from the same findings.', 'https://github.com/AgentAvow/AgentAvow/blob/main/docs/standards/agentavow-safety-model-v1.md'],
   ['Tool manifest — .agentavow.yml', 'Declare the hosts your tool contacts and the capabilities it uses; the sandbox holds it to its own declaration. Undeclared egress is a finding.', 'https://github.com/AgentAvow/AgentAvow/blob/main/docs/standards/agentavow-manifest-v0.md'],
-  ['CTEF — Cryptographic Trust Evidence Format', 'The signed, reproducible evidence envelope any implementer can recompute byte-for-byte. Versioned in the open.', 'https://github.com/AgentAvow/AgentAvow/tree/main/docs/standards'],
+  ['CTEF — Composable Trust Evidence Format', 'The signed, reproducible evidence envelope any implementer can recompute byte-for-byte. Versioned in the open.', 'https://github.com/AgentAvow/AgentAvow/tree/main/docs/standards'],
   ['Published test vectors', 'Conformance vectors served at /.well-known so anyone can validate their own implementation against ours.', 'https://agentgraph.co/.well-known/cte-test-vectors.json'],
-  ['ERC-8004 reader', 'Reader for ERC-8004 identity and reputation records; not yet used in any answer or score.', 'https://github.com/AgentAvow/AgentAvow/tree/main/src/agentgraph_bridge_erc8004'],
+  ['ERC-8004 reader', 'Reader for ERC-8004 identity and feedback records; not yet used in any answer or score.', 'https://github.com/AgentAvow/AgentAvow/tree/main/src/agentgraph_bridge_erc8004'],
   ['AIPOU cross-fixture', 'A shared conformance fixture proving two independent implementations agree.', 'https://github.com/AgentAvow/AgentAvow/tree/main/docs/conformance'],
-  ['Independently cross-run in the LF DT lab', 'Our CTEF conformance vectors, positive and adversarial/fail-closed, were reproduced byte-for-byte in the Linux Foundation Decentralized Trust Agent Authority Conformance lab, by a party other than us.', 'https://github.com/Agent-Authority-Conformance/aps-conformance-suite/pull/43'],
+  ['Independently cross-run in the LF DT lab', 'Our CTEF conformance vectors, positive and adversarial/fail-closed, were reproduced byte-for-byte in the Linux Foundation Decentralized Trust Agent Authority Conformance lab, by a party other than us.', 'https://github.com/Agent-Authority-Conformance/aps-conformance-suite/pull/79'],
   ['MCP & AIP bridges', 'Adapters so the trust layer plugs into the frameworks agents already use.', 'https://github.com/AgentAvow/AgentAvow/tree/main/docs/protocol'],
 ]
 
@@ -109,7 +109,7 @@ export default function RebrandHowItWorks() {
         {[
           ['01', 'You paste a URL', 'A repo, MCP server, npm/PyPI package, or skill. No signup, no install.'],
           ['02', 'We read the actual code', 'Not metadata or self-claims — the real source, across the categories below.'],
-          ['03', 'We run it in a sandbox', 'Packages and MCP servers are installed and run in isolation, every tool called, with fake credentials planted.'],
+          ['03', 'We run it in a sandbox', 'Packages (including MCP servers published as packages) are installed and run in isolation, each tool (up to 25) called, with fake credentials planted.'],
           ['04', 'You get a signed score', 'A 0–100 trust score plus a cryptographic attestation you can verify offline. The sandbox run is signed separately.'],
         ].map(([n, h, p]) => (
           <div key={n} className="glass rounded-xl p-5">
@@ -128,8 +128,8 @@ export default function RebrandHowItWorks() {
             <span className="font-mono text-[11px] text-text-muted">gVisor · canary credentials · signed</span>
           </div>
           <p className="mt-2 text-text-muted text-[14px] max-w-[64ch] leading-relaxed">
-            Reading code misses what only shows up at runtime. So we install npm, PyPI and Docker packages in a fresh
-            gVisor container, start MCP servers and <strong className="text-text">call every tool</strong> with synthetic
+            Reading code misses what only shows up at runtime. So we install npm, PyPI and Docker packages, GitHub repos and skills in a fresh
+            gVisor container, start MCP servers and <strong className="text-text">call each tool (up to 25)</strong> with synthetic
             arguments, and fill the environment variables a tool reads with <strong className="text-text">canary
             credentials</strong>. If a canary leaves the machine, that is credential exfiltration, rated critical. We also flag
             undeclared network hosts and read-only tools that write files. Each run is signed as a

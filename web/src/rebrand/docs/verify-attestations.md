@@ -27,7 +27,8 @@ GET https://agentgraph.co/.well-known/jwks.json
 Resolve the `kid` from the JWS header to the matching key. Keys rotate; always match by `kid`. The set
 currently publishes three keys: `agentgraph-security-v1` (Ed25519 — scan attestations and behavioral
 observations), `trust-v2-2026` (Ed25519 — trust-score envelopes) and `catalog-es256-v1` (P-256/ES256 — the
-signed [`/.well-known/ai-catalog.json`](https://agentavow.com/.well-known/ai-catalog.json)).
+signed [`/.well-known/ai-catalog.json`](https://agentavow.com/.well-known/ai-catalog.json)). The scan key is also
+published a second time under its RFC 7638 thumbprint as the `kid`, so the set lists four entries.
 
 The issuer has two DID documents that resolve to the same keys: `did:web:agentgraph.co` (the identifier
 inside every attestation) and `did:web:agentavow.com`. Each lists the other under `alsoKnownAs`, so a
@@ -161,7 +162,7 @@ the proof under it.
 
 ## Standards
 
-The attestation format is on the record as conformance work in `draft-etcheverry-action-ref` (IETF) and the
+The attestation format is on the record as conformance work in `draft-etcheverry-action-ref` (an individual Internet-Draft) and the
 CTEF envelope. See the [standards docs](https://github.com/AgentAvow/AgentAvow/tree/main/docs/standards) for the canonical spec.
 
 ## Next

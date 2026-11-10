@@ -94,7 +94,7 @@ function Install() {
 const ACTIONS: [string, string, string][] = [
   ['Safe to connect', 'text-success', 'Stays silent. A tool that cleared the full gate reads Safe to connect · Certified.'],
   ['Review before you connect', 'text-warning', 'One line with the reason. The install goes ahead.'],
-  ['Do not connect', 'text-danger', 'Before an add or install, Claude Code asks you first. You decide.'],
+  ['Do not connect', 'text-danger', 'Before an add or install, Claude Code asks you first. Calls to a server that is already connected are stopped, with the report link.'],
   ['Tool definition changed', 'text-primary-light', 'Claude Code asks before the call.'],
 ]
 
@@ -138,9 +138,9 @@ export default function RebrandClaudeCode() {
         <div className="max-w-[860px] mx-auto px-6">
           <h2 className={h2}>Your first session opens with one line.</h2>
           <div className="mt-5 bg-background border border-border rounded-xl px-[18px] py-4 font-mono text-[13.5px] leading-relaxed overflow-x-auto">
-            <span className="text-primary-light">AgentAvow pre-check:</span> checked 8 MCP servers. 5 Safe, 2 Review, <span className="text-danger">1 Do not connect</span>.<br />
+            <span className="text-primary-light">AgentAvow pre-check:</span> graded 8 MCP servers. 5 Safe, 2 Review, <span className="text-danger">1 Do not connect</span>.<br />
             <span className="text-text-muted">Needs attention:</span> <span className="text-danger">&apos;example-server&apos; Do not connect</span>, one critical finding.<br />
-            <span className="text-text-muted">Dependencies:</span> checked 12 of 38. 11 Safe, <span className="text-warning">1 Review</span>.
+            <span className="text-text-muted">Dependencies:</span> graded 12 of 38. 11 Safe, <span className="text-warning">1 Review</span>.
           </div>
 
           <h2 className={`${h2} mt-11`}>It stays quiet until it matters.</h2>
@@ -184,7 +184,7 @@ export default function RebrandClaudeCode() {
               <ul className="mt-2 pl-[17px] list-disc text-text-muted text-[14.5px] grid gap-1">
                 <li>MCP servers, at session start and on <code className="font-mono text-[13px]">claude mcp add</code></li>
                 <li>Packages Claude installs by name with npm, pnpm, yarn, bun, pip, uv, pipx or poetry</li>
-                <li>Your project&apos;s direct dependencies, up to 15 per session start</li>
+                <li>Your project&apos;s direct dependencies, up to 8 per session start</li>
               </ul>
             </div>
             <div className="glass rounded-2xl border border-border/60 p-5">
@@ -192,7 +192,7 @@ export default function RebrandClaudeCode() {
               <ul className="mt-2 pl-[17px] list-disc text-text-muted text-[14.5px] grid gap-1">
                 <li>Lockfile installs, requirements files and URL installs are left alone</li>
                 <li>If AgentAvow can&apos;t be reached, your work carries on with no check</li>
-                <li>A check can miss things. It warns, and you decide</li>
+                <li>A check can miss things. It asks before installs and stops calls only on Do not connect</li>
               </ul>
             </div>
           </div>

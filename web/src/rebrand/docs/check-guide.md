@@ -48,11 +48,12 @@ Every result leads with one answer and the one condition that triggered it (`dec
 - **Safe to connect** (`safe`, short label *Safe*) — nothing blocking found, e.g. "nothing found in 340 files".
   A clean scan of very little code also reads Safe, with the reason "nothing found; little code to
   inspect" (or, for a remote MCP server, "tool definitions clean; server code not inspected"), and its
-  score stays capped at 74 or 82.
-- **Review before you connect** (`review`, *Review*) — a high finding in the code or the sandbox, a published
-  advisory affecting the version scanned, a deprecated package, or a score under 51.
-- **Do not connect** (`do_not_connect`, *Don't connect*) — a critical finding, a planted credential leaving the
-  sandbox, a critical sandbox finding, or a known-malicious package or dependency.
+  score stays capped at 74 or 82 (5 more if the repo has tests).
+- **Review before you connect** (`review`, *Review*) — a hardcoded credential, a high finding in the code or the
+  sandbox, a published advisory affecting the version scanned, a deprecated package, a score under 51, or a scan
+  that couldn't read what it exists to read.
+- **Do not connect** (`do_not_connect`, *Don't connect*) — a critical finding (other than a hardcoded credential,
+  which on its own reads Review), a planted credential leaving the sandbox, a critical sandbox finding, or a known-malicious package or dependency.
 
 The popularity of a tool never changes the answer. While the sandbox is still running the reason ends
 "sandbox still running" and `decision_final` is `false`; the answer can move once the run lands. The exact
@@ -132,9 +133,9 @@ as **Declared scope**, and the behavioral tier holds the tool to it: any egress 
 
 ## The sandbox result
 
-For npm and PyPI packages, container images, and MCP servers published as packages, AgentAvow also **runs**
-the tool in an isolated gVisor sandbox the first time it is scanned. An MCP server is started and **every tool is
-called** with synthetic arguments; the environment variables the tool reads hold **canary credentials** (fake,
+For npm and PyPI packages, GitHub repos, skills, container images, and MCP servers published as packages,
+AgentAvow also **runs** the tool in an isolated gVisor sandbox the first time it is scanned. An MCP server is
+started and **each tool (up to 25) is called** with synthetic arguments; the environment variables the tool reads hold **canary credentials** (fake,
 unique values). The result panel shows which tools were exercised, the hosts the tool contacted, the files it
 wrote, and any behavioral findings: undeclared egress, a read-only tool that wrote files, a canary that left the
 machine (critical), or a secret returned in a tool result. If a server could not be started, the panel says why
@@ -157,7 +158,7 @@ you can recompute it. See [Verify an AgentAvow attestation](./verify-attestation
 Tools change after you vet them. **Watch** a tool and we re-scan it and alert you the moment its score drops
 or its signed definition changes (every alert leads with the tool's current answer) — the rug-pull you'd otherwise miss. For an MCP server the attestation pins
 one digest per served tool (`scan.toolDigests`, keyed `tool:<name>`) plus a digest of the whole set, and a
-re-scan reports `toolDrift` — which tools were added, removed or changed since the last check — so you can
+re-scan reports `toolDrift` (`tool_drift` in the API response) — which tools were added, removed or changed since the last check — so you can
 see exactly what moved, not just that something did. A gate can recompute the digest of the tool it is about
 to call from the server's own `tools/list` and refuse on mismatch; see
 [Verify an AgentAvow attestation](./verify-attestations.md#tool-definitions-per-tool-digests-and-drift). Once the sandbox has run a watched tool, a

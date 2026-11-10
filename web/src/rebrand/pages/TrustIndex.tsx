@@ -225,7 +225,7 @@ export default function RebrandTrustIndex() {
     <div className="max-w-[1080px] mx-auto px-6 py-16">
       <SEOHead
         title="Trust Index — the state of agent tool safety"
-        description="An independent, signed index of the tools, MCP servers, and packages AI agents connect to: trust scores, adoption scores, and the critical-finding rate."
+        description="An independent index of signed results for the tools, MCP servers, and packages AI agents connect to: trust scores, adoption scores, and the critical-finding rate."
         path="/index"
       />
       {/* hero — the thesis */}
