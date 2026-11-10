@@ -3298,6 +3298,43 @@ def _host_allowlist_entry(lines: list[str], idx: int, pattern: re.Pattern[str]) 
     return keys
 
 
+_STR_LIT = r"""(?:"[^"\\\n]*"|'[^'\\\n]*')"""
+# `host.endswith((".ngrok-free.dev", ".ngrok.io"))` / `h.endsWith('.ngrok.io')`: the
+# literal arguments of a suffix test (skyvern cli/core/unified_server.py, 2026-11-10).
+_SUFFIX_TEST_RE = re.compile(
+    r"""\.ends[wW]ith\s*\(\s*(?P<args>[(\[]?\s*""" + _STR_LIT
+    + r"""(?:\s*,\s*""" + _STR_LIT + r""")*\s*,?\s*[)\]]?)\s*[,)]""")
+# A tunnel host whose subdomain is an angle-bracket placeholder
+# (`wss://<ngrok-subdomain>.ngrok-free.app/...`, skyvern SKILL.md): `<` `>` can never be
+# part of a hostname, so nothing can be sent there. Tunnel hosts only: a shared
+# collector (webhook.site, requestbin, pipedream, oastify, ...) keeps its critical
+# whatever comes before it.
+_PLACEHOLDER_SUB_RE = re.compile(r"""<[\w\- ]{1,40}>\.$""")
+_TUNNEL_HOST_RE = re.compile(r"""^ngrok(?:-free)?\.(?:io|app|dev)$""", re.IGNORECASE)
+
+
+def _exfil_host_not_destination(line: str, pattern: re.Pattern[str]) -> bool:
+    """Every webhook/tunnel-host match on ``line`` is either a string argument of a
+    suffix test (``.endswith(...)`` / ``.endsWith(...)``: a comparison, not where
+    anything is sent) or a tunnel host behind an angle-bracket placeholder subdomain
+    (a host that cannot resolve). Anything else on the line keeps the finding."""
+    matches = list(pattern.finditer(line))
+    if not matches:
+        return False
+    spans = []
+    for sm in _SUFFIX_TEST_RE.finditer(line):
+        a, b = sm.span("args")
+        spans += [(a + lm.start(), a + lm.end())
+                  for lm in re.finditer(_STR_LIT, line[a:b])]
+    for m in matches:
+        in_suffix = any(a < m.start() and m.end() < b for a, b in spans)
+        placeholder = bool(_TUNNEL_HOST_RE.match(m.group(0))
+                           and _PLACEHOLDER_SUB_RE.search(line[:m.start()]))
+        if not (in_suffix or placeholder):
+            return False
+    return True
+
+
 # Sinks that are not a plain call: assigning a URL to an element / location, a
 # dynamic import, jQuery's ajax, process exec, Python's computed globals.
 _OTHER_SINK_RE = re.compile(
@@ -4098,6 +4135,15 @@ def _scan_content(
                             snippet=stripped[:120])
                         npm_scripts.mark_allowlist(f_low, severity, keys)
                         findings.append(f_low)
+                        continue
+                    # A suffix test (`host.endswith(".ngrok.io")`) or a placeholder
+                    # tunnel subdomain (`wss://<sub>.ngrok-free.app`) names no
+                    # destination. Low, kept visible.
+                    if _exfil_host_not_destination(line, pattern):
+                        findings.append(Finding(
+                            category="exfiltration", name=name, severity="low",
+                            file_path=file_path, line_number=line_num,
+                            snippet=stripped[:120]))
                         continue
                     # A host inside a regex / pattern string ARRAY that never reaches
                     # a sink is a signature (a guard's list of what to look for,
