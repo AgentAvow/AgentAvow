@@ -362,6 +362,28 @@ _CONSTRAINT_RE = re.compile(r"^\s*(>=|<=|>|<|=)?\s*v?([0-9A-Za-z][0-9A-Za-z.+\-_
 _SLUG_OK_RE = re.compile(r"^[\w.-]+/[\w.-]+$")
 
 
+_RANGE_NOTE_RE = re.compile(r"\([^()]*\)")
+_SPACE_AND_RE = re.compile(r"\s+(?=(?:>=|<=|>|<|=))")
+_WILDCARD_RE = re.compile(r"^(\d+)\.(\d+)\.[?xX*]$|^(\d+)\.[?xX*](?:\.[?xX*])?$")
+
+
+def _range_parts(rng: str) -> list[str]:
+    """The AND-ed constraints of a GitHub range as maintainers write it on a repository
+    advisory: comma-separated (``">= 1.0.0, < 2.0.1"``), space-separated (``">= 10.0.0
+    <= 15.5.27"``, vercel/next.js), joined by ``and`` (``">15.0.4 and <15.2.0"``),
+    Unicode or reversed operators (``"≤ 3.6.2"``, ``"=< 2.16.0"``, withastro/astro), and
+    a note in parentheses (``"(all versions)"``) dropped. In ``patched_versions`` an
+    ``and`` that means OR reads as AND: fewer releases patched, the conservative side."""
+    rng = rng.replace("≤", "<=").replace("≥", ">=").replace("＜", "<").replace("＞", ">")
+    rng = rng.replace("=<", "<=").replace("=>", ">=")
+    rng = re.sub(r"\s+and\s+|\s*&&\s*", ",", rng, flags=re.IGNORECASE)
+    rng = _RANGE_NOTE_RE.sub(" ", rng)
+    out = []
+    for part in rng.split(","):
+        out += [x for x in _SPACE_AND_RE.split(part.strip()) if x.strip()]
+    return out
+
+
 def gh_range_affects(rng, eco: str, version: str | None) -> bool | None:
     """Does a GitHub ``vulnerable_version_range`` (``">= 1.0.0, < 2.0.1"``, ``"= 1.2.3"``,
     ``"< 2.0"``; comma means AND) include ``version``? None when the range or the
@@ -372,7 +394,10 @@ def gh_range_affects(rng, eco: str, version: str | None) -> bool | None:
     if cur is None:
         return None
     bounds = []
-    for part in rng.split(","):
+    parts = _range_parts(rng)
+    if not parts:
+        return None
+    for part in parts:
         m = _CONSTRAINT_RE.match(part)
         if not m:
             return None
@@ -385,6 +410,102 @@ def gh_range_affects(rng, eco: str, version: str | None) -> bool | None:
               "<": cur < bound, "=": cur == bound}[op]
         if not ok:
             return False
+    return True
+
+
+def gh_patched_includes(raw, eco: str, version: str | None) -> bool | None:
+    """Is ``version`` inside a GitHub ``patched_versions`` value? The repository
+    advisory LIST endpoint can publish an open-ended ``vulnerable_version_range``
+    (axios GHSA-898c-q2cr-xwhg: ``">=1.0.0"``) and carry the fix only here
+    (``">=1.16.0"``); the global database shows the same advisory as ``>= 1.0.0,
+    < 1.16.0``. A bare version (``"2.0.1"``) is the first patched release, read as
+    ``>= 2.0.1``. Parts joined by commas are ANDed, which for a list of per-branch
+    first fixes (``"1.2.3, 2.0.1"``) reads only the highest as patched: the
+    conservative side. None when absent or unparsable."""
+    if not isinstance(raw, str) or not raw.strip() or not version:
+        return None
+    parts = []
+    for part in _range_parts(raw):
+        part = part.strip()
+        if part[0].isdigit() or part[0] in "vV":
+            part = ">= " + _wildcard_floor(part.lstrip("vV"))
+        parts.append(part)
+    if not parts:
+        return None
+    return gh_range_affects(", ".join(parts), eco, version)
+
+
+def _wildcard_floor(ver: str) -> str:
+    """``"16.3.?"`` (some 16.3.x release): every release from 16.4.0 on is patched for
+    certain, so the floor is the NEXT line, never 16.3.0 (the conservative side)."""
+    m = _WILDCARD_RE.match(ver.strip())
+    if not m:
+        return ver
+    if m.group(1) is not None:
+        return f"{m.group(1)}.{int(m.group(2)) + 1}.0"
+    return f"{int(m.group(3)) + 1}.0.0"
+
+
+def _line(eco: str, ver: str):
+    """The release line of a version: its major, or major.minor below 1.0."""
+    m = re.match(r"^v?(\d+)(?:\.(\d+))?", ver.strip())
+    if not m:
+        return None
+    major, minor = int(m.group(1)), int(m.group(2) or 0)
+    return (major, minor) if major == 0 else (major,)
+
+
+def gh_patched_on_line(vulns: list, eco: str, version: str | None) -> bool:
+    """A repository advisory lists one ``vulnerabilities[]`` entry per release line
+    (next-auth GHSA-5jpx-9hw9-2fx4: ``<4.24.12`` fixed in 4.24.12, and
+    ``<5.0.0-beta.30``). ``version`` is patched when an entry's first patched release
+    is on the same line (same major; same major.minor below 1.0) and ``version`` is at
+    or above it, as GitHub's global database reads the same advisory."""
+    if not version:
+        return False
+    cur = _parse_version(eco, version)
+    line = _line(eco, version)
+    if cur is None or line is None:
+        return False
+    for v in vulns:
+        raw = str((v or {}).get("patched_versions") or "").strip()
+        for part in _range_parts(raw) if raw else []:
+            part = part.strip().lstrip(">=").strip().lstrip("vV")
+            if not part or not part[0].isdigit():
+                continue
+            fix = _parse_version(eco, part)
+            if fix is not None and _line(eco, part) == line and cur >= fix:
+                return True
+    return False
+
+
+def _open_ended(rng) -> bool:
+    """A vulnerable range with no upper bound (``">=1.0.0"``): its fix, if any, is only
+    in ``patched_versions``."""
+    if not isinstance(rng, str):
+        return True
+    for part in rng.split(","):
+        m = _CONSTRAINT_RE.match(part)
+        if m and (m.group(1) or "=") in ("<", "<=", "="):
+            return False
+    return True
+
+
+def gh_vuln_affects(v: dict, eco: str, version: str | None) -> bool | None:
+    """One ``vulnerabilities[]`` entry of a repository advisory against ``version``:
+    inside ``vulnerable_version_range`` and not inside ``patched_versions``. None when
+    it cannot be told: the range is unparsable, or the range is open-ended and the
+    patched value is present but unparsable."""
+    rng = v.get("vulnerable_version_range")
+    r = gh_range_affects(rng, eco, version)
+    if not r:
+        return r
+    raw_patch = v.get("patched_versions")
+    p = gh_patched_includes(raw_patch, eco, version)
+    if p is True:
+        return False
+    if p is None and isinstance(raw_patch, str) and raw_patch.strip() and _open_ended(rng):
+        return None
     return True
 
 
@@ -429,8 +550,12 @@ def summarize_repo_advisories(advisories: list, eco: str, name: str,
             continue
         seen.add(ghsa)
         affected, unparsed, fixed = False, False, None
-        for v in mine:
-            r = gh_range_affects(v.get("vulnerable_version_range"), eco, version)
+        if gh_patched_on_line(mine, eco, version):
+            mine_checked = []  # patched on its own release line: not affected
+        else:
+            mine_checked = mine
+        for v in mine_checked:
+            r = gh_vuln_affects(v, eco, version)
             if r is None:
                 unparsed = True
             elif r:
