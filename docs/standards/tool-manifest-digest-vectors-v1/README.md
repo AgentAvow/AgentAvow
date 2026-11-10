@@ -184,6 +184,26 @@ not an independent record. A run of either reader by someone who wrote neither w
   label) and does not store this profile's digest per entry; it is recomputed from the
   definitions it already holds.
 
+### An outside read of the live server
+
+The entries above check implementations against the pinned fixture. HISTOR (a public log
+of MCP tool definitions, owned by alexar76) read `https://mcp.deepwiki.com/mcp` itself on
+26 October 2026, on its own schedule; the observation is in its signed snapshot of that day
+(tree head 1,074,932, [`datasets/2026-10-26/`](https://histor.modelmarket.dev/datasets/2026-10-26/)).
+Recomputing this profile from that stored definition with `rfc8785==0.1.4` gives the three
+digests signed in the 1 October attestation, so the server had not changed between the two
+reads. HISTOR's implementation was written from the Derivation section above; on the pinned file at
+`474f34a` it gives 3 of 3 served-definition digests, 13 of 13 key encodings, and the
+one-sentence control flips. Reported on
+[#240](https://github.com/AgentAvow/AgentAvow/issues/240); linked with its author's
+permission.
+
+Two readers can publish different digests for the same server on the same day without
+either being wrong: pagination, protocol version and launch environment all change what a
+server serves. HISTOR's comparison with heldfast, and its proposal for recording capture
+conditions beside a digest, are in
+[`datasets/interop-digests-2026-10-31/`](https://histor.modelmarket.dev/datasets/interop-digests-2026-10-31/).
+
 ### The CI check
 
 The Probity reader is run in our CI against the current vector file, next to
