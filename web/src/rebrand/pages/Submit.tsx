@@ -48,6 +48,14 @@ function scorePath(surface: string, identifier: string): string {
   return rp(`/rebrand/check/pkg/${surface}/${identifier}`)
 }
 
+/** The My Tools claim box takes the same coordinates as the Check page. */
+function claimCoord(surface: string, identifier: string): string | null {
+  if (surface === 'github') return identifier
+  if (surface === 'openclaw') return `skill:${identifier}`
+  if (surface === 'npm' || surface === 'pypi' || surface === 'crates' || surface === 'mcp') return `${surface}:${identifier}`
+  return null // Hugging Face and Docker can't be claimed yet
+}
+
 type Listed = { surface: string; identifier: string; grade: string; trust_score: number; decision?: string | null; decision_reason?: string | null }
 
 export default function Submit() {
@@ -92,8 +100,8 @@ export default function Submit() {
         path="/submit"
       />
       <div className="text-center">
-        <div className="font-mono text-[12px] uppercase tracking-wide text-primary-light">For authors</div>
-        <h1 className="mt-2 text-3xl md:text-4xl font-extrabold tracking-tight">List your tool</h1>
+        <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">List your tool</span>
+        <h1 className="mt-3 text-3xl md:text-4xl font-extrabold tracking-tight">List your tool</h1>
         <p className="mt-4 text-text-muted max-w-[52ch] mx-auto">Add your tool to the catalog. We scan it, give it a <span className="text-text">signed safety score</span>, and list it in Browse so agents can find and trust it. Free, no account.</p>
       </div>
 
@@ -149,7 +157,9 @@ export default function Submit() {
           })()}
           <div className="mt-6 flex gap-3 justify-center flex-wrap">
             <button onClick={() => navigate(scorePath(listed.surface, listed.identifier))} className="font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark">View your listing →</button>
-            <Link to={rp('/rebrand/tools')} className="font-semibold px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Claim it</Link>
+            {claimCoord(listed.surface, listed.identifier)
+              ? <Link to={rp('/rebrand/tools') + '?coord=' + encodeURIComponent(claimCoord(listed.surface, listed.identifier)!)} className="font-semibold px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Claim it</Link>
+              : <Link to={scorePath(listed.surface, listed.identifier) + '#watch'} className="font-semibold px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Watch it</Link>}
           </div>
           <button onClick={() => { setListed(null); setValue('') }} className="mt-5 text-[13px] text-text-muted hover:text-text">List another tool</button>
         </div>

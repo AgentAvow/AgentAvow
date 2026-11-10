@@ -17,7 +17,7 @@ import { rp } from '../basePath'
  * "Talk to us" opens an email.
  */
 
-const CONTACT = 'kenne@agentavow.com'
+const CONTACT = 'hello@agentavow.com'
 
 const CAPABILITIES: { h: string; p: string; pre?: string }[] = [
   { h: 'Gate CI on the answer', p: 'Fail the build on Do not connect. Works on GitHub, GitLab, Bitbucket and Azure DevOps.', pre: '- uses: AgentAvow/AgentAvow/github-action@main\n  with:\n    fail_on: do_not_connect' },
@@ -41,7 +41,7 @@ const X402_FALLBACK = 26302
 
 const h2 = 'text-[clamp(25px,3.4vw,33px)] font-bold tracking-tight leading-tight'
 const section = 'relative z-[2] py-[60px] border-t border-border/60'
-const field = 'w-full bg-[#0c1414] border border-border rounded-[10px] px-3 py-2.5 text-[15px] text-text focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_#0D948880]'
+const field = 'w-full bg-background border border-border rounded-[10px] px-3 py-2.5 text-[15px] text-text focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_var(--color-primary-glow)]'
 
 function TalkForm() {
   const [email, setEmail] = useState('')
@@ -58,7 +58,7 @@ function TalkForm() {
     setMsg(`Your email app should open with this filled in. If it doesn't, write to ${CONTACT}.`)
   }
   return (
-    <form onSubmit={submit} className="glass rounded-2xl border border-white/10 grid gap-3 p-[22px] max-w-[560px]">
+    <form onSubmit={submit} className="glass rounded-2xl border border-border/60 grid gap-3 p-[22px] max-w-[560px]">
       <label className="grid gap-[5px] text-[13.5px] text-text-muted">Work email
         <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" className={field} />
       </label>
@@ -127,10 +127,10 @@ export default function RebrandTeams() {
           <h2 className={h2}>What you can put in place this week.</h2>
           <div className="grid md:grid-cols-2 gap-3.5 mt-[26px]">
             {CAPABILITIES.map((c) => (
-              <div key={c.h} className="glass rounded-2xl border border-white/10 p-5 flex flex-col gap-[7px] min-w-0">
+              <div key={c.h} className="glass rounded-2xl border border-border/60 p-5 flex flex-col gap-[7px] min-w-0">
                 <h3 className="text-[16.5px] font-bold">{c.h}</h3>
                 <p className="text-text-muted text-[14.5px]">{c.p}</p>
-                {c.pre && <pre className="mt-[7px] bg-[#0c1414] border border-border rounded-[9px] px-3 py-2.5 font-mono text-[12.5px] overflow-x-auto">{c.pre}</pre>}
+                {c.pre && <pre className="mt-[7px] bg-background border border-border rounded-[9px] px-3 py-2.5 font-mono text-[12.5px] overflow-x-auto">{c.pre}</pre>}
               </div>
             ))}
           </div>
@@ -161,9 +161,9 @@ export default function RebrandTeams() {
             </thead>
             <tbody className="block sm:table-row-group">
               {STANDARDS.map(([what, means]) => (
-                <tr key={what} className="block sm:table-row py-2.5 sm:py-0 border-b border-[#1d2d2d]">
-                  <td className="block sm:table-cell sm:p-2.5 font-semibold align-top sm:border-b sm:border-[#1d2d2d] sm:w-[34%]">{what}</td>
-                  <td className="block sm:table-cell sm:p-2.5 text-text-muted align-top sm:border-b sm:border-[#1d2d2d]">{means}</td>
+                <tr key={what} className="block sm:table-row py-2.5 sm:py-0 border-b border-surface-hover">
+                  <td className="block sm:table-cell sm:p-2.5 font-semibold align-top sm:border-b sm:border-surface-hover sm:w-[34%]">{what}</td>
+                  <td className="block sm:table-cell sm:p-2.5 text-text-muted align-top sm:border-b sm:border-surface-hover">{means}</td>
                 </tr>
               ))}
             </tbody>
@@ -171,15 +171,15 @@ export default function RebrandTeams() {
 
           <h3 className="mt-7 text-[18px] font-bold">Works with the protocols your agents use</h3>
           <div className="grid md:grid-cols-3 gap-3.5 mt-3">
-            <div className="glass rounded-2xl border border-white/10 p-[22px] flex flex-col gap-[9px]">
+            <div className="glass rounded-2xl border border-border/60 p-[22px] flex flex-col gap-[9px]">
               <h3 className="text-[19px] font-bold">MCP</h3>
               <p className="text-text-muted text-[14.5px]">Check live servers by URL, and servers shipped as npm or PyPI packages. Tool definitions are read for poisoning and hidden instructions.</p>
             </div>
-            <div className="glass rounded-2xl border border-white/10 p-[22px] flex flex-col gap-[9px]">
+            <div className="glass rounded-2xl border border-border/60 p-[22px] flex flex-col gap-[9px]">
               <h3 className="text-[19px] font-bold">A2A</h3>
               <p className="text-text-muted text-[14.5px]">Paste any A2A Agent Card URL for an answer, findings and a signed attestation, including whether the card&apos;s own signature verifies.</p>
             </div>
-            <div className="glass rounded-2xl border border-white/10 p-[22px] flex flex-col gap-[9px]">
+            <div className="glass rounded-2xl border border-border/60 p-[22px] flex flex-col gap-[9px]">
               <h3 className="text-[19px] font-bold">x402</h3>
               <p className="text-text-muted text-[14.5px]"><span className="tabular-nums">{x402Total.toLocaleString('en-US')}</span> x402 payment endpoints indexed, and a wallet address resolves to the tool it&apos;s linked to.</p>
             </div>

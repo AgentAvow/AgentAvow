@@ -310,7 +310,8 @@ export default function RebrandBrowse() {
       {/* header block: the hero, how the catalog reads, then search */}
       <div className="max-w-[1080px] mx-auto px-6 pt-14">
         <div className="max-w-[62ch]">
-          <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight">Find tools your agent can trust.</h1>
+          <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Browse</span>
+          <h1 className="mt-3 text-3xl md:text-5xl font-extrabold tracking-tight">Find tools your agent can trust.</h1>
           <p className="mt-3 text-text-muted text-[17px]">Every tool we've checked, with its answer, trust score and adoption score.</p>
         </div>
 
@@ -352,7 +353,7 @@ export default function RebrandBrowse() {
           </Link>
           <Link to={rp(DNC_LIST)} className="flex flex-col gap-0.5 min-w-0 group">
             <span className="font-mono text-[11px] tracking-[0.12em] uppercase text-primary-light">Do not connect</span>
-            <b className="text-[24px] leading-tight text-[#f38ba8] tabular-nums">{mix ? mix.dnc.toLocaleString() : '—'}</b>
+            <b className="text-[24px] leading-tight text-danger tabular-nums">{mix ? mix.dnc.toLocaleString() : '—'}</b>
             <small className="text-[12px] text-text-muted group-hover:text-text">see them →</small>
           </Link>
           <div className="flex flex-col gap-0.5 min-w-0">

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { rp } from '../basePath'
@@ -6,6 +6,8 @@ import api from '../../lib/api'
 import { useAuth } from '../../hooks/useAuth'
 import { useTheme } from '../../hooks/useTheme'
 import { Reveal } from '../components/motion'
+import { AccountSkeleton } from '../components/AccountBits'
+import { useRequireUser } from '../lib/useRequireUser'
 
 /**
  * AgentAvow account settings — the relevant bits carried over from the legacy
@@ -37,7 +39,7 @@ export default function RebrandSettings() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { theme, toggleTheme } = useTheme()
-  useEffect(() => { if (!isLoading && !user) navigate(rp('/rebrand/login')) }, [isLoading, user, navigate])
+  useRequireUser(user, isLoading)
 
   const [curPass, setCurPass] = useState('')
   const [newPass, setNewPass] = useState('')
@@ -83,7 +85,7 @@ export default function RebrandSettings() {
     onSuccess: () => { logout(); navigate(rp('/rebrand')) },
   })
 
-  if (!user) return null
+  if (!user) return <AccountSkeleton width="max-w-[640px]" />
   const emailOn = prefs?.email_notifications_enabled ?? true
 
   return (
@@ -150,7 +152,7 @@ export default function RebrandSettings() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="text-[14px]">Email notifications</div>
-            <div className="text-[12px] text-text-muted">Grade-change alerts, verification, and account emails.</div>
+            <div className="text-[12px] text-text-muted">Score-change alerts, verification, and account emails.</div>
           </div>
           <button
             onClick={() => updatePref.mutate({ email_notifications_enabled: !emailOn })}
@@ -161,7 +163,7 @@ export default function RebrandSettings() {
             <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${emailOn ? 'left-[22px]' : 'left-0.5'}`} />
           </button>
         </div>
-        <p className="mt-3 text-[12px] text-text-muted">Per-tool alert delivery (email / webhook) is set on your <Link to={rp('/rebrand/account')} className="text-primary-light hover:text-primary">account page</Link>.</p>
+        <p className="mt-3 text-[12px] text-text-muted">Per-tool alert delivery (email / webhook) is set on <Link to={rp('/rebrand/account')} className="text-primary-light hover:text-primary">Watches &amp; alerts</Link>.</p>
       </Card>
 
       {/* data export */}

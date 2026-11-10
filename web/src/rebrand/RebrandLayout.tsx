@@ -8,48 +8,51 @@ import { AtmosphericBackground } from '../components/AtmosphericBackground'
 import { useAuth } from '../hooks/useAuth'
 import api from '../lib/api'
 import { currentPath, trackEvent, trackLandingView } from '../lib/analytics'
-import { NotifRow, isRelevant, type Notif } from './components/NotificationBits'
+import { NotifRow, type Notif } from './components/NotificationBits'
+import { RELEVANT_KIND_PARAM } from './lib/notifKinds'
+import { here, loginHref } from './lib/returnTo'
 import { dropSnapshot, inSnapshot } from './lib/snapshot'
 import { AppsLine } from './components/AppsStrip'
 
 /**
  * Signed-in account controls: a notifications bell (unread count from the real
- * /notifications API) + an avatar dropdown (My watches, Settings, Admin, Sign out).
+ * /notifications API) + an avatar dropdown (Watches & alerts, Settings, Admin, Sign out).
  * Signed-out: a plain "Sign in" link. Settings/Admin reuse the existing app.
  */
 function AccountMenu() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const notifRef = useRef<HTMLDivElement>(null)
 
-  // Count only watch-alert unread — the global unread-count includes the user's
-  // old social-era notifications (that's the "large number" bug), which the
-  // tool-safety rebrand shouldn't surface.
+  // Count unread of the same tool-safety kinds the dropdown lists (alerts and good
+  // news). The global unread-count includes the user's old social-era notifications
+  // (that's the "large number" bug), which the tool-safety rebrand shouldn't surface.
   const { data: unread } = useQuery({
     queryKey: ['rebrand-unread-watch'],
     queryFn: async () => {
-      const r = await api.get<{ notifications: unknown[] }>('/notifications', { params: { kind: 'watch_alert', unread_only: true, limit: 50 } })
+      const r = await api.get<{ notifications: unknown[] }>('/notifications', { params: { kind: RELEVANT_KIND_PARAM, unread_only: true, limit: 50 } })
       return r.data.notifications.length
     },
     enabled: !!user,
     refetchInterval: 60_000,
   })
 
-  // The dropdown list (tool-safety notifications only) — fetched when opened.
-  const { data: notifList } = useQuery({
+  // The dropdown list (tool-safety notifications only, filtered server-side) — fetched when opened.
+  const { data: notifList, isLoading: notifLoading, isError: notifError, refetch: refetchNotifs } = useQuery({
     queryKey: ['rebrand-notif-list'],
-    queryFn: async () => (await api.get<{ notifications: Notif[] }>('/notifications', { params: { limit: 30 } })).data,
+    queryFn: async () => (await api.get<{ notifications: Notif[] }>('/notifications', { params: { kind: RELEVANT_KIND_PARAM, limit: 3 } })).data,
     enabled: !!user && notifOpen,
   })
   const invalidateNotifs = () => ['rebrand-notif-list', 'rebrand-unread-watch', 'rebrand-all-notifs', 'rebrand-notifs']
     .forEach((k) => qc.invalidateQueries({ queryKey: [k] }))
   const markRead = useMutation({ mutationFn: (id: string) => api.post(`/notifications/${id}/read`), onSuccess: invalidateNotifs })
   const removeNotif = useMutation({ mutationFn: (id: string) => api.delete(`/notifications/${id}`), onSuccess: invalidateNotifs })
-  const recent = (notifList?.notifications ?? []).filter(isRelevant)
+  const recent = [...(notifList?.notifications ?? [])]
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 3)
 
   useEffect(() => {
@@ -63,7 +66,7 @@ function AccountMenu() {
   }, [open, notifOpen])
 
   if (!user) {
-    return <Link to={rp("/rebrand/login")} className="text-[14px] text-text-muted hover:text-text transition-colors">Sign in</Link>
+    return <Link to={loginHref(here(location))} className="text-[14px] text-text-muted hover:text-text transition-colors">Sign in</Link>
   }
 
   const count = unread ?? 0
@@ -77,15 +80,21 @@ function AccountMenu() {
           {count > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 grid place-items-center rounded-full bg-accent text-white text-[10px] font-bold tabular-nums">{count > 9 ? '9+' : count}</span>}
         </button>
         {notifOpen && (
-          <div className="absolute right-0 mt-2 w-[360px] max-w-[calc(100vw-2.5rem)] glass rounded-xl border border-border/60 shadow-xl z-30 overflow-hidden">
+          // Mobile: pinned to the viewport under the header, so it can't run off the left
+          // edge (the avatar and menu button sit to the bell's right). md+: under the bell.
+          <div className="fixed left-4 right-4 top-[62px] md:absolute md:left-auto md:right-0 md:top-auto md:mt-2 md:w-[360px] glass rounded-xl border border-border/60 shadow-xl z-30 overflow-hidden">
             <div className="px-3.5 py-2.5 border-b border-border/60 flex items-center justify-between">
               <span className="text-[13px] font-semibold">Notifications</span>
               <Link to={rp('/rebrand/notifications')} onClick={() => setNotifOpen(false)} className="text-[12px] font-semibold text-primary-light hover:text-primary">See all →</Link>
             </div>
             <div className="max-h-[70vh] overflow-y-auto p-2 flex flex-col gap-1.5">
-              {recent.length
-                ? recent.map((n) => <NotifRow key={n.id} n={n} compact onRead={markRead.mutate} onDelete={removeNotif.mutate} onNavigate={() => setNotifOpen(false)} />)
-                : <p className="text-text-muted text-[13px] py-6 text-center">You&apos;re all caught up.</p>}
+              {notifLoading
+                ? [0, 1].map((i) => <div key={i} className="glass rounded-xl h-[72px] animate-pulse" />)
+                : notifError
+                  ? <div className="py-5 text-center text-[13px] text-text-muted">Couldn&apos;t load notifications. <button type="button" onClick={() => void refetchNotifs()} className="font-semibold text-primary-light hover:text-primary">Try again</button></div>
+                  : recent.length
+                    ? recent.map((n) => <NotifRow key={n.id} n={n} compact onRead={markRead.mutate} onDelete={removeNotif.mutate} onNavigate={() => setNotifOpen(false)} />)
+                    : <p className="text-text-muted text-[13px] py-6 text-center">You&apos;re all caught up.</p>}
             </div>
           </div>
         )}
@@ -103,7 +112,7 @@ function AccountMenu() {
               <div className="text-[11.5px] text-text-muted truncate">{user.email}</div>
             </div>
             <Link to={rp("/rebrand/tools")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">My Tools</Link>
-            <Link to={rp("/rebrand/account")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">My watches</Link>
+            <Link to={rp("/rebrand/account")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Watches &amp; alerts</Link>
             <Link to={rp("/rebrand/settings")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Settings</Link>
             {user.is_admin && <Link to={rp("/rebrand/admin-dashboard")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Admin</Link>}
             <button onClick={() => { setOpen(false); logout(); navigate(rp('/rebrand')) }} className="block w-full text-left px-3.5 py-2 text-[13.5px] text-text-muted hover:text-danger hover:bg-surface border-t border-border/60 mt-1">Sign out</button>
@@ -131,12 +140,12 @@ function Wordmark({ id = 'hdr' }: { id?: string }) {
   const reduce = useReducedMotion()
   return (
     <motion.span
-      className="group flex items-center gap-2 font-bold text-[17px] tracking-tight cursor-pointer"
+      className="group flex items-center gap-2 font-bold text-[19px] md:text-[17px] tracking-tight cursor-pointer"
       initial="rest"
       whileHover="hover"
       animate="rest"
     >
-      <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" className="w-7 h-7 md:w-6 md:h-6" aria-hidden="true">
         {/* outer gradient ring — rotates on hover */}
         <motion.circle
           cx="12" cy="12" r="9.3" stroke={`url(#av-g-${id})`} strokeWidth="1.7"
@@ -159,7 +168,7 @@ function Wordmark({ id = 'hdr' }: { id?: string }) {
           </linearGradient>
         </defs>
       </svg>
-      AgentAvow<span className="align-super text-[9px] text-text-muted font-medium ml-0.5">™</span>
+      AgentAvow<span className="align-super text-[10px] md:text-[9px] text-text-muted font-medium ml-0.5">™</span>
     </motion.span>
   )
 }
@@ -248,8 +257,8 @@ const SOCIAL: [string, string, string][] = [
 type FooterLink = [label: string, to: string]
 
 const FOOTER: [heading: string, links: FooterLink[]][] = [
-  ['Check', [['Browse', '/rebrand/browse'], ['The Index', '/rebrand/index'], ['Certified', '/rebrand/certified'], ['Sandbox', '/rebrand/sandbox']]],
-  ['Build', [['For tool authors', '/rebrand/for-developers'], ['Badges', '/rebrand/badge'], ['List your tool', '/rebrand/submit'], ['Preflight', '/rebrand/preflight'], ['API', '/api/v1/redoc'], ['Verify keys', '/.well-known/jwks.json']]],
+  ['Check', [['Browse', '/rebrand/browse'], ['Trust Index', '/rebrand/index'], ['Certified', '/rebrand/certified'], ['API sandbox', '/rebrand/sandbox']]],
+  ['Build', [['For developers', '/rebrand/for-developers'], ['Badges', '/rebrand/badge'], ['List your tool', '/rebrand/submit'], ['Preflight', '/rebrand/preflight'], ['API', '/api/v1/redoc'], ['Verify keys', '/.well-known/jwks.json']]],
   ['About', [['How it works', '/rebrand/how-it-works'], ['Research', '/rebrand/research'], ['FAQ', '/rebrand/faq'], ['Community', '/feed'], ['Feedback', 'https://github.com/AgentAvow/AgentAvow/issues/new'], ['Terms', '/rebrand/legal/terms'], ['Privacy', '/rebrand/legal/privacy']]],
 ]
 
@@ -345,7 +354,7 @@ export default function RebrandLayout() {
       ) : (
       <header className="sticky top-0 z-20 bg-surface border-b border-border/60">
         <div className="max-w-[1080px] mx-auto px-6 h-[62px] flex items-center gap-7">
-          <Link to={rp("/rebrand")} aria-label="AgentAvow home">
+          <Link to={rp("/rebrand")} aria-label="AgentAvow home" className="shrink-0">
             <Wordmark />
           </Link>
           <nav className="hidden md:flex items-center gap-6 ml-2">

@@ -238,6 +238,23 @@ class NotificationListResponse(BaseModel):
 
 # --- Endpoints ---
 
+_MAX_KINDS = 20
+
+
+def _parse_kinds(kind: str | None) -> list[str]:
+    """``kind`` takes one kind or a comma-separated list (``watch_alert,watch_good_news``).
+
+    A single value behaves exactly as before. Blank entries are dropped; an all-blank
+    value means "no filter".
+    """
+    if not kind:
+        return []
+    kinds = list(dict.fromkeys(k.strip() for k in kind.split(",") if k.strip()))
+    if len(kinds) > _MAX_KINDS:
+        raise HTTPException(status_code=422, detail=f"At most {_MAX_KINDS} kinds")
+    return kinds
+
+
 
 @router.get(
     "", response_model=NotificationListResponse,
@@ -245,20 +262,26 @@ class NotificationListResponse(BaseModel):
 )
 async def get_notifications(
     unread_only: bool = Query(False),
-    kind: str | None = Query(None),
+    kind: str | None = Query(None, max_length=500),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     current_entity: Entity = Depends(get_current_entity),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get notifications for the current entity. Filter by kind (e.g. follow, reply, vote)."""
+    """Get notifications for the current entity. Filter by kind (e.g. follow, reply,
+    vote), or by several kinds as a comma-separated list
+    (``kind=watch_alert,watch_good_news``). ``total`` and ``unread_count`` stay
+    account-wide."""
     query = select(Notification).where(
         Notification.entity_id == current_entity.id,
     )
     if unread_only:
         query = query.where(Notification.is_read.is_(False))
-    if kind:
-        query = query.where(Notification.kind == kind)
+    kinds = _parse_kinds(kind)
+    if len(kinds) == 1:
+        query = query.where(Notification.kind == kinds[0])
+    elif kinds:
+        query = query.where(Notification.kind.in_(kinds))
 
     query = query.order_by(Notification.created_at.desc()).offset(offset).limit(limit)
     result = await db.execute(query)
@@ -328,18 +351,20 @@ async def mark_as_read(
 
 @router.post("/read-all", dependencies=[Depends(rate_limit_writes)])
 async def mark_all_as_read(
+    kind: str | None = Query(None, max_length=500),
     current_entity: Entity = Depends(get_current_entity),
     db: AsyncSession = Depends(get_db),
 ):
-    """Mark all notifications as read."""
-    result = await db.execute(
-        update(Notification)
-        .where(
-            Notification.entity_id == current_entity.id,
-            Notification.is_read.is_(False),
-        )
-        .values(is_read=True)
+    """Mark all notifications as read, or only those of the given kind(s)
+    (one kind or a comma-separated list, as on GET)."""
+    stmt = update(Notification).where(
+        Notification.entity_id == current_entity.id,
+        Notification.is_read.is_(False),
     )
+    kinds = _parse_kinds(kind)
+    if kinds:
+        stmt = stmt.where(Notification.kind.in_(kinds))
+    result = await db.execute(stmt.values(is_read=True))
     count = result.rowcount
     await db.flush()
 
@@ -351,7 +376,7 @@ async def mark_all_as_read(
         action="notification.read_all",
         entity_id=current_entity.id,
         resource_type="notification",
-        details={"count": count},
+        details={"count": count, **({"kinds": kinds} if kinds else {})},
     )
 
     return {"message": f"Marked {count} notifications as read"}

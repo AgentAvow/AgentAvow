@@ -28,18 +28,19 @@ export function AppsButtons({ className = '' }: { className?: string }) {
 export function AppsStrip({ align = 'center', className = '' }: { align?: 'center' | 'start'; className?: string }) {
   return (
     <div
-      className={`flex flex-wrap items-center gap-x-3.5 gap-y-3 max-w-[640px] px-[18px] py-3.5 rounded-2xl max-[520px]:flex-col max-[520px]:items-stretch max-[520px]:text-center ${align === 'center' ? 'mx-auto justify-center' : 'justify-start'} ${className}`}
+      className={`flex flex-wrap items-center gap-x-3.5 gap-y-3 max-w-[640px] px-[18px] py-3.5 rounded-2xl max-[520px]:flex-col max-[520px]:items-stretch ${align === 'center' ? 'mx-auto justify-center max-[520px]:text-center' : 'justify-start'} ${className}`}
       style={{
         border: '1.5px solid transparent',
         background: 'linear-gradient(var(--color-surface),var(--color-surface)) padding-box, linear-gradient(90deg,#2DD4BF,#E879F9) border-box',
         boxShadow: '0 0 0 1px rgba(45,212,191,.08), 0 10px 28px -14px rgba(232,121,249,.45)',
       }}
     >
-      <div className="text-[15px] font-semibold text-text text-left max-[520px]:text-center">
+      {/* "start" (inside a left-aligned page) stays left on small screens too */}
+      <div className={`text-[15px] font-semibold text-text text-left ${align === 'center' ? 'max-[520px]:text-center' : ''}`}>
         Available in Claude and ChatGPT
         <small className="block text-[12.5px] font-normal text-text-muted mt-px">Ask before you connect anything, right in the chat.</small>
       </div>
-      <AppsButtons className="max-[520px]:justify-center" />
+      <AppsButtons className={align === 'center' ? 'max-[520px]:justify-center' : ''} />
     </div>
   )
 }

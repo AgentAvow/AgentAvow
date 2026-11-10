@@ -88,7 +88,7 @@ function WhereTheRiskIs({ stat }: { stat: FlaggedStat | undefined }) {
 }
 
 /**
- * The public index — the outside-in, independent, signed leaderboard of agent-tool
+ * The Trust Index — the outside-in, independent, signed leaderboard of agent-tool
  * safety. Our land-grab move vs. inside-in scorers (they grade the agent you build;
  * we grade the third-party tools an agent connects to). Editorial + shareable: a
  * headline stat computed from the live catalog, then ranked boards per surface.
@@ -231,7 +231,7 @@ export default function RebrandTrustIndex() {
       {/* hero — the thesis */}
       <Reveal>
         <div className="max-w-[64ch]">
-          <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">The public index</span>
+          <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Trust Index</span>
           <h1 className="mt-3 text-3xl md:text-5xl font-extrabold tracking-tight leading-[1.05]">
             The state of <span className="gradient-text-bio">agent tool</span> safety.
           </h1>

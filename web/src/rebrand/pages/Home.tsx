@@ -90,10 +90,10 @@ function withScheme(v: string): string {
 }
 
 const SEG_STYLE: Record<Tab, string> = {
-  safe: 'text-[#a6e3a1] border-[#a6e3a1]/50 bg-[#a6e3a1]/[0.08]',
-  deep: 'text-[#a6e3a1] border-[#a6e3a1]/50 bg-[#a6e3a1]/[0.08]',
-  review: 'text-[#f9e2af] border-[#f9e2af]/50 bg-[#f9e2af]/[0.08]',
-  dnc: 'text-[#f38ba8] border-[#f38ba8]/50 bg-[#f38ba8]/[0.08]',
+  safe: 'text-success border-success/50 bg-success/[0.08]',
+  deep: 'text-success border-success/50 bg-success/[0.08]',
+  review: 'text-warning border-warning/50 bg-warning/[0.08]',
+  dnc: 'text-danger border-danger/50 bg-danger/[0.08]',
 }
 
 const sentence = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s)
@@ -107,10 +107,12 @@ function reportHref(row: CatalogRow): string {
 function VerdictLine({ value, certified }: { value: 'safe' | 'review' | 'do_not_connect'; certified?: boolean }) {
   const p = decisionPhrase(value)
   const icon = value === 'safe' ? '✓' : value === 'review' ? '!' : '✕'
-  const color = value === 'safe' ? '#a6e3a1' : value === 'review' ? '#f9e2af' : '#f38ba8'
+  // Theme tokens (success / warning / danger), so the line reads in light theme too.
+  const tone = value === 'safe' ? 'text-success' : value === 'review' ? 'text-warning' : 'text-danger'
+  const toneBg = value === 'safe' ? 'bg-success/15' : value === 'review' ? 'bg-warning/15' : 'bg-danger/15'
   return (
-    <div className="mt-[7px] flex items-center gap-[9px] flex-wrap text-[21px] font-bold tracking-[-0.01em]" style={{ color }} data-decision={value}>
-      <span className="w-6 h-6 rounded-full inline-grid place-items-center text-[13px] font-extrabold shrink-0" style={{ background: `${color}26` }} aria-hidden="true">{icon}</span>
+    <div className={`mt-[7px] flex items-center gap-[9px] flex-wrap text-[21px] font-bold tracking-[-0.01em] ${tone}`} data-decision={value}>
+      <span className={`w-6 h-6 rounded-full inline-grid place-items-center text-[13px] font-extrabold shrink-0 ${toneBg}`} aria-hidden="true">{icon}</span>
       {p.phrase}
       {certified && <span className="font-mono text-[11.5px] font-extrabold tracking-[0.14em] text-[#06231f] px-[9px] py-[3px] rounded-full" style={{ background: 'linear-gradient(90deg,#2DD4BF,#E879F9)' }}>CERTIFIED</span>}
     </div>
@@ -147,7 +149,7 @@ function ExampleCard({ row }: { row: CatalogRow }) {
       </div>
       <div className="px-5 py-3 border-t border-border/60 text-[13px] text-text-muted">{finds}</div>
       <div className="flex gap-3.5 flex-wrap items-center px-5 py-[13px] border-t border-dashed border-border text-[13px]">
-        <span className="font-mono text-[12px] text-[#a6e3a1]">✓ Signed · Ed25519 / JWS</span>
+        <span className="font-mono text-[12px] text-success">✓ Signed · Ed25519 / JWS</span>
         <Link to={reportHref(row)} className="sm:ml-auto font-semibold text-primary-light hover:text-primary">See the full report →</Link>
       </div>
     </>
@@ -164,7 +166,7 @@ function DoNotConnectCard() {
         <p className="mt-1.5 text-[14.5px] text-text">A critical finding in what the tool ships caps its trust score at 45. The report names the finding and points at the exact file and line.</p>
       </div>
       <div className="flex gap-3.5 flex-wrap items-center px-5 py-[13px] text-[13px]">
-        <span className="font-mono text-[12px] text-[#a6e3a1]">✓ Signed · Ed25519 / JWS</span>
+        <span className="font-mono text-[12px] text-success">✓ Signed · Ed25519 / JWS</span>
         <Link to={rp(DNC_LIST)} className="sm:ml-auto font-semibold text-primary-light hover:text-primary">
           {mix ? `See the ${mix.dnc.toLocaleString()} tools that read Do not connect →` : 'See the tools that read Do not connect →'}
         </Link>
@@ -401,7 +403,7 @@ export default function RebrandHome() {
               <div className="mt-[7px]"><Link to={rp('/rebrand/teams')} className={BTN_GHOST}>See how teams use it</Link></div>
             </Card3>
           </div>
-          <p className="mt-5 text-[14.5px] text-text-muted">Publish a tool? Get a signed badge and claim your listing. <Link to={rp('/rebrand/for-developers')} className="font-semibold text-primary-light hover:text-primary">For tool authors →</Link></p>
+          <p className="mt-5 text-[14.5px] text-text-muted">Publish a tool? Get a signed badge and claim your listing. <Link to={rp('/rebrand/for-developers')} className="font-semibold text-primary-light hover:text-primary">For developers →</Link></p>
         </Reveal>
       </section>
 
@@ -422,7 +424,7 @@ export default function RebrandHome() {
             <ul className="grid sm:grid-cols-2 gap-x-3.5 gap-y-2 sm:col-span-2 lg:col-span-1 list-none m-0 p-0">
               {CERT_ROWS.map(([h, s]) => (
                 <li key={h} className="flex gap-[9px] items-start text-[13.5px] leading-[1.35] text-text">
-                  <i className="not-italic shrink-0 font-mono text-[10.5px] font-extrabold tracking-[0.06em] px-[7px] py-0.5 rounded-[5px] mt-px bg-[#a6e3a1]/[0.16] text-[#a6e3a1]">PASS</i>
+                  <i className="not-italic shrink-0 font-mono text-[10.5px] font-extrabold tracking-[0.06em] px-[7px] py-0.5 rounded-[5px] mt-px bg-success/[0.16] text-success">PASS</i>
                   <span>{h}<small className="block text-text-muted text-[12px]">{s}</small></span>
                 </li>
               ))}

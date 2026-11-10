@@ -168,8 +168,8 @@ export default function RebrandForDevelopers() {
               ['OpenAI Agents SDK', 'wrap an MCP server so connect, listTools and callTool are checked', '/rebrand/docs/gate-on-the-grade#openai-agents-sdk'],
               ['Open Policy Agent', 'a Rego policy your gateway or Envoy asks before a server or tool call', '/rebrand/docs/gate-on-the-grade#open-policy-agent'],
               ['LiteLLM proxy', 'a guardrail on every MCP tool call through LiteLLM\'s MCP gateway', '/rebrand/docs/gate-on-the-grade#litellm-proxy'],
-              ['Behavioral sandbox', 'see what a package actually does when it runs', '/rebrand/sandbox'],
-              ['Claim your repo', 'prove you own it and manage its listing', '/rebrand/claim'],
+              ['Behavioral sandbox', 'see what a package actually does when it runs', '/rebrand/docs/behavioral-sandbox'],
+              ['Claim your repo', 'prove you own it and manage its listing', '/rebrand/tools'],
             ] as const).map(([h, p, to]) => (
               <li key={h}>
                 <Link to={rp(to)} className="font-semibold text-primary-light hover:text-primary">{h} →</Link> <span>{p}</span>

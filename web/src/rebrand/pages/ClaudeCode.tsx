@@ -72,7 +72,7 @@ function Install() {
     window.setTimeout(() => setDone((d) => (d === i ? null : d)), 1800)
   }
   return (
-    <div onCopy={selectionCopied} className="mt-6 p-2 bg-[#0c1414] border border-border rounded-[14px] max-w-[720px]">
+    <div onCopy={selectionCopied} className="mt-6 p-2 bg-background border border-border rounded-[14px] max-w-[720px]">
       {PLUGIN_LINES.map((line, i) => (
         <div key={line} className={`flex items-center gap-2.5 py-2 pr-2 pl-2.5 rounded-[9px] ${i ? 'border-t border-border/50' : ''}`}>
           <span className="font-mono text-[11.5px] text-text-muted w-3.5 flex-none">{i + 1}</span>
@@ -137,14 +137,14 @@ export default function RebrandClaudeCode() {
       <div className={section}>
         <div className="max-w-[860px] mx-auto px-6">
           <h2 className={h2}>Your first session opens with one line.</h2>
-          <div className="mt-5 bg-[#0c1414] border border-border rounded-xl px-[18px] py-4 font-mono text-[13.5px] leading-relaxed overflow-x-auto">
+          <div className="mt-5 bg-background border border-border rounded-xl px-[18px] py-4 font-mono text-[13.5px] leading-relaxed overflow-x-auto">
             <span className="text-primary-light">AgentAvow pre-check:</span> graded 8 MCP servers. 5 Safe, 2 Review, <span className="text-danger">1 Do not connect</span>.<br />
             <span className="text-text-muted">Needs attention:</span> <span className="text-danger">&apos;example-server&apos; Do not connect</span>, one critical finding.<br />
             <span className="text-text-muted">Dependencies:</span> graded 12 of 38. 11 Safe, <span className="text-warning">1 Review</span>.
           </div>
 
           <h2 className={`${h2} mt-11`}>It stays quiet until it matters.</h2>
-          <div className="mt-[22px] glass rounded-[14px] border border-white/10 overflow-hidden">
+          <div className="mt-[22px] glass rounded-[14px] border border-border/60 overflow-hidden">
             {ACTIONS.map(([label, color, text], i) => (
               <div key={label} className={`grid sm:grid-cols-[minmax(0,270px)_1fr] gap-1 sm:gap-4 px-[18px] py-3.5 text-[15px] items-baseline ${i ? 'border-t border-border/60' : ''}`}>
                 <b className={`font-bold ${color}`}>{label}</b>
@@ -160,7 +160,7 @@ export default function RebrandClaudeCode() {
         <div className="max-w-[860px] mx-auto px-6">
           <h2 className={h2}>A server you approved can change later.</h2>
           <p className="mt-2.5 text-text-muted max-w-[60ch]">In a rug-pull, a tool passes review, then its definition changes to do something else. The plugin compares what a remote server serves now with the signed definition from the check. If they differ, Claude Code asks you first.</p>
-          <div className="mt-5 glass rounded-2xl border border-white/10 font-mono text-[12.5px] leading-[1.7] px-4 py-3.5 overflow-x-auto whitespace-nowrap">
+          <div className="mt-5 glass rounded-2xl border border-border/60 font-mono text-[12.5px] leading-[1.7] px-4 py-3.5 overflow-x-auto whitespace-nowrap">
             <span className="text-primary-light">signed</span> {SIGNED_DIGEST}<br />
             <span className="text-danger">served</span> {SERVED_DIGEST}
           </div>
@@ -179,7 +179,7 @@ export default function RebrandClaudeCode() {
             <p>Our founder co-authors the action-ref Internet-Draft, an individual submission to the IETF.</p>
           </div>
           <div className="grid sm:grid-cols-2 gap-3.5 mt-[22px]">
-            <div className="glass rounded-2xl border border-white/10 p-5">
+            <div className="glass rounded-2xl border border-border/60 p-5">
               <h3 className="text-[16px] font-bold">What it checks</h3>
               <ul className="mt-2 pl-[17px] list-disc text-text-muted text-[14.5px] grid gap-1">
                 <li>MCP servers, at session start and on <code className="font-mono text-[13px]">claude mcp add</code></li>
@@ -187,7 +187,7 @@ export default function RebrandClaudeCode() {
                 <li>Your project&apos;s direct dependencies, up to 8 per session start</li>
               </ul>
             </div>
-            <div className="glass rounded-2xl border border-white/10 p-5">
+            <div className="glass rounded-2xl border border-border/60 p-5">
               <h3 className="text-[16px] font-bold">What it doesn&apos;t do</h3>
               <ul className="mt-2 pl-[17px] list-disc text-text-muted text-[14.5px] grid gap-1">
                 <li>Lockfile installs, requirements files and URL installs are left alone</li>

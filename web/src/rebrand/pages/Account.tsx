@@ -1,15 +1,19 @@
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import api from '../../lib/api'
 import { useAuth } from '../../hooks/useAuth'
 import { TrustMini } from '../components/TrustMark'
 import { NotifRow } from '../components/NotificationBits'
+import { RELEVANT_KIND_PARAM } from '../lib/notifKinds'
+import { AccountSkeleton, ConfirmAction, LoadError } from '../components/AccountBits'
+import { useRequireUser } from '../lib/useRequireUser'
 import { Reveal, RevealStagger } from '../components/motion'
+import { toolLink } from '../lib/toolLinks'
 
 /**
- * Signed-in home — "My watches". The earned surface for the tool-safety product:
+ * Signed-in home — "Watches & alerts" (route /account). The earned surface for the tool-safety product:
  * the tools you're watching, their current grade, and the change-alerts fired.
  * Settings/Admin are reused from the existing app (linked from the header menu);
  * the social-era Profile/Agents/Feed are intentionally not ported here.
@@ -24,18 +28,9 @@ interface Watch {
   active: boolean
 }
 
-/** A watch is stored by coordinate (github → owner/repo · npm/pypi → surface/pkg ·
- * mcp → mcp/url · openclaw → owner/repo). Render a readable label + the right
- * report route per surface so surface watches don't 404 on the github route. */
-function watchLabel(w: Watch): { label: string; badge: string; href: string } {
-  const s = (w.surface ?? 'github').toLowerCase()
-  if (s === 'npm' || s === 'pypi')
-    return { label: w.repo, badge: s, href: rp(`/rebrand/check/pkg/${s}/${w.repo}`) }
-  if (s === 'mcp')
-    return { label: w.repo, badge: 'mcp', href: rp(`/rebrand/check/mcp?endpoint=${encodeURIComponent(w.repo)}`) }
-  if (s === 'openclaw')
-    return { label: `${w.owner}/${w.repo}`, badge: 'skill', href: rp(`/rebrand/check/skill/${w.owner}/${w.repo}`) }
-  return { label: `${w.owner}/${w.repo}`, badge: 'github', href: rp(`/rebrand/check/${w.owner}/${w.repo}`) }
+/** A watch is stored by coordinate; the shared helper gives its label, chip and route. */
+function watchLabel(w: Watch) {
+  return toolLink(w.surface, w.owner, w.repo)
 }
 
 interface Notif {
@@ -97,7 +92,8 @@ function AlertWebhook() {
           <div className="flex gap-2 shrink-0">
             <button onClick={() => rotate.mutate()} disabled={rotate.isPending} className="text-[12px] text-text-muted hover:text-primary-light">Rotate secret</button>
             <button onClick={() => { setTestResult(null); test.mutate() }} disabled={test.isPending} className="text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light">{test.isPending ? 'Testing…' : 'Send test'}</button>
-            <button onClick={() => remove.mutate()} className="text-[12px] text-text-muted hover:text-danger">Remove</button>
+            <ConfirmAction label="Remove" question="Stop sending alerts here?" confirmLabel="Remove webhook"
+              onConfirm={() => remove.mutate()} pending={remove.isPending} pendingLabel="Removing…" />
           </div>
         </div>
       ) : (
@@ -155,7 +151,10 @@ function ApiKeys() {
                 <div className="text-[14px] font-semibold">{k.label}</div>
                 <div className="font-mono text-[11.5px] text-text-muted">created {k.created_at ? new Date(k.created_at).toLocaleDateString() : '—'}</div>
               </div>
-              <button onClick={() => revoke.mutate(k.id)} disabled={revoke.isPending} className="text-[12px] text-text-muted hover:text-danger transition-colors shrink-0">Revoke</button>
+              <span className="shrink-0">
+                <ConfirmAction label="Revoke" question="Calls with this key will stop working." confirmLabel="Revoke key"
+                  onConfirm={() => revoke.mutate(k.id)} pending={revoke.isPending && revoke.variables === k.id} pendingLabel="Revoking…" />
+              </span>
             </div>
           ))}
         </div>
@@ -184,9 +183,8 @@ function WatchRow({ w, onRemove, removing }: { w: Watch; onRemove: () => void; r
       </div>
       <div className="flex items-center gap-3 shrink-0">
         <Link to={href} className="text-[12.5px] font-semibold text-primary-light hover:text-primary">View report →</Link>
-        <button onClick={onRemove} disabled={removing} className="text-[12px] text-text-muted hover:text-danger transition-colors disabled:opacity-50">
-          {removing ? '…' : 'Unwatch'}
-        </button>
+        <ConfirmAction label="Unwatch" question="Stop alerts for this tool?" confirmLabel="Unwatch"
+          onConfirm={onRemove} pending={removing} pendingLabel="Removing…" />
       </div>
     </div>
   )
@@ -194,14 +192,10 @@ function WatchRow({ w, onRemove, removing }: { w: Watch; onRemove: () => void; r
 
 export default function RebrandAccount() {
   const { user, isLoading: authLoading } = useAuth()
-  const navigate = useNavigate()
   const qc = useQueryClient()
+  useRequireUser(user, authLoading)
 
-  useEffect(() => {
-    if (!authLoading && !user) navigate(rp('/rebrand/login'))
-  }, [authLoading, user, navigate])
-
-  const { data: watches, isLoading: wLoading } = useQuery({
+  const { data: watches, isLoading: wLoading, isError: wError, refetch: refetchWatches, isRefetching: wRefetching } = useQuery({
     queryKey: ['rebrand-watches'],
     queryFn: async () => (await api.get<Watch[]>('/watches')).data,
     enabled: !!user,
@@ -209,7 +203,8 @@ export default function RebrandAccount() {
 
   const { data: notifs } = useQuery({
     queryKey: ['rebrand-notifs'],
-    queryFn: async () => (await api.get<{ notifications: Notif[] }>('/notifications', { params: { limit: 20 } })).data,
+    // Fetch only the tool-safety kinds, so old social-era rows can't crowd them out.
+    queryFn: async () => (await api.get<{ notifications: Notif[] }>('/notifications', { params: { kind: RELEVANT_KIND_PARAM, limit: 10 } })).data,
     enabled: !!user,
   })
 
@@ -222,17 +217,17 @@ export default function RebrandAccount() {
   const markReadNotif = useMutation({ mutationFn: (id: string) => api.post(`/notifications/${id}/read`), onSuccess: invalidateNotifs })
   const deleteNotif = useMutation({ mutationFn: (id: string) => api.delete(`/notifications/${id}`), onSuccess: invalidateNotifs })
 
-  if (!user) return null
+  if (!user) return <AccountSkeleton />
 
   const rows = watches ?? []
-  const alerts = (notifs?.notifications ?? []).filter((n) => n.kind === 'watch_alert')
+  const alerts = notifs?.notifications ?? []
 
   return (
     <div className="max-w-[860px] mx-auto px-6 py-14">
       <Reveal>
         <div className="flex items-end justify-between gap-4 flex-wrap">
           <div className="max-w-[60ch]">
-            <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">My watches</span>
+            <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Watches &amp; alerts</span>
             <h1 className="mt-1 text-2xl md:text-3xl font-extrabold tracking-tight">Watch tools for changes</h1>
             <p className="mt-2 text-text-muted text-[14px]">We re-scan the tools you watch and tell you when something changes — a <span className="text-text">score drops</span>, a <span className="text-text">signed definition changes</span>, or a tool you flagged gets <span className="text-text">safer</span> — so you always know where the tools your agents rely on stand.</p>
           </div>
@@ -261,6 +256,8 @@ export default function RebrandAccount() {
         <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-3">Watching {rows.length > 0 && `· ${rows.length}`}</h2>
         {wLoading ? (
           <div className="flex flex-col gap-2">{[0, 1, 2].map((i) => <div key={i} className="glass rounded-xl h-[76px] animate-pulse" />)}</div>
+        ) : wError ? (
+          <LoadError what="your watches" onRetry={() => void refetchWatches()} retrying={wRefetching} />
         ) : rows.length === 0 ? (
           <div className="glass rounded-2xl p-8 text-center">
             <p className="text-text-muted text-[14px]">You're not watching any tools yet. Watch a tool and we'll re-scan it and alert you if its score drops or its signed definition changes.</p>

@@ -4,7 +4,8 @@
 import { Link } from 'react-router-dom'
 
 import { DECISIONS, getTrustTier, type DecisionPhrase } from '../../components/trust/gradeSystem'
-import { rp } from '../basePath'
+import { referenceHref } from '../lib/toolLinks'
+import { RELEVANT_KIND_LIST } from '../lib/notifKinds'
 
 export interface Notif {
   id: string; kind: string; title: string; body: string
@@ -13,7 +14,7 @@ export interface Notif {
 
 // Only tool-safety notifications belong in the rebrand — the account also holds the
 // user's old social-era notifications (follow/reply/vote/…), which are the "thousands".
-export const RELEVANT_KINDS = new Set(['watch_alert', 'watch_good_news'])
+export const RELEVANT_KINDS = new Set<string>(RELEVANT_KIND_LIST)
 
 export const isRelevant = (n: Notif) => RELEVANT_KINDS.has(n.kind)
 
@@ -103,7 +104,7 @@ export function NotifRow({ n, compact, onRead, onDelete, onNavigate }: {
         </p>
       </div>
       <div className="mt-2 flex gap-3 text-[12px] font-semibold">
-        {n.reference_id && <Link to={rp(`/rebrand/check/${n.reference_id}`)} onClick={onNavigate} className="text-primary-light hover:text-primary">Re-check →</Link>}
+        {n.reference_id && <Link to={referenceHref(n.reference_id)} onClick={onNavigate} className="text-primary-light hover:text-primary">Re-check →</Link>}
         {!n.is_read && <button onClick={() => onRead(n.id)} className="text-text-muted hover:text-text">Mark read</button>}
         <button onClick={() => onDelete(n.id)} className="text-text-muted hover:text-danger">Delete</button>
       </div>
