@@ -834,6 +834,39 @@ def _restore_datasets(findings: list, texts: dict[str, str]) -> None:
             f._dataset_restore = None
 
 
+HELPER_SCRIPT_WHY = (
+    "A helper script pipes a remote script to bash. Nothing in the package runs it (no "
+    "install hook, entry point, package script or runtime code names it); it runs only "
+    "when a user starts it by hand, so review it before you do.")
+
+
+def _restore_helper_scripts(findings: list, texts: dict[str, str]) -> None:
+    """A helper-script pipe-to-shell capped at high (``scan._is_helper_script``) gets
+    its critical back when code that can execute something (``_SPAWN_RE``) names the
+    file, when anything a consumer can run names it (``consumer_run_strings`` with
+    every package.json script, install / prepare included), or when the file is not in
+    ``texts`` (unseen)."""
+    from src.scanner.scan import _is_helper_script
+
+    marked = [f for f in findings if getattr(f, "_helper_restore", None)
+              and f.severity == "high" and f.remediation == HELPER_SCRIPT_WHY]
+    if not marked:
+        return
+    spawners = [t for p, t in texts.items()
+                if t and _is_code_file(p) and not _is_helper_script(p)
+                and _SPAWN_RE.search(t)]
+    runs = consumer_run_strings(texts, roots=None, skip=_is_helper_script)
+    for f in marked:
+        path = f.file_path
+        # Another helper script that sources / runs this one: over-approximate, any
+        # other helper script naming it restores it.
+        others = [t for p, t in texts.items() if t and p != path and _is_helper_script(p)]
+        if (path not in texts or _names_file(path, spawners) or _names_file(path, runs)
+                or _names_file(path, others)):
+            f.severity, f.remediation = f._helper_restore, ""
+            f._helper_restore = None
+
+
 def mark_allowlist(finding: object, severity: str, keys: set[str]) -> None:
     """A webhook/tunnel-host match that is an allowlist element (scan.py
     ``_host_allowlist_entry``), reported low until the rest of the tree is checked."""
@@ -986,6 +1019,7 @@ def restore_externally_invoked(findings: list, texts: dict[str, str], *,
     restore_signature_hosts(findings, texts)
     restore_signing_relaxed(findings, texts)
     _restore_datasets(findings, texts)
+    _restore_helper_scripts(findings, texts)
     _restore_dev_tooling(findings, texts,
                          REGISTRY_ROOTS if registry_artifact else CONSUMER_ROOTS)
     # (A finding a later pass already capped further, e.g. to info in an uninstalled

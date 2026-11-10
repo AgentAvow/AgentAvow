@@ -2740,6 +2740,22 @@ def _is_installer_script(file_path: str) -> bool:
     return bool(_INSTALLER_STEM_RE.match(p.stem.lower()))
 
 
+# A shell helper the user runs by hand, shipped in the package (ultralytics
+# data/scripts/get_imagenet.sh, 2026-11-10): a pipe-to-shell there is Review, not Do not
+# connect, until the tree check finds something that runs it
+# (npm_scripts._restore_helper_scripts).
+_HELPER_SCRIPT_DIRS = frozenset({"data", "scripts", "script", "examples", "example",
+                                 "docs", "doc"})
+_HELPER_SCRIPT_EXTS = (".sh", ".bash", ".zsh", ".ps1")
+
+
+def _is_helper_script(file_path: str) -> bool:
+    p = Path(file_path)
+    if p.suffix.lower() not in _HELPER_SCRIPT_EXTS:
+        return False
+    return any(x.lower() in _HELPER_SCRIPT_DIRS for x in p.parts[:-1])
+
+
 def _is_unshipped_script(file_path: str) -> bool:
     """Infra/CI/release scripts and one-time installer scripts: never the runtime surface,
     so their findings are downgraded, weighted like tests, and never block."""
@@ -4592,6 +4608,18 @@ def _scan_content(
                 f.severity = "high"
                 f.remediation = npm_scripts.DATASET_WHY
                 f._dataset_restore = "critical"  # type: ignore[attr-defined]
+
+    # A shell helper script the user runs by hand (data/, scripts/, examples/, docs/):
+    # its pipe-to-shell is high until the tree check finds an install hook, a consumer
+    # run string, or spawning code that names the file
+    # (npm_scripts._restore_helper_scripts, via restore_externally_invoked).
+    if _is_helper_script(file_path):
+        for f in findings:
+            if (f.kind == "defect" and f.severity == "critical"
+                    and f.name == pipe_shell.PIPE_TO_SHELL):
+                f.severity = "high"
+                f.remediation = npm_scripts.HELPER_SCRIPT_WHY
+                f._helper_restore = "critical"  # type: ignore[attr-defined]
 
     # Add remediation hints to all findings. A capability carries its description
     # (nothing to remediate — it's what the tool does), never the category hint.
