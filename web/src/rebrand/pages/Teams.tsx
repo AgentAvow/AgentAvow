@@ -12,7 +12,8 @@ import { rp } from '../basePath'
  * traffic. Held back until their inputs exist (docs/internal/website-build-spec-2026-11-07.md):
  * the NSA guidance table (waits on a read of the PDF), accuracy numbers (the December
  * benchmark), a calendar link, and an ERC-8004 line (until it is used in an answer).
- * A2A says only what ships: importing an agent card. There is no contact backend, so
+ * A2A says only what ships: grading an agent card in the public check (live since
+ * 2026-11-07). There is no contact backend, so
  * "Talk to us" opens an email.
  */
 
@@ -158,7 +159,7 @@ export default function RebrandTeams() {
             </div>
             <div className="glass rounded-2xl border border-white/10 p-[22px] flex flex-col gap-[9px]">
               <h3 className="text-[19px] font-bold">A2A</h3>
-              <p className="text-text-muted text-[14.5px]">Import an agent from its A2A agent card into AgentAvow.</p>
+              <p className="text-text-muted text-[14.5px]">Paste any A2A Agent Card URL for an answer, findings and a signed attestation, including whether the card&apos;s own signature verifies.</p>
             </div>
             <div className="glass rounded-2xl border border-white/10 p-[22px] flex flex-col gap-[9px]">
               <h3 className="text-[19px] font-bold">x402</h3>
