@@ -927,6 +927,53 @@ def _watch_digest_state(last: str | None, new: str | None) -> tuple[bool, str | 
     return bool(last and new and new != last), (new or last)
 
 
+# Worse is higher: safe -> review -> do_not_connect.
+_DECISION_RANK = {"safe": 0, "review": 1, "do_not_connect": 2}
+
+
+class AnswerChange:
+    """How a watched tool's answer and Certified mark moved since the last re-scan.
+
+    No stored baseline (a watch from before the columns existed, or a new watch) is
+    not a change: the first observation sets the baseline silently. An unrecognised
+    decision value is not a change either, and keeps the old baseline (the mark too).
+    """
+
+    __slots__ = ("worse", "better", "certified_lost", "certified_gained",
+                 "decision_baseline", "certified_baseline")
+
+    def __init__(self, last_decision: str | None, last_certified: bool | None,
+                 decision: dict | None):
+        d = decision if isinstance(decision, dict) else {}
+        new = d.get("decision")
+        new_rank = _DECISION_RANK.get(new) if isinstance(new, str) else None
+        old_rank = _DECISION_RANK.get(last_decision) if last_decision else None
+        both = new_rank is not None and old_rank is not None
+        self.worse = both and new_rank > old_rank
+        self.better = both and new_rank < old_rank
+        self.decision_baseline = new if new_rank is not None else last_decision
+        new_cert = bool(d.get("certified")) if new_rank is not None else None
+        self.certified_lost = last_certified is True and new_cert is False
+        self.certified_gained = last_certified is False and new_cert is True
+        self.certified_baseline = last_certified if new_cert is None else new_cert
+
+    @property
+    def moved(self) -> bool:
+        return self.worse or self.better or self.certified_lost or self.certified_gained
+
+    def absorb(self) -> None:
+        """No alert and no good news (a held re-score); the baseline still moves."""
+        self.worse = self.better = self.certified_lost = self.certified_gained = False
+
+
+def _answer_phrase(decision: str | None, certified: bool | None) -> str:
+    """"Safe to connect · Certified" for a stored answer; "" when none is stored."""
+    if not decision:
+        return ""
+    from src.trust_tiers import headline
+    return headline(decision, certified=bool(certified))
+
+
 # ── behavioral (sandbox) drift ──────────────────────────────────────────────
 # The watch loop never runs the sandbox itself: it reads the block the public scan
 # cached (24h, see public_scan_router._behavioral_block) and compares a compact
@@ -1119,6 +1166,34 @@ def _watch_decision(data: dict | None, block: dict | None) -> dict:
     return out
 
 
+def _old_decision(w) -> dict:
+    """The answer stored at the last re-scan, shaped like ``_watch_decision``."""
+    return {"decision": getattr(w, "last_decision", None),
+            "certified": bool(getattr(w, "last_certified", None))}
+
+
+def _grade_change_payload(w, new_score, reason: str, triggers: list[tuple[str, str]],
+                          decision: dict) -> dict:
+    """The ``agentavow.alert.grade_change`` webhook body. ``reason`` is the first
+    trigger (unchanged from before ``triggers`` existed); ``triggers`` / ``reasons``
+    list every one this re-scan fired for, and ``old_decision`` /
+    ``old_certified_mark`` are the answer and mark stored at the previous re-scan
+    (null before one was stored). All additive."""
+    return {
+        "type": "agentavow.alert.grade_change",
+        "owner": w.owner,
+        "repo": w.repo,
+        "old_score": w.last_score,
+        "new_score": new_score,
+        "reason": reason,
+        "triggers": [c for c, _ in triggers],
+        "reasons": [h for _, h in triggers],
+        "old_decision": getattr(w, "last_decision", None),
+        "old_certified_mark": getattr(w, "last_certified", None),
+        **decision,
+    }
+
+
 async def _watcher_hook(db, watcher_id):
     """The watcher's active alert webhook, or None."""
     from sqlalchemy import select as _select
@@ -1253,15 +1328,41 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                 w.last_score is not None and new_score is not None
                 and new_score > w.last_score + 5
             )
-            if held and (dropped or improved):
+            # The answer (safe / review / do_not_connect) and the Certified mark, against
+            # the ones stored at the last re-scan. A watch with no stored answer yet
+            # sets it silently.
+            answer = AnswerChange(getattr(w, "last_decision", None),
+                                  getattr(w, "last_certified", None), w_decision)
+            if held and (dropped or improved or answer.moved):
+                # A planned re-score moves answers the same way it moves scores.
                 held_count += 1
                 dropped = improved = False
-            if dropped or drift:
-                reason = "score dropped" if dropped else "signed definition changed"
+                answer.absorb()
+            old_phrase = _answer_phrase(
+                getattr(w, "last_decision", None), getattr(w, "last_certified", None))
+            # Every reason this one re-scan alerts for, most important first. One
+            # alert carries them all; ``reason`` stays the first, as before.
+            triggers: list[tuple[str, str]] = []
+            if dropped:
+                triggers.append(("score_drop", "score dropped"))
+            if drift:
+                triggers.append(("definition_change", "signed definition changed"))
+            if answer.worse:
+                triggers.append(("answer_worse", "answer changed"))
+            if answer.certified_lost:
+                triggers.append(("certified_lost", "Certified mark removed"))
+            answer_alert = answer.worse or answer.certified_lost
+            if triggers:
+                reason = triggers[0][1]
+                extra = "".join(
+                    f"; {h}" for c, h in triggers[1:]
+                    if c in ("answer_worse", "certified_lost"))
                 title = f"{w.owner}/{w.repo} — {reason}"
                 body = (
                     f"A tool you're watching changed: {reason}"
                     + (f" ({w.last_score} -> {new_score})" if dropped else "")
+                    + extra
+                    + (f" (was: {old_phrase})" if answer_alert else "")
                     + f". Now: {w_decision_phrase(w_decision)}."
                 )
                 try:
@@ -1277,9 +1378,10 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                         from src.email import render_watch_notification, send_email
 
                         subj, html = render_watch_notification(
-                            "drop" if dropped else "drift",
+                            "drop" if dropped else "drift" if drift else "answer",
                             w.owner, w.repo, w.last_score, new_score,
                             decision=w_decision,
+                            old_decision=_old_decision(w) if answer_alert else None,
                         )
                         await send_email(watcher.email, subj, html)
                 except Exception:
@@ -1290,27 +1392,33 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                     if hook is not None:
                         from src.api.account_webhook_router import deliver_to_hook
 
-                        hook.last_status = await deliver_to_hook(hook, {
-                            "type": "agentavow.alert.grade_change",
-                            "owner": w.owner,
-                            "repo": w.repo,
-                            "old_score": w.last_score,
-                            "new_score": new_score,
-                            "reason": reason,
-                            **w_decision,
-                        })
+                        hook.last_status = await deliver_to_hook(
+                            hook, _grade_change_payload(
+                                w, new_score, reason, triggers, w_decision))
                         hook.last_delivery_at = datetime.now(timezone.utc)
                 except Exception:
                     logger.debug("webhook alert delivery failed for %s/%s", w.owner, w.repo)
-            elif improved:
+            elif improved or answer.better or answer.certified_gained:
                 # Good news — a watched tool got safer. A lighter, positive nudge
-                # (also a reason to bring the watcher back to the site).
-                title = f"{w.owner}/{w.repo} — score improved 🎉"
-                body = (
-                    f"Good news: a tool you're watching improved "
-                    f"({w.last_score} → {new_score}/100). "
-                    f"Now: {w_decision_phrase(w_decision)}."
-                )
+                # (also a reason to bring the watcher back to the site): in-app and
+                # email, never the webhook.
+                answer_up = answer.better or answer.certified_gained
+                if improved:
+                    title = f"{w.owner}/{w.repo} — score improved 🎉"
+                    body = (
+                        f"Good news: a tool you're watching improved "
+                        f"({w.last_score} → {new_score}/100). "
+                        + (f"Was: {old_phrase}. " if answer_up else "")
+                        + f"Now: {w_decision_phrase(w_decision)}."
+                    )
+                else:
+                    what = ("answer improved" if answer.better
+                            else "earned the Certified mark")
+                    title = f"{w.owner}/{w.repo} — {what} 🎉"
+                    body = (
+                        f"Good news: a tool you're watching improved. Was: {old_phrase}. "
+                        f"Now: {w_decision_phrase(w_decision)}."
+                    )
                 try:
                     await create_notification(
                         db, w.watcher_id, "watch_good_news", title, body,
@@ -1320,8 +1428,10 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                     if watcher is not None and watcher.email:
                         from src.email import render_watch_notification, send_email
                         subj, html = render_watch_notification(
-                            "improve", w.owner, w.repo, w.last_score, new_score,
+                            "improve" if improved else "answer_improve",
+                            w.owner, w.repo, w.last_score, new_score,
                             decision=w_decision,
+                            old_decision=_old_decision(w) if answer_up else None,
                         )
                         await send_email(watcher.email, subj, html)
                 except Exception:
@@ -1381,6 +1491,8 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                 fresh.last_manifest_digest = baseline_digest
                 fresh.last_behavioral_digest = b_baseline
                 fresh.last_icon_digest = icon_baseline
+                fresh.last_decision = answer.decision_baseline
+                fresh.last_certified = answer.certified_baseline
                 fresh.last_checked_at = datetime.now(timezone.utc)
                 await db.commit()
     if held:

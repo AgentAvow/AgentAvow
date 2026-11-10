@@ -34,8 +34,13 @@ def render_watch_notification(
     kind: str, owner: str, repo: str,
     old_score: int | None, new_score: int | None,
     decision: dict | None = None,
+    old_decision: dict | None = None,
 ) -> tuple[str, str]:
-    """Build (subject, html) for a watch email. ``kind`` is drop | improve | drift.
+    """Build (subject, html) for a watch email. ``kind`` is drop | improve | drift |
+    answer (the answer got worse or the Certified mark came off) | answer_improve.
+
+    ``old_decision`` ({decision, certified}) is the answer at the last re-scan, given
+    when the answer or mark moved: the message then names the old answer too.
 
     ``decision`` is the watch's three-phrase decision ({decision, decision_reason,
     certified}); the email leads with it ("Review before you connect · one high
@@ -73,6 +78,11 @@ def render_watch_notification(
     phrase = headline(_dval, certified=bool(_d.get("certified")))
     phrase_reason = str(_d.get("decision_reason") or "")
     phrase_color = decision_for(_dval).color
+    _od = old_decision or {}
+    old_phrase = (headline(_od.get("decision"), certified=bool(_od.get("certified")))
+                  if _od.get("decision") else "")
+    answer_note = (f" The answer also changed: was <b>{_esc(old_phrase)}</b>, now"
+                   f" <b>{_esc(phrase)}</b>." if old_phrase else "")
 
     if kind == "improve":
         accent, tag = "#22c55e", "Good news"
@@ -82,7 +92,7 @@ def render_watch_notification(
             f"A tool you're watching got safer. <b style=\"color:#f1f5f9;\">{full}</b> "
             f"rose from {old_score} to {new_score}/100 on its latest re-scan — worth a look "
             f"at what changed."
-        )
+        ) + answer_note
         cta_label, subject = (
             "See what improved", f"AgentAvow · {repo} improved 🎉 · now {phrase}")
     elif kind == "drift":
@@ -93,10 +103,34 @@ def render_watch_notification(
             f"The signed tool definition for <b style=\"color:#f1f5f9;\">{full}</b> changed "
             f"since your last check — the kind of silent update a rug-pull hides behind. "
             f"Review what moved before your agents keep using it."
-        )
+        ) + answer_note
         cta_label, subject = (
             "Review the change",
             f"AgentAvow alert · {repo} definition changed · now {phrase}")
+    elif kind in ("answer", "answer_improve"):
+        good = kind == "answer_improve"
+        lost_mark = (not good and bool(_od.get("certified"))
+                     and not bool(_d.get("certified"))
+                     and _od.get("decision") == _d.get("decision"))
+        accent = "#22c55e" if good else "#ef4444"
+        tag = ("Good news" if good
+               else "Certified mark removed" if lost_mark else "Answer changed")
+        title = (f"{_esc(repo)} improved 🎉" if good
+                 else f"{_esc(repo)} lost its Certified mark" if lost_mark
+                 else f"{_esc(repo)} got riskier")
+        score_line = (f"was {_esc(old_phrase)}" if old_phrase else "answer changed")
+        message = (
+            f"The answer for <b style=\"color:#f1f5f9;\">{_esc(full)}</b> changed on its"
+            f" latest re-scan: was <b>{_esc(old_phrase or 'unknown')}</b>, now"
+            f" <b>{_esc(phrase)}</b>."
+            + (" Worth a look at what changed." if good
+               else " Review it before your agents keep connecting to it.")
+        )
+        cta_label = "See what improved" if good else "See the report"
+        subject = (f"AgentAvow · {repo} improved 🎉 · now {phrase}" if good
+                   else f"AgentAvow alert · {repo} "
+                   + ("lost its Certified mark" if lost_mark else "answer changed")
+                   + f" · now {phrase}")
     else:  # drop
         accent, tag = "#ef4444", "Score dropped"
         title = f"{repo} got riskier"
@@ -105,7 +139,7 @@ def render_watch_notification(
             f"A tool you're watching dropped in score. <b style=\"color:#f1f5f9;\">{full}</b> "
             f"fell from {old_score} to {new_score}/100 — review it before your agents keep "
             f"connecting to it."
-        )
+        ) + answer_note
         cta_label, subject = (
             "See the report", f"AgentAvow alert · {repo} score dropped · now {phrase}")
 
