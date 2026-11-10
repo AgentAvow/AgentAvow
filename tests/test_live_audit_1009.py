@@ -225,7 +225,7 @@ def test_static_llms_and_security_txt():
     llms = (ROOT / "web/public/llms.txt").read_text()
     assert llms.startswith("# AgentAvow") and "https://agentavow.com/mcp" in llms
     sec = (ROOT / "web/public/.well-known/security.txt").read_text()
-    assert "Contact: mailto:kenne@agentavow.com" in sec and "Expires: 2027-" in sec
+    assert "Contact: mailto:security@agentavow.com" in sec and "Expires: 2027-" in sec
     conf = (ROOT / "nginx/nginx.conf").read_text()
     assert "location = /.well-known/security.txt" in conf
     assert "location = /llms.txt" in conf

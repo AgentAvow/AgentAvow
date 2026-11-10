@@ -17,7 +17,7 @@ import { rp } from '../basePath'
  * "Talk to us" opens an email.
  */
 
-const CONTACT = 'kenne@agentavow.com'
+const CONTACT = 'hello@agentavow.com'
 
 const CAPABILITIES: { h: string; p: string; pre?: string }[] = [
   { h: 'Gate CI on the answer', p: 'Fail the build on Do not connect. Works on GitHub, GitLab, Bitbucket and Azure DevOps.', pre: '- uses: AgentAvow/AgentAvow/github-action@main\n  with:\n    fail_on: do_not_connect' },
