@@ -6,6 +6,15 @@ import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { AtmosphericBackground } from './AtmosphericBackground'
 import api from '../lib/api'
+import { Helmet } from 'react-helmet-async'
+import { REBRAND_BASE } from '../rebrand/basePath'
+
+// Legacy (pre-rebrand social) pages stay live but out of search once the rebrand is the
+// root site. nginx sends the same as an X-Robots-Tag header ($legacy_robots); this tag
+// covers in-app navigation and any host without that config. The 2026 report stays
+// indexable (docs/internal/seo-ai-audit-2026-11.md, fix 6).
+const LEGACY_NOINDEX = REBRAND_BASE === ''
+const INDEXABLE_LEGACY_PATHS = new Set(['/state-of-agent-security-2026'])
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 }
 
@@ -176,11 +185,14 @@ export default function Layout() {
     { to: '/docs', label: 'Developers' },
   ]
 
+  const noindex = LEGACY_NOINDEX && !INDEXABLE_LEGACY_PATHS.has(location.pathname.replace(/\/$/, ''))
+
   return (
     <div className={`flex flex-col ${location.pathname === '/messages' ? 'h-dvh overflow-hidden' : 'min-h-screen'}`}>
       <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:bg-primary focus:text-white focus:px-4 focus:py-2 focus:rounded-md">
         Skip to main content
       </a>
+      {noindex && <Helmet><meta name="robots" content="noindex" /></Helmet>}
 
       {/* Glassmorphism Header */}
       <motion.header

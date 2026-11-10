@@ -15,6 +15,7 @@ Allow: /api/v1/public/scan-catalog
 Disallow: /verify-email
 Disallow: /reset-password
 Disallow: /forgot-password
-# legacy social routes (/feed, /profile, /marketplace, ...): decision pending
+# legacy social routes (/feed, /profile, /marketplace, ...) stay crawlable on purpose:
+# they send X-Robots-Tag: noindex (nginx $legacy_robots), which a Disallow here would hide.
 
 Sitemap: https://agentavow.com/sitemap.xml

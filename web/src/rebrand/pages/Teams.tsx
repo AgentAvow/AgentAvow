@@ -12,7 +12,8 @@ import { rp } from '../basePath'
  * traffic. Held back until their inputs exist (docs/internal/website-build-spec-2026-11-07.md):
  * the NSA guidance table (waits on a read of the PDF), accuracy numbers (the December
  * benchmark), a calendar link, and an ERC-8004 line (until it is used in an answer).
- * A2A says only what ships: importing an agent card. There is no contact backend, so
+ * A2A says only what ships: grading an agent card in the public check (live since
+ * 2026-11-07). There is no contact backend, so
  * "Talk to us" opens an email.
  */
 
@@ -105,6 +106,24 @@ export default function RebrandTeams() {
 
       <div className={section}>
         <div className="max-w-[1080px] mx-auto px-6">
+          <h2 className={h2}>Why a separate check.</h2>
+          <figure className="mt-3.5 max-w-[68ch]">
+            <blockquote className="border-l-2 border-primary-light pl-4 text-[16px] text-text">
+              “Anthropic does not control what MCP servers, files, or other software are included in plugins and cannot verify that they will work as intended or that they won’t change.”
+            </blockquote>
+            <figcaption className="mt-2 pl-4 text-[13px] text-text-muted">
+              Claude Code’s plugin trust warning,{' '}
+              <a href="https://code.claude.com/docs/en/plugins/security" target="_blank" rel="noopener noreferrer" className="text-primary-light hover:underline">Plugin security and trust</a>
+            </figcaption>
+          </figure>
+          <p className="mt-4 max-w-[68ch] text-[15px] text-text-muted">
+            The platforms your teams use say it plainly: checking what a tool does, and noticing when it changes after you approved it, is left to you. AgentAvow does that check, and signs the answer. AgentAvow is independent and not affiliated with or endorsed by Anthropic.
+          </p>
+        </div>
+      </div>
+
+      <div className={section}>
+        <div className="max-w-[1080px] mx-auto px-6">
           <h2 className={h2}>What you can put in place this week.</h2>
           <div className="grid md:grid-cols-2 gap-3.5 mt-[26px]">
             {CAPABILITIES.map((c) => (
@@ -158,7 +177,7 @@ export default function RebrandTeams() {
             </div>
             <div className="glass rounded-2xl border border-white/10 p-[22px] flex flex-col gap-[9px]">
               <h3 className="text-[19px] font-bold">A2A</h3>
-              <p className="text-text-muted text-[14.5px]">Import an agent from its A2A agent card into AgentAvow.</p>
+              <p className="text-text-muted text-[14.5px]">Paste any A2A Agent Card URL for an answer, findings and a signed attestation, including whether the card&apos;s own signature verifies.</p>
             </div>
             <div className="glass rounded-2xl border border-white/10 p-[22px] flex flex-col gap-[9px]">
               <h3 className="text-[19px] font-bold">x402</h3>

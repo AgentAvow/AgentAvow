@@ -20,8 +20,9 @@ const PLUGIN_LINES = [
 
 const HEADLINES: Record<string, string> = {
   'd1-automatic': 'Claude Code checks your MCP servers and packages before your agent uses them, automatically.',
-  'd2-before-npx': 'Before you npx that MCP server, get one clear answer.',
-  'd3-do-not-connect': 'What does Do not connect look like?',
+  'd2-before-npx': 'Before you add that MCP server, get one clear answer.',
+  'd3-do-not-connect': 'Here\'s what a Do not connect looks like, and why.',
+  'd4-definition-changed': 'Know when an MCP server you approved changes its tools.',
 }
 const DEFAULT_HEADLINE = 'd1-automatic'
 
