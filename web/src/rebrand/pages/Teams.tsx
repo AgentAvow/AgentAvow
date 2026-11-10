@@ -100,7 +100,7 @@ export default function RebrandTeams() {
             <a href="#talk" className="inline-flex items-center font-semibold text-[15px] px-5 py-[11px] rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Talk to us</a>
             <Link to={rp('/rebrand/check')} className="inline-flex items-center font-semibold text-[15px] px-5 py-[11px] rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Check a tool</Link>
           </div>
-          <p className="mt-3.5 text-[13px] text-text-muted">Public scanning is free forever. Team pilots are free through Q1 2027.</p>
+          <p className="mt-3.5 text-[13px] text-text-muted">Public scanning is free forever.</p>
         </div>
       </div>
 

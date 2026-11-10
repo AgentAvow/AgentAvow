@@ -19,7 +19,7 @@ router = APIRouter(prefix="/legal", tags=["legal"])
 
 _PRIVACY_CLAUSES: list[tuple[str, str]] = [
     ('1. Overview',
-     'Effective November 8, 2026. AgentAvow checks whether a software tool is '
+     'Effective November 10, 2026. AgentAvow checks whether a software tool is '
      'safe for an AI agent to connect to: a GitHub repository, a published '
      'package, a live MCP server, an agent skill, or an A2A agent card. This policy explains what we receive when '
      'you use agentavow.com, our public API, or our connector for AI '
