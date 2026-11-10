@@ -4945,13 +4945,13 @@
   },
   "pypi/huggingface-hub": {
    "version": "2.1.1",
-   "score": 0,
-   "label": "do_not_connect",
-   "reason": "3 critical findings in its code, including curl/wget piped to shell",
+   "score": 54,
+   "label": "review",
+   "reason": "4 high findings in its code, including curl/wget piped to shell",
    "files_scanned": 177,
    "severity": {
-    "critical": 3,
-    "high": 1,
+    "critical": 0,
+    "high": 4,
     "medium": 1,
     "low": 1,
     "info": 0
@@ -4959,7 +4959,7 @@
    "capabilities": 27,
    "not_installed": 0,
    "rules": {
-    "critical: curl/wget piped to shell": 3,
+    "high: curl/wget piped to shell": 3,
     "high: subprocess.run / Popen (Python)": 1,
     "low: Source file too large to scan in full": 1,
     "medium: torch.load (pickle-backed) (Python)": 1
