@@ -106,6 +106,24 @@ export default function RebrandTeams() {
 
       <div className={section}>
         <div className="max-w-[1080px] mx-auto px-6">
+          <h2 className={h2}>Why a separate check.</h2>
+          <figure className="mt-3.5 max-w-[68ch]">
+            <blockquote className="border-l-2 border-primary-light pl-4 text-[16px] text-text">
+              “Anthropic does not control what MCP servers, files, or other software are included in plugins and cannot verify that they will work as intended or that they won’t change.”
+            </blockquote>
+            <figcaption className="mt-2 pl-4 text-[13px] text-text-muted">
+              Claude Code’s plugin trust warning,{' '}
+              <a href="https://code.claude.com/docs/en/plugins/security" target="_blank" rel="noopener noreferrer" className="text-primary-light hover:underline">Plugin security and trust</a>
+            </figcaption>
+          </figure>
+          <p className="mt-4 max-w-[68ch] text-[15px] text-text-muted">
+            The platforms your teams use say it plainly: checking what a tool does, and noticing when it changes after you approved it, is left to you. AgentAvow does that check, and signs the answer. AgentAvow is independent and not affiliated with or endorsed by Anthropic.
+          </p>
+        </div>
+      </div>
+
+      <div className={section}>
+        <div className="max-w-[1080px] mx-auto px-6">
           <h2 className={h2}>What you can put in place this week.</h2>
           <div className="grid md:grid-cols-2 gap-3.5 mt-[26px]">
             {CAPABILITIES.map((c) => (
