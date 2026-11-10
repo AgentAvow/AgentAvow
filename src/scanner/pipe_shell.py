@@ -60,6 +60,10 @@ VENDOR_INSTALLERS: tuple[tuple[str, str], ...] = (
     ("elan.lean-lang.org", "/elan-init.sh"),              # elan (current docs)
     ("aider.chat", "/install.sh"),                        # aider
     ("func-e.io", "/install.sh"),                         # func-e (Tetrate)
+    # Round 3 (2026-11-10): the `hf` CLI installer, as huggingface.co/docs/
+    # huggingface_hub/installation gives it (hf.co redirects to huggingface.co).
+    ("hf.co", "/cli/install.sh"),                         # Hugging Face hf CLI
+    ("huggingface.co", "/cli/install.sh"),                # Hugging Face hf CLI
 )
 
 _TOOL_RE = re.compile(r"\b(?:curl|wget)\b")
