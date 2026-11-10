@@ -111,7 +111,7 @@ export default function RebrandDocs() {
     <div className="max-w-[1080px] mx-auto px-6 py-14 grid md:grid-cols-[220px_1fr] gap-10">
       <SEOHead title={`${doc.title} · Docs`} description={doc.blurb} path={`/docs/${doc.slug}`} />
       <aside className="md:sticky md:top-[86px] self-start">
-        <div className="font-mono text-[11px] uppercase tracking-wide text-primary-light mb-3">Verify an agent</div>
+        <div className="font-mono text-[11px] uppercase tracking-wide text-primary-light mb-3">Docs</div>
         <nav className="flex flex-col gap-1">
           {DOCS.map((d) => (
             <button

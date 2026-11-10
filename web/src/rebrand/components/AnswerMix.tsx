@@ -87,7 +87,7 @@ export function AnswerMixBar({ size }: { size: 'slim' | 'big' }) {
 interface Card { n: number | null | undefined; label: string; to: string; tone?: 'grad' | 'bad' }
 
 function StatCard({ n, label, to, tone }: Card) {
-  const cls = tone === 'grad' ? 'gradient-text' : tone === 'bad' ? 'text-[#f38ba8]' : 'text-text'
+  const cls = tone === 'grad' ? 'gradient-text' : tone === 'bad' ? 'text-danger' : 'text-text'
   const inner = (
     <>
       <b className={`block text-[30px] font-extrabold leading-tight tabular-nums ${cls}`}>{n != null ? n.toLocaleString() : '—'}</b>

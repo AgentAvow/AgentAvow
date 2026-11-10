@@ -150,7 +150,7 @@ export default function RebrandSettings() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="text-[14px]">Email notifications</div>
-            <div className="text-[12px] text-text-muted">Grade-change alerts, verification, and account emails.</div>
+            <div className="text-[12px] text-text-muted">Score-change alerts, verification, and account emails.</div>
           </div>
           <button
             onClick={() => updatePref.mutate({ email_notifications_enabled: !emailOn })}
@@ -161,7 +161,7 @@ export default function RebrandSettings() {
             <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${emailOn ? 'left-[22px]' : 'left-0.5'}`} />
           </button>
         </div>
-        <p className="mt-3 text-[12px] text-text-muted">Per-tool alert delivery (email / webhook) is set on your <Link to={rp('/rebrand/account')} className="text-primary-light hover:text-primary">account page</Link>.</p>
+        <p className="mt-3 text-[12px] text-text-muted">Per-tool alert delivery (email / webhook) is set on <Link to={rp('/rebrand/account')} className="text-primary-light hover:text-primary">Watches &amp; alerts</Link>.</p>
       </Card>
 
       {/* data export */}

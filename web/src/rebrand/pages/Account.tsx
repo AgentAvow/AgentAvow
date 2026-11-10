@@ -9,7 +9,7 @@ import { NotifRow } from '../components/NotificationBits'
 import { Reveal, RevealStagger } from '../components/motion'
 
 /**
- * Signed-in home — "My watches". The earned surface for the tool-safety product:
+ * Signed-in home — "Watches & alerts" (route /account). The earned surface for the tool-safety product:
  * the tools you're watching, their current grade, and the change-alerts fired.
  * Settings/Admin are reused from the existing app (linked from the header menu);
  * the social-era Profile/Agents/Feed are intentionally not ported here.
@@ -232,7 +232,7 @@ export default function RebrandAccount() {
       <Reveal>
         <div className="flex items-end justify-between gap-4 flex-wrap">
           <div className="max-w-[60ch]">
-            <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">My watches</span>
+            <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Watches &amp; alerts</span>
             <h1 className="mt-1 text-2xl md:text-3xl font-extrabold tracking-tight">Watch tools for changes</h1>
             <p className="mt-2 text-text-muted text-[14px]">We re-scan the tools you watch and tell you when something changes — a <span className="text-text">score drops</span>, a <span className="text-text">signed definition changes</span>, or a tool you flagged gets <span className="text-text">safer</span> — so you always know where the tools your agents rely on stand.</p>
           </div>

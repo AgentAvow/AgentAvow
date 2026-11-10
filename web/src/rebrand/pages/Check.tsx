@@ -44,7 +44,7 @@ const CAT_LABELS: Record<string, string> = {
 }
 
 /** The one-line verdict for SEO/share copy: the three-phrase headline + its reason
- * (gradeSystem.decisionOf — the same decision VerdictBadge and summarize() read, so the
+ * (gradeSystem.decisionOf — the same decision the answer card and summarize() read, so the
  * description never disagrees with the banner). "Safe to connect · Certified — …". */
 /** "mcp.deepwiki.com/mcp" from an endpoint URL, for titles. */
 /** Reports result_view once per result shown. The page path is all it sends: no verdict or score. */
@@ -921,7 +921,7 @@ function Hero() {
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-20 text-center">
       <SEOHead title="Check a tool" description="Is this tool safe for your agent to connect? Paste a GitHub repo, MCP server, npm/PyPI/crates package, Docker image, Hugging Face model or agent skill for Safe to connect, Review before you connect, or Do not connect, with a signed trust score." path="/check" />
-      <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight">Is this tool <span className="gradient-text-bio">safe</span>?</h1>
+      <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight">Is this AI tool <span className="gradient-text-bio">safe</span> to connect?</h1>
       <p className="mt-4 text-text-muted max-w-[46ch] mx-auto">Paste anything your agent connects to. We'll tell you — in plain English — whether it's safe, and prove it with a signed score.</p>
       <p className="mt-2 text-[13px] text-text-muted max-w-[56ch] mx-auto">Paste any A2A Agent Card URL for an answer, findings and a signed attestation, including whether the card&apos;s own signature verifies.</p>
       <form onSubmit={(e) => { e.preventDefault(); go() }} className="glass mt-7 mx-auto max-w-[560px] flex gap-2.5 rounded-2xl p-2 pl-4 shadow-lg shadow-primary/10">
