@@ -84,8 +84,9 @@ export default function RebrandGet() {
         path="/get"
       />
       <div className="relative pt-14 pb-[34px]">
-        <div className="relative z-[2] max-w-[1080px] mx-auto px-6">
-          <h1 className="text-[clamp(30px,4.6vw,46px)] font-extrabold leading-[1.1] tracking-[-.025em] [text-wrap:balance]">Get AgentAvow where you work.</h1>
+        <div className="relative z-[2] max-w-[860px] mx-auto px-6">
+          <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Get AgentAvow</span>
+          <h1 className="mt-3 text-[clamp(30px,4.6vw,46px)] font-extrabold leading-[1.1] tracking-[-.025em] [text-wrap:balance]">Get AgentAvow where you work.</h1>
           <p className="mt-[18px] max-w-[58ch] text-[18px] font-light text-text-muted">
             The same check everywhere: <b className="font-medium text-text">Safe to connect</b>, <b className="font-medium text-text">Review before you connect</b>, or <b className="font-medium text-text">Do not connect</b>, with a signed 0-100 trust score, an adoption score, and the Certified mark where a tool has earned it. Free, no account.
           </p>
@@ -99,7 +100,7 @@ export default function RebrandGet() {
             <section key={g.title}>
               <h2 className="text-[21px] font-bold tracking-tight">{g.title}</h2>
               <p className="mt-1 text-[14.5px] text-text-muted">{g.sub}</p>
-              <div className="mt-3 glass rounded-[14px] border border-white/10 overflow-hidden">
+              <div className="mt-3 glass rounded-[14px] border border-border/60 overflow-hidden">
                 {g.items.map((item, i) => {
                   const external = !item.fullLoad
                   return (

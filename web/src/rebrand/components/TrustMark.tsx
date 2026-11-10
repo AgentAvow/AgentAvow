@@ -1,7 +1,6 @@
 import { useId, type ReactNode } from 'react'
-import { getTrustTier, coverageGapNotes, decisionOf, decisionPhrase, isCertified } from '../../components/trust/gradeSystem'
+import { getTrustTier, decisionOf, decisionPhrase, isCertified } from '../../components/trust/gradeSystem'
 import { shortUnit } from '../lib/adoptionUnit'
-import { sandboxSummary } from '../lib/resultPage'
 
 /**
  * The AgentAvow dual mark (0–100 pivot 2026-08).
@@ -270,75 +269,3 @@ export function TrustPill({ score, className = '' }: { score: number; showTier?:
   )
 }
 
-/**
- * The answer banner — the three-phrase decision above the number (decide(), the
- * twin of src/scanner/verdict.py). Derived from the already-signed scan; never a
- * rescore. Verb is surface-aware (connect / install / use).
- */
-export function VerdictBadge(
-  { scan, className = '' }: {
-    scan: {
-      trust_score?: number | null
-      decision?: string | null
-      decision_final?: boolean | null
-      decision_reason?: string | null
-      certified?: { eligible?: boolean; checks?: { no_critical_or_high?: boolean } }
-      findings?: unknown
-      critical?: number | null
-      high?: number | null
-      metadata?: { files_scanned?: number | null } | null
-      deprecation?: string | null
-      coverage_gaps?: Record<string, unknown> | null
-      behavioral?: {
-        ran?: boolean; pending?: boolean; plan?: string; state?: string
-        reason?: string | null; timed_out?: boolean
-        canary_exfil?: unknown[]
-        findings?: Array<{ severity?: string; name?: string; rule?: string }>
-        exercise?: { launch_ok?: boolean; calls?: unknown[]; timed_out?: boolean } | null
-        grade_summary?: { start_reason?: string } | null
-        unexpected_egress?: string[]
-      } | null
-      behavioral_score_effect?: { applied?: boolean; delta?: number } | null
-    }
-    /** Kept for call-site compatibility; the three phrases are fixed wording. */
-    verb?: 'connect' | 'install' | 'use'
-    className?: string
-  },
-) {
-  // The headline is ONE of three phrases plus the one reason that triggered it —
-  // the API's own `decision` when present, else the same rule here (gradeSystem.decide).
-  // Certified rides beside the phrase; the score and tier sit underneath elsewhere.
-  const d = decisionOf(scan)
-  const p = decisionPhrase(d.decision)
-  const certified = isCertified(scan)
-  const sandboxLine = sandboxSummary(scan)
-  const cfg = {
-    safe: { box: 'bg-success/10 border-success/30', fg: 'text-success', icon: '✓' },
-    review: { box: 'bg-warning/10 border-warning/30', fg: 'text-warning', icon: '⚠' },
-    do_not_connect: { box: 'bg-danger/10 border-danger/30', fg: 'text-danger', icon: '✕' },
-  }[d.decision]
-  const why = d.reason ? d.reason[0].toUpperCase() + d.reason.slice(1) + '.' : ''
-  // What the scan could not check: a clean answer covers only what was read.
-  const gaps = coverageGapNotes(scan)
-  return (
-    <div className={`rounded-xl px-4 py-3 flex items-center gap-3 border ${cfg.box} ${className}`} data-decision={d.decision}>
-      <span className={`text-lg leading-none ${cfg.fg}`} aria-hidden="true">{cfg.icon}</span>
-      <div className="min-w-0">
-        <div className={`font-bold text-[15px] ${cfg.fg}`}>
-          {p.phrase}
-          {certified && <span className="ml-1.5 font-semibold" style={GRAD_TEXT}>· Certified</span>}
-          {!d.final && <span className="ml-2 align-middle font-mono text-[10px] uppercase tracking-wide text-text-muted">provisional</span>}
-        </div>
-        <div className="text-[12.5px] text-text-muted">{why}</div>
-        {sandboxLine && <div className="text-[12px] text-text-muted mt-0.5"><span className="font-mono text-[10px] uppercase tracking-wide mr-1.5">gVisor</span>{sandboxLine}</div>}
-        {gaps.length > 0 && (
-          <div className="text-[12px] text-warning mt-0.5" data-testid="not-checked">
-            <span className="font-mono text-[10px] uppercase tracking-wide mr-1.5">Not checked</span>
-            {gaps.join('; ')}. This answer covers only what was read.
-          </div>
-        )}
-      </div>
-      <span className="ml-auto font-mono text-[10px] text-text-muted/60 shrink-0 hidden sm:block">from the signed findings</span>
-    </div>
-  )
-}

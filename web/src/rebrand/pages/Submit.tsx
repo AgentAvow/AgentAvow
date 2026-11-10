@@ -100,8 +100,8 @@ export default function Submit() {
         path="/submit"
       />
       <div className="text-center">
-        <div className="font-mono text-[12px] uppercase tracking-wide text-primary-light">For authors</div>
-        <h1 className="mt-2 text-3xl md:text-4xl font-extrabold tracking-tight">List your tool</h1>
+        <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">List your tool</span>
+        <h1 className="mt-3 text-3xl md:text-4xl font-extrabold tracking-tight">List your tool</h1>
         <p className="mt-4 text-text-muted max-w-[52ch] mx-auto">Add your tool to the catalog. We scan it, give it a <span className="text-text">signed safety score</span>, and list it in Browse so agents can find and trust it. Free, no account.</p>
       </div>
 

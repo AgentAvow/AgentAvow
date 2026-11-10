@@ -28,7 +28,7 @@ export interface ScanLike {
 }
 
 export interface PlainSummary {
-  /** The three-phrase decision — the same value the verdict banner (VerdictBadge) shows. */
+  /** The three-phrase decision — the same value the result page answer card shows. */
   verdict: DecisionValue
   /** "Safe to connect" / "Review before you connect" / "Do not connect" (+ " · Certified"). */
   headline: string

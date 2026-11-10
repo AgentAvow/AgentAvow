@@ -16,7 +16,7 @@ import { AppsLine } from './components/AppsStrip'
 
 /**
  * Signed-in account controls: a notifications bell (unread count from the real
- * /notifications API) + an avatar dropdown (My watches, Settings, Admin, Sign out).
+ * /notifications API) + an avatar dropdown (Watches & alerts, Settings, Admin, Sign out).
  * Signed-out: a plain "Sign in" link. Settings/Admin reuse the existing app.
  */
 function AccountMenu() {
@@ -112,7 +112,7 @@ function AccountMenu() {
               <div className="text-[11.5px] text-text-muted truncate">{user.email}</div>
             </div>
             <Link to={rp("/rebrand/tools")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">My Tools</Link>
-            <Link to={rp("/rebrand/account")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">My watches</Link>
+            <Link to={rp("/rebrand/account")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Watches &amp; alerts</Link>
             <Link to={rp("/rebrand/settings")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Settings</Link>
             {user.is_admin && <Link to={rp("/rebrand/admin-dashboard")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Admin</Link>}
             <button onClick={() => { setOpen(false); logout(); navigate(rp('/rebrand')) }} className="block w-full text-left px-3.5 py-2 text-[13.5px] text-text-muted hover:text-danger hover:bg-surface border-t border-border/60 mt-1">Sign out</button>
@@ -140,12 +140,12 @@ function Wordmark({ id = 'hdr' }: { id?: string }) {
   const reduce = useReducedMotion()
   return (
     <motion.span
-      className="group flex items-center gap-2 font-bold text-[17px] tracking-tight cursor-pointer"
+      className="group flex items-center gap-2 font-bold text-[19px] md:text-[17px] tracking-tight cursor-pointer"
       initial="rest"
       whileHover="hover"
       animate="rest"
     >
-      <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" className="w-7 h-7 md:w-6 md:h-6" aria-hidden="true">
         {/* outer gradient ring — rotates on hover */}
         <motion.circle
           cx="12" cy="12" r="9.3" stroke={`url(#av-g-${id})`} strokeWidth="1.7"
@@ -168,7 +168,7 @@ function Wordmark({ id = 'hdr' }: { id?: string }) {
           </linearGradient>
         </defs>
       </svg>
-      AgentAvow<span className="align-super text-[9px] text-text-muted font-medium ml-0.5">™</span>
+      AgentAvow<span className="align-super text-[10px] md:text-[9px] text-text-muted font-medium ml-0.5">™</span>
     </motion.span>
   )
 }
@@ -354,7 +354,7 @@ export default function RebrandLayout() {
       ) : (
       <header className="sticky top-0 z-20 bg-surface border-b border-border/60">
         <div className="max-w-[1080px] mx-auto px-6 h-[62px] flex items-center gap-7">
-          <Link to={rp("/rebrand")} aria-label="AgentAvow home">
+          <Link to={rp("/rebrand")} aria-label="AgentAvow home" className="shrink-0">
             <Wordmark />
           </Link>
           <nav className="hidden md:flex items-center gap-6 ml-2">

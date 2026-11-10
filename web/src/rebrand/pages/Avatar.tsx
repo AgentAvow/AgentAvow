@@ -76,7 +76,7 @@ export default function RebrandAvatar() {
   return (
     <div className="max-w-[720px] mx-auto px-6 py-14">
       <Reveal>
-        <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Profile</span>
+        <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Settings</span>
         <h1 className="mt-2 text-3xl font-extrabold tracking-tight">Choose your avatar</h1>
         <p className="mt-2 text-text-muted text-[14px]">Pick a generated avatar, or use your initial.</p>
       </Reveal>
