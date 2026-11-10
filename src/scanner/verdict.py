@@ -524,6 +524,13 @@ def coverage_gap_notes(data: dict) -> list[str]:
         notes.append(f"{_files_phrase(n, 'dependency file')} could not be read")
     if g.get("advisory_lookup") == "failed":
         notes.append("the vulnerability database lookup failed")
+    if g.get("repo_advisory_lookup") == "failed":
+        notes.append("the source repository's security advisories could not be read")
+    n = _int(g.get("repo_advisory_range_unparsed"))
+    if n > 0:
+        notes.append(f"{n:,} repository security "
+                     f"{'advisory' if n == 1 else 'advisories'} had a version range "
+                     "that could not be read")
     if g.get("tool_list_unread") is True:
         notes.append("the server's tool list could not be read")
     if g.get("tool_list_paged") is True:
@@ -835,6 +842,10 @@ def cheap_coverage_gap(data: dict) -> bool:
     if _int(g.get("bytecode_unread")) > 0:
         return True
     if _int(g.get("skills_ungraded")) > 0:
+        return True
+    # A published advisory names this package and we could not tell if it covers
+    # this version: never Certified on that.
+    if _int(g.get("repo_advisory_range_unparsed")) > 0:
         return True
     if _surface_is(data, "openclaw") and (
             _int(g.get("oversized_files")) > 0 or _int(g.get("over_file_cap")) > 0

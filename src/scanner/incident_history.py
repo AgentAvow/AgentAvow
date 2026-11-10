@@ -340,3 +340,175 @@ async def fetch_incident_history(
     # affect the scanned version into findings. Not part of the never-scored history.
     summary["advisories"] = summarize_advisories(vulns, eco, version, name)
     return summary
+
+
+# --- The source repository's own published security advisories ---------------------
+# A maintainer can publish a GitHub security advisory on the repository and never have
+# it reviewed into GitHub's global advisory database, so OSV never sees it
+# (GHSA-mvf5-2qqv-rg3c, @modelcontextprotocol/server-everything < 2.0.1: no CVE, global
+# database 404, OSV empty). ``GET repos/{o}/{r}/security-advisories`` still returns it.
+# Only entries naming the scanned package in its own ecosystem count: a monorepo lists
+# advisories for sibling packages, and another package's range is never applied here.
+# A range we cannot parse is recorded as unparsed, never read as "not affected".
+
+GITHUB_REPO_ADVISORIES_URL = "https://api.github.com/repos/{slug}/security-advisories"
+REPO_ADVISORY_SOURCE = "repository security advisory"
+# OSV ecosystem id -> GitHub advisory ecosystem id.
+_GH_ECOSYSTEM = {"npm": "npm", "PyPI": "pip", "crates.io": "rust"}
+_REPO_ADV_TTL_S = 6 * 3600
+_REPO_ADV_MAX_PAGES = 3
+_repo_adv_cache: dict[str, tuple[float, list]] = {}
+_CONSTRAINT_RE = re.compile(r"^\s*(>=|<=|>|<|=)?\s*v?([0-9A-Za-z][0-9A-Za-z.+\-_]*)\s*$")
+_SLUG_OK_RE = re.compile(r"^[\w.-]+/[\w.-]+$")
+
+
+def gh_range_affects(rng, eco: str, version: str | None) -> bool | None:
+    """Does a GitHub ``vulnerable_version_range`` (``">= 1.0.0, < 2.0.1"``, ``"= 1.2.3"``,
+    ``"< 2.0"``; comma means AND) include ``version``? None when the range or the
+    version cannot be parsed, so the caller never treats it as "not affected"."""
+    if not isinstance(rng, str) or not rng.strip() or not version:
+        return None
+    cur = _parse_version(eco, version)
+    if cur is None:
+        return None
+    bounds = []
+    for part in rng.split(","):
+        m = _CONSTRAINT_RE.match(part)
+        if not m:
+            return None
+        bound = _parse_version(eco, m.group(2))
+        if bound is None:
+            return None
+        bounds.append((m.group(1) or "=", bound))
+    for op, bound in bounds:
+        ok = {">=": cur >= bound, ">": cur > bound, "<=": cur <= bound,
+              "<": cur < bound, "=": cur == bound}[op]
+        if not ok:
+            return False
+    return True
+
+
+def _patched(v: dict) -> str | None:
+    raw = str(v.get("patched_versions") or "").strip()
+    raw = raw.split(",", 1)[0].strip().lstrip(">=").strip()
+    return raw or None
+
+
+def summarize_repo_advisories(advisories: list, eco: str, name: str,
+                              version: str | None) -> list[dict]:
+    """Pure reducer: a repository's published security advisories -> entries in the same
+    shape as ``summarize_advisories``, for the scanned package only (exact name in the
+    same ecosystem). ``eco`` is the OSV ecosystem id. Each entry carries
+    ``source = "repository security advisory"`` and ``range_unparsed`` when no range for
+    this package could be read (then ``affects_scanned_version`` is False and the entry
+    is disclosed, not scored)."""
+    gh_eco = _GH_ECOSYSTEM.get(eco)
+    if not gh_eco or not name:
+        return []
+    want = _norm_pkg(eco, name)
+    out: list[dict] = []
+    seen: set[str] = set()
+    for a in advisories if isinstance(advisories, list) else []:
+        if not isinstance(a, dict) or a.get("withdrawn_at"):
+            continue
+        if a.get("state") not in (None, "published"):
+            continue
+        ghsa = str(a.get("ghsa_id") or "").strip()
+        if not ghsa or ghsa in seen:
+            continue
+        mine = []
+        for v in a.get("vulnerabilities") or []:
+            pkg = v.get("package") if isinstance(v, dict) else None
+            if not isinstance(pkg, dict):
+                continue
+            if str(pkg.get("ecosystem") or "").lower() != gh_eco:
+                continue
+            if _norm_pkg(eco, str(pkg.get("name") or "")) == want:
+                mine.append(v)
+        if not mine:
+            continue
+        seen.add(ghsa)
+        affected, unparsed, fixed = False, False, None
+        for v in mine:
+            r = gh_range_affects(v.get("vulnerable_version_range"), eco, version)
+            if r is None:
+                unparsed = True
+            elif r:
+                affected = True
+                fixed = fixed or _patched(v)
+        if fixed is None and not affected:
+            # Only for context on an unaffected version: never name another range's fix
+            # as the upgrade for a version in a range that has none.
+            fixed = next((p for p in (_patched(v) for v in mine) if p), None)
+        cve = str(a.get("cve_id") or "").strip()
+        out.append({
+            "id": ghsa,
+            "aliases": [cve] if cve else [],
+            "summary": str(a.get("summary") or "").strip()[:200],
+            "severity": _SEVERITY.get(str(a.get("severity") or "").upper(), "medium"),
+            "fixed_in": fixed,
+            "last_affected": None,
+            "affects_scanned_version": affected,
+            "range_unparsed": unparsed and not affected,
+            "source": REPO_ADVISORY_SOURCE,
+            "url": str(a.get("html_url") or "")[:300] or None,
+        })
+    out.sort(key=lambda x: (not x["affects_scanned_version"], x["id"]))
+    return out[:20]
+
+
+def merge_advisories(existing: list[dict], extra: list[dict]) -> list[dict]:
+    """The ``extra`` entries whose id and aliases are not already in ``existing``."""
+    known: set[str] = set()
+    for a in existing or []:
+        known.add(str(a.get("id") or ""))
+        known |= {str(x) for x in (a.get("aliases") or [])}
+    known.discard("")
+    out = []
+    for a in extra or []:
+        ids = {str(a.get("id") or "")} | {str(x) for x in (a.get("aliases") or [])}
+        ids.discard("")
+        if ids & known:
+            continue
+        known |= ids
+        out.append(a)
+    return out
+
+
+async def fetch_repo_advisories(slug: str, token: str | None = None) -> dict:
+    """The repository's published security advisories (raw GitHub records).
+    ``{"checked": True, "advisories": [...]}`` on success, cached per repository for
+    6 hours; ``{"checked": False, ...}`` on any error, 404 or rate limit, which the
+    caller discloses rather than reading as "no advisories". Uses the server token when
+    one is configured (the endpoint is public; the token only raises the rate limit)."""
+    slug = str(slug or "").strip().lower()
+    if not _SLUG_OK_RE.match(slug):
+        return {"checked": False, "reason": "bad_slug"}
+    import time
+    hit = _repo_adv_cache.get(slug)
+    now = time.monotonic()
+    if hit and now - hit[0] < _REPO_ADV_TTL_S:
+        return {"checked": True, "advisories": hit[1], "cached": True}
+    headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    found: list = []
+    try:
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            for page in range(1, _REPO_ADV_MAX_PAGES + 1):
+                resp = await client.get(
+                    GITHUB_REPO_ADVISORIES_URL.format(slug=slug), headers=headers,
+                    params={"state": "published", "per_page": 100, "page": page},
+                )
+                if resp.status_code != 200:
+                    return {"checked": False, "reason": f"http_{resp.status_code}"}
+                batch = resp.json()
+                if not isinstance(batch, list):
+                    return {"checked": False, "reason": "bad_body"}
+                found.extend(b for b in batch if isinstance(b, dict))
+                if len(batch) < 100:
+                    break
+    except (httpx.HTTPError, ValueError):
+        return {"checked": False, "reason": "error"}
+    _repo_adv_cache[slug] = (now, found)
+    return {"checked": True, "advisories": found}
