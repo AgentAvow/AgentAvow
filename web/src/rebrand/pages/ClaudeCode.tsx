@@ -94,7 +94,7 @@ function Install() {
 const ACTIONS: [string, string, string][] = [
   ['Safe to connect', 'text-success', 'Stays silent. A tool that cleared the full gate reads Safe to connect · Certified.'],
   ['Review before you connect', 'text-warning', 'One line with the reason. The install goes ahead.'],
-  ['Do not connect', 'text-danger', 'Before an add or install, Claude Code asks you first. You decide.'],
+  ['Do not connect', 'text-danger', 'Before an add or install, Claude Code asks you first. Calls to a server that is already connected are stopped, with the report link.'],
   ['Tool definition changed', 'text-primary-light', 'Claude Code asks before the call.'],
 ]
 
@@ -192,7 +192,7 @@ export default function RebrandClaudeCode() {
               <ul className="mt-2 pl-[17px] list-disc text-text-muted text-[14.5px] grid gap-1">
                 <li>Lockfile installs, requirements files and URL installs are left alone</li>
                 <li>If AgentAvow can&apos;t be reached, your work carries on with no check</li>
-                <li>A check can miss things. It warns, and you decide</li>
+                <li>A check can miss things. It asks before installs and stops calls only on Do not connect</li>
               </ul>
             </div>
           </div>
