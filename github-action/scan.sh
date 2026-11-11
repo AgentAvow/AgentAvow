@@ -4,6 +4,11 @@
 set -euo pipefail
 
 API_BASE="https://agentavow.com/api/v1/public/scan"
+# Sent as the User-Agent on calls to agentavow.com, so these checks count as our own
+# client ("agentavow-action/" in src/traffic_class.py) instead of anonymous curl.
+# The Action is used at @main with no release tags; bump this when its behaviour changes.
+ACTION_VERSION="1.0.0"
+USER_AGENT="agentavow-action/${ACTION_VERSION}"
 OWNER="${REPO_OWNER}"
 REPO="${REPO_NAME}"
 # fail_on: do_not_connect (default) | review | none — gate on the three-phrase decision.
@@ -24,7 +29,7 @@ PR_NUMBER="${PR_NUMBER:-}"
 echo "::group::AgentAvow Trust Scan"
 echo "Scanning ${OWNER}/${REPO} ..."
 
-HTTP_CODE=$(curl -s -o /tmp/ag_scan.json -w "%{http_code}" \
+HTTP_CODE=$(curl -s -A "${USER_AGENT}" -o /tmp/ag_scan.json -w "%{http_code}" \
   "${API_BASE}/${OWNER}/${REPO}")
 
 if [ "$HTTP_CODE" -ne 200 ]; then

@@ -9,6 +9,7 @@ import { liveListings, pendingListings } from './adminListings'
 interface Row {
   day: string
   cc_machines_7d?: number | null; checked_machines_7d?: number | null
+  cc_machines_7d_excl_cloud?: number | null; checked_machines_7d_excl_cloud?: number | null
   cc_new_machines_30d?: number | null
   d1_cohort?: number | null; d1_returned?: number | null
   d7_cohort?: number | null; d7_returned?: number | null
@@ -54,8 +55,11 @@ export default function StartHerePanel() {
   })
   const week = (data?.rows || []).slice(-7)
   const latest = week[week.length - 1]
-  const protectedMachines = latest?.checked_machines_7d
-  const connected = latest?.cc_machines_7d
+  // From the PR 2 snapshot on, machines seen on an Anthropic cloud entrypoint are left
+  // out (their egress IPs are shared); older rows only have the raw 7-day counts.
+  const cloudExcluded = latest?.checked_machines_7d_excl_cloud != null
+  const protectedMachines = cloudExcluded ? latest?.checked_machines_7d_excl_cloud : latest?.checked_machines_7d
+  const connected = cloudExcluded ? latest?.cc_machines_7d_excl_cloud : latest?.cc_machines_7d
   const share = protectedMachines != null && connected ? ` of ${connected.toLocaleString()} (${Math.round((protectedMachines / connected) * 100)}%)` : ''
   const d7 = pct(sum(week, (r) => r.d7_returned), sum(week, (r) => r.d7_cohort))
   const d1 = pct(sum(week, (r) => r.d1_returned), sum(week, (r) => r.d1_cohort))
@@ -76,7 +80,7 @@ export default function StartHerePanel() {
           label="Claude Code machines protected (7 days)"
           value={protectedMachines != null ? `${protectedMachines.toLocaleString()}${share}` : 'Not ready'}
           meaning="Machines where the Claude Code plugin's session-start or install-time hook checked at least one thing in the last 7 days, out of machines connecting. Full count from Nov 14."
-          tip="Owner machines (data/owner-ips.txt on the host) are excluded. Not counted: hand-run checks in claude.ai, ChatGPT, Cursor, VS Code or Codex; the npm and Python gates; CI. Anthropic cloud egress IPs (remote Claude Code sessions) are NOT excluded: no list of them exists yet, so they inflate both the count and the share."
+          tip={`Owner machines (data/owner-ips.txt on the host) are excluded. Not counted: hand-run checks in claude.ai, ChatGPT, Cursor, VS Code or Codex; the npm and Python gates; CI. ${cloudExcluded ? 'Machines seen on an Anthropic cloud (remote) entrypoint in the last 30 days are excluded too.' : 'Anthropic cloud egress IPs (remote Claude Code sessions) are NOT excluded on this row: the snapshot did not split by entrypoint yet, so they inflate both the count and the share.'}`}
         />
         <Card
           label="New machines"

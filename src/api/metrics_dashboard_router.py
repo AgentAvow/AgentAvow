@@ -625,6 +625,18 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         for s in mcp_surfaces
     }
 
+    # --- Scan requests by kind (src/scan_kind) and watch alerts by trigger ---
+    from src.jobs.scheduler import ALERT_TRIGGER_CODES
+    from src.scan_kind import CHECK_KINDS, RENDER_KINDS, SCAN_KINDS
+
+    scan_kind_by_day = {
+        k: await _read_daily_counter(f"scan_kind:{k}", day_strs) for k in SCAN_KINDS
+    }
+    alerts_by_day = {
+        (c, sc): await _read_daily_counter(f"watch_alert:{c}:{sc}", day_strs)
+        for c in ALERT_TRIGGER_CODES for sc in ("public", "private")
+    }
+
     # --- Daily time-series (grouped queries, then aligned to day_strs) ---
     async def _series_by_date(date_col) -> dict[str, int]:
         day_expr = _utc_date_expr(date_col)
@@ -670,6 +682,13 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         series[f"mcp_callers:{s_name}"] = _align(mcp_callers_by_surface_day[s_name])
     for c_name in CLIENT_CLASSES:
         series[f"scan_requests:{c_name}"] = _align(scan_requests_by_class_day[c_name])
+    for k_name in SCAN_KINDS:
+        series[f"scan_kind:{k_name}"] = _align(scan_kind_by_day[k_name])
+    for c_name in ALERT_TRIGGER_CODES:
+        series[f"watch_alert:{c_name}"] = [
+            a + b for a, b in zip(_align(alerts_by_day[(c_name, "public")]),
+                                  _align(alerts_by_day[(c_name, "private")]))
+        ]
 
     # --- Surface breakdown: static launch corpus + live community scans ---
     # x402 listings are scored from their public listing alone and live only under
@@ -832,6 +851,22 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
             "by_category": dict(sorted(category_breakdown.items(), key=lambda kv: -kv[1])),
         },
         "x402": x402_block,
+        # Public scan-API requests by kind, from 2026-11 (PR 2): checks per surface,
+        # renders (badge / card / OG / verdict.json) and other reads, split out.
+        "scan_kinds": {
+            "checks": {k: int(sum(scan_kind_by_day[k].values())) for k in CHECK_KINDS},
+            "renders": {k: int(sum(scan_kind_by_day[k].values())) for k in RENDER_KINDS},
+            "other": {
+                k: int(sum(scan_kind_by_day[k].values()))
+                for k in SCAN_KINDS if k not in CHECK_KINDS and k not in RENDER_KINDS
+            },
+        },
+        # Watch alerts by trigger, public watches vs private repos (GitHub App). The
+        # series starts with the PR 2 deploy, after the #292 reset (t28).
+        "watch_alerts": {
+            c: {sc: int(sum(alerts_by_day[(c, sc)].values())) for sc in ("public", "private")}
+            for c in ALERT_TRIGGER_CODES
+        },
         # The Claude Code plugin's session-start hook: scans it ran + machines it ran on.
         "hook": {
             "scans_window": int(sum(hook_scans_by_day.values())),
@@ -1113,6 +1148,12 @@ _TRAFFIC_INT_COLUMNS = (
     "calls_codex", "callers_codex",
     "checks_claude", "checks_claude_code", "checks_chatgpt", "checks_cursor",
     "checks_vscode", "checks_codex", "checks_other", "checks_total",
+    "cc_machines_desktop", "cc_machines_cli", "cc_machines_sdk", "cc_machines_cloud",
+    "cc_machines_other",
+    "checked_machines_desktop", "checked_machines_cli", "checked_machines_sdk",
+    "checked_machines_cloud", "checked_machines_other",
+    "cc_machines_7d_excl_cloud", "checked_machines_7d_excl_cloud",
+    "new_checked_same_day", "d7_cohort_checked",
 )
 _TRAFFIC_NOTES = [
     "checked_machines_7d and cc_machines_7d are rolling 7-day counts of distinct machines, "
@@ -1141,6 +1182,13 @@ _TRAFFIC_NOTES = [
     "same Redis counters as the MCP panel). owner_* and *_excl_owner strip IPs listed in "
     "data/owner-ips.txt on the host (Kenne's test machines). Cursor, VS Code and Codex "
     "columns start 2026-11-11.",
+    "cc_machines_<entrypoint> / checked_machines_<entrypoint> split Claude Code machines by "
+    "the entrypoint in their User-Agent: desktop, cli (terminal and IDE extensions), sdk, "
+    "cloud (Anthropic-hosted remote sessions), other. A machine on two entrypoints that day "
+    "counts in both. *_7d_excl_cloud drop machines seen on a cloud entrypoint in the last "
+    "30 days. new_checked_same_day = machines first seen that day that the hook also "
+    "checked that day; d7_cohort_checked = of d7_cohort, how many the hook checked within "
+    "6 days of first being seen (complete 7 days after the PR 2 deploy).",
     "checks_* = hand-run checks per surface: MCP tool calls minus about_agentavow and "
     "minus calls from the IPs in METRICS_OWNER_IPS. Empty on days before the counter "
     "existed (2026-11-11); the Start here card uses calls_* for those days.",
@@ -1233,6 +1281,114 @@ async def traffic_metrics(
         "covered_days": len(rows),
         "notes": _TRAFFIC_NOTES,
     }
+
+
+# Referrer hosts grouped for the "search referrals" view. A host matches a group when
+# it equals or ends with one of the group's domains (google.co.uk -> "google").
+_SEARCH_ENGINES = {
+    "google": ("google.com", "google."), "bing": ("bing.com",),
+    "duckduckgo": ("duckduckgo.com",), "yahoo": ("search.yahoo.com", "yahoo.com"),
+    "ecosia": ("ecosia.org",), "brave": ("search.brave.com",), "kagi": ("kagi.com",),
+    "yandex": ("yandex.",), "baidu": ("baidu.com",),
+}
+_AI_ASSISTANTS = {
+    "chatgpt": ("chatgpt.com", "chat.openai.com"), "perplexity": ("perplexity.ai",),
+    "claude": ("claude.ai",), "gemini": ("gemini.google.com",),
+    "copilot": ("copilot.microsoft.com",),
+}
+
+
+def referrer_group(host: str) -> tuple[str, str]:
+    """``(kind, name)`` for a referrer host: kind is search | ai | other."""
+    h = (host or "").lower()
+    for kind, table in (("ai", _AI_ASSISTANTS), ("search", _SEARCH_ENGINES)):
+        for name, domains in table.items():
+            for d in domains:
+                if d.endswith("."):
+                    if h.startswith(d) or f".{d}" in h:
+                        return kind, name
+                elif h == d or h.endswith(f".{d}"):
+                    return kind, name
+    return "other", h
+
+
+async def _referrals(db: AsyncSession, days: int) -> dict:
+    """Landing sessions by referrer host (lp_view, bots left out), grouped."""
+    from src.models import AnalyticsEvent
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = (await db.execute(
+        select(AnalyticsEvent.referrer, func.count(func.distinct(AnalyticsEvent.session_id)))
+        .where(AnalyticsEvent.event_type == "lp_view",
+               AnalyticsEvent.created_at >= cutoff,
+               AnalyticsEvent.referrer.isnot(None),
+               AnalyticsEvent.ua_class.is_distinct_from("bot"))
+        .group_by(AnalyticsEvent.referrer)
+    )).all()
+    by_kind: dict[str, dict[str, int]] = {"search": {}, "ai": {}, "other": {}}
+    for host, n in rows:
+        kind, name = referrer_group(host or "")
+        by_kind[kind][name] = by_kind[kind].get(name, 0) + int(n)
+    top_other = dict(sorted(by_kind["other"].items(), key=lambda kv: -kv[1])[:15])
+    return {
+        "search": by_kind["search"], "ai": by_kind["ai"], "other_top": top_other,
+        "search_total": sum(by_kind["search"].values()),
+        "ai_total": sum(by_kind["ai"].values()),
+        "other_total": sum(by_kind["other"].values()),
+    }
+
+
+@router.get("/metrics/growth", dependencies=[Depends(rate_limit_reads)])
+async def growth_metrics(
+    days: int = Query(30, ge=1, le=366),
+    current_entity: Entity = Depends(get_current_entity),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Daily series the 6-hour job keeps (catalog answer mix + Certified, x402
+    excluded; npm / PyPI downloads), the catalog mix right now, and search / AI
+    referrals to landing pages over ``days``. Admin only."""
+    require_admin(current_entity)
+    from src import cache
+    from src.jobs.metrics_daily import (
+        CATALOG_PREFIX,
+        DOWNLOADS_PREFIX,
+        current_catalog_mix,
+        read_daily,
+    )
+
+    cache_key = f"admin:metrics:growth:{days}"
+    cached = await cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    day_strs = window_day_strs(days)
+    catalog = await read_daily(CATALOG_PREFIX, day_strs)
+    downloads = await read_daily(DOWNLOADS_PREFIX, day_strs)
+    try:
+        now = await current_catalog_mix(db)
+    except Exception:
+        logging.getLogger(__name__).exception("catalog mix unavailable")
+        now = None
+    latest_dl = downloads[max(downloads)] if downloads else None
+    result = {
+        "days": day_strs,
+        "catalog_daily": catalog,
+        "catalog_now": now,
+        "downloads_daily": downloads,
+        "downloads_latest": latest_dl,
+        "referrals": await _referrals(db, days),
+        "notes": [
+            "catalog_daily is written by the 6-hour scheduler job (src/jobs/metrics_daily) "
+            "from the PR 2 deploy on; days before it are absent, not zero. x402 listings "
+            "are excluded, as on the site.",
+            "downloads: npm last-week downloads and PyPI recent downloads (pypistats) of "
+            "agentavow-trust, fetched by the same job. A source that failed is absent.",
+            "referrals: landing sessions (lp_view, bots left out) by the host of the page "
+            "that sent them. Only the host is stored. Counted from the PR 2 deploy.",
+        ],
+    }
+    await cache.set(cache_key, result, ttl=cache.TTL_SHORT)
+    return result
 
 
 _EVAL_TASKS: set[asyncio.Task] = set()
