@@ -253,6 +253,7 @@ def route(monkeypatch):
     from src.api import public_scan_router as psr
 
     store: dict = {}
+    monkeypatch.setenv("ETH_RPC_URL", "https://rpc.example")
 
     async def cget(k):
         return store.get(k)
