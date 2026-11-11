@@ -11,9 +11,9 @@ While the hold is set:
 * the watch re-scan loop (``scheduler._run_watch_rescan``) and the GitHub App private
   repo re-scan (``app_scan._maybe_notify``) send no score-drop or score-improved alert
   (no notification, email or webhook), and still store the new score as the baseline,
-  so the change is absorbed silently and does not fire after the hold clears. The
-  watch loop treats a change of answer (safe / review / do_not_connect) or of the
-  Certified mark the same way, since a re-score moves those too;
+  so the change is absorbed silently and does not fire after the hold clears. Both
+  treat a change of answer (safe / review / do_not_connect) or of the Certified mark
+  the same way, since a re-score moves those too;
 * a signed tool-definition change (``tool_manifest_digest`` drift) and a sandbox
   behavior change still alert as usual. A re-score does not change either, so an alert
   on them during the hold is a real change.

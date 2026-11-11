@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +34,11 @@ from src.api.rate_limit import (
 from src.config import settings
 from src.database import get_db
 from src.scanner.behavioral import slots as _behavioral_slots
+from src.scanner.categories import (
+    DETECTION_CATEGORIES,
+    categories_public,
+    detection_category_for,
+)
 from src.scanner.verdict import certified_mark as _certified_mark
 from src.scanner.verdict import certified_mark_status as _certified_mark_status
 from src.scanner.verdict import coverage_gap_notes as _coverage_gap_notes
@@ -101,6 +106,18 @@ class ScanFinding(BaseModel):
     # Makefile / scripts/ / bench/, anything absent from the wheel): severity is
     # capped at info and it never blocks.
     installed: bool = True
+    # The detection category the raw ``category`` key rolls up into
+    # (src/scanner/categories.py; the list is at GET /public/scan/categories).
+    # Display grouping only: never a score or decision input.
+    detection_category: str = ""
+
+    @model_validator(mode="after")
+    def _fill_detection_category(self) -> ScanFinding:
+        # Filled here, not where items are built, so a cached response from before the
+        # field existed carries it too.
+        if not self.detection_category:
+            self.detection_category = detection_category_for(self.category)
+        return self
 
 
 class FindingsSummary(BaseModel):
@@ -2274,6 +2291,24 @@ async def mcp_card(
 ) -> Response:
     """The website-embed card for a live MCP endpoint."""
     return await _mcp_badge_svg(endpoint, style, theme)
+
+
+@router.get("/categories", dependencies=[Depends(rate_limit_reads)])
+async def list_detection_categories() -> dict:
+    """The detection categories every finding rolls up into.
+
+    Each entry has an ``id``, ``name``, one-line ``description``, the raw finding
+    ``category`` keys it covers and whether the static engine can produce it
+    (``static: false`` means only the behavioral sandbox tier can). A finding in a scan
+    response names its group in ``detection_category``. Grouping only: the trust score,
+    the five ``category_scores`` and the answer are computed from the findings
+    themselves, not from these groups.
+    """
+    return {
+        "count": len(DETECTION_CATEGORIES),
+        "static_count": sum(1 for c in DETECTION_CATEGORIES if c.static),
+        "categories": categories_public(),
+    }
 
 
 @router.get(
