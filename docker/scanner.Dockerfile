@@ -3,7 +3,7 @@
 # Published as ghcr.io/agentavow/scanner:0.1 (rebuilt from main by CI).
 #
 # This image carries ONLY the offline static scanner (`agentavow scan`): the same
-# 12-category detection engine and scoring the hosted service runs, over a checked-out
+# 14-category detection engine and scoring the hosted service runs, over a checked-out
 # tree. No web stack, no database driver, no network calls at scan time. It is meant
 # to be pulled once into an internal registry and run inside CI behind a firewall.
 #

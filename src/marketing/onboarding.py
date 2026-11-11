@@ -22,9 +22,11 @@ FAQ_KNOWLEDGE = [
      "Paste a URL and get a 0-100 trust score backed by scan evidence anyone can "
      "recompute offline."),
     ("How do trust scores work?",
-     "Every scan reads the actual source across 12 safety categories — exposed "
-     "secrets, unsafe code execution, data handling, network and filesystem access, "
-     "prompt-injection surfaces, obfuscation, and dependency health — and produces "
+     "Every scan reads the actual source across 14 detection categories — secrets, "
+     "code execution, obfuscation, prompt injection, remote code load (rug-pull), "
+     "data exfiltration, toxic flows (the lethal trifecta), network endpoints, "
+     "filesystem access, dependencies, install hooks, tool definitions, artifact "
+     "integrity, and runtime robustness (from the behavioral sandbox) — and produces "
      "a 0-100 trust score plus a signed attestation. Higher is safer; the earned "
      "top tier is Certified."),
     ("What makes the score verifiable?",

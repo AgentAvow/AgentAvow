@@ -6,7 +6,7 @@ collect two things:
 
 * **The app's own files** — text files outside the base-OS and third-party trees
   (``/app``, ``/srv``, ``/opt``, entrypoint scripts, ``/etc`` config …), which the
-  12-category static engine then grades like any other artifact.
+  14-category static engine then grades like any other artifact.
 * **The installed package inventory** — OS packages from ``var/lib/dpkg/status`` (Debian,
   Ubuntu, distroless ``status.d``) or ``lib/apk/db/installed`` (Alpine), plus Python
   ``*.dist-info`` and npm ``node_modules/*/package.json`` — for the OSV CVE check in

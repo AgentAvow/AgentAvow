@@ -14,7 +14,7 @@ Built for self-managed GitLab behind a firewall, where the hosted scanner cannot
 
 ## What the scan is
 
-`agentavow scan` is the same static engine and scoring the hosted service runs: the 12 detection categories, the allowlist and inline suppressions, MCP-server context, dependency findings from manifests and lockfiles, and the 0-100 trust score. It reads git-tracked files only, so the score matches a hosted scan of the same tree.
+`agentavow scan` is the same static engine and scoring the hosted service runs: the 14 detection categories, the allowlist and inline suppressions, MCP-server context, dependency findings from manifests and lockfiles, and the 0-100 trust score. It reads git-tracked files only, so the score matches a hosted scan of the same tree.
 
 Two outputs per run:
 

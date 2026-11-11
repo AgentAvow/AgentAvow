@@ -6433,7 +6433,7 @@ async def _maybe_scan_artifact(
     Feature-flagged (``settings.scanner_scan_artifact``, default OFF) and FAIL-OPEN:
     any resolve/download/unpack error leaves the repo-only grade + coverage
     untouched. When it succeeds it folds artifact findings (install hooks, injected/
-    modified files, plus every 12-category detector run over the real tree) into the
+    modified files, plus every 14-category detector run over the real tree) into the
     scan and upgrades ``coverage.scan_depth`` to ``"artifact"`` with the exact
     artifact ``sha256`` digest and a pinned registry snapshot date.
     """
@@ -6840,7 +6840,7 @@ def _deprecation_finding(eco: str, name: str, version: str, message: str) -> Fin
 
 async def scan_package(surface: str, name: str, version: str | None = None) -> ScanResult:
     """Grade a PUBLISHED npm / PyPI package directly by coordinate — no GitHub repo
-    required. Fetches + STATICALLY scans the real artifact tree (the same 12-category
+    required. Fetches + STATICALLY scans the real artifact tree (the same 14-category
     engine + install-hook detectors, via ``scan_artifact_files``), verifies the
     package's build provenance on the exact coordinate (the axis that can earn A+),
     and returns a signed A+..F ``ScanResult`` with ``coverage.surface`` set and
@@ -8173,7 +8173,7 @@ async def scan_repo(
         # --- Phase 2: published-artifact fetch + scan + repo↔artifact drift ----
         # Feature-flagged (default OFF) and FAIL-OPEN. When enabled it scans the
         # real npm/PyPI artifact (install hooks, injected/modified files, the full
-        # 12-category engine over the extracted tree) and upgrades coverage to
+        # 14-category engine over the extracted tree) and upgrades coverage to
         # scan_depth="artifact" with the exact artifact digest.
         await _maybe_scan_artifact(
             result, owner, repo, tree, token, ref, artifact, repo_text_hashes,

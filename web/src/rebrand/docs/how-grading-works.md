@@ -71,6 +71,25 @@ Certification is **re-checked every scan and is revocable**: if provenance expir
 
 See the [**Certified page**](/certified) for the live gate, the hard disqualifiers, and the tools that are Certified today.
 
+## The 14 detection categories
+
+Every finding falls into one of 14 detection categories. The first 13 come from reading the code; the last needs the behavioral sandbox to run the tool. The categories group findings for people. The score and the answer read each finding's own severity and raw category key, not the group. The canonical list, with the raw keys under each, is [`src/scanner/categories.py`](https://github.com/AgentAvow/AgentAvow/blob/main/src/scanner/categories.py).
+
+1. **Secrets**: API keys, tokens, passwords or private keys written into the code or config.
+2. **Code execution**: shell or eval execution of input, unsafe deserialization, and git configs that run commands on ordinary git operations.
+3. **Obfuscation**: encoded, packed or bytecode-only code, and invisible or bidi Unicode that hides text from a human reviewer.
+4. **Prompt injection**: instruction-override or hidden-directive text in tool descriptions, metadata, skill prose or tool results, aimed at the model that reads it.
+5. **Remote code load (rug-pull)**: code, config or tool definitions fetched from a mutable remote source that can change after you approved the tool.
+6. **Data exfiltration**: credentials or local data sent to an outbound endpoint.
+7. **Toxic flow (lethal trifecta)**: private-data access, untrusted input and an outbound send combined in one tool, the prompt-injection-to-exfiltration chain.
+8. **Network endpoints**: caller-supplied URLs fetched unchecked (SSRF), plain-HTTP or private-address endpoints, cross-site endpoints, and weak or missing auth schemes.
+9. **Filesystem access**: unsandboxed reads and writes, path traversal, and recursive deletes.
+10. **Dependencies**: dependencies with known vulnerabilities, published advisories against the package itself, and deprecated or yanked releases.
+11. **Install hooks**: scripts that run on install or around a skill's invocation without being called (npm pre/postinstall, skill hook manifests).
+12. **Tool definition**: risky input schemas, annotations that misstate what a tool does, and skill permission grants that differ from what the shipped code does.
+13. **Artifact integrity**: a published package that differs from its source repo, and agent cards whose signature does not verify.
+14. **Runtime robustness (sandbox only)**: a tool call that crashes the server or a read-only tool that fails on a read, seen only when the behavioral sandbox runs the tool.
+
 ## Coverage & offline recompute
 
 Every verdict carries a **coverage block** stating exactly what was measured: the surface, the scan depth (`repo-only` / `artifact` / `artifact+live`), the exact artifact digest, the provenance binding, and the dated snapshot of every external database consulted (OSV export, registry timestamp, Rekor index). That's what makes the score **recomputable** — pin the bytes and the DB dates, and any verifier re-derives the identical verdict and checks the signature against our public JWKS. See **Verify an attestation**.

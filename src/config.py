@@ -236,7 +236,7 @@ class Settings(BaseSettings):
     # When on, after the repo scan we resolve+download the real npm/PyPI artifact
     # FROM THE REGISTRY ONLY (SSRF-guarded, host-allowlisted, size/zip-bomb capped),
     # compute its sha256 digest, unpack it STATICALLY (no execution), re-run the
-    # 12-category engine on the extracted tree, detect published install hooks
+    # 14-category engine on the extracted tree, detect published install hooks
     # (npm pre/post/install + setup.py AST), and diff the artifact tree vs the repo
     # to surface drift. Sets coverage.scan_depth="artifact" + a real artifact_digest.
     # ADDITIVE, FEATURE-FLAGGED (default OFF — enable after review), and FAIL-OPEN:

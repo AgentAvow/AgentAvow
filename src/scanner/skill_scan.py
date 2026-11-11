@@ -1,5 +1,5 @@
 """OpenClaw / Agent-Skill capability grading (roadmap §2.D — the net-new value
-beyond the 12 categories).
+beyond the 14 detection categories).
 
 A skill is a folder: a ``SKILL.md`` whose YAML frontmatter is injected into the
 model's context EVERY session, an ``allowed-tools`` capability manifest that
@@ -356,7 +356,7 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md",
                 "code the user never explicitly invokes. Review every command string.",
             ))
 
-    # 4 + 5. scripts — env-exfil / sandbox-probe + the 12-category engine, and
+    # 4 + 5. scripts — env-exfil / sandbox-probe + the 14-category engine, and
     # collect ACTUAL capabilities for the declared-vs-actual drift check (§6).
     net_scripts: list[str] = []
     exec_scripts: list[str] = []
@@ -603,7 +603,7 @@ def _credential_findings(path: str, text: str, extern: dict[str, str] | None = N
 
 
 def _scan_text(text: str, where: str) -> list:
-    """Reuse the repo scanner's 12-category engine over a skill file."""
+    """Reuse the repo scanner's 14-category engine over a skill file."""
     if not text or not text.strip():
         return []
     from src.scanner.scan import _scan_content
