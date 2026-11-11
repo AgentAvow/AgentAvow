@@ -14,10 +14,11 @@ def test_npm_deprecation_message_or_flag():
     assert _npm_deprecation({}) is None
 
 
-def test_pypi_yanked_or_inactive():
-    assert _pypi_deprecation({"info": {"yanked": True, "yanked_reason": "CVE-2025-1"}}) == \
-        "release yanked: CVE-2025-1"
-    assert _pypi_deprecation({"info": {"yanked": True}}) == "release yanked by its maintainer"
+def test_pypi_inactive_is_deprecation_but_a_yank_is_not():
+    # A yank is usually a broken build: reported as its own finding (test_removed_and_
+    # yanked_versions.py), never as "the maintainer has deprecated this package".
+    assert _pypi_deprecation({"info": {"yanked": True, "yanked_reason": "CVE-2025-1"}}) is None
+    assert _pypi_deprecation({"info": {"yanked": True}}) is None
     assert "inactive" in _pypi_deprecation(
         {"info": {"classifiers": ["Development Status :: 7 - Inactive"]}})
     assert _pypi_deprecation({"info": {"classifiers": ["Development Status :: 5 - Stable"]}}) is None

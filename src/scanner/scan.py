@@ -6862,6 +6862,23 @@ def _env_reads_from_artifact(files: dict) -> list[str]:
         return []
 
 
+def _yank_finding(name: str, version: str, reason: str | None) -> Finding:
+    """A PyPI release its maintainer yanked. Usually a broken build, so LOW: a clean
+    yanked version stays Safe with this note. MEDIUM when the yank reason says it was a
+    security event (agentgraph-83, 2026-11-11)."""
+    from src.scanner.artifact_fetch import yank_is_security
+    sec = yank_is_security(reason)
+    return Finding(
+        category="maintenance",
+        name=("Release yanked by its maintainer for a security reason" if sec
+              else "Release yanked by its maintainer"),
+        severity="medium" if sec else "low",
+        file_path="registry metadata", line_number=0,
+        snippet=f"{name}=={version}: yanked" + (f": {reason}" if reason else "")[:280],
+        remediation=("pip skips a yanked release unless it is pinned exactly. Pin a "
+                     "release that isn't yanked."))
+
+
 def _deprecation_finding(eco: str, name: str, version: str, message: str) -> Finding:
     """'Clean but abandoned': the maintainer retired the package. Not malicious, so it is
     a MEDIUM maintenance finding (no security fixes are coming), never a blocker."""
@@ -6879,6 +6896,65 @@ def _deprecation_finding(eco: str, name: str, version: str, message: str) -> Fin
             "deprecation message often names one) and scan that before you connect it."
         ),
     )
+
+
+REMOVED_COMPROMISE_NAME = "This version was removed from the registry after a reported compromise"
+REMOVED_NAME = "This version was removed from the registry; its code can't be checked"
+
+
+async def _removed_version_answer(result: ScanResult, eco: str, surface: str, name: str,
+                                  version: str) -> bool:
+    """Fill ``result`` for a version the registry no longer serves (gap audit A3,
+    design reviewed by agentgraph-83 2026-11-11). True when it answered.
+
+    (a) A compromise record (MAL- / CWE-506 GHSA) lists this exact version: a critical
+        finding citing it, so the answer is Do not connect without the code.
+    (b) Otherwise, if we can tell the version existed (npm's ``time`` map still lists it,
+        or an OSV record names it): a high finding, so the answer is Review; never
+        Certified.
+    Neither (a typo, an unknown package): False, and the caller keeps the error."""
+    from src.scanner import incident_history as ih
+    from src.scanner.artifact_fetch import probe_removed_version
+
+    probe = await probe_removed_version(eco, name, version)
+    if probe is None:
+        return False
+    vulns = await ih.fetch_osv_vulns(surface, name) or []
+    osv_eco = ih._OSV_ECOSYSTEM.get(eco)
+    exact = ih.exact_version_incidents(vulns, version, osv_eco, name)
+    existed = (bool(probe.get("published_before"))
+               or ih.any_record_lists_version(vulns, version, osv_eco, name))
+    inc = ih.summarize_incidents(vulns, version, osv_eco, name)
+    if not exact and not existed:
+        return False
+    where = "registry metadata"
+    if exact:
+        ids = ", ".join(exact[:3])
+        finding = Finding(
+            category="known_vulnerability",
+            name=f"{REMOVED_COMPROMISE_NAME} ({ids})",
+            severity="critical", file_path=where, line_number=0,
+            snippet=f"{name}@{version}: no longer served by the registry; listed in {ids}"[:300],
+            remediation=("Remove this version from your lockfile and install a version the "
+                         "maintainer published after the incident. Rotate any credentials "
+                         "a machine that installed it could reach."))
+    else:
+        finding = Finding(
+            category="maintenance", name=REMOVED_NAME,
+            severity="high", file_path=where, line_number=0,
+            snippet=f"{name}@{version}: published, then removed from the registry"[:300],
+            remediation=("Pin a version the registry still serves, then check it. A removed "
+                         "version can't be inspected, and its removal is often a fix."))
+    result.findings = [finding]
+    result.incident_history = inc
+    result.files_scanned = 0
+    result.total_scannable_files = 0
+    result.artifact_scan = {"version": version, "removed_from_registry": True}
+    result.coverage_gaps = {**(result.coverage_gaps or {}), "version_removed": True}
+    result.trust_score = _calculate_trust_score(result)
+    result.category_scores = _calculate_category_scores(result)
+    result.certified = False
+    return True
 
 
 async def scan_package(surface: str, name: str, version: str | None = None) -> ScanResult:
@@ -6935,6 +7011,17 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
         else:
             fetched = await fetch_pypi_artifact(name, version)
     except ArtifactFetchError as exc:
+        # A version the registry no longer serves (unpublished, deleted) still gets an
+        # answer when we can tell it existed: a lockfile can pin it.
+        if eco in ("npm", "pypi") and version:
+            from src.scanner.artifact_fetch import is_version_missing_error
+            if is_version_missing_error(eco, str(exc)):
+                try:
+                    if await _removed_version_answer(result, eco, surface, name, version):
+                        return result
+                except Exception:  # noqa: BLE001 — fail-open: keep the plain error
+                    logger.debug("removed-version answer failed for %s:%s@%s",
+                                 eco, name, version, exc_info=True)
         result.error = str(exc)
         return result
     except Exception as exc:  # noqa: BLE001 — fail-open is mandatory
@@ -7089,6 +7176,9 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
         result.deprecation = fetched.deprecation
         findings = findings + [_deprecation_finding(eco, fetched.name, fetched.version,
                                                     fetched.deprecation)]
+    if getattr(fetched, "yanked", False) is True:
+        findings = findings + [_yank_finding(fetched.name, fetched.version,
+                                             getattr(fetched, "yanked_reason", None))]
     result.findings = findings
     result.files_scanned = files_scanned
     result.total_scannable_files = files_scanned
