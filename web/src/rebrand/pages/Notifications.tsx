@@ -61,7 +61,7 @@ export default function Notifications() {
           <div>
             <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Notifications</span>
             <h1 className="mt-1 text-2xl md:text-3xl font-extrabold tracking-tight">Your alerts</h1>
-            <p className="mt-1.5 text-text-muted text-[13.5px]">When a tool you watch changes — a score drops, a signed definition changes, or it gets safer.</p>
+            <p className="mt-1.5 text-text-muted text-[13.5px]">When a tool you watch changes — a score drops, the answer gets worse, the Certified mark comes off, a signed definition changes, the sandbox finds new behavior, or it gets safer.</p>
           </div>
           {!!unreadIds.length && (
             <button onClick={() => markAll.mutate()} disabled={markAll.isPending} className="text-[12.5px] font-semibold px-3 py-1.5 rounded-lg border border-border text-text-muted hover:text-text disabled:opacity-60">Mark all read ({unreadIds.length})</button>

@@ -125,7 +125,7 @@ export default function RebrandClaudeCode() {
             Install the plugin. In your next session, Claude tells you which ones read <b className="font-medium text-text">Safe to connect</b>, <b className="font-medium text-text">Review before you connect</b>, or <b className="font-medium text-text">Do not connect</b>, and why.
           </p>
           <Install />
-          <p className="mt-3 text-[14px] text-text-muted">Run each line in Claude Code, then start a new session. Or open <code className="font-mono text-[13px] text-primary-light">/plugin</code> and find AgentAvow Trust under Discover.</p>
+          <p className="mt-3 text-[14px] text-text-muted">Run each line in Claude Code, then start a new session. Or open <code className="font-mono text-[13px] text-primary-light">/plugin</code> and find AgentAvow Trust under Discover (the directory can lag behind the latest version).</p>
           <div className="flex flex-wrap gap-x-[18px] gap-y-1.5 mt-3.5 text-[13.5px] text-text-muted">
             {['Free, no account', 'The plugin is MIT licensed', 'Only the server URL or package name leaves your machine'].map((f) => (
               <span key={f}><span className="text-primary-light font-bold mr-1.5" aria-hidden="true">✓</span>{f}</span>
@@ -172,7 +172,7 @@ export default function RebrandClaudeCode() {
         <div className="max-w-[860px] mx-auto px-6">
           <h2 className={h2}>Why developers can trust the answer.</h2>
           <div className="grid gap-[7px] mt-3.5 text-[14.5px] text-text-muted max-w-[68ch]">
-            <p><b className="text-text font-semibold">Hundreds of Claude Code machines connect each day.</b></p>
+            <p><b className="text-text font-semibold">Claude Code machines connect to it every day.</b></p>
             <p>Each result is signed with Ed25519, and you can verify it offline against our public keys.</p>
             <p>Our tool definition digest is in the TRACE spec as <code className="font-mono text-[13px]">trace.mcp-tool-definition.v1</code>.</p>
             <p>An outside party reproduced our conformance vectors byte for byte in a Linux Foundation Decentralized Trust lab.</p>

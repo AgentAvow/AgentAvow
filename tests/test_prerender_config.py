@@ -68,7 +68,7 @@ def test_prerendered_routes_are_real_routes_in_the_sitemap():
     known = [g.to_regex(p) for p in g.route_paths(g.APP.read_text())]
     sitemap = (ROOT / "web/public/sitemap.xml").read_text()
     routes = _prerendered_routes()
-    assert len(routes) == 17
+    assert len(routes) == 18
     for route in routes:
         assert any(re.match(p, route) for p in known), route
         assert f"<loc>https://agentavow.com{route if route != '/' else ''}" in sitemap, route

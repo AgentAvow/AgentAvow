@@ -155,8 +155,9 @@ you can recompute it. See [Verify an AgentAvow attestation](./verify-attestation
 
 ## Stay safe over time
 
-Tools change after you vet them. **Watch** a tool and we re-scan it and alert you the moment its score drops
-or its signed definition changes (every alert leads with the tool's current answer) — the rug-pull you'd otherwise miss. For an MCP server the attestation pins
+Tools change after you vet them. **Watch** a tool and we re-scan it and alert you when its score drops
+by more than 5 points, its answer gets worse, its Certified mark comes off, its signed definition changes, or a
+later sandbox run finds new behavior (every alert leads with the tool's current answer) — the rug-pull you'd otherwise miss. For an MCP server the attestation pins
 one digest per served tool (`scan.toolDigests`, keyed `tool:<name>`) plus a digest of the whole set, and a
 re-scan reports `toolDrift` (`tool_drift` in the API response) — which tools were added, removed or changed since the last check — so you can
 see exactly what moved, not just that something did. A gate can recompute the digest of the tool it is about
