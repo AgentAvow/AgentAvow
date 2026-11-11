@@ -109,7 +109,9 @@ SCRIPT = (
     "const m = await import(process.argv[1]);"
     "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{"
     "const out=JSON.parse(s).map(([scan,kind])=>{const rows=m.certifiedRows(scan,kind);"
-    "return {rows:rows.map(r=>[r.state,r.evidence]),status:m.certifiedStatus(scan,rows),"
+    "return {rows:rows.map(r=>[r.state,r.evidence]),decides:rows.map(r=>!!r.decides),"
+    "note:rows[rows.length-1].note||null,pending:m.certifiedPending(scan),"
+    "status:m.certifiedStatus(scan,rows),"
     "top:m.topFindings(scan,3).map(f=>[f.name,m.fixText(f)])}});"
     "process.stdout.write(JSON.stringify(out));});"
 )
@@ -134,47 +136,63 @@ def states(r: dict) -> list[str]:
     return [s for s, _ in r["rows"]]
 
 
+def test_the_deciding_line_is_always_last(results):
+    for name, r in results.items():
+        assert r["decides"] == [False, False, False, False, True], name
+
+
 def test_safe_certified_passes_every_row(results):
     r = results["safe_certified"]
     assert r["status"] == {"lead": "Why it's Certified", "rest": ""}
-    assert states(r) == ["pass", "pass", "pass", "pass"]
-    assert r["rows"][1][1] == "Signed build provenance → makenotion/notion-mcp-server"
+    assert states(r) == ["pass", "pass", "pass", "pass", "pass"]
+    assert r["rows"][0][1] == "Signed build provenance → makenotion/notion-mcp-server"
     assert r["rows"][3][1] == "started, 24 tools, 25 calls · signed result"
+    assert r["rows"][4][1] == "reads Safe at 95"
+    assert r["pending"] is None
 
 
 def test_safe_not_certified_names_the_missing_check(results):
     r = results["safe_not_certified"]
     assert r["status"] == {"lead": "Not Certified yet", "rest": "one check is missing"}
-    assert states(r) == ["pass", "pass", "pass", "fail"]
+    assert states(r) == ["pass", "pass", "pass", "fail", "pass"]
     assert "crashed" in r["rows"][3][1]
+    assert r["pending"] is None
 
 
 def test_pending_waits_on_the_sandbox(results):
     r = results["pending"]
     assert r["status"] == {"lead": "Certified is pending", "rest": "waiting on the sandbox run"}
     assert states(r)[3] == "wait"
+    assert r["rows"][4] == ["wait", "reads Safe at 95, pending"]
+    # One dashed line under the score, never the badge.
+    assert r["pending"] == "sandbox run in progress"
 
 
 def test_review_and_do_not_connect_status_lines(results):
     assert results["review"]["status"] == {"lead": "Not Certified", "rest": "the answer is Review"}
-    assert results["review"]["rows"][0] == [
-        "fail", "Reads Review: 2 high findings in its code, including HTTP POST with sensitive data"]
+    # The deciding line: "Answer: Safe to connect at 81+ (reads Review at 70)".
+    assert results["review"]["rows"][4] == ["fail", "reads Review at 70"]
+    assert results["review"]["note"] == "2 high findings in its code, including HTTP POST with sensitive data."
+    assert results["review"]["rows"][2][0] == "fail"
+    assert results["review"]["pending"] is None
     d = results["do_not_connect"]
     assert d["status"] == {"lead": "Not Certified", "rest": "the answer is Do not connect"}
-    assert d["rows"][1] == ["fail", "No build provenance"]
+    assert d["rows"][0] == ["fail", "No build provenance"]
+    assert d["rows"][2] == ["fail", "1 critical finding"]
     assert d["rows"][3] == ["fail", "the sandbox runs the latest release, not this pinned version"]
+    assert d["rows"][4] == ["fail", "reads Do not connect at 45"]
 
 
 def test_unread_live_server(results):
     r = results["couldnt_read"]
     assert r["status"] == {"lead": "Not Certified", "rest": "the live server couldn't be read"}
-    assert r["rows"][2] == ["fail", "The live tool list couldn't be read"]
+    assert r["rows"][1] == ["fail", "The live tool list couldn't be read"]
 
 
 def test_a2a_card_rows_say_what_a_card_check_is(results):
     r = results["a2a_safe"]
-    assert r["rows"][1] == ["fail", "An agent card checked by URL has no published package to match"]
-    assert r["rows"][2] == ["pass", "The whole agent card read: every skill, interface and auth scheme"]
+    assert r["rows"][0] == ["fail", "An agent card checked by URL has no published package to match"]
+    assert r["rows"][1] == ["pass", "The whole agent card read: every skill, interface and auth scheme"]
     assert r["rows"][3] == ["fail", "an agent card is read, not run: the agent's code is not in the sandbox"]
     assert r["status"]["lead"] == "Not Certified yet"
 
@@ -194,6 +212,13 @@ def test_every_result_type_renders_through_one_result_page():
     for kind in ("skill", "mcp", "package", "repo", "a2a"):
         assert f'kind="{kind}"' in src, kind
     assert src.count("<ResultPage") == 5
+    # The old "Badge, claim and share" slot is gone: claim is Next steps step 2, the
+    # badges sit at the bottom, and Watch renders once (step 1).
+    assert "badgeClaimShare" not in src
+    page = (ROOT / "web/src/rebrand/components/ResultPage.tsx").read_text()
+    assert page.count("{watch}") == 1 and "Watch this tool</h3>" not in page
+    # Certified shows once, as the badge in the trust-score slot: no CERTIFIED tag.
+    assert 'data-testid="certified-mark"' not in page and "CertifiedBadge" in page
     # The old per-surface score labels are gone: every page says "Trust score".
     for rel in ("web/src/rebrand/pages/Check.tsx", "web/src/rebrand/components/ResultPage.tsx"):
         text = (ROOT / rel).read_text()
