@@ -42,7 +42,7 @@ const STANDARDS = [
   ['CTEF — Composable Trust Evidence Format', 'The signed, reproducible evidence envelope any implementer can recompute byte-for-byte. Versioned in the open.', 'https://github.com/AgentAvow/AgentAvow/tree/main/docs/standards'],
   ['Published test vectors', 'Conformance vectors served at /.well-known so anyone can validate their own implementation against ours.', 'https://agentgraph.co/.well-known/cte-test-vectors.json'],
   ['A2A', 'Our agent card carries a pointer to its own signed verdict (the AgentAvow trust-verdict extension).', '/ext/trust-verdict/v1/'],
-  ['ERC-8004 reader', 'Reader for ERC-8004 identity and feedback records; not yet used in any answer or score.', 'https://github.com/AgentAvow/AgentAvow/tree/main/src/agentgraph_bridge_erc8004'],
+  ['ERC-8004 agents', 'We read an agent’s on-chain registration (Ethereum, Base, BNB Chain) and answer for every tool it lists. On-chain identity itself is not part of the trust score.', '/docs/erc8004-agents'],
   ['AIPOU cross-fixture', 'A shared conformance fixture proving two independent implementations agree.', 'https://github.com/AgentAvow/AgentAvow/tree/main/docs/conformance'],
   ['Independently cross-run in the LF DT lab', 'Our CTEF conformance vectors, positive and adversarial/fail-closed, were reproduced byte-for-byte in the Linux Foundation Decentralized Trust Agent Authority Conformance lab, by a party other than us.', 'https://github.com/Agent-Authority-Conformance/aps-conformance-suite/pull/79'],
   ['MCP & AIP bridges', 'Adapters so the trust layer plugs into the frameworks agents already use.', 'https://github.com/AgentAvow/AgentAvow/tree/main/docs/protocol'],

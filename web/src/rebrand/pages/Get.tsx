@@ -70,6 +70,7 @@ const GROUPS: { title: string; sub: string; items: Item[] }[] = [
       { name: 'GitHub Action', text: code('AgentAvow/AgentAvow/github-action@main'), actions: [{ kind: 'link', label: 'Open ↗', href: 'https://github.com/AgentAvow/AgentAvow/tree/main/github-action' }] },
       { name: 'GitLab CI/CD Catalog', text: 'Gate merge requests on the answer. Runs in your own GitLab runner; nothing leaves your network.', snippet: GITLAB_SNIPPET, actions: [{ kind: 'link', label: 'Open in the Catalog ↗', href: 'https://gitlab.com/explore/catalog/agentavow/agentavow-scan' }, { kind: 'link', label: 'Setup →', href: '/rebrand/docs/run-locally#gitlab-ci' }] },
       { name: 'Bitbucket and Azure DevOps', text: 'Run the scanner in your own pipeline.', actions: [{ kind: 'link', label: 'Setup →', href: '/rebrand/docs/run-locally' }] },
+      { name: 'ERC-8004 agents', text: 'Check any ERC-8004 agent on Ethereum, Base or BNB Chain: we read its registration and answer for every MCP server and A2A agent it lists.', actions: [{ kind: 'link', label: 'Check one →', href: '/rebrand/check' }, { kind: 'link', label: 'Docs →', href: '/rebrand/docs/erc8004-agents' }] },
       { name: 'API', text: <>The answer, both scores and the findings as JSON. No key needed for public tools. {code('curl https://agentavow.com/api/v1/public/scan/package/npm/zod')}</>, actions: [{ kind: 'link', label: 'API docs ↗', href: '/api/v1/redoc' }] },
     ],
   },

@@ -16,6 +16,7 @@ import verifyAttestations from '../docs/verify-attestations.md?raw'
 import autoScanClaudeCode from '../docs/auto-scan-claude-code.md?raw'
 import mcpConnector from '../docs/mcp-connector.md?raw'
 import behavioralSandbox from '../docs/behavioral-sandbox.md?raw'
+import erc8004Agents from '../docs/erc8004-agents.md?raw'
 
 /**
  * Rebrand docs PREVIEW — renders the staged trust-first docs (web/src/rebrand/docs/*.md)
@@ -44,6 +45,8 @@ const DOCS = [
     blurb: 'Connect the AgentAvow MCP server to Claude, ChatGPT, Cursor, or VS Code and check any tool’s trust score before your agent connects to it.' },
   { slug: 'auto-scan-claude-code', title: 'Auto-scan in Claude Code', body: autoScanClaudeCode,
     blurb: 'Have Claude Code check every new tool’s trust score automatically — via the plugin, a CLAUDE.md rule, or a SessionStart hook.' },
+  { slug: 'erc8004-agents', title: 'ERC-8004 agents', body: erc8004Agents,
+    blurb: 'Check an ERC-8004 agent on Ethereum, Base or BNB Chain: what we read from its registration, how its answer is set, the API, and the limits.' },
 ]
 
 /** Plain text of a react-markdown heading's children, for its id. */
