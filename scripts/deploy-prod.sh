@@ -109,7 +109,22 @@ site_ok() {
   remote "curl -sk --max-time 3 -H 'Host: agentavow.com' https://localhost/health | grep -q '\"status\":\"ok\"'" > /dev/null 2>&1
 }
 
+# Test the new nginx.conf in a throwaway container (same compose network and mounts)
+# before restarting the live one. A config nginx rejects would otherwise take the
+# site down on restart; this way the old nginx keeps serving and the deploy stops.
+nginx_config_ok() {
+  local out rc
+  out=$(remote "cd ~/${PROJECT_DIR} && ${LOAD_ENV} && docker-compose -f ${COMPOSE_FILE} run --rm --no-deps -T nginx nginx -t" 2>&1)
+  rc=$?
+  echo "$out" | tail -2 | sed 's/^/    /'
+  return $rc
+}
+
 restart_nginx() {
+  if ! nginx_config_ok; then
+    echo -e "${RED}nginx -t rejected the new nginx.conf: NOT restarting nginx (the running one keeps serving). Fix the config and redeploy.${NC}" >&2
+    exit 1
+  fi
   remote "cd ~/${PROJECT_DIR} && ${LOAD_ENV} && docker-compose -f ${COMPOSE_FILE} restart nginx" 2>&1 | while IFS= read -r line; do
     echo "    $line"
   done

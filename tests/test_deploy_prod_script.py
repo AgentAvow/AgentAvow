@@ -47,3 +47,14 @@ wait_until Never never 1 || echo NEVER_TIMEOUT
     out = subprocess.run(["bash", "-c", prog], capture_output=True, text=True, check=True).stdout
     assert "LATE_OK" in out
     assert "NEVER_TIMEOUT" in out
+
+
+def test_nginx_config_is_tested_before_the_restart():
+    """A config nginx rejects must never reach the live container: the deploy runs
+    `nginx -t` in a throwaway container first and stops without restarting if it fails."""
+    src = SCRIPT.read_text()
+    body = src[src.index("restart_nginx() {"):]
+    body = body[: body.index("\n}\n")]
+    assert "nginx_config_ok" in body
+    assert body.index("nginx_config_ok") < body.index("restart nginx")
+    assert "run --rm --no-deps -T nginx nginx -t" in src
