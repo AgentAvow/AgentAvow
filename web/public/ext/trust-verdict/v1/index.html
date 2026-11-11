@@ -44,7 +44,7 @@
 <ol>
 <li>Check that <code>verdict_url</code> is exactly the form above and that its <code>card</code> parameter names the card you fetched. A verdict for another card says nothing about this one.</li>
 <li><code>GET</code> the URL. The response carries <code>decision</code>, <code>decision_reason</code>, <code>trust_score</code> and a JWS attestation (<code>jws</code>).</li>
-<li>Verify the JWS (EdDSA) against <a href="https://agentavow.com/.well-known/jwks.json">https://agentavow.com/.well-known/jwks.json</a>.</li>
+<li>Verify the JWS (EdDSA) against <a href="https://agentavow.com/.well-known/jwks.json">https://agentavow.com/.well-known/jwks.json</a>. The same keys are served at <a href="https://agentgraph.co/.well-known/jwks.json">https://agentgraph.co/.well-known/jwks.json</a>, the host our responses name in <code>jwks_url</code>; either works.</li>
 <li>Check that the signed card digest (<code>scan.agentCard.digest</code>, SHA-256 of the card's RFC 8785 form) matches the card you hold. If the card changed since it was checked, the digest will not match: ask for a fresh check (<code>&amp;force=true</code>) or treat the verdict as unknown.</li>
 </ol>
 
