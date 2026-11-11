@@ -48,18 +48,26 @@ The image sets `safe.directory=*` for git. Runners check the repository out as a
 
 ## Using the component
 
-Components need GitLab 17.0 or newer on the instance that runs the pipeline, and a component project it can reach. The component is published from this directory to a GitLab project; until that exists, mirror the AgentAvow repository into your instance and point the include at the mirror.
+Components need GitLab 17.0 or newer on the instance that runs the pipeline. The component is published in the GitLab CI/CD Catalog as [AgentAvow scan](https://gitlab.com/explore/catalog/agentavow/agentavow-scan) (project [gitlab.com/agentavow/agentavow-scan](https://gitlab.com/agentavow/agentavow-scan), MIT). On gitlab.com:
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<group>/agentavow-scan/scan@<your-tag>
+  - component: gitlab.com/agentavow/agentavow-scan/scan@0.1.0
     inputs:
       fail_on: do_not_connect
       fail_on_findings: high
+```
+
+On a self-managed instance, mirror that project into your instance, point the include at the mirror, and set `image:` to your internal copy of the scanner image:
+
+```yaml
+include:
+  - component: $CI_SERVER_FQDN/<group>/agentavow-scan/scan@0.1.0
+    inputs:
       image: registry.example.internal/mirrors/agentavow/scanner:0.1
 ```
 
-Pin the version after `@`. It is a git tag you create on your component project (AgentAvow does not publish component tags yet); `@~latest` follows the newest release and is the wrong choice for a gate you want to stay reproducible.
+Pin the version after `@` to a release. `@~latest` follows the newest release and is the wrong choice for a gate you want to stay reproducible.
 
 Inputs:
 
