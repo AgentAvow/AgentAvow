@@ -7,7 +7,7 @@
 - A2A Agent Cards: paste any A2A Agent Card URL for an answer, findings and a signed attestation, including whether the card's own signature verifies. API: `GET /api/v1/public/scan/a2a?card={url}`
 - [Browse the catalog](https://agentavow.com/browse): every tool we've scanned, filterable by answer
 - [x402 endpoints](https://agentavow.com/browse?surface=x402): paid x402 endpoints scored from their public listings (the endpoint's code isn't visible), under their own filter only. [How we check x402](https://agentavow.com/docs/x402)
-- [ERC-8004 agents](https://agentavow.com/docs/erc8004-agents): check any ERC-8004 agent on Ethereum, Base or BNB Chain; we read its registration and answer for every MCP server and A2A agent it lists. API: `GET /api/v1/public/scan/erc8004/{ethereum|base|bnb}/{agent_id}`
+- [ERC-8004 agents](https://agentavow.com/docs/erc8004-agents): check any ERC-8004 agent on Ethereum, Base or BNB Chain; we read its registration and answer for every MCP server and A2A agent it lists. API: `GET /api/v1/public/scan/erc8004/{ethereum|base|bnb}/{agent_id}`. AgentAvow itself is ERC-8004 agent 1178486 on Base (registration: https://agentavow.com/.well-known/agent-registration.json)
 - [Public scan API](https://agentavow.com/docs/check-guide): no account needed, e.g. `GET /api/v1/public/scan/{owner}/{repo}` or `/api/v1/public/scan/package/npm/{name}`
 
 ## Use it from an agent
