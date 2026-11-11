@@ -514,13 +514,95 @@ def test_refusal_tells_claude_how_the_person_allows_it_without_the_code(
     decision, reason = _decision(out)
     assert decision == "deny"
     assert reason.startswith("AgentAvow: Do not connect — one critical finding.")
-    assert "the user (not Claude)" in reason and "Do not edit that file yourself" in reason
+    assert "the user (not Claude)" in reason and "do not edit that file yourself" in reason
     code = _code(gate)
     # The code reaches the person (systemMessage) and never Claude (the reason).
     assert code not in reason and code.replace("-", "") not in reason
-    assert out["systemMessage"].endswith(f"allowed-servers.txt (the code at the end is "
-                                         f"shown only to you; do not paste it into the "
-                                         f"chat):\nsrv {URL} {code}")
+    assert (f"allowed-servers.txt (the code at the end is shown only to you; do not "
+            f"paste it into the chat):\nsrv {URL} {code}\n") in out["systemMessage"]
+
+
+def test_refusal_names_the_terminal_command_for_claude_and_person_without_the_code(
+        gate, monkeypatch, capsys):
+    gate.CACHE.write_text(json.dumps({"srv": _dnc()}))
+    out = _run(gate, monkeypatch, capsys, _call())
+    reason = _decision(out)[1]
+    command = gate.allow_line_command("srv")
+    assert command.startswith("python3 ") and command.endswith(
+        "agentavow_pretool_gate.py --allow-line srv")
+    assert "If they can't see that line (for example in VS Code)" in reason
+    assert command in reason and "Do not run that command yourself" in reason
+    assert command in out["systemMessage"]
+    code = _code(gate)
+    assert code not in reason and code.replace("-", "") not in reason
+
+
+def test_allow_line_command_quotes_a_path_with_spaces_but_keeps_the_tilde(
+        gate, monkeypatch, tmp_path):
+    script = tmp_path / "Application Support" / "scripts" / "agentavow_pretool_gate.py"
+    monkeypatch.setattr(gate, "__file__", str(script))
+    monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+    assert gate.allow_line_command("my srv") == (
+        "python3 ~/'Application Support/scripts/agentavow_pretool_gate.py' "
+        "--allow-line 'my srv'")
+
+
+def _cli(gate, monkeypatch, capsys, args, tty=(True, True)):
+    monkeypatch.setattr(gate.os, "isatty", lambda fd: {0: tty[0], 1: tty[1]}.get(fd, False))
+    monkeypatch.setattr("sys.argv", ["agentavow_pretool_gate.py", "--allow-line", *args])
+    with pytest.raises(SystemExit) as exc:
+        gate.main()
+    out = capsys.readouterr()
+    return exc.value.code, out.out, out.err
+
+
+def test_allow_line_at_a_terminal_prints_the_exact_line(gate, monkeypatch, capsys):
+    gate.CACHE.write_text(json.dumps({"srv": _dnc()}))
+    code, out, err = _cli(gate, monkeypatch, capsys, ["srv"])
+    assert code == 0 and err == ""
+    line = f"srv {URL} {_code(gate)}"
+    assert out.splitlines()[-1] == line
+    gate.allow_file().write_text(line + "\n")  # and that line allows the server
+    monkeypatch.setattr("sys.argv", ["agentavow_pretool_gate.py"])
+    assert _decision(_run(gate, monkeypatch, capsys, _call()))[0] is None
+
+
+def test_allow_line_finds_a_plugin_bundled_server(gate, monkeypatch, capsys):
+    gate.CACHE.write_text(json.dumps({"srv": _dnc()}))
+    code, out, _ = _cli(gate, monkeypatch, capsys, ["plugin_some-plugin_srv"])
+    assert code == 0 and out.splitlines()[-1] == f"srv {URL} {_code(gate)}"
+
+
+@pytest.mark.parametrize("tty", [(False, True), (True, False), (False, False)])
+def test_allow_line_off_a_terminal_refuses_and_prints_no_code(gate, monkeypatch, capsys, tty):
+    gate.CACHE.write_text(json.dumps({"srv": _dnc()}))
+    code, out, err = _cli(gate, monkeypatch, capsys, ["srv"], tty=tty)
+    assert code == 1 and out == ""
+    assert "only in your own terminal" in err
+    assert not gate.allow_key_file().exists()  # refused before making or reading a key
+    want = _code(gate)
+    assert want not in out + err and want.replace("-", "") not in out + err
+    assert URL not in out + err
+
+
+def test_allow_line_for_an_unknown_server_is_a_clear_error(gate, monkeypatch, capsys):
+    gate.CACHE.write_text(json.dumps({"srv": _dnc()}))
+    code, out, err = _cli(gate, monkeypatch, capsys, ["nope"])
+    assert code == 2 and out == ""
+    assert "no grade on file for an MCP server named 'nope'" in err
+
+
+@pytest.mark.parametrize("args", [[], ["a", "b"], ["  "]])
+def test_allow_line_bad_use_prints_usage(gate, monkeypatch, capsys, args):
+    code, out, err = _cli(gate, monkeypatch, capsys, args)
+    assert code == 2 and out == "" and "usage:" in err
+
+
+def test_allow_line_for_a_server_that_is_not_stopped_says_so(gate, monkeypatch, capsys):
+    gate.CACHE.write_text(json.dumps({"srv": _record()}))
+    code, out, err = _cli(gate, monkeypatch, capsys, ["srv"])
+    assert code == 0 and "does not read Do not connect right now" in err
+    assert out.splitlines()[-1] == f"srv {URL} {_code(gate)}"
 
 
 def test_allow_key_is_random_private_and_stable(gate, monkeypatch, capsys):

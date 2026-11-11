@@ -471,6 +471,10 @@ def _ask_reason(mod, monkeypatch, capsys, payload):
     "ln -sf /tmp/mine ~/.cache/agentavow/allowed-servers.txt",
     "ln -s ~/.cache/agentavow /tmp/av",
     "rsync /tmp/l ~/.cache/agentavow/",
+    # the gate's terminal-only allow-line command, run under a pseudo-terminal
+    "script -q /dev/null python3 ~/.claude/plugins/x/scripts/agentavow_pretool_gate.py "
+    "--allow-line srv",
+    "python3 agentavow_pretool_gate.py --allow_line srv",
 ])
 def test_shell_steps_on_agentavow_files_ask_the_person(hook, monkeypatch, capsys, cmd):
     mod, _ = hook

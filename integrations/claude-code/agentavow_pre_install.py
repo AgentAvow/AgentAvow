@@ -445,7 +445,7 @@ def _own_dir() -> pathlib.Path:
 # lacks the code the gate shows the person alone). These catch the plain and the common
 # disguised spellings of AgentAvow's folder in a shell command, so reading the key or
 # changing the files is put to the person; no string match can catch every disguise.
-_NAMED_FILE = re.compile(r"allowed[-_]?servers|allow\.key")
+_NAMED_FILE = re.compile(r"allowed[-_]?servers|allow\.key|allow[-_]line")
 _STANDALONE = re.compile(r"(?<![\w.@-])agentavow(?![\w.-])")
 # The GitHub org and repo (AgentAvow/AgentAvow, github.com/AgentAvow/...), not the folder.
 _REPO_SLUG = re.compile(r"agentavow/agentavow|(?:github(?:usercontent)?|gitlab)\.com/+agentavow")

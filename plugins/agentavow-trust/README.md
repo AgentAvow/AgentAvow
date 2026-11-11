@@ -97,10 +97,22 @@ example-server https://mcp.example.com/mcp K7Q2M-9XA3B
 - A changed tool definition still asks, allowed or not.
 - Each session shows one note when an allowed server's tools run.
 - Lines starting with `#` are comments. Delete a line to stop allowing that server.
+- If you can't see the gate's notice (the VS Code extension may not show it), print the
+  line yourself in your own terminal. The refusal gives the exact command for your
+  install; it looks like this:
+
+  ```
+  python3 ~/.claude/plugins/.../scripts/agentavow_pretool_gate.py --allow-line example-server
+  ```
+
+  It prints the line only when it runs in a real terminal (its input and its output
+  both a terminal). Run from Claude's Bash tool, a pipe or a file, it refuses and
+  prints no code, so Claude can't fetch the code this way either. A name with no grade
+  on file is an error; use the name from the refusal.
 - As a second check, if Claude tries to run a command that names AgentAvow's folder
   `~/.cache/agentavow` (or a file in it), or to write into that folder, the
   install-time hook asks you first, and so does the gate for an MCP tool call that
-  names it.
+  names it. A Claude command that runs `--allow-line` asks too.
 
 Settings, all optional, read from the environment and never sent anywhere:
 
@@ -201,7 +213,9 @@ sent. Nothing goes to AgentAvow, and the header is never written to the cache or
 printed. The gate writes the digests it last saw to the same cache file; the graded
 digests are never overwritten by it. It never writes the allow list. The first time it
 stops a server it creates `~/.cache/agentavow/allow.key`, a random key readable only by
-you that the confirmation codes come from; the key never leaves your machine.
+you that the confirmation codes come from; the key never leaves your machine. Run by
+you with `--allow-line <name>`, it reads the cache file and that key (creating the key
+if needed), prints one line to your terminal, and sends nothing.
 
 The first time the hook finds nothing to scan (no MCP servers it can grade and no
 manifest), it shows one line saying so and how to scan a tool on demand. That line is

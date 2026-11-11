@@ -16,7 +16,9 @@ server in ~/.cache/agentavow/scanned.json and decides:
             however it reaches the file. Only an exact line for that server with its
             code counts; there is no pattern and no allow-everything. An allowed
             server's tools run (with one note per session), and a changed
-            definition still asks.
+            definition still asks. Where a surface does not show that message (the
+            VS Code extension, for one), the person runs this script in their own
+            terminal with `--allow-line <server name>` (below).
   • ask   — any MCP tool call whose input names AgentAvow's own files (the cache
             folder, the allow list, the allow key): only the person may read or
             change them.
@@ -57,6 +59,12 @@ Design guarantees (deliberate):
     denies, unless you allowed that server. "Review before you connect" never prompts here.
   • ONE SHORT BUDGET — the whole run stays under the hook's 8-second timeout.
 
+Allow line from a terminal (for the person, not for Claude):
+  python3 agentavow_pretool_gate.py --allow-line <server name>
+prints the exact allow line, code included, for a server with a grade on file. It
+prints it only when both its input and its output are a terminal: run from Claude's
+Bash tool (or anything else that captures the output), it refuses and prints no code.
+
 Install / test: https://agentavow.com/docs/auto-scan-claude-code
 """
 from __future__ import annotations
@@ -70,6 +78,7 @@ import os
 import pathlib
 import re
 import secrets
+import shlex
 import sys
 import time
 import urllib.parse
@@ -681,6 +690,15 @@ def is_allowed(name: str, record: dict) -> bool:
     return False
 
 
+def allow_line_command(name: str) -> str:
+    """The terminal command that prints this server's allow line for the person, with
+    this install's own path to the gate script (quoted for a shell, ~ left unquoted so
+    it still expands). It carries no code: the script prints that only to a terminal."""
+    shown = _shown_path(pathlib.Path(__file__).resolve())
+    script = ("~/" + shlex.quote(shown[2:])) if shown.startswith("~/") else shlex.quote(shown)
+    return f"python3 {script} --allow-line {shlex.quote(name)}"
+
+
 def allow_instructions(name: str) -> str:
     """How the PERSON can allow this one server, worded for Claude to relay. It never
     carries the confirmation code: that is shown to the person alone."""
@@ -688,10 +706,13 @@ def allow_instructions(name: str) -> str:
     return (f"If the user has reviewed this server and wants to use it anyway, the user "
             f"(not Claude) can allow this one server: AgentAvow has shown them, outside "
             f"this conversation, the exact line to add to {path}, with a confirmation code "
-            "only they can see. Tell the user exactly that.\n"
-            "Do not edit that file yourself, do not read AgentAvow's files in "
-            "~/.cache/agentavow, and do not ask for or work out the code: a line without "
-            "the user's own code allows nothing.")
+            "only they can see. If they can't see that line (for example in VS Code), they "
+            f"can print it by running this in their own terminal: {allow_line_command(name)}\n"
+            "Tell the user exactly that.\n"
+            "Do not run that command yourself (it prints nothing to you), do not edit that "
+            "file yourself, do not read AgentAvow's files in ~/.cache/agentavow, and do "
+            "not ask for or work out the code: a line without the user's own code allows "
+            "nothing.")
 
 
 def allow_message(name: str, record: dict) -> str | None:
@@ -705,7 +726,9 @@ def allow_message(name: str, record: dict) -> str | None:
     return (f"AgentAvow gate: MCP '{name}' reads Do not connect, so its tools were stopped. "
             f"If you reviewed it and want to use it anyway, add this line yourself to "
             f"{_shown_path(allow_file())} (the code at the end is shown only to you; do not "
-            f"paste it into the chat):\n{line}")
+            f"paste it into the chat):\n{line}\n"
+            f"If you can't see the line here (for example in VS Code), run this in your own "
+            f"terminal to print it: {allow_line_command(name)}")
 
 
 # Spellings of AgentAvow's own files in an MCP tool's input (a filesystem server, say).
@@ -847,7 +870,47 @@ def decide(payload: dict, cache: dict) -> tuple | None:
     return result
 
 
+def allow_line_cli(argv: list[str]) -> int:
+    """`--allow-line <server name>`: print that server's allow line, for the person at a
+    terminal. Refuses, printing no code, unless stdin AND stdout are both a terminal, so
+    a tool that captures the output (Claude's Bash tool, a pipe, a file) gets nothing it
+    could write into the allow list. Exit 0 on success, 1 when refused, 2 on bad use or
+    an unknown server."""
+    try:
+        at_terminal = os.isatty(0) and os.isatty(1)
+    except Exception:
+        at_terminal = False
+    if not at_terminal:
+        print("AgentAvow: --allow-line prints the allow line only in your own terminal "
+              "(input and output both a terminal). Run it there yourself; nothing was "
+              "printed here.", file=sys.stderr)
+        return 1
+    if len(argv) != 1 or not argv[0].strip():
+        print("usage: agentavow_pretool_gate.py --allow-line <server name>", file=sys.stderr)
+        return 2
+    found = find_record(_load_cache(), argv[0].strip())
+    if not found:
+        print(f"AgentAvow: no grade on file for an MCP server named '{argv[0].strip()}'. Use "
+              "the name from the gate's refusal; servers are graded at session start.",
+              file=sys.stderr)
+        return 2
+    name, record = found
+    key = _allow_key(create=True)
+    if key is None:
+        print(f"AgentAvow: could not create the allow key {_shown_path(allow_key_file())}.",
+              file=sys.stderr)
+        return 2
+    if not denies(record, _setting("AGENTAVOW_GATE_DENY_BELOW")):
+        print(f"Note: MCP '{name}' does not read Do not connect right now, so the gate does "
+              "not stop it; the line only matters if that changes.", file=sys.stderr)
+    print(f"Add this line to {_shown_path(allow_file())} (do not paste it into the chat):")
+    print(allow_line(name, record, allow_code(key, name, str(record.get("id")))))
+    return 0
+
+
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "--allow-line":
+        sys.exit(allow_line_cli(sys.argv[2:]))
     try:
         payload = json.load(sys.stdin)
     except Exception:
