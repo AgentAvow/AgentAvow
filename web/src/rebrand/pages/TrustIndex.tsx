@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { rp } from '../basePath'
 import { Reveal } from '../components/motion'
-import { TrustOrCertifiedMini, AdoptionMini } from '../components/TrustMark'
+import { ScorePairMini, TrustOrCertifiedMini } from '../components/TrustMark'
+import { CtaBand, PageHeader, SECTION_CLASS, SectionH2 } from '../components/PageBits'
 import { fetchCatalog, fetchFlaggedStat, fetchRecent, rowIdentity, type CatalogRow, type FlaggedStat } from '../catalog'
 import { AnswerMixBar, StatCards } from '../components/AnswerMix'
 import { SandboxFindingsBlock } from '../components/SandboxStats'
@@ -160,10 +161,10 @@ function Row({ row, rank }: { row: CatalogRow; rank: number }) {
         <div className="font-mono text-[13.5px] truncate">{id.display}</div>
         <div className="font-mono text-[10.5px] uppercase tracking-wide text-text-muted/70">{SURFACE_LABEL[row.surface] || row.surface}</div>
       </div>
-      {row.adoption_count != null && row.adoption_count > 0 && <AdoptionMini count={row.adoption_count} unit={row.adoption_unit} />}
-      {/* The Certified mark follows certified_mark on every board, not just the
-          Certified one, so a certified tool reads the same wherever it is listed. */}
-      {row.trust_score != null && <TrustOrCertifiedMini row={row as unknown as Record<string, unknown> & { trust_score: number }} />}
+      {/* The trust or Certified mark, then adoption (muted "New" with no signal), in
+          the Browse order. The Certified mark follows certified_mark on every board,
+          so a certified tool reads the same wherever it is listed. */}
+      <ScorePairMini row={row as unknown as Record<string, unknown> & { trust_score: number }} />
     </div>
   )
   return href
@@ -222,29 +223,22 @@ export default function RebrandTrustIndex() {
   const { data: stat } = useQuery({ queryKey: ['flagged-stat'], queryFn: fetchFlaggedStat, staleTime: 60_000 })
 
   return (
-    <div className="max-w-[1080px] mx-auto px-6 py-16">
+    <div>
       <SEOHead
         title="Trust Index — the state of agent tool safety"
         description="An independent index of signed results for the tools AI agents connect to: trust scores, adoption scores, and the critical-finding rate."
         path="/index"
       />
       {/* hero — the thesis */}
-      <Reveal>
-        <div className="max-w-[64ch]">
-          <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Trust Index</span>
-          <h1 className="mt-3 text-3xl md:text-5xl font-extrabold tracking-tight leading-[1.05]">
-            The state of <span className="gradient-text-bio">agent tool</span> safety.
-          </h1>
-          <p className="mt-4 text-text-muted text-[16px] leading-relaxed">
-            An independent, <strong className="text-text">signed</strong> index of the tools, MCP servers, and packages AI agents
-            connect to — checked from the outside, no repo access, verifiable offline. Not the agent you build; the things it trusts.
-          </p>
-        </div>
-      </Reveal>
-
+      <PageHeader
+        eyebrow="Trust Index"
+        title={<>The state of <span className="gradient-text-bio">agent tool</span> safety.</>}
+        lede={<>An independent, <b className="font-medium text-text">signed</b> index of the tools, MCP servers, and packages AI agents connect to — checked from the outside, no repo access, verifiable offline. Not the agent you build; the things it trusts.</>}
+      />
+      <div className="relative z-[2] max-w-[1080px] mx-auto px-6 pb-[60px]">
       {/* how the catalog reads: the answer mix and the counts under it, all live */}
       <Reveal>
-        <div className="mt-10">
+        <div className="mt-2">
           <AnswerMixBar size="big" />
           <StatCards set="index" />
         </div>
@@ -264,8 +258,8 @@ export default function RebrandTrustIndex() {
 
       {/* leaderboards */}
       <Reveal>
-        <h2 className="mt-14 text-xl font-bold">The leaderboards</h2>
-        <p className="mt-1.5 text-text-muted text-[14px] max-w-[62ch]">Ranked from the live catalog — click any tool for its full signed report.</p>
+        <SectionH2 className="mt-[60px]">The leaderboards</SectionH2>
+        <p className="mt-2.5 text-text-muted max-w-[62ch]">Ranked from the live catalog — click any tool for its full signed report.</p>
       </Reveal>
       <div className="mt-5 grid md:grid-cols-2 gap-4">
         <Board title="Safest MCP servers" note="by trust" rows={mcp.data?.rows} isLoading={mcp.isLoading} />
@@ -280,17 +274,20 @@ export default function RebrandTrustIndex() {
         </div>
       )}
 
-      {/* CTA — frameless, sits on the page */}
-      <Reveal>
-        <div className="mt-16 text-center">
-          <h2 className="text-2xl font-extrabold">Check the tool you're about to connect.</h2>
-          <p className="mt-2 text-text-muted text-[14.5px] max-w-[52ch] mx-auto">Paste any repo, package, or MCP server — get an answer and a signed, offline-verifiable trust score in seconds. Free, no account.</p>
-          <div className="mt-5 flex gap-3 justify-center flex-wrap">
-            <Link to={rp('/rebrand/check')} className="font-semibold px-6 py-3 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25">Check a tool →</Link>
-            <Link to={rp('/rebrand/browse')} className="font-semibold px-6 py-3 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Browse the full catalog</Link>
-          </div>
+      </div>
+
+      <section className={SECTION_CLASS}>
+        <div className="max-w-[1080px] mx-auto px-6">
+          <Reveal>
+            <CtaBand
+              title="Check the tool you're about to connect."
+              line="Paste any repo, package, or MCP server — get an answer and a signed, offline-verifiable trust score in seconds. Free, no account."
+              primary={{ label: 'Check a tool →', to: rp('/rebrand/check') }}
+              secondary={{ label: 'Browse the full catalog', to: rp('/rebrand/browse') }}
+            />
+          </Reveal>
         </div>
-      </Reveal>
+      </section>
     </div>
   )
 }
