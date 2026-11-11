@@ -9,6 +9,7 @@ import SEOHead from '../../components/SEOHead'
 import api from '../../lib/api'
 import { isCertified as certifiedMark } from '../../components/trust/gradeSystem'
 import { trackBadgeCopied, trackCta, trackPluginCommandCopy } from '../../lib/analytics'
+import { DIVIDER_CLASS } from '../components/PageBits'
 
 /**
  * /for-developers: the one entry point for a tool author (approved mock "Developers",
@@ -75,7 +76,7 @@ const GATES: [string, string, string][] = [
 ]
 
 const h2 = 'text-[clamp(25px,3.4vw,33px)] font-bold tracking-tight leading-tight'
-const section = 'relative z-[2] py-[60px] border-t border-border/60'
+const section = `relative z-[2] py-[60px] ${DIVIDER_CLASS}`
 const wrap = 'max-w-[1080px] mx-auto px-6'
 const codeCls = 'font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded [overflow-wrap:anywhere]'
 const btnPrimary = 'inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25'

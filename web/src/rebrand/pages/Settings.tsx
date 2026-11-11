@@ -5,7 +5,7 @@ import { rp } from '../basePath'
 import api from '../../lib/api'
 import { useAuth } from '../../hooks/useAuth'
 import { useTheme } from '../../hooks/useTheme'
-import { AccountShell, ConfirmAction, LoadError, SkeletonRows, btnGhostSm, btnSm, rowAct } from '../components/AccountBits'
+import { ConfirmAction, LoadError, SkeletonRows, btnGhostSm, btnSm, rowAct } from '../components/AccountBits'
 
 /**
  * Settings, a tab of the account shell: profile, sign-in, appearance, which alerts
@@ -218,10 +218,7 @@ function SettingsBody() {
   )
 }
 
+/** Rendered inside AccountLayout (the shared header and tabs), see App.tsx. */
 export default function RebrandSettings() {
-  return (
-    <AccountShell tab="settings">
-      <SettingsBody />
-    </AccountShell>
-  )
+  return <SettingsBody />
 }

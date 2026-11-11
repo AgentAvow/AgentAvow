@@ -5,6 +5,7 @@ import SEOHead from '../../components/SEOHead'
 import { getUtmParams, trackCta, trackPluginCommandCopy } from '../../lib/analytics'
 import { startMetaPixel, trackMetaInstallCopy } from '../../lib/metaPixel'
 import { rp } from '../basePath'
+import { DIVIDER_CLASS } from '../components/PageBits'
 
 /**
  * /claude-code: the paid landing page for the Claude Code plugin. No nav and one goal,
@@ -99,7 +100,7 @@ const ACTIONS: [string, string, string][] = [
 ]
 
 const h2 = 'text-[clamp(25px,3.4vw,33px)] font-bold tracking-tight leading-tight'
-const section = 'relative z-[2] py-[60px] border-t border-border/60'
+const section = `relative z-[2] py-[60px] ${DIVIDER_CLASS}`
 
 export default function RebrandClaudeCode() {
   const { pathname, search } = useLocation()
@@ -204,7 +205,7 @@ export default function RebrandClaudeCode() {
         </div>
       </div>
 
-      <div className="relative z-[2] pt-[26px] pb-[30px] border-t border-border/60">
+      <div className={`relative z-[2] pt-[26px] pb-[30px] ${DIVIDER_CLASS}`}>
         <div className="max-w-[860px] mx-auto px-6">
           <p className="text-[12.5px] text-text-muted max-w-[70ch] leading-normal">
             <b>What this page measures:</b> page views and clicks on the copy buttons, with the campaign tag from your link and a random ID stored in your browser. This page also loads the Meta Pixel, so we can see how many people our Meta ads bring here and how many copy the install command. It tells Meta about the page view and the first copy, and Meta may set a cookie. No other page on agentavow.com loads it, and it stays off if your browser sends Global Privacy Control or Do Not Track. Details and how to opt out are in our privacy policy.

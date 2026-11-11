@@ -6,6 +6,7 @@ import SEOHead from '../../components/SEOHead'
 import api from '../../lib/api'
 import { trackContactSubmit } from '../../lib/analytics'
 import { rp } from '../basePath'
+import { DIVIDER_CLASS } from '../components/PageBits'
 
 /**
  * /teams: for a security or platform lead choosing what agents may connect to. No paid
@@ -40,7 +41,7 @@ const STANDARDS: [string, React.ReactNode][] = [
 const X402_FALLBACK = 33067
 
 const h2 = 'text-[clamp(25px,3.4vw,33px)] font-bold tracking-tight leading-tight'
-const section = 'relative z-[2] py-[60px] border-t border-border/60'
+const section = `relative z-[2] py-[60px] ${DIVIDER_CLASS}`
 const field = 'w-full bg-background border border-border rounded-[10px] px-3 py-2.5 text-[15px] text-text focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_var(--color-primary-glow)]'
 
 function TalkForm() {

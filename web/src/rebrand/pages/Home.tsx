@@ -26,7 +26,8 @@ const CHECK_HINTS = ['Paste a link to check', 'github.com/owner/repo', 'npmjs.co
  * AgentAvow homepage (approved mockup 2026-11-10, "Home order"). Five sections:
  * hero (the check itself + one "works with" line) → the three answers on live
  * examples, with how the catalog reads → where it works (Claude Code first) → why
- * trust it (findings, signatures, limits, Certified, built in the open) → closing band.
+ * trust it (findings, signatures, limits, built in the open) → closing band. Certified
+ * sits as one compact row under the three answers (Kenne, 11-11).
  */
 
 /**
@@ -188,44 +189,21 @@ function Card3({ title, children }: { title: string; children: React.ReactNode }
   )
 }
 
-const CERT_ROWS: [string, string][] = [
-  ['Reads Safe to connect at 81+', 'no critical or high finding, nothing known-malicious'],
-  ['Published package matches its source', 'verified build provenance (Sigstore / PEP 740)'],
-  ['Every file read, nothing changed', 'full coverage; no added files or install hook'],
-  ['Sandbox result is in, anyone can recompute', 'not pending, offline-verifiable result'],
-]
-
-/**
- * The Certified band. The badge is the Safe example's live row (zod) when that row
- * carries the mark; with no certified row to show (and in the prerender, which names
- * no tool) it falls back to the plain seal.
- */
-function CertifiedBand({ row }: { row: CatalogRow | null }) {
-  const earned = row != null && row.trust_score != null && decisionOf({ ...row, findings: { critical: row.critical ?? 0, high: row.high ?? 0 } }).decision === 'safe' && isCertified(row)
+/** The Certified row, right under the three answers. The full checklist lives on /certified. */
+function CertifiedRow() {
+  // Always the plain seal: the Safe example card just above already shows the scored
+  // badge when its tool is Certified, so the mark never appears twice in one section.
   return (
-    <div className="mt-[22px] grid gap-x-7 gap-y-[22px] items-center rounded-2xl px-6 py-5 grid-cols-1 sm:grid-cols-[auto_minmax(0,1fr)] lg:grid-cols-[auto_minmax(0,1fr)_minmax(0,1.35fr)]"
-      style={{ background: 'linear-gradient(100deg,rgba(45,212,191,.12),rgba(232,121,249,.10) 70%), var(--color-surface)', border: '1.5px solid rgba(232,121,249,.35)' }}>
-      <div className="flex sm:flex-col items-center gap-1.5 sm:min-w-[96px]">
-        {earned
-          ? <><CertifiedBadge score={row.trust_score as number} size="md" /><small className="text-[11.5px] text-text-muted text-center">{row.name}, today</small></>
-          : <>
-              <div className="w-[62px] h-[62px] rounded-full grid place-items-center text-[28px] font-black text-[#06231f]" style={{ background: 'conic-gradient(from 210deg,#2DD4BF,#E879F9,#2DD4BF)' }} aria-hidden="true">✓</div>
-              <div className="font-mono text-[10.5px] font-extrabold tracking-[0.18em] gradient-text">CERTIFIED</div>
-            </>}
+    <div className="mt-8 max-w-[760px] mx-auto flex flex-col sm:flex-row items-center gap-x-5 gap-y-3 rounded-2xl px-5 py-4 text-center sm:text-left"
+      style={{ background: 'linear-gradient(100deg,rgba(45,212,191,.10),rgba(232,121,249,.08) 70%), var(--color-surface)', border: '1px solid rgba(232,121,249,.30)' }}>
+      <div className="shrink-0 flex flex-col items-center gap-1">
+        <div className="w-[52px] h-[52px] rounded-full grid place-items-center text-[24px] font-black text-[#06231f]" style={{ background: 'conic-gradient(from 210deg,#2DD4BF,#E879F9,#2DD4BF)' }} aria-hidden="true">✓</div>
+        <div className="font-mono text-[10.5px] font-extrabold tracking-[0.18em] gradient-text">CERTIFIED</div>
       </div>
-      <div className="min-w-0">
-        <h3 className="text-[18px] font-bold leading-tight">Certified is a bar a tool has to clear.</h3>
-        <p className="mt-1 text-[13.5px] text-text-muted">It sits beside Safe to connect, it comes off the moment any check slips, and nobody can buy it. <b className="text-text font-medium">zod</b>, <b className="text-text font-medium">react</b> and <b className="text-text font-medium">requests</b> clear it today.</p>
-        <Link to={rp('/rebrand/certified')} className="inline-block mt-2 text-[13.5px] font-semibold text-primary-light hover:text-primary">See the gate and who's Certified →</Link>
-      </div>
-      <ul className="grid sm:grid-cols-2 gap-x-3.5 gap-y-2 sm:col-span-2 lg:col-span-1 list-none m-0 p-0">
-        {CERT_ROWS.map(([h, s]) => (
-          <li key={h} className="flex gap-[9px] items-start text-[13.5px] leading-[1.35] text-text">
-            <i className="not-italic shrink-0 font-mono text-[10.5px] font-extrabold tracking-[0.06em] px-[7px] py-0.5 rounded-[5px] mt-px bg-success/[0.16] text-success">PASS</i>
-            <span>{h}<small className="block text-text-muted text-[12px]">{s}</small></span>
-          </li>
-        ))}
-      </ul>
+      <p className="min-w-0 text-[14.5px] text-text-muted">
+        <b className="text-text font-semibold">Certified is the top mark:</b> every check passes, no averaging, and it comes off the moment one fails.{' '}
+        <Link to={rp('/rebrand/certified')} className="font-semibold text-primary-light hover:text-primary whitespace-nowrap">See the gate and who's Certified →</Link>
+      </p>
     </div>
   )
 }
@@ -382,7 +360,7 @@ export default function RebrandHome() {
         </motion.div>
       </section>
 
-      {/* 2 · THE THREE ANSWERS, on live examples, then how the catalog reads */}
+      {/* 2 · THE THREE ANSWERS, on live examples, how the catalog reads, then Certified */}
       <section ref={resultRef} id="result" className={`${SECTION_CLASS} scroll-mt-20`}>
         <div className="max-w-[1080px] mx-auto px-6">
           <Reveal>
@@ -419,6 +397,9 @@ export default function RebrandHome() {
             </div>
             <p className="mt-3.5 text-center text-[13px] text-text-muted">Hundreds of Claude Code machines connect every day. A check you run here is normally no more than an hour old.</p>
           </Reveal>
+          <Reveal>
+            <CertifiedRow />
+          </Reveal>
         </div>
       </section>
 
@@ -434,7 +415,7 @@ export default function RebrandHome() {
         </div>
       </section>
 
-      {/* 4 · WHY TRUST IT — the three cards, the Certified band, built in the open */}
+      {/* 4 · WHY TRUST IT — the three cards, then built in the open */}
       <section className={SECTION_CLASS}>
         <div className="max-w-[1080px] mx-auto px-6">
           <Reveal>
@@ -444,9 +425,6 @@ export default function RebrandHome() {
               <Card3 title="Results you can verify"><p className="text-text-muted text-[14.5px]">Every result is signed with Ed25519. Anyone can check it offline against our public keys.</p></Card3>
               <Card3 title="Limits we state"><p className="text-text-muted text-[14.5px]">A check reads code, dependencies, advisories and tool definitions. It can miss things, so the report says what it couldn't read.</p></Card3>
             </div>
-          </Reveal>
-          <Reveal>
-            <CertifiedBand row={examples?.safe ?? null} />
           </Reveal>
           <Reveal>
             <BuiltInTheOpen className="mt-[30px]" />

@@ -90,13 +90,24 @@ def test_developers_in_nav_and_footer():
     assert "'/rebrand/badge'" not in LAYOUT
 
 
-def test_account_pages_share_one_shell():
-    for page, tab in (("MyTools", "tools"), ("Account", "watch"), ("Notifications", "notif"), ("Settings", "settings")):
+def test_account_pages_share_one_persistent_layout():
+    # One parent route holds the header and tabs; only the <Outlet/> swaps (11-11).
+    app = (ROOT / "web" / "src" / "App.tsx").read_text()
+    block = app[app.index("<Route element={<RebrandAccountLayout />}>"):]
+    block = block[:block.index("</Route>")]
+    for path in ("tools", "account", "notifications", "settings"):
+        assert f'<Route path="{path}" ' in block, path
+        assert app.count(f'<Route path="{path}" element={{<Rebrand') == 1, path
+    for page in ("MyTools", "Account", "Notifications", "Settings"):
         src = (WEB / "pages" / f"{page}.tsx").read_text()
-        assert f'<AccountShell tab="{tab}">' in src, page
+        assert "AccountShell" not in src, page
     bits = (WEB / "components" / "AccountBits.tsx").read_text()
+    assert "export function AccountLayout()" in bits and "<Outlet />" in bits
+    assert "useRequireUser(user, isLoading)" in bits
     assert "max-w-[720px]" in bits
     assert "noindex" in bits
+    # The route wrapper keeps one key for the whole account area, so tabs don't remount it.
+    assert "key={accountTabFor(pathname) ? 'account' : pathname}" in LAYOUT
 
 
 def test_api_keys_moved_to_settings_and_webhook_stayed():
@@ -117,3 +128,37 @@ def test_account_rows_show_adoption_artwork():
 def test_no_blur_on_the_bell_dropdown():
     bell = LAYOUT[LAYOUT.index("{notifOpen && ("):LAYOUT.index("See all →")]
     assert "backdrop-blur" not in bell and "glass" not in bell
+
+
+# ---- polish, 11-11 ----
+
+def test_get_lines_up_with_the_1080_grid():
+    # Outer 1080 container, inner 860 column with no auto margin: left edges match the logo.
+    assert "max-w-[860px] mx-auto" not in GET
+    assert GET.count("max-w-[1080px] mx-auto px-6") == 2
+    assert '<div className="max-w-[860px]">' in GET
+
+
+def test_section_dividers_are_contained():
+    bits = (WEB / "components" / "PageBits.tsx").read_text()
+    assert "before:w-[min(1080px,calc(100%-48px))]" in bits
+    assert "${DIVIDER_CLASS}" in bits
+    for f in ("Get", "Home", "ClaudeCode", "Teams", "ForDevelopers", "StateOfAgentSecurity2026",
+              "Certified", "TrustIndex"):
+        src = (WEB / "pages" / f"{f}.tsx").read_text()
+        assert "py-[60px] border-t border-border/60" not in src, f
+        assert 'pb-[60px] border-t border-border/60' not in src, f
+        assert 'pb-[30px] border-t border-border/60' not in src, f
+    # The footer keeps its full-width rule.
+    assert '<footer className="relative z-10 bg-background border-t border-border/60' in LAYOUT
+
+
+def test_home_certified_is_a_compact_row_under_the_answers():
+    home = (WEB / "pages" / "Home.tsx").read_text()
+    assert "CERT_ROWS" not in home and "CertifiedBand" not in home
+    assert "every check passes, no averaging, and it comes off the moment one fails." in home
+    answers = home.index('id="result"')
+    where = home.index('id="where"')
+    assert answers < home.index("<CertifiedRow") < where
+    why = home[home.index("You don't have to take our word for it."):]
+    assert "<BuiltInTheOpen" in why

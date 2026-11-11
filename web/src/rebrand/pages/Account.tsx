@@ -7,7 +7,7 @@ import { NotifRow, type Notif } from '../components/NotificationBits'
 import { RELEVANT_KIND_PARAM } from '../lib/notifKinds'
 import { ALERT_QUERY_KEYS } from '../lib/useUnreadAlerts'
 import {
-  AccList, AccRow, AccSection, AccountShell, ConfirmAction, EmptyCard, LoadError, PhraseText,
+  AccList, AccRow, AccSection, ConfirmAction, EmptyCard, LoadError, PhraseText,
   SkeletonRows, ToolArt, btnSm, rowAct, type RowArt,
 } from '../components/AccountBits'
 import { toolLink } from '../lib/toolLinks'
@@ -176,10 +176,7 @@ function WatchesBody() {
   )
 }
 
+/** Rendered inside AccountLayout (the shared header and tabs), see App.tsx. */
 export default function RebrandAccount() {
-  return (
-    <AccountShell tab="watch">
-      <WatchesBody />
-    </AccountShell>
-  )
+  return <WatchesBody />
 }

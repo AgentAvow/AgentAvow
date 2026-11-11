@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 
 import SEOHead from '../../components/SEOHead'
 import { rp } from '../basePath'
+import { DIVIDER_CLASS } from '../components/PageBits'
 
 /**
  * State of Agent Security 2026 (published May 12, 2026, v2.0), in the rebrand layout.
@@ -67,7 +68,7 @@ const TEST_VECTORS = 'https://agentgraph.co/.well-known/cte-test-vectors.json'
 
 const h2 = 'text-[clamp(25px,3.4vw,33px)] font-bold tracking-tight leading-tight'
 const eyebrow = 'font-mono text-[12px] tracking-[.16em] uppercase font-semibold'
-const section = 'relative z-[2] py-[60px] border-t border-border/60'
+const section = `relative z-[2] py-[60px] ${DIVIDER_CLASS}`
 const th = 'text-left text-[12px] text-text-muted font-semibold px-2.5 py-2 border-b border-border'
 const td = 'block sm:table-cell sm:p-2.5 align-top sm:border-b sm:border-surface-hover'
 const link = 'text-primary-light hover:underline'
