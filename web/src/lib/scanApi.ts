@@ -77,11 +77,31 @@ export async function fetchPackageBehavioral(
   name: string,
   version?: string,
 ): Promise<PublicScanResponse> {
-  const { data } = await publicApi.get<PublicScanResponse>(
-    packageScanUrl(surface, name, { behavioral: true, version }),
-    { timeout: 150_000 },
-  )
-  return data
+  return getPackageScan(packageScanUrl(surface, name, { behavioral: true, version }), 150_000)
+}
+
+/** A first scan of an uncommon package can outlast one request: the API then answers
+ * 202 `{state: "checking", retry_after}` and keeps scanning. Ask again (same flags: a
+ * repeat while it runs joins that scan and costs nothing) until the result lands. */
+export const PACKAGE_CHECKING_MAX_MS = 240_000
+
+export class ScanStillCheckingError extends Error {
+  constructor() {
+    super('The first check of this package is still running. Try again in a minute.')
+    this.name = 'ScanStillCheckingError'
+  }
+}
+
+async function getPackageScan(url: string, timeout?: number): Promise<PublicScanResponse> {
+  const started = Date.now()
+  for (;;) {
+    const res = await publicApi.get(url, timeout ? { timeout } : undefined)
+    const body = res.data as { state?: string; retry_after?: number } | undefined
+    if (res.status !== 202 && body?.state !== 'checking') return res.data as PublicScanResponse
+    const waitMs = Math.min(Math.max(Number(body?.retry_after) || 15, 3), 30) * 1000
+    if (Date.now() - started + waitMs > PACKAGE_CHECKING_MAX_MS) throw new ScanStillCheckingError()
+    await new Promise((r) => setTimeout(r, waitMs))
+  }
 }
 
 export async function fetchPackageScan(
@@ -90,10 +110,7 @@ export async function fetchPackageScan(
   force = false,
   version?: string,
 ): Promise<PublicScanResponse> {
-  const { data } = await publicApi.get<PublicScanResponse>(
-    packageScanUrl(surface, name, { force, version }),
-  )
-  return data
+  return getPackageScan(packageScanUrl(surface, name, { force, version }))
 }
 
 /** Grade an OpenClaw / Agent Skill in a GitHub repo. */

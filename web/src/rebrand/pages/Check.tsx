@@ -8,7 +8,7 @@ import { NoticeText } from '../components/NoticeText'
 import ImageScanDepth from '../components/ImageScanDepth'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
-import { fetchPublicScan, fetchSkillCollectionLead, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchA2aScan, fetchMcpProbe, fetchSkillScan, fetchSkillBehavioral, publicApi } from '../../lib/scanApi'
+import { fetchPublicScan, fetchSkillCollectionLead, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchA2aScan, fetchMcpProbe, fetchSkillScan, fetchSkillBehavioral, publicApi, ScanStillCheckingError } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
 import { getTrustTier, decisionOf, decisionPhrase, headline as decisionHeadline, coverageGapNotes } from '../../components/trust/gradeSystem'
 import { TrustPill } from '../components/TrustMark'
@@ -2313,7 +2313,7 @@ function PackageResult({ surface, name, version }: { surface: string; name: stri
   // `version` is the `?version=` the MCP connector / plugin link to for a pinned scan:
   // it rides into the fetch, the canonical path and the share link unchanged.
   const key = ['rebrand-pkg-scan', surface, name, version ?? '']
-  const { data: scan, isLoading, isError } = useQuery({
+  const { data: scan, isLoading, isError, error } = useQuery({
     queryKey: key,
     queryFn: () => fetchPackageScan(surface, name, false, version),
     retry: 0,
@@ -2324,6 +2324,15 @@ function PackageResult({ surface, name, version }: { surface: string; name: stri
   useResultView(!!scan)
   const versionQs = version ? `?version=${encodeURIComponent(version)}` : ''
   if (isLoading) return <ScanningLoader owner={surface} repo={name} />
+  if (isError && error instanceof ScanStillCheckingError) {
+    return (
+      <div className="max-w-[560px] mx-auto px-6 py-24 text-center">
+        <h1 className="text-2xl font-extrabold tracking-tight">Still checking {surface}:{name}</h1>
+        <p className="mt-3 text-text-muted text-[14px]">This is the first check of this package and it&apos;s taking a while. It keeps running on our side: reload this page in a minute for the answer.</p>
+        <Link to={rp('/rebrand/check')} className="mt-6 inline-block text-primary-light hover:text-primary font-semibold">← Scan something else</Link>
+      </div>
+    )
+  }
   if (isError || !scan) {
     return (
       <div className="max-w-[560px] mx-auto px-6 py-24 text-center">
