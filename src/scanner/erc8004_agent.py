@@ -331,22 +331,34 @@ def headline(tools: list[dict], findings: list[dict]) -> dict:
     * worst answer among the checked tools;
     * a high/critical finding on the registration file is at least Review;
     * Safe ONLY when every listed tool was checked and each reads Safe;
-    * any tool not checked (unreachable, unsupported, over the cap, still checking)
-      caps it at Review with "N of M listed tools checked";
-    * no tools at all, or none checked: Review, never Safe from identity alone.
+    * any tool not checked (unreachable, unsupported, over the cap) caps it at Review
+      with "N of M listed tools checked";
+    * no tools at all, or none checked: Review, never Safe from identity alone;
+    * while a listed tool is still being checked there is no answer yet
+      (``decision`` None, ``checking`` > 0): a first look at a new agent must not
+      read Review just because its scans are queued. A checked tool that already
+      reads Do not connect is final, so that answer shows at once.
     Never Certified at the agent level."""
     total = len(tools)
     checked = [t for t in tools if t.get("decision") in _RANK]
     n = len(checked)
+    pending = sum(1 for t in tools if t.get("state") == "checking"
+                  and t.get("decision") not in _RANK)
     file_bad = any(f["severity"] in ("critical", "high") for f in findings)
     note = f"{n} of {total} listed tools checked" if total else ""
     if total == 0:
         return {"decision": "review", "reason": "it lists no tools we can check",
-                "coverage_note": note, "certified": False}
+                "coverage_note": note, "certified": False, "checking": 0}
+    worst = (max(checked, key=lambda t: _RANK[t["decision"]])["decision"]
+             if checked else None)
+    if pending and worst != "do_not_connect":
+        tools_word = "tool" if total == 1 else "tools"
+        return {"decision": None,
+                "reason": f"checking {pending} of {total} listed {tools_word}",
+                "coverage_note": note, "certified": False, "checking": pending}
     if n == 0:
         return {"decision": "review", "reason": "none of the tools it lists could be checked",
-                "coverage_note": note, "certified": False}
-    worst = max(checked, key=lambda t: _RANK[t["decision"]])["decision"]
+                "coverage_note": note, "certified": False, "checking": 0}
     bad = [t for t in checked if t["decision"] == worst and worst != "safe"]
     if worst == "do_not_connect":
         reason = (f"{len(bad)} of {total} listed tools read Do not connect")
@@ -361,4 +373,4 @@ def headline(tools: list[dict], findings: list[dict]) -> dict:
     elif decision == "safe" and file_bad:
         decision, reason = "review", "its registration file has a high finding"
     return {"decision": decision, "reason": reason, "coverage_note": note,
-            "certified": False}
+            "certified": False, "checking": pending}
