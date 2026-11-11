@@ -517,6 +517,14 @@ CASES = [
                              coverage_gaps={"x402_code_unread": True}),
      "review", True, "one high finding in its listing: the paid endpoint uses plain"
                      " http:// (http://api.example/x)"),
+    ("x402_live_payee_moved", _scan(60, 1, [_f("high", "the endpoint asks to pay a "
+                                               "different address than its listing says",
+                                               category="payment_terms",
+                                               file_path="x402:live-402")],
+                                    high=1, coverage={"surface": "x402"},
+                                    coverage_gaps={"x402_code_unread": True}),
+     "review", True, "one high finding in its live payment request: the endpoint asks to"
+                     " pay a different address than its listing says"),
     # ── A2A Agent Card (src/scanner/a2a_scan.py; files = skills) ─────────────────
     ("a2a_clean_thin", _scan(74, 2, coverage={"surface": "a2a"}),
      "safe", True, "agent card clean; agent code not inspected"),

@@ -342,6 +342,7 @@ export function findingWhere(i: Obj): string {
     return ' in its tool definitions'
   }
   if (path.startsWith('card:')) return ' in its agent card'
+  if (path.startsWith('x402:live')) return ' in its live payment request'
   if (path.startsWith('x402:')) return ' in its listing'
   const parts = path.split('/').filter((p) => p)
   const name = parts.length ? parts[parts.length - 1] : ''
