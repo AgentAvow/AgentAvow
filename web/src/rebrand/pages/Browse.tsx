@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { fetchCatalog, fetchRecent, rowIdentity, type CatalogRow, type CatalogSandbox } from '../catalog'
@@ -249,8 +249,15 @@ function CatalogGraphic({ mix, decision, certifiedOn, onDecision, onCertified, r
   const ready = mix && mix.total > 0
   const cell = 'flex flex-col gap-0.5 min-w-0 text-left px-3.5 pt-3 pb-0.5 border-l border-border/60'
   const kicker = 'font-mono text-[10.5px] tracking-[0.12em] uppercase text-primary-light'
+  const navigate = useNavigate()
+  // The whole panel opens the Trust Index; its own filters and links keep working.
+  const openIndex = (e: { target: EventTarget }) => {
+    if ((e.target as HTMLElement).closest('a,button')) return
+    navigate(rp('/rebrand/index'))
+  }
   return (
-    <div className="glass rounded-2xl border border-border/60 px-5 py-[18px]">
+    <div onClick={openIndex} title="Open the Trust Index"
+      className="glass rounded-2xl border border-border/60 px-5 py-[18px] cursor-pointer transition-colors hover:border-primary-light/50">
       <div className="flex flex-wrap justify-between items-end gap-x-5 gap-y-2">
         <div>
           <b className="block gradient-text font-extrabold leading-none tracking-[-.02em] tabular-nums text-[clamp(30px,5vw,40px)]">{ready ? mix.total.toLocaleString() : '—'}</b>
@@ -399,33 +406,41 @@ export default function RebrandBrowse() {
           recent={recent?.map((it) => ({ ...it, href: listingHref(it as unknown as CatalogRow) }))}
         />
 
-        <form
-          onSubmit={(e) => { e.preventDefault(); applySearch() }}
-          className="glass mt-4 flex gap-2.5 rounded-2xl p-2 pl-4 shadow-lg shadow-primary/10"
-        >
-          <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 self-center text-text-muted shrink-0" aria-hidden="true">
-            <path d="M11 19a8 8 0 1 1 5.7-2.3L21 21" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-          </svg>
-          <input
-            value={qInput}
-            onChange={(e) => setQInput(e.target.value)}
-            placeholder="Search by name, package or server"
-            aria-label="Search tools"
-            className="flex-1 min-w-0 bg-transparent outline-none text-[15.5px] text-text placeholder:text-text-muted"
-          />
-          {qInput && <button type="button" onClick={clearSearch} aria-label="Clear search" className="text-text-muted hover:text-text px-1 text-[18px] leading-none">×</button>}
-          <button type="submit" className="font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow whitespace-nowrap">Search</button>
-        </form>
       </div>
 
       {/* ONE sticky filter row: the kind pills (one scrollable row), then the five
           dropdowns (a Filters bottom sheet on phones). Selected = teal outline. Solid
           background: no blur on a persistent element. */}
       <div className="sticky top-[62px] z-20 mt-3.5 bg-background relative after:absolute after:left-0 after:right-0 after:bottom-0 after:translate-y-full after:h-4 after:bg-gradient-to-b after:from-background/50 after:to-transparent after:pointer-events-none">
-        <div className="max-w-[1080px] mx-auto px-4 sm:px-6 py-3 flex flex-col gap-2.5">
-          {/* Desktop: the pills wrap inside the container. Phones: one scrollable row
-              with a fade at the right edge as the overflow hint. */}
-          <div className="relative">
+        <div className="max-w-[1080px] mx-auto px-4 sm:px-6 py-2.5 sm:py-3 flex flex-col gap-2.5">
+          {/* Search pins with the filters (Kenne 11-11). Phones: just the search and a
+              Filters button stay pinned; the kind pills scroll away below. */}
+          <div className="flex items-center gap-2">
+            <form
+              onSubmit={(e) => { e.preventDefault(); applySearch() }}
+              className="glass flex-1 min-w-0 flex gap-2.5 rounded-xl p-1.5 pl-3.5"
+            >
+              <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 self-center text-text-muted shrink-0" aria-hidden="true">
+                <path d="M11 19a8 8 0 1 1 5.7-2.3L21 21" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+              <input
+                value={qInput}
+                onChange={(e) => setQInput(e.target.value)}
+                placeholder="Search by name, package or server"
+                aria-label="Search tools"
+                className="flex-1 min-w-0 bg-transparent outline-none text-[15.5px] text-text placeholder:text-text-muted"
+              />
+              {qInput && <button type="button" onClick={clearSearch} aria-label="Clear search" className="text-text-muted hover:text-text px-1 text-[18px] leading-none">×</button>}
+              <button type="submit" className="font-semibold px-4 py-2 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow whitespace-nowrap">Search</button>
+            </form>
+            {/* mobile: Filters button beside the search (bottom sheet) */}
+            <button type="button" onClick={() => setSheetOpen(true)} aria-label="Filters" className={`sm:hidden flex items-center gap-1.5 shrink-0 ${pill(activeFilters > 0)}`}>
+              <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+              {activeFilters > 0 && <span className="grid place-items-center min-w-[18px] h-[18px] text-[10px] font-bold rounded-full bg-primary text-white">{activeFilters}</span>}
+            </button>
+          </div>
+          {/* Desktop: the pills wrap inside the container. */}
+          <div className="relative max-sm:hidden">
             <div className="flex gap-1.5 max-sm:overflow-x-auto sm:flex-wrap pb-0.5 max-sm:-mx-1 max-sm:px-1 max-sm:pr-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden snap-x" role="group" aria-label="Kind of tool">
               {SURFACES.map((sf, i) => (
                 <button key={sf.key} type="button" aria-pressed={tab === i} onClick={() => setTab(i)} className={`snap-start ${pill(tab === i)}`}>
@@ -435,7 +450,7 @@ export default function RebrandBrowse() {
             </div>
             <span className="sm:hidden pointer-events-none absolute right-0 top-0 bottom-0.5 w-10 bg-gradient-to-l from-background to-transparent" aria-hidden="true" />
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap max-sm:hidden">
             {/* desktop: inline filter dropdowns */}
             {[
               { label: 'Answer', v: decision, def: '', set: setDecision, opts: DECISION_OPTS },
@@ -449,13 +464,20 @@ export default function RebrandBrowse() {
                 {f.opts.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
               </select>
             ))}
-            {/* mobile: one Filters button → bottom sheet */}
-            <button type="button" onClick={() => setSheetOpen(true)} className={`sm:hidden flex items-center gap-1.5 ${pill(activeFilters > 0)}`}>
-              <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
-              Filters{activeFilters > 0 && <span className="grid place-items-center min-w-[18px] h-[18px] text-[10px] font-bold rounded-full bg-primary text-white">{activeFilters}</span>}
-            </button>
           </div>
         </div>
+      </div>
+
+      {/* Phones: the kind pills scroll with the page (one row, fade at the edge). */}
+      <div className="sm:hidden max-w-[1080px] mx-auto px-4 pt-2.5 relative">
+        <div className="flex gap-1.5 overflow-x-auto -mx-1 px-1 pr-8 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden snap-x" role="group" aria-label="Kind of tool">
+          {SURFACES.map((sf, i) => (
+            <button key={sf.key} type="button" aria-pressed={tab === i} onClick={() => setTab(i)} className={`snap-start ${pill(tab === i)}`}>
+              {sf.label}
+            </button>
+          ))}
+        </div>
+        <span className="pointer-events-none absolute right-4 top-2.5 bottom-0.5 w-10 bg-gradient-to-l from-background to-transparent" aria-hidden="true" />
       </div>
 
       {/* mobile filter bottom sheet */}

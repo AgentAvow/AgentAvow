@@ -1,4 +1,5 @@
 import { isValidElement, useEffect, type ReactNode } from 'react'
+import { Eyebrow } from '../components/PageBits'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { rp } from '../basePath'
 import Markdown from 'react-markdown'
@@ -111,7 +112,7 @@ export default function RebrandDocs() {
     <div className="max-w-[1080px] mx-auto px-6 py-14 grid md:grid-cols-[220px_1fr] gap-10">
       <SEOHead title={`${doc.title} · Docs`} description={doc.blurb} path={`/docs/${doc.slug}`} />
       <aside className="md:sticky md:top-[86px] self-start">
-        <div className="font-mono text-[11px] uppercase tracking-wide text-primary-light mb-3">Docs</div>
+        <Eyebrow className="mb-3">Docs</Eyebrow>
         <nav className="flex flex-col gap-1">
           {DOCS.map((d) => (
             <button
@@ -125,7 +126,7 @@ export default function RebrandDocs() {
             </button>
           ))}
         </nav>
-        <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted mt-6 mb-2">More</div>
+        <Eyebrow className="!text-text-muted mt-6 mb-2">More</Eyebrow>
         <nav className="flex flex-col gap-1">
           {MORE.map(([label, href]) => (
             href.startsWith('/api') || href.startsWith('http')
