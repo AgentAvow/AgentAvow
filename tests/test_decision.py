@@ -157,6 +157,14 @@ CASES = [
         {"id": "GHSA-a", "affects_scanned_version": True, "fixed_in": "3.0.1"},
         {"id": "GHSA-old", "affects_scanned_version": False, "fixed_in": "9.9.9"}]),
      "review", True, "a published advisory affects this version (GHSA-a); fixed in 3.0.1"),
+    ("advisory_fix_mixed_date_and_semver_names_none", _scan(88, 200, advisories=[
+        {"id": "GHSA-a", "affects_scanned_version": True, "fixed_in": "2.0.1"},
+        {"id": "GHSA-b", "affects_scanned_version": True, "fixed_in": "2026.9.1"}]),
+     "review", True, "a published advisory affects this version (GHSA-a)"),
+    ("advisory_fix_all_date_numbered_picks_highest", _scan(88, 200, advisories=[
+        {"id": "GHSA-a", "affects_scanned_version": True, "fixed_in": "2025.9.24"},
+        {"id": "GHSA-b", "affects_scanned_version": True, "fixed_in": "2026.1.14"}]),
+     "review", True, "a published advisory affects this version (GHSA-a); fixed in 2026.1.14"),
     ("advisory_in_incident_history", _scan(88, 200, incident_history={"advisories": [
         {"id": "PYSEC-1", "affects_scanned_version": True}]}),
      "review", True, "a published advisory affects this version (PYSEC-1)"),

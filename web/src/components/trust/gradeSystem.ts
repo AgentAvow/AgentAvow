@@ -250,15 +250,25 @@ function compareKeys(a: [number, string][], b: [number, string][]): number {
   return a.length - b.length
 }
 
+// A date-numbered release: its first part is a year (2025.9.24, 2026.8.31).
+function isDateVersion(v: string): boolean {
+  const head = v.replace(/^v+/, '').split('.', 1)[0]
+  return /^\d{4}$/.test(head) && Number(head) >= 1990 && Number(head) <= 2100
+}
+
 // The release that fixes ALL the listed advisories = the highest fixed_in (first wins a tie).
+// When the fixes mix date-numbered releases with ordinary ones, names none: a year sorts
+// above any 2.x, so "the highest" would point one release line at the other.
 function highestFix(advisories: Obj[]): string | null {
   let best: string | null = null
+  const schemes = new Set<boolean>()
   for (const a of advisories) {
     if (!a.fixed_in) continue
     const f = String(a.fixed_in)
+    schemes.add(isDateVersion(f))
     if (best === null || compareKeys(versionKey(f), versionKey(best)) > 0) best = f
   }
-  return best
+  return schemes.size > 1 ? null : best
 }
 
 function toInt(v: unknown): number {
