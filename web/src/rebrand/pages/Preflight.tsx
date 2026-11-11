@@ -6,6 +6,7 @@ import { rp } from '../basePath'
 import { Reveal } from '../components/motion'
 import { CertifiedMark, DecisionLine, TrustBar } from '../components/TrustMark'
 import SEOHead from '../../components/SEOHead'
+import { trackPageAction } from '../../lib/analytics'
 
 /**
  * Connector Preflight — a pre-submission readiness check for the Claude directory
@@ -178,10 +179,12 @@ export default function RebrandPreflight() {
   const run = async (value: string = input) => {
     const req = toRequest(value)
     if (!req) { setError('Enter an owner/repo, a GitHub URL, or an https:// MCP endpoint.'); return }
+    trackPageAction('preflight', `run_${req.kind}`)
     setLoading(true); setError(''); setData(null)
     try {
       const res = await api.get<Preflight>(req.path)
       setData(res.data)
+      trackPageAction('preflight', res.data.directory_ready ? 'result_ready' : 'result_not_ready')
     } catch (e) {
       const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       setError(detail || 'Could not run preflight — check the target and try again.')
@@ -291,9 +294,9 @@ export default function RebrandPreflight() {
           {notApplicable.length > 0 && <Section title="Not applicable" gates={notApplicable} note="" />}
 
           <div className="mt-5 flex gap-4 text-[13px] flex-wrap">
-            {data.signed.report_url && <a href={data.signed.report_url} target="_blank" rel="noopener noreferrer" className="text-primary-light hover:text-primary font-semibold">Full signed report ↗</a>}
-            <Link to={rp('/rebrand/for-developers') + '#badge'} className="text-primary-light hover:text-primary font-semibold">Get your README badge →</Link>
-            <Link to={rp('/rebrand/certified')} className="text-text-muted hover:text-text">What Certified means →</Link>
+            {data.signed.report_url && <a href={data.signed.report_url} target="_blank" rel="noopener noreferrer" onClick={() => trackPageAction('preflight', 'open_report')} className="text-primary-light hover:text-primary font-semibold">Full signed report ↗</a>}
+            <Link to={rp('/rebrand/for-developers') + '#badge'} onClick={() => trackPageAction('preflight', 'get_badge')} className="text-primary-light hover:text-primary font-semibold">Get your README badge →</Link>
+            <Link to={rp('/rebrand/certified')} onClick={() => trackPageAction('preflight', 'open_certified')} className="text-text-muted hover:text-text">What Certified means →</Link>
           </div>
         </Reveal>
       )}

@@ -9,6 +9,7 @@ import { AdoptionMini, CertifiedBadge, TrustMini } from '../components/TrustMark
 import { Reveal } from '../components/motion'
 import { CtaBand, PageHeader, SECTION_CLASS, SectionH2 } from '../components/PageBits'
 import SEOHead from '../../components/SEOHead'
+import { trackPageAction } from '../../lib/analytics'
 
 const PKG_SURFACES = ['npm', 'pypi', 'crates', 'docker', 'hf']
 
@@ -103,6 +104,7 @@ export default function RebrandCertified() {
   const run = async () => {
     const path = toPath(input)
     if (!path) { setError('Enter an owner/repo or a GitHub URL.'); return }
+    trackPageAction('certified', 'check')
     setLoading(true); setError(''); setResult(null)
     try {
       const res = await api.get<{ certified?: Certified; trust_score?: number | null }>(path)
@@ -155,7 +157,7 @@ export default function RebrandCertified() {
               {bySurface.length > 0 && (
                 <p className="mt-2 font-mono text-[12px] text-text-muted">
                   {bySurface.map(([surf, n], i) => (
-                    <span key={surf}>{i > 0 && ' · '}<Link className="hover:text-primary-light" to={rp(`/rebrand/browse?surface=${surf}&grade=certified`)}>{n} {CERT_SURFACE_LABEL[surf] || surf}</Link></span>
+                    <span key={surf}>{i > 0 && ' · '}<Link className="hover:text-primary-light" onClick={() => trackPageAction('certified', 'browse_surface')} to={rp(`/rebrand/browse?surface=${surf}&grade=certified`)}>{n} {CERT_SURFACE_LABEL[surf] || surf}</Link></span>
                   ))}
                 </p>
               )}
@@ -172,11 +174,11 @@ export default function RebrandCertified() {
                     </span>
                   )
                   return href
-                    ? <Link key={label} to={href} className="max-w-full">{pill}</Link>
+                    ? <Link key={label} to={href} onClick={() => trackPageAction('certified', 'open_tool')} className="max-w-full">{pill}</Link>
                     : <span key={label} className="max-w-full">{pill}</span>
                 })}
               </div>
-              <Link to={rp('/rebrand/index') + '#certified'} className="inline-block mt-3.5 text-[14px] font-semibold text-primary-light hover:text-primary">See the Certified board on the Trust Index →</Link>
+              <Link to={rp('/rebrand/index') + '#certified'} onClick={() => trackPageAction('certified', 'open_index')} className="inline-block mt-3.5 text-[14px] font-semibold text-primary-light hover:text-primary">See the Certified board on the Trust Index →</Link>
             </Reveal>
           </div>
         </section>
@@ -280,7 +282,7 @@ function GateResult({ result }: { result: { target: string; certified: Certified
             </span>
           )}
         </span>
-        {report && <Link to={report} className="text-[13.5px] font-semibold text-primary-light hover:text-primary">Open the full result →</Link>}
+        {report && <Link to={report} onClick={() => trackPageAction('certified', 'open_result')} className="text-[13.5px] font-semibold text-primary-light hover:text-primary">Open the full result →</Link>}
       </div>
       {!result.mark && result.note && <p className="mt-2 text-[13px] text-text-muted">{result.note}</p>}
       <ul className="mt-3 list-none p-0 m-0">

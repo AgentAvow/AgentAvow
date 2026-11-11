@@ -8,7 +8,7 @@ import ListToolForm from '../components/ListToolForm'
 import SEOHead from '../../components/SEOHead'
 import api from '../../lib/api'
 import { isCertified as certifiedMark } from '../../components/trust/gradeSystem'
-import { trackBadgeCopied, trackCta, trackPluginCommandCopy } from '../../lib/analytics'
+import { trackBadgeCopied, trackCta, trackPageAction, trackPluginCommandCopy } from '../../lib/analytics'
 import { DIVIDER_CLASS } from '../components/PageBits'
 
 /**
@@ -87,6 +87,7 @@ function useCopy(): [string | null, (key: string, text: string) => void] {
   const [copied, setCopied] = useState<string | null>(null)
   const copy = (key: string, text: string) => {
     navigator.clipboard?.writeText(text)
+    trackPageAction('dev', `copy_${key}`)
     setCopied(key)
     setTimeout(() => setCopied((k) => (k === key ? null : k)), 1400)
   }
@@ -220,16 +221,15 @@ export default function RebrandForDevelopers() {
               [true, 'Public GitHub repos and skills: the GitHub topic'],
               [true, "npm, PyPI, crates: automatic when the package links to a repo you've claimed, or a keyword you publish"],
               [true, <>MCP servers: return the code in an <code className={codeCls}>X-AgentAvow-Verify</code> header or <code className={codeCls}>serverInfo</code></>],
-              [false, 'Docker images and Hugging Face models'],
             ]} />
             <div className="mt-auto pt-2 flex flex-wrap gap-2">
-              <Link to={rp('/rebrand/tools')} className={btnPrimary}>Claim your tool</Link>
+              <Link to={rp('/rebrand/tools')} onClick={() => trackPageAction('dev', 'claim_start')} className={btnPrimary}>Claim your tool</Link>
             </div>
           </Card>
 
           <Card id="get-badge" step="2 · Get your badge" title="Put the answer on your README">
             <p className="text-[14px] text-text-muted">One line of Markdown. It shows the current signed answer, trust score and adoption, and links to the full report. No account needed for a public tool.</p>
-            <form onSubmit={(e) => { e.preventDefault(); document.getElementById('badge')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}
+            <form onSubmit={(e) => { e.preventDefault(); trackPageAction('dev', 'badge_preview'); document.getElementById('badge')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}
               className="flex gap-2 rounded-xl border border-border bg-surface p-1.5 pl-3 mt-1">
               {badgeInput('Repo, package or MCP URL')}
               <button type="submit" className="shrink-0 font-semibold text-[13px] px-3 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark">Make badge</button>
@@ -242,8 +242,6 @@ export default function RebrandForDevelopers() {
             </div>
             <Today rows={[
               [true, 'GitHub repos, npm, PyPI and crates packages, and MCP servers'],
-              [false, 'A single skill inside a collection, A2A agents'],
-              [false, "A private repo, until it's published"],
             ]} />
             <div className="mt-auto pt-2 flex flex-wrap gap-2">
               <a href="#badge" className={btnGhost}>Styles and the website widget ↓</a>
@@ -262,11 +260,9 @@ export default function RebrandForDevelopers() {
             <Today rows={[
               [true, 'A private report (GitHub App: kept and re-checked daily; token: one check, nothing kept)'],
               [true, '"Publish to search" for GitHub App repos, which also turns on the badge'],
-              [false, 'A badge for a private README without publishing'],
-              [false, 'Publishing a one-time token check'],
             ]} />
             <div className="mt-auto pt-2 flex flex-wrap gap-2">
-              <Link to={rp('/rebrand/tools') + '?private=1'} className={btnPrimary}>Check a private repo</Link>
+              <Link to={rp('/rebrand/tools') + '?private=1'} onClick={() => trackPageAction('dev', 'private_scan')} className={btnPrimary}>Check a private repo</Link>
             </div>
           </Card>
         </div>
@@ -395,7 +391,7 @@ export default function RebrandForDevelopers() {
               <div className="text-[15px] font-semibold">Other places to gate</div>
               <ul className="mt-2 space-y-1.5 text-[13.5px] text-text-muted">
                 {GATES.map(([h, p, to]) => (
-                  <li key={h}><Link to={rp(to)} className="font-semibold text-primary-light hover:text-primary">{h} →</Link> <span>{p}</span></li>
+                  <li key={h}><Link to={rp(to)} onClick={() => trackPageAction('dev', 'open_gate_doc')} className="font-semibold text-primary-light hover:text-primary">{h} →</Link> <span>{p}</span></li>
                 ))}
               </ul>
             </div>
@@ -428,8 +424,8 @@ export default function RebrandForDevelopers() {
           <div className="mt-5 flex gap-2.5 flex-wrap">
             <a href="https://claude.ai/directory/connectors/agentavow" target="_blank" rel="noopener noreferrer" onClick={() => trackCta('add_claude')} className={btnPrimary}>Add to Claude ↗</a>
             <a href="https://chatgpt.com/plugins/plugin_asdk_app_6ac830ccc2d48191ac27974dec7d8344" target="_blank" rel="noopener noreferrer" onClick={() => trackCta('add_chatgpt')} className={btnGhost}>Add to ChatGPT ↗</a>
-            <a href={cursorStdio(AA_MCP)} className={btnGhost}>Add to Cursor →</a>
-            <a href={vscodeStdio(AA_MCP)} className={btnGhost}>Add to VS Code →</a>
+            <a href={cursorStdio(AA_MCP)} onClick={() => trackPageAction('dev', 'add_cursor')} className={btnGhost}>Add to Cursor →</a>
+            <a href={vscodeStdio(AA_MCP)} onClick={() => trackPageAction('dev', 'add_vscode')} className={btnGhost}>Add to VS Code →</a>
             <Link to={rp('/rebrand/get')} className={btnGhost}>Every way to get it →</Link>
           </div>
           <p className="mt-4 text-[13.5px] text-text-muted">Claude Code: <code className={codeCls}>{claudeCodeStdio(AA_MCP)}</code></p>
@@ -456,8 +452,8 @@ export default function RebrandForDevelopers() {
                 </>
               )
               return external
-                ? <a key={h} href={href} target="_blank" rel="noopener noreferrer" className="glass card-hover rounded-xl px-4 py-3 block">{inner}</a>
-                : <Link key={h} to={rp(href)} className="glass card-hover rounded-xl px-4 py-3 block">{inner}</Link>
+                ? <a key={h} href={href} target="_blank" rel="noopener noreferrer" onClick={() => trackPageAction('dev', 'open_resource')} className="glass card-hover rounded-xl px-4 py-3 block">{inner}</a>
+                : <Link key={h} to={rp(href)} onClick={() => trackPageAction('dev', 'open_resource')} className="glass card-hover rounded-xl px-4 py-3 block">{inner}</Link>
             })}
           </div>
         </div>

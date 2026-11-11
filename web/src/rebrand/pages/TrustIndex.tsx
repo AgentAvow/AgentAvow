@@ -9,6 +9,7 @@ import { fetchCatalog, fetchFlaggedStat, fetchRecent, rowIdentity, type CatalogR
 import { AnswerMixBar, StatCards } from '../components/AnswerMix'
 import { SandboxFindingsBlock } from '../components/SandboxStats'
 import SEOHead from '../../components/SEOHead'
+import { trackPageAction } from '../../lib/analytics'
 
 /** Live "just scanned…" feed — real recent scans, refreshed on an interval. */
 function RecentFeed() {
@@ -45,7 +46,7 @@ function RecentFeed() {
               {it.trust_score != null && <TrustOrCertifiedMini row={it as unknown as Record<string, unknown> & { trust_score: number }} />}
             </div>
           )
-          return href ? <Link key={i} to={href} className="block">{inner}</Link> : <div key={i}>{inner}</div>
+          return href ? <Link key={i} to={href} onClick={() => trackPageAction('trust_index', 'open_recent')} className="block">{inner}</Link> : <div key={i}>{inner}</div>
         })}
       </div>
     </div>
@@ -168,7 +169,7 @@ function Row({ row, rank }: { row: CatalogRow; rank: number }) {
     </div>
   )
   return href
-    ? <Link to={href} className="block">{inner}</Link>
+    ? <Link to={href} onClick={() => trackPageAction('trust_index', 'open_tool')} className="block">{inner}</Link>
     : <div>{inner}</div>
 }
 
@@ -182,10 +183,10 @@ function Board({ title, note, rows, isLoading: fetching, href }: { title: string
     <div className="glass rounded-2xl p-5 min-w-0">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <h2 className="text-[16px] font-bold">
-          {href ? <Link to={href} className="hover:text-primary-light transition-colors">{title}</Link> : title}
+          {href ? <Link to={href} onClick={() => trackPageAction('trust_index', 'open_board')} className="hover:text-primary-light transition-colors">{title}</Link> : title}
         </h2>
         {href
-          ? <Link to={href} className="font-mono text-[10.5px] text-primary-light hover:text-primary uppercase tracking-wide shrink-0">{note} · what's this? →</Link>
+          ? <Link to={href} onClick={() => trackPageAction('trust_index', 'open_board_note')} className="font-mono text-[10.5px] text-primary-light hover:text-primary uppercase tracking-wide shrink-0">{note} · what's this? →</Link>
           : <span className="font-mono text-[10.5px] text-text-muted uppercase tracking-wide shrink-0">{note}</span>}
       </div>
       <div className="mt-3 flex flex-col divide-y divide-border/40">
@@ -233,7 +234,7 @@ export default function RebrandTrustIndex() {
       <PageHeader
         eyebrow="Trust Index"
         title={<>The state of <span className="gradient-text-bio">agent tool</span> safety.</>}
-        lede={<>An independent, <b className="font-medium text-text">signed</b> index of the tools, MCP servers, and packages AI agents connect to — checked from the outside, no repo access, verifiable offline. Not the agent you build; the things it trusts.</>}
+        lede={<>An independent index of <b className="font-medium text-text">signed answers</b> for the tools, MCP servers, and packages AI agents connect to — checked from the outside, no repo access, verifiable offline. Not the agent you build; the things it trusts.</>}
       />
       <div className="relative z-[2] max-w-[1080px] mx-auto px-6 pb-[60px]">
       {/* how the catalog reads: the answer mix and the counts under it, all live */}

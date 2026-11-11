@@ -247,7 +247,17 @@ function GitHubAppConnection() {
   }, [params, connect, setParams])
 
   const [installing, setInstalling] = useState(false)
-  const [installErr, setInstallErr] = useState<string | null>(null)
+  // GitHub sends ?gh_setup=error (no installation id) when the install didn't finish.
+  const [installErr, setInstallErr] = useState<string | null>(() =>
+    params.get('gh_setup') === 'error' && !params.get('gh_installation_id')
+      ? "GitHub didn't finish installing the app. Try again, or check the app's access in your GitHub settings."
+      : null)
+  useEffect(() => {
+    if (params.get('gh_setup') === 'error' && !params.get('gh_installation_id')) {
+      params.delete('gh_setup')
+      setParams(params, { replace: true })
+    }
+  }, [params, setParams])
   const startInstall = async () => {
     setInstalling(true); setInstallErr(null)
     try {

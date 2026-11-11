@@ -528,6 +528,13 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
     adoption_by_day = await _read_daily_counter("adoption_hit", day_strs)
     rescan_by_day = await _read_daily_counter("force_rescan", day_strs)
     install_by_day = await _read_daily_counter("install_click", day_strs)
+    # One-click installs by the client the deeplink opens (Check page). Counted from the
+    # deploy that split them; before it every click is in the total only.
+    from src.api.public_scan_router import INSTALL_CLIENTS
+    install_by_client = {
+        c: sum((await _read_daily_counter(f"install_{c}", day_strs)).values())
+        for c in INSTALL_CLIENTS
+    }
     # Redirects and legacy-host requests never reach a usage counter
     # (src/usage_scope); they are counted once here so the junk volume stays visible.
     redirected_by_day = await _read_daily_counter(REDIRECTED_METRIC, day_strs)
@@ -879,6 +886,7 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
             "claimed": int(claims_created_window),
             "installs": int(install_clicks_window),
         },
+        "installs_by_client": {c: int(n) for c, n in install_by_client.items()},
         "series": series,
         "notes": notes,
         # The counting rules + the date they changed, so the trend break is explained.
@@ -1154,6 +1162,7 @@ _TRAFFIC_INT_COLUMNS = (
     "checked_machines_cloud", "checked_machines_other",
     "cc_machines_7d_excl_cloud", "checked_machines_7d_excl_cloud",
     "new_checked_same_day", "d7_cohort_checked",
+    "tool_gate_machines", "tool_gate_reqs", "a2a_card_fetches", "a2a_card_fetchers",
 )
 _TRAFFIC_NOTES = [
     "checked_machines_7d and cc_machines_7d are rolling 7-day counts of distinct machines, "
@@ -1192,6 +1201,11 @@ _TRAFFIC_NOTES = [
     "checks_* = hand-run checks per surface: MCP tool calls minus about_agentavow and "
     "minus calls from the IPs in METRICS_OWNER_IPS. Empty on days before the counter "
     "existed (2026-11-11); the Start here card uses calls_* for those days.",
+    "gate_machines = distinct IPs sending the plugin gate's User-Agent (agentavow-gate/); "
+    "tool_gate_machines / tool_gate_reqs = the npm SDK's tool gate (agentavow-tool-gate/), "
+    "counted on its own from 2026-11-12. a2a_card_fetches / a2a_card_fetchers = answered "
+    "fetches of our own A2A Agent Card (/.well-known/agent-card.json, or the legacy "
+    "agent.json) and the distinct IPs fetching it, from 2026-11-12.",
     "log_complete = 0 means the nginx log did not cover all 24 hours of that day (partial "
     "day or a log rotation gap); treat that row as a lower bound.",
     "cc_sessions = Claude Code session starts. Through 2026-10-19 it counted the one "
@@ -1270,7 +1284,8 @@ async def traffic_metrics(
                     "cc_machines_excl_owner", "hook_machines_excl_owner",
                     "checked_machines", "checked_machines_excl_owner", "preinstall_machines",
                     "preinstall_reqs", "cc_machines_7d", "checked_machines_7d",
-                    "d7_cohort", "d7_returned")
+                    "d7_cohort", "d7_returned", "gate_machines", "tool_gate_machines",
+                    "a2a_card_fetches")
     }
     latest = rows[-1] if rows else None
     return {
@@ -1349,6 +1364,7 @@ async def growth_metrics(
     referrals to landing pages over ``days``. Admin only."""
     require_admin(current_entity)
     from src import cache
+    from src.indexnow_record import recent_runs as recent_indexnow_runs
     from src.jobs.metrics_daily import (
         CATALOG_PREFIX,
         DOWNLOADS_PREFIX,
@@ -1377,6 +1393,7 @@ async def growth_metrics(
         "downloads_daily": downloads,
         "downloads_latest": latest_dl,
         "referrals": await _referrals(db, days),
+        "indexnow_runs": await recent_indexnow_runs(5),
         "notes": [
             "catalog_daily is written by the 6-hour scheduler job (src/jobs/metrics_daily) "
             "from the PR 2 deploy on; days before it are absent, not zero. x402 listings "
@@ -1385,6 +1402,8 @@ async def growth_metrics(
             "agentavow-trust, fetched by the same job. A source that failed is absent.",
             "referrals: landing sessions (lp_view, bots left out) by the host of the page "
             "that sent them. Only the host is stored. Counted from the PR 2 deploy.",
+            "indexnow_runs: the newest IndexNow pings, newest first (when, outcome, URLs "
+            "submitted, HTTP status), stored by scripts/deploy-prod.sh after each deploy.",
         ],
     }
     await cache.set(cache_key, result, ttl=cache.TTL_SHORT)

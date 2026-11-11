@@ -98,9 +98,29 @@ COLUMNS = [
     # New machines that see a verdict: first seen today and checked today; and of the
     # D7 cohort (first seen 7 days ago), how many were checked within 6 days of it.
     "new_checked_same_day", "d7_cohort_checked",
+    # Added 2026-11-12. The npm SDK's tool gate (agentavow-trust gates for the Vercel AI
+    # SDK / Flue) sends User-Agent agentavow-tool-gate/<v>; gate_machines above counts
+    # only the plugin gate (agentavow-gate/). Kept apart, never merged into it.
+    "tool_gate_machines", "tool_gate_reqs",
+    # Fetches of our own A2A Agent Card (nginx serves /.well-known/agent-card.json from
+    # web/public as a static file, so only the access log sees them), and the distinct
+    # IPs fetching it. Answered requests only (200 / 304).
+    "a2a_card_fetches", "a2a_card_fetchers",
 ]
 
+# Our A2A Agent Card: the A2A 1.0 path, and the pre-0.3 path some clients still try first.
+A2A_CARD_PATHS = ("/.well-known/agent-card.json", "/.well-known/agent.json")
+
 ENTRYPOINT_GROUPS = ("desktop", "cli", "sdk", "cloud", "other")
+
+
+def is_card_request(request: str) -> bool:
+    """True for a GET/HEAD of our A2A Agent Card (``request`` is nginx's "METHOD path
+    PROTO" line). A query string does not change what was fetched."""
+    parts = request.split()
+    if len(parts) < 2 or parts[0] not in ("GET", "HEAD"):
+        return False
+    return parts[1].split("?", 1)[0] in A2A_CARD_PATHS
 
 
 def entrypoint_group(ua: str) -> str:
@@ -317,6 +337,8 @@ def snapshot(day: str, since_hours: int) -> dict:
     hook_ips: set[str] = set()
     cai_ips: set[str] = set()
     gate_ips: set[str] = set()
+    tool_gate_ips: set[str] = set()
+    card_ips: set[str] = set()
     pre_ips: set[str] = set()
     hook_versions: dict[str, int] = defaultdict(int)
     n = defaultdict(int)
@@ -357,6 +379,12 @@ def snapshot(day: str, since_hours: int) -> dict:
                 n["owner_hook_reqs"] += 1
         if ua.startswith("agentavow-gate/"):
             gate_ips.add(ip)
+        if ua.startswith("agentavow-tool-gate/"):
+            tool_gate_ips.add(ip)
+            n["tool_gate_reqs"] += 1
+        if st in (200, 304) and is_card_request(req):
+            card_ips.add(ip)
+            n["a2a_card_fetches"] += 1
         if ua.startswith(("agentavow-pre_install/", "agentavow-preinstall/")):
             pre_ips.add(ip)
             n["preinstall_reqs"] += 1
@@ -428,6 +456,8 @@ def snapshot(day: str, since_hours: int) -> dict:
         "hook_machines_nginx": len(hook_ips), "hook_reqs": n["hook_reqs"],
         "hook_top_version": max(hook_versions, key=hook_versions.get) if hook_versions else "",
         "gate_machines": len(gate_ips), "preinstall_machines": len(pre_ips),
+        "tool_gate_machines": len(tool_gate_ips), "tool_gate_reqs": n["tool_gate_reqs"],
+        "a2a_card_fetches": n["a2a_card_fetches"], "a2a_card_fetchers": len(card_ips),
         "scans_200": n["scans_200"], "badges_200": n["badges_200"],
         "owner_cc_reqs": n["owner_cc_reqs"], "owner_cc_sessions": n["owner_cc_sessions"],
         "owner_hook_reqs": n["owner_hook_reqs"], "owner_scans_200": n["owner_scans_200"],
