@@ -4305,7 +4305,7 @@ def _scan_content(
                     pipe_class = pipe_shell.classify_line(line, pattern, file_path)
                     if pipe_class == pipe_shell.DROP:
                         continue
-                    if pipe_class == pipe_shell.OFFICIAL:
+                    if pipe_class in (pipe_shell.OFFICIAL, pipe_shell.PINNED):
                         effective_severity = "high"
                     if _pipe_shown(idx, line, pattern):
                         # Shown, never run (round 2): help / error text of a shell
@@ -4322,9 +4322,7 @@ def _scan_content(
                             "defect", effective_severity,
                             name in _PAYLOAD_REMOTE_LOAD_NAMES)
                         shown.shown_pre = (  # type: ignore[attr-defined]
-                            pre_sev, pre_payload,
-                            pipe_shell.WHY_OFFICIAL
-                            if pipe_class == pipe_shell.OFFICIAL else "")
+                            pre_sev, pre_payload, pipe_shell.why(pipe_class))
                         findings.append(shown)
                         break
                 # Downgrade in test/doc/infra files like other groups
@@ -4458,8 +4456,7 @@ def _scan_content(
                     line_number=line_num,
                     snippet=stripped[:120],
                     payload=remote_payload,
-                    remediation=(pipe_shell.WHY_OFFICIAL
-                                 if pipe_class == pipe_shell.OFFICIAL else ""),
+                    remediation=pipe_shell.why(pipe_class),
                 )
                 if npx_pre is not None:
                     # What it would have been (not a dataclass field): repository,
@@ -6193,8 +6190,52 @@ async def _run_supply_chain(
             except Exception:
                 root_coord = None
 
+            # Private workspace members of a pnpm monorepo (a docs site, examples):
+            # read each importer's package.json, at most 40 per lockfile. A member
+            # that cannot be read counts as public (fail safe: full weight).
+            private_importers: dict[str, set[str]] = {}
+            try:
+                from src.scanner.lockfiles import pnpm_v9_importers
+                for _lp, _text in lockfiles.items():
+                    if not _lp.lower().endswith("pnpm-lock.yaml"):
+                        continue
+                    from src.scanner.lockfiles import yaml_documents
+                    _imps = list(dict.fromkeys(
+                        k for _doc in yaml_documents(_text)
+                        for k in pnpm_v9_importers(_doc)))[:40]
+                    if len(_imps) < 2:
+                        continue
+                    _base = str(Path(_lp).parent)
+                    _base = "" if _base in (".", "") else _base + "/"
+                    _pj = {imp: f"{_base}{'' if imp == '.' else imp.strip('/') + '/'}"
+                                f"package.json" for imp in _imps}
+
+                    async def _fetch_pj(path: str) -> tuple[str, str]:
+                        try:
+                            async with sem:
+                                c = await asyncio.wait_for(
+                                    _fetch_file_content(owner, repo, path, token, ref=ref),
+                                    timeout=per_file_timeout)
+                            return path, c or ""
+                        except (asyncio.TimeoutError, Exception):
+                            return path, ""
+                    _texts = dict(await asyncio.gather(*(_fetch_pj(x) for x in _pj.values())))
+                    _priv = set()
+                    for imp, path in _pj.items():
+                        try:
+                            doc = json.loads(_texts.get(path) or "")
+                        except ValueError:
+                            continue
+                        if isinstance(doc, dict) and doc.get("private") is True:
+                            _priv.add(imp)
+                    if _priv:
+                        private_importers[_lp] = _priv
+            except Exception:
+                private_importers = {}
+
             sc = await analyze_supply_chain(
                 lockfiles,
+                private_importers=private_importers,
                 owner=owner,
                 repo=repo,
                 workflow_texts=workflow_texts,

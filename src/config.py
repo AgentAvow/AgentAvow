@@ -413,6 +413,11 @@ class Settings(BaseSettings):
     # Admin account email (used for bot ownership, alerts, marketing)
     admin_email: str = "admin@agentgraph.co"
 
+    # Owner / test machines whose MCP tool calls are left out of the "hand-run checks"
+    # counter (admin dashboard, Start here). Comma-separated client IPs, the same list
+    # as data/owner-ips.txt on the prod host. Empty = nothing excluded.
+    metrics_owner_ips: str = ""
+
     # MCP connector health alerting (src/jobs/mcp_health.py). On 2026-10-17..20 every
     # first request from current Claude clients got 400 "Unsupported protocol version"
     # and nothing alerted; these checks email the admin when /mcp breaks.

@@ -3,7 +3,10 @@
 Raw request counts overstate usage: the MCP endpoint alone sees a dozen directory
 crawlers and uptime monitors, and the public scan API is hit by our own scripts.
 This classifies a request by its User-Agent so usage counters can be split into
-``human`` / ``agent`` / ``automated`` without storing anything about the caller.
+``human`` / ``agent`` / ``agentavow`` / ``automated`` without storing anything about
+the caller. ``agentavow`` is our own clients (the Claude Code plugin's hooks, the npm
+and Python gates, the SDK adapters): real use of the product, but not a person or a
+third-party agent, so it gets its own row instead of hiding in "automated".
 
 Best effort by design. A User-Agent is self-declared, so a crawler that spoofs a
 browser lands in ``human``; the point is to stop counting the honest bots, which
@@ -12,7 +15,7 @@ are nearly all of them. Checked against 72 hours of production traffic on
 tests/test_traffic_class.py for the real strings).
 
 Order of tests: known crawlers that carry an agent vendor's name (ClaudeBot,
-GPTBot) first, then agent clients, then bots and HTTP libraries, then a real
+GPTBot) first, then our own clients, then agent clients, then bots and HTTP libraries, then a real
 browser engine string; anything else is automated.
 """
 from __future__ import annotations
@@ -20,9 +23,26 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-ClientClass = Literal["human", "agent", "automated"]
+ClientClass = Literal["human", "agent", "agentavow", "automated"]
 
-CLIENT_CLASSES: tuple[ClientClass, ...] = ("human", "agent", "automated")
+CLIENT_CLASSES: tuple[ClientClass, ...] = ("human", "agent", "agentavow", "automated")
+
+# Our own clients, by the User-Agent each one sends (prefix match). The health probe
+# (agentavow-mcp-health) is deliberately absent: it is monitoring, not use.
+#   agentavow-precheck/     Claude Code plugin, session-start hook
+#   agentavow-preinstall/   Claude Code plugin, install-time hook (pre_install in 0.1.28)
+#   agentavow-gate/         Claude Code plugin, pre-tool gate
+#   agentavow-tool-gate/    npm `agentavow-trust` gate and the Python tool gate
+#   agentavow-trust/        SDK adapters (LangChain, ADK, ...)
+#   agentavow-sdk/          Python SDK
+#   agentavow-scan/         CLI / CI scan
+#   agentavow-mcp-admission/ MCP admission controller
+#   agentavow-action/       GitHub Action (once it sends its own User-Agent; today: curl)
+AGENTAVOW_CLIENT_PREFIXES = (
+    "agentavow-precheck", "agentavow-preinstall", "agentavow-pre_install",
+    "agentavow-gate/", "agentavow-tool-gate", "agentavow-trust/", "agentavow-sdk/",
+    "agentavow-scan/", "agentavow-mcp-admission", "agentavow-action/",
+)
 
 # Index crawlers run by the AI vendors. Their strings carry the vendor's name
 # ("+claudebot@anthropic.com", "openai.com/searchbot"), so they must be settled
@@ -37,9 +57,9 @@ _VENDOR_CRAWLER_RE = re.compile(
 # "<Vendor>-User" strings are the user-triggered fetchers (a person asked the
 # assistant something and it read our page), the same thing as Claude-User.
 _AGENT_MARKERS = (
-    "agentavow-precheck",  # the Claude Code plugin's pre-connect hook
     "claude-user", "claude-code", "claude code", "claudecode", "anthropic",
     "openai-mcp", "chatgpt", "perplexity-user",
+    "codex",  # OpenAI Codex (CLI / app); unconfirmed against prod logs, 2026-11-11
     "cursor", "vscode", "visual studio code",
     "github-camo",  # a README rendering our badge — real adoption, not a crawler
 )
@@ -84,6 +104,8 @@ def classify_user_agent(user_agent: str | None) -> ClientClass:
         return "automated"
     if _VENDOR_CRAWLER_RE.search(ua):
         return "automated"
+    if ua.startswith(AGENTAVOW_CLIENT_PREFIXES):
+        return "agentavow"
     if any(marker in ua for marker in _AGENT_MARKERS):
         return "agent"
     if _BOT_RE.search(ua) or _SCRIPT_RE.match(ua):
@@ -91,3 +113,37 @@ def classify_user_agent(user_agent: str | None) -> ClientClass:
     if _BROWSER_RE.search(ua):
         return "human"
     return "automated"
+
+
+# Pre-renderers, headless browsers and page-speed tools that run our JavaScript, so
+# they can fire first-party analytics events while carrying an ordinary-looking
+# browser string. "headless" and "lighthouse"-style tells are caught here on top of
+# the crawler list above.
+_RENDERER_RE = re.compile(
+    r"headless|prerender|puppeteer|playwright|selenium|webdriver|lighthouse|"
+    r"pagespeed|gtmetrix|speedcurve|chrome-lighthouse",
+    re.IGNORECASE,
+)
+
+AnalyticsUaClass = Literal["bot", "browser", "unknown"]
+
+
+def analytics_ua_class(user_agent: str | None) -> AnalyticsUaClass:
+    """Coarse class stored on a first-party analytics event (never the UA itself).
+
+    ``bot``: a known crawler, script, pre-renderer or headless browser.
+    ``browser``: a real browser engine string.
+    ``unknown``: no User-Agent, or one that is neither (an agent fetcher, say).
+    The funnel excludes ``bot`` only, so a mistake here can hide a crawler but never
+    a person whose browser string we could not read."""
+    ua = (user_agent or "").strip()
+    if not ua:
+        return "unknown"
+    if _RENDERER_RE.search(ua):
+        return "bot"
+    cls = classify_user_agent(ua)
+    if cls == "human":
+        return "browser"
+    if cls == "automated":
+        return "bot"
+    return "unknown"

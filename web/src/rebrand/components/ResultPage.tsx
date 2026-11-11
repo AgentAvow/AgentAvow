@@ -3,14 +3,13 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { rp } from '../basePath'
 import { publicApi } from '../../lib/scanApi'
-import { trackBadgeCopied } from '../../lib/analytics'
-import { CHATGPT_LISTING, CLAUDE_LISTING, trackListing } from '../lib/listings'
 import { coverageGapNotes, decisionOf, decisionPhrase, isCertified, type Decision } from '../../components/trust/gradeSystem'
-import { TrustBar, AdoptionNeedle } from './TrustMark'
+import { TrustBar, AdoptionNeedle, CertifiedBadge } from './TrustMark'
+import { AgentAvowChooser } from './AgentAvowChooser'
 import { Reveal } from './motion'
 import { useIsDesktop } from '../lib/hooks'
 import {
-  certifiedRows, certifiedStatus, checkedAgo, fixText, sandboxSummary, topFindings,
+  certifiedPending, certifiedRows, certifiedStatus, checkedAgo, fixText, sandboxSummary, topFindings,
   type CheckRow, type CheckRowState, type ResultKind, type TopFinding,
 } from '../lib/resultPage'
 
@@ -35,24 +34,25 @@ const SEV_CLASS: Record<string, string> = {
  * (website build spec 2026-11-07, score page):
  *
  *   incident banner · eyebrow (surface, name, version, checked time, Re-check) · title
- *   1  the answer and its reason, with the CERTIFIED mark (here only)
- *   2  trust score and adoption score
- *   3  the slim Certified checklist
+ *   1  the answer and its reason
+ *   2  trust score (the Certified badge in its place when earned) and adoption score
+ *   3  the Certified checklist, always ending with the line that decides it
  *   4  what the check found: top 3 findings with fixes, then all findings
  *   5  what we couldn't check
- *   6  next steps
+ *   6  next steps: 1 keep an eye on it (Watch) · 2 is this yours? (claim, badge) ·
+ *      3 check tools like this automatically (every AgentAvow path) · 4 how to
+ *      install this tool (collapsed). A step whose action doesn't exist is hidden.
  *   7  keep watching it
  *   8  what's inside
- *   9  badge, claim and share
+ *   9  badges (and the share panel)
  *   10 verify it yourself (collapsed)
+ *
+ * Certified shows once: the badge in the trust-score slot (approved mock, 2026-11-10).
  *
  * The answer is the API's own decision read through gradeSystem.decisionOf (the twin of
  * src/scanner/verdict.py decide()); the mark is isCertified. Nothing here re-decides.
  * Type-specific panels come in as slots; the order and headings are fixed here.
  */
-
-/** Where "Get this check automatically" points: the Claude Code landing page. */
-const CLAUDE_CODE_PAGE = '/rebrand/claude-code'
 
 
 export interface ResultAdoption {
@@ -96,25 +96,37 @@ export interface ResultPageProps {
   gapNotes?: ReactNode[]
   /** a full panel for the couldn't-check section (e.g. what doesn't apply to a hosted endpoint) */
   gapPanel?: ReactNode
-  /** install / connect block (hidden on Do not connect) */
+  /** step 4, "How to install this tool" (replaced by one line on Do not connect) */
   install?: ReactNode
-  /** the watch button (absent for a one-time private scan) */
+  /** step 1, the watch button (absent where watching doesn't exist: one-time private
+   * scans, A2A cards, surfaces the watch API doesn't take) */
   watch?: ReactNode
-  /** markdown for "Copy the badge" (absent where there is no public badge) */
+  /** markdown of the public badge; when set, step 2 offers "Add the badge ↓" */
   badgeMarkdown?: string
-  /** false when the page renders no #share panel (e.g. an unpublished private repo) */
-  share?: boolean
-  /** false when the page renders no #claim panel (e.g. an A2A agent card) */
-  claim?: boolean
+  /** step 2, "Is this yours?" (absent where claiming doesn't exist: Docker, Hugging
+   * Face, A2A) */
+  ownerStep?: OwnerStep
+  /** the share panel (renders #share); the card footer links to it when present */
+  sharePanel?: ReactNode
+  /** true when a #share target exists without a sharePanel (a published private repo
+   * shares from its publish control) */
+  shareAnchor?: boolean
   keepWatching?: { history?: ReactNode; adoption?: ReactNode; drift?: ReactNode; note?: ReactNode }
   inside: ReactNode
-  badgeClaimShare: ReactNode
+  /** the Badges section at the bottom: badge / card / widget */
+  badges?: ReactNode
   /** the "What we checked" facts, inside Verify it yourself */
   whatWeChecked?: ReactNode
   /** the signed proof (VerifyPanel) */
   proof?: ReactNode
   /** the incident / deprecation banner, above the title */
   banner?: ReactNode
+}
+
+/** Step 2's body: one line and the claim (or publish) control. */
+export interface OwnerStep {
+  text: ReactNode
+  actions: ReactNode
 }
 
 const ROW_STYLE: Record<CheckRowState, { tag: string; cls: string }> = {
@@ -131,21 +143,37 @@ export function CertifiedChecklist({ scan, kind, decision, rowsOverride, statusO
   const d = decision ?? decisionOf(scan)
   const rows = rowsOverride ?? certifiedRows(scan, kind, d)
   const st = statusOverride ?? certifiedStatus(scan, rows, d)
+  const checks = rows.filter((r) => !r.decides)
+  const decide = rows.find((r) => r.decides)
+  const earned = isCertified(scan)
   return (
     <Reveal>
-      <div className="mt-4 glass rounded-2xl px-5 py-4" data-testid="certified-checklist">
-        <div className="flex items-baseline justify-between gap-3 flex-wrap">
+      <div className={`mt-4 rounded-2xl px-5 py-4 border ${earned ? 'border-accent/40 bg-[linear-gradient(100deg,rgba(45,212,191,.08),rgba(232,121,249,.06)_70%)]' : 'glass border-transparent'}`} data-testid="certified-checklist">
+        <div className="flex items-baseline justify-between gap-x-3 gap-y-1 flex-wrap">
           <div className="text-[14.5px]"><b>{st.lead}</b>{st.rest && <span className="text-text-muted"> · {st.rest}</span>}</div>
           <Link to={rp('/rebrand/certified')} className="text-[12.5px] font-semibold text-primary-light hover:text-primary">What Certified means →</Link>
         </div>
         <ul className="mt-3 grid sm:grid-cols-2 gap-x-5 gap-y-2.5">
-          {rows.map((r) => (
-            <li key={r.label} className="flex items-start gap-2.5 text-[13px]" data-state={r.state}>
+          {checks.map((r) => (
+            <li key={r.label} className="flex items-start gap-2.5 text-[13px] min-w-0" data-state={r.state}>
               <span className={`font-mono text-[10px] font-bold tracking-wide px-1.5 py-0.5 rounded border shrink-0 mt-0.5 ${ROW_STYLE[r.state].cls}`}>{ROW_STYLE[r.state].tag}</span>
-              <span className="min-w-0"><span className="text-text">{r.label}</span><span className="block text-[11.5px] text-text-muted break-words">{r.evidence}</span></span>
+              <span className="min-w-0">
+                <span className="text-text">{r.label}</span>
+                <span className="block text-[11.5px] text-text-muted break-words">{r.evidence}</span>
+                {r.keys?.length ? <span className="block font-mono text-[10.5px] text-text-muted/70 break-words">{r.keys.join(' · ')}</span> : null}
+              </span>
             </li>
           ))}
         </ul>
+        {decide && (
+          <div className="mt-3 pt-3 border-t border-border/70 flex items-start gap-2.5 text-[13.5px]" data-state={decide.state} data-testid="certified-decides">
+            <span className={`font-mono text-[10px] font-bold tracking-wide px-1.5 py-0.5 rounded border shrink-0 mt-0.5 ${ROW_STYLE[decide.state].cls}`}>{ROW_STYLE[decide.state].tag}</span>
+            <span className="min-w-0">
+              <b className="font-semibold">{decide.label}</b> <span className="text-text-muted">({decide.evidence})</span>
+              {decide.note && <span className="block text-[12px] text-text-muted break-words">{decide.note}</span>}
+            </span>
+          </div>
+        )}
       </div>
     </Reveal>
   )
@@ -170,29 +198,31 @@ function Percentile({ score }: { score: number }) {
   return <> · higher than <b className="text-text tabular-nums">{data.percentile}%</b> of {data.population ? `${data.population.toLocaleString('en-US')} ` : ''}tools</>
 }
 
-function AnswerCard({ scan, kind, adoption }: { scan: ResultPageProps['scan']; kind: ResultKind; adoption: ResultAdoption | null }) {
+function AnswerCard({ scan, kind, adoption, share }: { scan: ResultPageProps['scan']; kind: ResultKind; adoption: ResultAdoption | null; share: boolean }) {
   const d = decisionOf(scan)
   const p = decisionPhrase(d.decision)
   const st = ANSWER_STYLE[d.decision]
-  const certified = isCertified(scan)
-  const eligible = asObj(scan.certified).eligible === true
-  const big = useIsDesktop() ? 1.35 : 1
+  // Certified shows ONCE: the badge takes the trust score's place. Never while pending.
+  const certified = isCertified(scan) && d.decision === 'safe'
+  const pending = certified ? null : certifiedPending(scan, d)
+  const desktop = useIsDesktop()
+  const big = desktop ? 1.35 : 1
   const crit = Number(asObj(scan.findings).critical ?? 0)
   const reason = d.reason ? cap(d.reason) + '.' : ''
+  const signed = typeof scan.jws === 'string' && !!scan.jws
   const scoreSub = kind === 'mcp'
     ? 'Signed · scored on the tools it serves, not its server code'
     : kind === 'a2a'
     ? "Signed · scored on its agent card, not the agent's code"
     : crit > 0 && scan.trust_score <= 45 ? 'Signed · a critical finding caps the score at 45' : null
+  const openVerify = () => { const el = document.getElementById('verify'); if (el) el.setAttribute('open', '') }
   return (
     <Reveal>
-      <div className={`mt-6 glass rounded-2xl border ${st.border} overflow-hidden`} data-decision={d.decision} data-testid="answer-card">
+      <div className={`mt-6 glass rounded-2xl border ${st.border} overflow-hidden`} data-decision={d.decision} data-certified={certified ? 'earned' : pending ? 'pending' : 'no'} data-testid="answer-card">
         <div className="px-6 pt-6 pb-5">
           <div className={`flex items-center gap-2.5 flex-wrap text-[22px] sm:text-[26px] font-extrabold tracking-tight leading-tight ${st.fg}`}>
             <span aria-hidden="true">{st.icon}</span>
             <span>{p.phrase}</span>
-            {certified && <span className="font-mono text-[11px] font-bold tracking-[0.14em] px-2 py-1 rounded-md text-white bg-gradient-to-r from-primary to-accent" data-testid="certified-mark">CERTIFIED</span>}
-            {!d.final && eligible && d.decision === 'safe' && <span className="font-mono text-[11px] font-bold tracking-[0.14em] px-2 py-1 rounded-md border border-primary/50 text-primary-light">CERTIFIED · PENDING</span>}
             {!d.final && <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-1 rounded-md bg-surface border border-border text-text-muted">provisional</span>}
           </div>
           <p className="mt-2 text-[14.5px] text-text-muted max-w-[68ch]">
@@ -202,9 +232,19 @@ function AnswerCard({ scan, kind, adoption }: { scan: ResultPageProps['scan']; k
         </div>
         <div className="grid grid-cols-2 border-t border-border/60">
           <div className="px-3 py-5 sm:p-6 text-center flex flex-col items-center min-w-0">
-            <div className="min-h-[96px] sm:min-h-[124px] flex items-center justify-center"><TrustBar score={scan.trust_score} scale={big} /></div>
+            <div className="min-h-[96px] sm:min-h-[124px] flex items-center justify-center" data-testid={certified ? 'certified-badge' : 'trust-bar'}>
+              {certified
+                ? <CertifiedBadge score={scan.trust_score} size={desktop ? 'lg' : 'md'} />
+                : <TrustBar score={scan.trust_score} scale={big} />}
+            </div>
             <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-text">Trust score</div>
             <div className="mt-0.5 text-[11.5px] text-text-muted">{scoreSub ?? <>Signed<Percentile score={scan.trust_score} /></>}</div>
+            {pending && (
+              <span className="mt-2 inline-flex items-center gap-1.5 text-[12px] text-warning border-[1.5px] border-dashed border-warning/80 rounded-full px-2.5 py-0.5" data-testid="certified-pending">
+                <span className="w-2 h-2 rounded-full border-2 border-current border-t-transparent animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                Certified: pending · {pending}
+              </span>
+            )}
           </div>
           <div className="px-3 py-5 sm:p-6 text-center flex flex-col items-center min-w-0 border-l border-border/60">
             <div className="min-h-[96px] sm:min-h-[124px] flex items-center justify-center">
@@ -213,6 +253,11 @@ function AnswerCard({ scan, kind, adoption }: { scan: ResultPageProps['scan']; k
             <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-[0.16em] gradient-text">Adoption score</div>
             <div className="mt-0.5 text-[11.5px] text-text-muted">{adoption?.sub || 'No usage data'}</div>
           </div>
+        </div>
+        <div className="px-6 py-3 border-t border-border/60 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px]">
+          {signed && <span className="text-success font-mono text-[11.5px]">✓ Signed · Ed25519 / JWS</span>}
+          {share && <a href="#share" className="font-semibold text-primary-light hover:text-primary">Share this result</a>}
+          <a href="#verify" onClick={openVerify} className="font-semibold text-primary-light hover:text-primary">Verify it yourself ↓</a>
         </div>
       </div>
     </Reveal>
@@ -310,52 +355,61 @@ function GapsSection({ scan, extra, panel }: { scan: Obj; extra?: ReactNode[]; p
   )
 }
 
-function StepCard({ title, text, children, lead = false }: { title: string; text: string; children: ReactNode; lead?: boolean }) {
+const BTN = 'inline-flex items-center justify-center gap-1.5 text-[13px] font-semibold px-3.5 py-2 rounded-xl transition-colors'
+export const BTN_GHOST = `${BTN} border border-border text-text hover:border-primary-light hover:text-primary-light`
+
+/** One numbered step. */
+function Step({ n, title, children, id }: { n: number; title?: ReactNode; children: ReactNode; id?: string }) {
   return (
-    <div className={`glass rounded-2xl p-5 flex flex-col ${lead ? 'border border-primary/40' : ''}`}>
-      <h3 className="text-[15px] font-bold">{title}</h3>
-      <p className="mt-1 text-[13px] text-text-muted flex-1">{text}</p>
-      <div className="mt-4 flex flex-wrap gap-2">{children}</div>
-    </div>
+    <li id={id} className="glass rounded-2xl p-4 sm:p-5 grid grid-cols-[30px_minmax(0,1fr)] max-[480px]:grid-cols-[minmax(0,1fr)] gap-3 scroll-mt-24" data-step={n}>
+      <span className="w-[26px] h-[26px] rounded-full grid place-items-center font-mono text-[12.5px] font-bold text-primary-light border-[1.5px] border-primary-light" aria-hidden="true">{n}</span>
+      <div className="min-w-0">
+        {title && <h3 className="text-[16px] font-bold tracking-tight">{title}</h3>}
+        {children}
+      </div>
+    </li>
   )
 }
 
-const BTN = 'inline-flex items-center justify-center gap-1.5 text-[13px] font-semibold px-3.5 py-2 rounded-xl transition-colors'
-const BTN_SOLID = `${BTN} text-white bg-gradient-to-r from-primary to-primary-dark`
-const BTN_GHOST = `${BTN} border border-border text-text hover:border-primary-light hover:text-primary-light`
-
-/** The first two next-step cards (Claude Code, and Claude / ChatGPT). Exported for the
- * couldn't-check page, which has no stored result to watch. */
-export function NextStepCards({ dnc = false, watch, badgeMarkdown, oneTime = false }: { dnc?: boolean; watch?: ReactNode; badgeMarkdown?: string; oneTime?: boolean }) {
-  const [copied, setCopied] = useState(false)
-  const copyBadge = () => {
-    if (!badgeMarkdown) return
-    void navigator.clipboard?.writeText(badgeMarkdown)
-    trackBadgeCopied('badge')
-    setCopied(true); setTimeout(() => setCopied(false), 1400)
+/** The four next steps (approved mock, Kenne's order, 2026-11-10). A step whose action
+ * doesn't exist for this result is left out, and the rest renumber. Watch and the badge
+ * appear once each on the page. Exported for the couldn't-check pages, which only have
+ * step 3. */
+export function NextSteps({ dnc = false, watch, ownerStep, badge = false, install, installed = true }: {
+  dnc?: boolean; watch?: ReactNode; ownerStep?: OwnerStep; badge?: boolean
+  install?: ReactNode
+  /** false hides step 4 entirely (no stored result to install from) */
+  installed?: boolean
+}) {
+  const steps: { key: string; title?: ReactNode; id?: string; body: ReactNode }[] = []
+  if (watch) {
+    steps.push({ key: 'watch', title: 'Keep an eye on it', id: 'watch-it', body: <>
+      <p className="mt-1 text-[14px] text-text-muted max-w-[64ch]">Get an email or a signed webhook when the answer gets worse, the Certified mark comes off, the score drops, or its tool definitions change. We re-check watched tools every day.</p>
+      <div className="mt-3 max-w-[420px]">{watch}</div>
+    </> })
   }
-  // "Keep an eye on it" only when there is something to keep an eye on with: a watch
-  // button or a badge. A one-time scan and an A2A card have neither.
-  const keep = !oneTime && (!!watch || !!badgeMarkdown)
+  if (ownerStep) {
+    steps.push({ key: 'owner', title: 'Is this yours?', id: 'claim', body: <>
+      <p className="mt-1 text-[14px] text-text-muted max-w-[64ch]">{ownerStep.text}</p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {ownerStep.actions}
+        {badge && <a href="#badge" className={BTN_GHOST}>Add the badge ↓</a>}
+      </div>
+    </> })
+  }
+  steps.push({ key: 'agentavow', title: dnc ? 'Stop tools like this automatically' : 'Check tools like this automatically', body: <>
+    <p className="mt-1 text-[14px] text-text-muted">Get AgentAvow where you work. Pick one and we&apos;ll remember it.</p>
+    <AgentAvowChooser dnc={dnc} />
+  </> })
+  if (installed && (dnc || install)) {
+    steps.push({ key: 'install', body: dnc
+      ? <><h3 className="text-[16px] font-bold tracking-tight">How to install this tool</h3><p className="mt-1 text-[14px] text-text-muted">No install line on a Do not connect result.</p></>
+      : install })
+  }
   return (
-    <div className={`mt-4 grid gap-3 ${keep ? 'md:grid-cols-3' : 'md:grid-cols-2'}`} data-testid="next-steps">
-      <StepCard lead title={dnc ? 'Stop tools like this automatically' : 'Get this check automatically'}
-        text={dnc ? 'Claude Code asks you first before a server or package that reads Do not connect is added.' : 'Claude Code checks new MCP servers and packages before your agent uses them.'}>
-        <Link to={rp(CLAUDE_CODE_PAGE)} className={BTN_SOLID}>Get it for Claude Code</Link>
-      </StepCard>
-      <StepCard title="Ask in Claude or ChatGPT" text="Add AgentAvow and ask before you connect anything.">
-        <a href={CLAUDE_LISTING} target="_blank" rel="noopener noreferrer" onClick={() => trackListing(CLAUDE_LISTING)} className={BTN_GHOST}>Add to Claude ↗</a>
-        <a href={CHATGPT_LISTING} target="_blank" rel="noopener noreferrer" onClick={() => trackListing(CHATGPT_LISTING)} className={BTN_GHOST}>Add to ChatGPT ↗</a>
-      </StepCard>
-      {keep && (
-        <StepCard title="Keep an eye on it" text="Get an alert if this answer drops or its tool definitions change.">
-          {watch}
-          {badgeMarkdown
-            ? <button type="button" onClick={copyBadge} className={BTN_GHOST}>{copied ? 'Copied ✓' : 'Copy the badge'}</button>
-            : <a href="#badge" className={BTN_GHOST}>Badge options ↓</a>}
-        </StepCard>
-      )}
-    </div>
+    <ol className="mt-4 flex flex-col gap-3 list-none p-0" data-testid="next-steps">
+      {steps.map((st, i) => <Step key={st.key} n={i + 1} title={st.title} id={st.id}>{st.body}</Step>)}
+    </ol>
   )
 }
 
@@ -393,17 +447,16 @@ export function ResultPage(props: ResultPageProps) {
   const oneTime = privateScan === 'one-time'
   const dnc = d.decision === 'do_not_connect'
   const kw = props.keepWatching ?? {}
-  const canShare = props.share ?? !oneTime
-  const canClaim = props.claim ?? true
+  const canShare = !!props.sharePanel || !!props.shareAnchor
   return (
     <div className="max-w-[860px] mx-auto px-6 py-14" data-result-kind={kind}>
       <ResultTitle banner={props.banner} eyebrow={props.eyebrow} version={props.version} checked={checkedAgo(scan.scanned_at)}
         recheck={props.recheck} name={props.name} chips={props.chips} intro={props.intro} />
 
-      {/* 1 + 2 · the answer (CERTIFIED here only) and the two scores */}
-      <AnswerCard scan={scan} kind={kind} adoption={adoption} />
+      {/* 1 + 2 · the answer and the two scores (the Certified badge in the trust slot) */}
+      <AnswerCard scan={scan} kind={kind} adoption={adoption} share={canShare} />
 
-      {/* 3 · why it's Certified, or which check is missing */}
+      {/* 3 · why it's Certified, or which check is missing; the deciding line last */}
       <CertifiedChecklist scan={scan} kind={kind} decision={d} />
 
       {/* 4 · top 3 findings with fixes, then all of them */}
@@ -412,34 +465,18 @@ export function ResultPage(props: ResultPageProps) {
       {/* 5 · what we couldn't check */}
       <GapsSection scan={scan} extra={props.gapNotes} panel={props.gapPanel} />
 
-      {/* 6 · next steps */}
+      {/* 6 · next steps: watch · is this yours? · AgentAvow · install this tool */}
       <Section id="next-steps" title="Next steps">
-        <NextStepCards dnc={dnc} watch={props.watch} badgeMarkdown={props.badgeMarkdown} oneTime={oneTime} />
-        {!dnc && props.install}
-        <p className="mt-3 text-[12.5px] text-text-muted">
-          {[
-            dnc && 'No install line on a Do not connect result',
-            canShare && <a key="share" href="#share" className="text-primary-light hover:text-primary">Share this result</a>,
-            canClaim && <a key="claim" href="#claim" className="text-primary-light hover:text-primary">{privateScan ? 'Claim or publish it' : 'Claim this tool'}</a>,
-          ].filter(Boolean).flatMap((el, i) => (i ? [' · ', el] : [el]))}
-        </p>
+        <NextSteps dnc={dnc} watch={oneTime ? undefined : props.watch} ownerStep={props.ownerStep}
+          badge={!oneTime && !!props.badgeMarkdown && !!props.badges} install={props.install} />
       </Section>
 
-      {/* 7 · keep watching it */}
+      {/* 7 · keep watching it (Watch itself is step 1, once) */}
       <Section id="watch" title="Keep watching it" sub={oneTime ? 'Nothing is stored for a one-time scan, so there is no history to keep.' : 'History, adoption and changes over time.'}>
         {kw.note}
         {kw.history}
         {kw.adoption}
         {kw.drift}
-        {!oneTime && props.watch && (
-          <Reveal>
-            <div className="mt-4 glass rounded-2xl p-6">
-              <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Watch this tool</h3>
-              <p className="mt-1.5 text-[13px] text-text-muted max-w-[64ch]">Get an email or a signed webhook when the answer drops, the Certified mark comes off, or a tool definition changes. We re-check watched tools every day.</p>
-              <div className="mt-3 max-w-[420px]">{props.watch}</div>
-            </div>
-          </Reveal>
-        )}
       </Section>
 
       {/* 8 · what's inside */}
@@ -447,10 +484,13 @@ export function ResultPage(props: ResultPageProps) {
         {props.inside}
       </Section>
 
-      {/* 9 · badge, claim and share */}
-      <Section id="badge" title="Badge, claim and share">
-        {props.badgeClaimShare}
-      </Section>
+      {/* 9 · badges (step 2's "Add the badge" lands here), then the share panel */}
+      {(props.badges || props.sharePanel) && (
+        <Section id="badge" title={props.badges ? 'Badges' : 'Share'}>
+          {props.badges}
+          {props.sharePanel}
+        </Section>
+      )}
 
       {/* 10 · verify it yourself (collapsed) */}
       <VerifyItYourself scan={scan} proof={props.proof} whatWeChecked={props.whatWeChecked} />
@@ -466,7 +506,7 @@ function VerifyItYourself({ scan, proof, whatWeChecked }: { scan: Obj; proof?: R
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
   return (
-    <details className="mt-12 glass rounded-2xl px-5 py-4 group" data-testid="verify-it-yourself">
+    <details id="verify" className="mt-12 glass rounded-2xl px-5 py-4 group scroll-mt-24" data-testid="verify-it-yourself">
       <summary className="cursor-pointer list-none flex items-baseline justify-between gap-3 flex-wrap">
         <span className="text-[16px] font-bold">Verify it yourself <span className="font-normal text-[13px] text-text-muted">signed proof, raw details, what we checked</span></span>
         <span className="text-text-muted text-[12px] group-open:rotate-180 transition-transform" aria-hidden="true">▾</span>

@@ -34,8 +34,18 @@ PIPE_TO_SHELL = "curl/wget piped to shell"
 
 DROP = "drop"
 OFFICIAL = "official"
+PINNED = "pinned"
 CRITICAL = "critical"
-_RANK = {DROP: 0, OFFICIAL: 1, CRITICAL: 2}
+_RANK = {DROP: 0, OFFICIAL: 1, PINNED: 1, CRITICAL: 2}
+
+# A raw GitHub file at a full 40-hex commit SHA: the bytes fetched can never change,
+# which is what the rule's own remediation asks for ("pin remote payloads by commit
+# SHA"; colinhacks/zod's devcontainer, 2026-11-11). Reported high (Review), never in an
+# install hook. Residual risk, accepted: a repo owner can name a BRANCH as 40 hex
+# characters; the answer is still Review, never Safe.
+_PINNED_RAW_RE = re.compile(
+    r"^https://(?:raw\.githubusercontent\.com/[A-Za-z0-9-]+/[A-Za-z0-9._-]+/"
+    r"|github\.com/[A-Za-z0-9-]+/[A-Za-z0-9._-]+/raw/)[0-9a-f]{40}/[^\s?#]+$")
 
 # Reviewed allowlist of well-known official installers, as (host, path prefix). Only
 # HTTPS URLs qualify, and the path prefix pins the installer itself where the host also
@@ -109,6 +119,9 @@ _POST_CUE_RE = re.compile(
     r"""\s*(?:is\s+(?:an?\s+)?(?:attack|malicious|forbidden|unsafe)\b|"""
     r"""must\s+be\s+rejected\b)""",
     re.IGNORECASE)
+
+WHY_PINNED = ("Pipes a script pinned to an exact commit to a shell. The bytes can't change "
+              "after you review them, so read that script once before you run it.")
 
 WHY_OFFICIAL = ("Pipes a well-known vendor's official installer (HTTPS) to a shell. It "
                 "runs whatever that host serves at install time, so review it, or pin a "
@@ -256,10 +269,18 @@ def classify_match(line: str, start: int, end: int, file_path: str) -> str:
         return DROP
     if (has_var or len(urls) != 1 or name in _INSTALL_HOOK_NAMES
             or _BASE64_RE.search(line) or _INSECURE_FLAG_RE.search(target)
-            or not _args_clean(target)
-            or not _is_official(urls[0])):
+            or not _args_clean(target)):
         return CRITICAL
-    return OFFICIAL
+    if _is_official(urls[0]):
+        return OFFICIAL
+    if _PINNED_RAW_RE.match(urls[0]):
+        return PINNED
+    return CRITICAL
+
+
+def why(cls: str | None) -> str:
+    """The remediation text for a lowered class ("" for everything else)."""
+    return {OFFICIAL: WHY_OFFICIAL, PINNED: WHY_PINNED}.get(cls or "", "")
 
 
 def classify_line(line: str, pattern: re.Pattern[str], file_path: str) -> str:

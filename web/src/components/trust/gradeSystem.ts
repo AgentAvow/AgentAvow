@@ -338,6 +338,9 @@ export function findingWhere(i: Obj): string {
   // A deciding finding in package.json sits in its scripts: a maintainer-only script
   // is low and never decides, so what is left runs from an install lifecycle script.
   if (name === 'package.json') return ' in its install script'
+  // A dev container's postCreateCommand runs when the repo is opened in one: not a data file.
+  if (parts.slice(0, -1).includes('.devcontainer') || name === 'devcontainer.json'
+    || name === '.devcontainer.json') return ' in its dev container setup'
   if (AGENT_FILE_NAMES.has(name) || name.endsWith('.mdc') || (
     TEXT_EXTS.some((e) => name.endsWith(e))
     && (name.startsWith('readme') || parts.slice(0, -1).some((p) => AGENT_DIRS.has(p))))) {

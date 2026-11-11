@@ -163,3 +163,48 @@ def test_reach_fields_count_seven_days_and_retention():
     assert fields["checked_machines_7d"] == 1
     assert (fields["d7_cohort"], fields["d7_returned"]) == (2, 1)
     assert (fields["d1_cohort"], fields["d1_returned"]) == (1, 0)
+
+
+def test_snapshot_columns_cover_the_new_surfaces_and_checks():
+    snap = _snapshot_module()
+    new = [f"calls_{s}" for s in ("cursor", "vscode", "codex")] + [
+        f"checks_{s}" for s in ("claude", "claude_code", "chatgpt", "cursor", "vscode",
+                                "codex", "other", "total")]
+    for col in new:
+        assert col in snap.COLUMNS, col
+        assert col in md._TRAFFIC_INT_COLUMNS, col
+
+
+def test_snapshot_redis_program_reads_checks_and_leaves_pre_counter_days_empty(monkeypatch,
+                                                                               capsys):
+    """checks_<surface>: the counter's value; zero on a day with no calls; empty (None)
+    on a day with calls but no counter yet, so the dashboard falls back to calls."""
+    import sys
+
+    snap = _snapshot_module()
+    day = "2026-11-12"
+    store = {
+        f"ag:metrics:mcp:calls:total:{day}": b"9",
+        f"ag:metrics:mcp:calls:total:claude-code:{day}": b"5",
+        f"ag:metrics:mcp:calls:total:cursor:{day}": b"4",
+        f"ag:metrics:mcp:checks:{day}": b"7",
+        f"ag:metrics:mcp:checks:claude-code:{day}": b"4",
+        # cursor had calls but no checks key: pre-counter style -> None
+    }
+
+    class _R:
+        async def get(self, key):
+            return store.get(key)
+
+        async def pfcount(self, *keys):
+            return 0
+
+    monkeypatch.setattr("src.redis_client.get_redis", lambda: _R())
+    monkeypatch.setattr(sys, "argv", ["-", day])
+    exec(compile(snap.REDIS_PROGRAM, "<redis>", "exec"), {"__name__": "__main__"})
+    import json
+
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["checks_total"] == 7 and out["checks_claude-code"] == 4
+    assert out["checks_cursor"] is None
+    assert out["checks_vscode"] == 0 and out["calls_codex"] == 0

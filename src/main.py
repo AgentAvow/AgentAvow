@@ -18,6 +18,7 @@ from src.api.account_keys_router import router as account_keys_router
 from src.api.account_router import router as account_router
 from src.api.account_webhook_router import router as account_webhook_router
 from src.api.activity_router import router as activity_router
+from src.api.ad_spend_router import router as ad_spend_router
 from src.api.admin_jobs_router import router as admin_jobs_router
 from src.api.admin_router import router as admin_router
 from src.api.agent_router import router as agent_router
@@ -780,6 +781,7 @@ app.include_router(activity_router, prefix=settings.api_v1_prefix)
 app.include_router(aggregation_router, prefix=settings.api_v1_prefix)
 app.include_router(admin_router, prefix=settings.api_v1_prefix)
 app.include_router(metrics_dashboard_router, prefix=settings.api_v1_prefix)
+app.include_router(ad_spend_router, prefix=settings.api_v1_prefix)
 app.include_router(attestation_provider_router, prefix=settings.api_v1_prefix)
 app.include_router(attestation_router, prefix=settings.api_v1_prefix)
 app.include_router(admin_jobs_router, prefix=settings.api_v1_prefix)

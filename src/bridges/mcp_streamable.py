@@ -476,7 +476,7 @@ async def _answer_from_source(
         return _text(_source_failed_help(src, host))
     rescan = force and _schedule_rescan(path, None)
     await _bump_s("signin:source_answer")
-    await _bump_s("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
+    await _bump_verdict(data)
     adoption = await _adoption("github", owner, repo)
     rp = f"/check/{owner}/{repo}"
     api = f"/api/v1/public/scan/{owner}/{repo}"
@@ -530,8 +530,12 @@ _HEALTH_PROBE: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "agentavow_mcp_health_probe", default=False
 )
 
-# Order matters: "claude-code" must be tested before "claude" (it contains it).
+# Order matters: "claude-code" must be tested before "claude" (it contains it), and
+# "codex" before "chatgpt" (a Codex client may also name OpenAI). The Codex needle is
+# unconfirmed against prod logs (2026-11-11): if Codex sends no "codex" in its
+# User-Agent its calls stay in "chatgpt" or "other", as before.
 _SURFACE_MATCHERS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("codex", ("codex",)),
     ("chatgpt", ("openai", "chatgpt")),
     ("claude-code", ("claude-code", "claude code", "claudecode")),
     ("cursor", ("cursor",)),
@@ -567,6 +571,30 @@ async def _bump_s(metric: str) -> None:
     except Exception:
         surface = "other"
     await _bump(f"{metric}:{surface}")
+
+
+async def _bump_verdict(data: dict) -> None:
+    """Count one scan answer: the legacy two-way split (verdict:safe|needs_review, kept
+    so the old series continue) and the three answers (answer:safe|review|
+    do_not_connect), each overall and per surface. Best-effort."""
+    try:
+        await _bump_s("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
+        await _bump_s(f"answer:{_decision_of(data).decision}")
+    except Exception:  # noqa: BLE001 — instrumentation never breaks a tool call
+        pass
+
+
+def _is_owner_call() -> bool:
+    """True when this call comes from an owner / test machine (settings
+    ``metrics_owner_ips``). Only the hand-run-checks counter uses it."""
+    try:
+        from src.config import settings
+
+        raw = getattr(settings, "metrics_owner_ips", "") or ""
+        ip = _CLIENT_IP.get()
+        return bool(ip) and ip in {x.strip() for x in raw.split(",") if x.strip()}
+    except Exception:
+        return False
 
 
 async def _record_caller() -> None:
@@ -2507,6 +2535,10 @@ async def _run_tool(
 ) -> list[types.TextContent] | tuple[list[types.TextContent], dict]:
     await _bump_s("calls:total")
     await _bump(f"tool:{name}")
+    # Hand-run checks: every tool call except the about_agentavow overview (not a
+    # check) and calls from owner / test machines. The Start here card reads this.
+    if name != "about_agentavow" and not _is_owner_call():
+        await _bump_s("checks")
     await _record_caller()
     try:
         if name == "about_agentavow":
@@ -2527,7 +2559,7 @@ async def _run_tool(
                              "or pass owner and repo separately.")
             data = await _get(f"/public/scan/{owner}/{repo}", params=fp)
             rescan = force and _schedule_rescan(f"/public/scan/{owner}/{repo}", None)
-            await _bump_s("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
+            await _bump_verdict(data)
             adoption = await _adoption("github", owner, repo)
             rp = f"/check/{owner}/{repo}"
             api = f"/api/v1/public/scan/{owner}/{repo}"
@@ -2558,7 +2590,7 @@ async def _run_tool(
                 params["version"] = version
             data = await _get(f"/public/scan/package/{surface}/{pkg}", params=params)
             rescan = force and _schedule_rescan(f"/public/scan/package/{surface}/{pkg}", params)
-            await _bump_s("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
+            await _bump_verdict(data)
             adoption = await _adoption(surface, surface, pkg)
             vq = f"?version={quote(version, safe='')}" if version else ""
             rp = f"/check/pkg/{surface}/{pkg}{vq}"
@@ -2612,7 +2644,7 @@ async def _run_tool(
                 await _bump_s("result:error")
                 return _text(_signin_no_source_help(no_src, _host_of(url)))
             rescan = force and _schedule_rescan("/public/scan/mcp", params)
-            await _bump_s("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
+            await _bump_verdict(data)
             # A bare MCP endpoint has no registry/stars adoption signal — omit it rather
             # than fabricate one.
             label = url.split("://", 1)[-1].split("/", 1)[0] or "MCP server"

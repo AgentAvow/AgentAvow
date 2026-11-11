@@ -41,6 +41,7 @@ const STANDARDS = [
   ['Tool manifest — .agentavow.yml', 'Declare the hosts your tool contacts and the capabilities it uses; the sandbox holds it to its own declaration. Undeclared egress is a finding.', 'https://github.com/AgentAvow/AgentAvow/blob/main/docs/standards/agentavow-manifest-v0.md'],
   ['CTEF — Composable Trust Evidence Format', 'The signed, reproducible evidence envelope any implementer can recompute byte-for-byte. Versioned in the open.', 'https://github.com/AgentAvow/AgentAvow/tree/main/docs/standards'],
   ['Published test vectors', 'Conformance vectors served at /.well-known so anyone can validate their own implementation against ours.', 'https://agentgraph.co/.well-known/cte-test-vectors.json'],
+  ['A2A', 'Our agent card carries a pointer to its own signed verdict (the AgentAvow trust-verdict extension).', '/ext/trust-verdict/v1/'],
   ['ERC-8004 reader', 'Reader for ERC-8004 identity and feedback records; not yet used in any answer or score.', 'https://github.com/AgentAvow/AgentAvow/tree/main/src/agentgraph_bridge_erc8004'],
   ['AIPOU cross-fixture', 'A shared conformance fixture proving two independent implementations agree.', 'https://github.com/AgentAvow/AgentAvow/tree/main/docs/conformance'],
   ['Independently cross-run in the LF DT lab', 'Our CTEF conformance vectors, positive and adversarial/fail-closed, were reproduced byte-for-byte in the Linux Foundation Decentralized Trust Agent Authority Conformance lab, by a party other than us.', 'https://github.com/Agent-Authority-Conformance/aps-conformance-suite/pull/79'],
@@ -234,10 +235,11 @@ agentavow scan . --fail-on do_not_connect`}</pre>
       </Reveal>
       <RevealStagger className="flex flex-col gap-2.5 mt-4" stagger={0.04}>
         {STANDARDS.map(([h, p, href]) => (
-          <a key={h} href={href} target="_blank" rel="noopener noreferrer" className="glass card-hover rounded-xl px-5 py-4 block">
+          // A path on this site (the static extension spec) opens in the same tab.
+          <a key={h} href={href} {...(href.startsWith('/') ? {} : { target: '_blank', rel: 'noopener noreferrer' })} className="glass card-hover rounded-xl px-5 py-4 block">
             <div className="flex items-center justify-between gap-3">
               <div className="text-[15px] font-semibold">{h}</div>
-              <span className="text-primary-light text-[13px] shrink-0">↗</span>
+              <span className="text-primary-light text-[13px] shrink-0">{href.startsWith('/') ? '→' : '↗'}</span>
             </div>
             <div className="text-[13.5px] text-text-muted mt-1">{p}</div>
           </a>
