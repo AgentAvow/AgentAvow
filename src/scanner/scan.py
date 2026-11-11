@@ -6190,24 +6190,31 @@ async def _run_supply_chain(
             except Exception:
                 root_coord = None
 
-            # Private workspace members of a pnpm monorepo (a docs site, examples):
+            # Private workspace members of a pnpm or npm monorepo (a docs site, examples):
             # read each importer's package.json, at most 40 per lockfile. A member
             # that cannot be read counts as public (fail safe: full weight).
             private_importers: dict[str, set[str]] = {}
             try:
-                from src.scanner.lockfiles import pnpm_v9_importers
+                from src.scanner.lockfiles import (
+                    npm_workspace_members,
+                    pnpm_v9_importers,
+                    yaml_documents,
+                )
                 for _lp, _text in lockfiles.items():
-                    if not _lp.lower().endswith("pnpm-lock.yaml"):
+                    if _lp.lower().endswith("pnpm-lock.yaml"):
+                        _imps = list(dict.fromkeys(
+                            k for _doc in yaml_documents(_text)
+                            for k in pnpm_v9_importers(_doc)))[:40]
+                    elif _lp.lower().endswith("package-lock.json"):
+                        # npm workspaces: the root is "" (pnpm calls it ".")
+                        _imps = npm_workspace_members(_text)[:40]
+                    else:
                         continue
-                    from src.scanner.lockfiles import yaml_documents
-                    _imps = list(dict.fromkeys(
-                        k for _doc in yaml_documents(_text)
-                        for k in pnpm_v9_importers(_doc)))[:40]
                     if len(_imps) < 2:
                         continue
                     _base = str(Path(_lp).parent)
                     _base = "" if _base in (".", "") else _base + "/"
-                    _pj = {imp: f"{_base}{'' if imp == '.' else imp.strip('/') + '/'}"
+                    _pj = {imp: f"{_base}{'' if imp in ('.', '') else imp.strip('/') + '/'}"
                                 f"package.json" for imp in _imps}
 
                     async def _fetch_pj(path: str) -> tuple[str, str]:
