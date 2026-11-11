@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentAvow trust-verdict extension v1</title>
+<meta name="description" content="An A2A Agent Card extension that points at AgentAvow's live, signed verdict for the card.">
+<link rel="canonical" href="https://agentavow.com/ext/trust-verdict/v1">
+<style>
+  :root { color-scheme: light dark; --fg: #1b1d22; --bg: #ffffff; --muted: #5b616e; --code: #f3f4f6; --line: #e3e5e8; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #e8eaed; --bg: #121417; --muted: #a0a6b1; --code: #1d2026; --line: #2a2e35; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+  p.sub { color: var(--muted); margin: 0 0 24px; }
+  code, pre { font: 0.9em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code); border-radius: 6px; }
+  code { padding: 1px 5px; } pre { padding: 12px 14px; overflow-x: auto; border: 1px solid var(--line); }
+  table { border-collapse: collapse; width: 100%; } th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+<main>
+<h1>AgentAvow trust-verdict extension, v1</h1>
+<p class="sub">URI <code>https://agentavow.com/ext/trust-verdict/v1</code> · status: published by AgentAvow, not an A2A project standard · 2026-11-11</p>
+
+<p>An A2A Agent Card can declare this extension to point clients at AgentAvow's live, signed verdict for that card: Safe to connect, Review before you connect, or Do not connect, with the reason and a 0-100 trust score. The card carries a pointer, never a verdict, so nothing in the card can go stale.</p>
+
+<h2>Declaring it</h2>
+<p>Add one entry to <code>capabilities.extensions</code> (A2A 1.0 <code>AgentExtension</code>):</p>
+<pre>{
+  "uri": "https://agentavow.com/ext/trust-verdict/v1",
+  "params": {
+    "verdict_url": "https://agentavow.com/api/v1/public/scan/a2a?card=&lt;URL-encoded URL of this card&gt;"
+  }
+}</pre>
+<table>
+<tr><th>Param</th><th>Meaning</th></tr>
+<tr><td><code>verdict_url</code></td><td>AgentAvow's A2A check for <em>this</em> card: <code>https://agentavow.com/api/v1/public/scan/a2a?card=</code> followed by the card's own URL, URL-encoded. No other host, path or query parameter is valid.</td></tr>
+</table>
+<p>Leave <code>required</code> out (it defaults to <code>false</code>): a client that does not know the extension loses nothing. Omitting default-valued fields also keeps a signed card verifiable by every A2A 1.0 §8.4 reading.</p>
+
+<h2>Verifying it (client)</h2>
+<ol>
+<li>Check that <code>verdict_url</code> is exactly the form above and that its <code>card</code> parameter names the card you fetched. A verdict for another card says nothing about this one.</li>
+<li><code>GET</code> the URL. The response carries <code>decision</code>, <code>decision_reason</code>, <code>trust_score</code> and a JWS attestation (<code>jws</code>).</li>
+<li>Verify the JWS (EdDSA) against <a href="https://agentavow.com/.well-known/jwks.json">https://agentavow.com/.well-known/jwks.json</a>.</li>
+<li>Check that the signed card digest (<code>scan.agentCard.digest</code>, SHA-256 of the card's RFC 8785 form) matches the card you hold. If the card changed since it was checked, the digest will not match: ask for a fresh check (<code>&amp;force=true</code>) or treat the verdict as unknown.</li>
+</ol>
+
+<h2>What AgentAvow does with it</h2>
+<p>When AgentAvow reads a card that declares this extension, it checks that <code>verdict_url</code> names that same card on agentavow.com. A card that points at another card's verdict, or at another host, gets a finding: <em>the card claims an AgentAvow verdict that is not this card's own</em>.</p>
+
+<h2>What the verdict covers</h2>
+<p>The card only: its interface URLs, authentication schemes, skill and card text, and its own signature. Not the agent's code or behaviour. See <a href="https://agentavow.com/docs">the docs</a>.</p>
+
+<h2>Example</h2>
+<p>AgentAvow's own card declares it: <a href="https://agentavow.com/.well-known/agent-card.json">https://agentavow.com/.well-known/agent-card.json</a>.</p>
+</main>
+</body>
+</html>

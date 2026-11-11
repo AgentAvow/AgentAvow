@@ -12,7 +12,16 @@
   "capabilities": {
     "streaming": false,
     "pushNotifications": false,
-    "extendedAgentCard": false
+    "extendedAgentCard": false,
+    "extensions": [
+      {
+        "uri": "https://agentavow.com/ext/trust-verdict/v1",
+        "description": "Points at AgentAvow's live, signed verdict for this card. Fetch verdict_url, check the JWS against https://agentavow.com/.well-known/jwks.json, and check that the signed card digest matches the card you hold.",
+        "params": {
+          "verdict_url": "https://agentavow.com/api/v1/public/scan/a2a?card=https%3A%2F%2Fagentavow.com%2F.well-known%2Fagent-card.json"
+        }
+      }
+    ]
   },
   "defaultInputModes": ["text/plain"],
   "defaultOutputModes": ["application/json"],
