@@ -215,9 +215,11 @@ A2A_FOUND_REASON = "no critical or high findings in its agent card"
 # An x402 endpoint read from its public Bazaar listing (src/scanner/x402_scan.py): the
 # reason says what was read, so a Safe never reads as an audit of the backend (design
 # review 2026-11-11).
-X402_CLEAN_REASON = "nothing found in the listing; the endpoint's code isn't visible"
-X402_FOUND_REASON = ("no critical or high findings in the listing; the endpoint's code "
-                     "isn't visible")
+# The "code isn't visible" clause is the x402_code_unread coverage note, so it shows on
+# every x402 result (Safe reason suffix, and the coverage notes on Review results).
+X402_CLEAN_REASON = "nothing found in the listing"
+X402_FOUND_REASON = "no critical or high findings in the listing"
+X402_CODE_UNREAD_NOTE = "the endpoint's code isn't visible"
 
 # A hardcoded credential shipped in a tool (category ``secret``, e.g. an AWS key in
 # yt-dlp's extractors) exposes the vendor whose key leaked, not the person installing
@@ -487,6 +489,9 @@ def coverage_gap_notes(data: dict) -> list[str]:
     if not isinstance(g, dict):
         return []
     notes: list[str] = []
+    # An x402 endpoint: only its public listing was read. First, on every x402 result.
+    if g.get("x402_code_unread") is True:
+        notes.append(X402_CODE_UNREAD_NOTE)
     # What an agent is handed to read comes first: these are the cheap ways to hide
     # an instruction from the scan.
     n = _int(g.get("oversized_agent_files"))

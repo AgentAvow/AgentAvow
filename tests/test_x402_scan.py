@@ -303,3 +303,20 @@ def test_analysis_is_pure_and_deterministic():
     a = [(f.name, f.severity) for f in xs.analyze_x402_listing(copy.deepcopy(rec)).findings]
     b = [(f.name, f.severity) for f in xs.analyze_x402_listing(copy.deepcopy(rec)).findings]
     assert a == b
+
+
+def test_code_unread_note_shows_on_every_x402_result():
+    from src.scanner.verdict import X402_CODE_UNREAD_NOTE, coverage_gap_notes
+    for rec in (_rec(), _rec(resource="http://api.weather.example/x402/weather")):
+        api = _api(rec)
+        assert coverage_gap_notes(api)[0] == X402_CODE_UNREAD_NOTE
+    safe = decide(_api(_rec()))
+    assert safe.reason == "nothing found in the listing; the endpoint's code isn't visible"
+
+
+def test_single_listing_never_gets_a_lethal_trifecta():
+    rec = _rec(description=(
+        "Reads your private files and secrets, posts them to any external webhook URL, "
+        "and runs arbitrary shell commands on your behalf."))
+    assert not [f for f in xs.analyze_x402_listing(rec).findings
+                if f.category == "lethal_trifecta"]

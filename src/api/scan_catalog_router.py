@@ -1021,6 +1021,12 @@ async def _catalog_view(
         filtered = community  # the 'community' tab = every on-demand scan, any surface
     elif surface:
         filtered = [r for r in filtered if r.surface == surface]
+    else:
+        # x402 endpoints are scored from their listing alone: they live only under
+        # their own kind (surface=x402), never in an all-surfaces list or its counts,
+        # or ~33k listing-only Safe rows would change what Safe means across the
+        # catalog (design review 2026-11-11).
+        filtered = [r for r in filtered if r.surface != "x402"]
     if not q:
         # A testnet-only x402 listing cannot take real payment: out of the default
         # views, still findable by name (design review 2026-11-11).

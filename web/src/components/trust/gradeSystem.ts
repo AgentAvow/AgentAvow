@@ -208,9 +208,10 @@ export const CARD_SIGNATURE_UNVERIFIED_REASON = "the agent card's signature coul
 export const A2A_CLEAN_REASON = 'agent card clean; agent code not inspected'
 export const A2A_FOUND_REASON = 'no critical or high findings in its agent card'
 // An x402 endpoint read from its public Bazaar listing: the reason says what was read.
-export const X402_CLEAN_REASON = "nothing found in the listing; the endpoint's code isn't visible"
-export const X402_FOUND_REASON =
-  "no critical or high findings in the listing; the endpoint's code isn't visible"
+// The "code isn't visible" clause is the x402_code_unread coverage note (every x402 result).
+export const X402_CLEAN_REASON = 'nothing found in the listing'
+export const X402_FOUND_REASON = 'no critical or high findings in the listing'
+export const X402_CODE_UNREAD_NOTE = "the endpoint's code isn't visible"
 
 // A hardcoded credential shipped in a tool (category `secret`) exposes the vendor whose
 // key leaked, not the person installing it: on its own it caps at Review, never Do not
@@ -393,6 +394,8 @@ const was = (n: number) => (n === 1 ? 'was' : 'were')
 export function coverageGapNotes(input: unknown): string[] {
   const g = asObj(asObj(input).coverage_gaps)
   const notes: string[] = []
+  // An x402 endpoint: only its public listing was read. First, on every x402 result.
+  if (g.x402_code_unread === true) notes.push(X402_CODE_UNREAD_NOTE)
   // What an agent is handed to read comes first: the cheap ways to hide an instruction.
   let n = toInt(g.oversized_agent_files)
   if (n > 0) notes.push(`${filesPhrase(n, 'agent instruction file')} over 500 KB ${was(n)} not read`)

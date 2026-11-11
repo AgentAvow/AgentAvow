@@ -82,3 +82,20 @@ async def test_testnet_only_is_findable_by_name(catalog):
 async def test_prevalence_stat_ignores_x402(catalog):
     stat = await m.flagged_stat(db=None)
     assert stat["scanned_total"] == 1 and stat["critical"] == 1
+
+
+async def test_x402_is_only_under_its_own_kind(catalog):
+    everything = await _view(None)
+    assert not [n for n in everything if n.startswith("https://main.example")]
+    assert "srv" in everything
+    resp = await m.scan_catalog(surface=None, q="weather", severity=None, grade=None,
+                                category=None, sort="default", limit=50, offset=0, db=None)
+    assert resp.total == 0   # not even by search from the all-surfaces view
+    assert "https://main.example/weather" in await _view("x402")
+
+
+async def test_all_surfaces_safe_filter_has_no_x402(catalog):
+    resp = await m.scan_catalog(surface=None, q=None, severity=None, grade=None,
+                                category=None, decision="safe", sort="default", limit=50,
+                                offset=0, db=None)
+    assert all(r.surface != "x402" for r in resp.rows)
