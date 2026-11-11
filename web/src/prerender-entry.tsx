@@ -13,7 +13,6 @@ import { AuthProvider } from './hooks/useAuth'
 import api from './lib/api'
 import { publicApi } from './lib/scanApi'
 import RebrandLayout from './rebrand/RebrandLayout'
-import Badge from './rebrand/pages/Badge'
 import Browse from './rebrand/pages/Browse'
 import Certified from './rebrand/pages/Certified'
 import Check from './rebrand/pages/Check'
@@ -33,8 +32,8 @@ import Teams from './rebrand/pages/Teams'
 import TrustIndex from './rebrand/pages/TrustIndex'
 
 /**
- * /claim is left out on purpose: it has no page of its own, only a redirect to the
- * signed-in tools page, so there is nothing to render.
+ * /claim and /badge are left out on purpose: each is only a redirect (/claim to the
+ * signed-in tools page, /badge to /for-developers#badge), so there is nothing to render.
  */
 const PAGES: Record<string, ReactNode> = {
   '/': <Home />,
@@ -50,7 +49,6 @@ const PAGES: Record<string, ReactNode> = {
   '/submit': <Submit />,
   '/certified': <Certified />,
   '/preflight': <Preflight />,
-  '/badge': <Badge />,
   '/sandbox': <Sandbox />,
   '/claude-code': <ClaudeCode />,
   '/get': <Get />,

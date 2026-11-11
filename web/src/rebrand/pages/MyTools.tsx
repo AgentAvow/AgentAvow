@@ -1,15 +1,14 @@
 import { useState, useEffect } from 'react'
-import { TrustMini } from '../components/TrustMark'
 import { Link, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
 import api from '../../lib/api'
-import { useAuth } from '../../hooks/useAuth'
-import { Reveal } from '../components/motion'
 import { holdOneTimeScan } from '../lib/oneTimeScan'
-import { AccountSkeleton, ConfirmAction, LoadError } from '../components/AccountBits'
-import { useRequireUser } from '../lib/useRequireUser'
+import {
+  AccList, AccRow, AccSection, AccountShell, ConfirmAction, EmptyCard, LoadError, PhraseText,
+  SkeletonRows, ToolArt, btnSm, rowAct, type RowArt,
+} from '../components/AccountBits'
 
 // Confetti pieces — fixed trajectories so the burst is stable across renders.
 // Colors pull from the brand palette (primary / accent / success / warning).
@@ -45,7 +44,7 @@ interface ClaimProof {
   kind: 'topic' | 'keyword' | 'mcp-challenge'
   topic?: string; keyword?: string; registry?: string; header?: string; value?: string
 }
-interface Claim {
+interface Claim extends RowArt {
   id: string; surface?: string; owner: string; repo: string; full_name: string; status: string; topic: string
   proof?: ClaimProof; proof_method?: string | null
   private?: boolean; scanned?: boolean; published?: boolean; grade?: string | null; score?: number | null
@@ -154,10 +153,10 @@ function AddToolForm({ onClaimed }: { onClaimed: (c: Claim) => void }) {
   return (
     <div>
       <form onSubmit={(e) => { e.preventDefault(); create.mutate() }} className="flex gap-2">
-        <input value={coord} onChange={(e) => { setCoord(e.target.value); if (done) setDone(null) }} placeholder="owner/repo · npm:chalk · pypi:requests · crates:serde · mcp:https://… · skill:owner/repo" className="flex-1 min-w-0 bg-surface border border-border rounded-xl px-3.5 py-2 text-[14px] outline-none focus:border-primary-light font-mono" />
+        <input id="add-tool-input" aria-label="Tool to claim" value={coord} onChange={(e) => { setCoord(e.target.value); if (done) setDone(null) }} placeholder="owner/repo, npm:name, pypi:name or an MCP URL" className="flex-1 min-w-0 bg-surface border border-border rounded-xl px-3.5 py-2 text-[14px] outline-none focus:border-primary-light font-mono" />
         <button type="submit" disabled={create.isPending || !coord.trim()} className="text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60 shrink-0">{create.isPending ? 'Claiming…' : 'Claim'}</button>
       </form>
-      {!done && <p className="mt-2 text-[12.5px] text-text-muted">Claim any tool you own. <span className="text-text">Repos/skills</span> verify by GitHub topic (private repos: connect the App in <span className="text-text">Connections</span>). <span className="text-text">npm/PyPI</span> auto-link to a repo you&apos;ve claimed. <span className="text-text">MCP servers</span> verify by a challenge your endpoint returns.</p>}
+      {!done && <p className="mt-2 text-[13px] text-text-muted">Repos, npm, PyPI and crates packages, MCP servers and skills. Private repo? <a href="#connections" onClick={(e) => { e.preventDefault(); document.getElementById('connections')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }} className="text-primary-light hover:text-primary">Connect the GitHub App or use a one-time token →</a></p>}
       {next && (
         <motion.div
           initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
@@ -307,8 +306,10 @@ function GitHubAppConnection() {
 function OneTimeScanExpander() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
-  const [owner, setOwner] = useState(params.get('owner') || '')
-  const [repo, setRepo] = useState(params.get('repo') || '')
+  // ?coord=owner/repo (from a "check it privately" link) or the older ?owner=&repo=.
+  const coordParts = (params.get('coord') || '').match(/^([\w.-]+)\/([\w.-]+)$/)
+  const [owner, setOwner] = useState(params.get('owner') || coordParts?.[1] || '')
+  const [repo, setRepo] = useState(params.get('repo') || coordParts?.[2] || '')
   const [token, setToken] = useState('')
   const scan = useMutation({
     mutationFn: async () => (await api.post('/account/private-scan', { owner: owner.trim(), repo: repo.trim(), token: token.trim() })).data,
@@ -460,78 +461,80 @@ function ToolRow({ c, highlight = false }: { c: Claim; highlight?: boolean }) {
   // surface (publish scans on demand). GitHub PUBLIC repos are auto-listed on claim.
   const canPublish = verified && !c.published && (surface === 'github' ? (!!c.private && !!c.scanned) : true)
   const canUnlist = verified && !!c.published && (surface !== 'github' || !!c.private)
-  const btn = 'text-[12px] font-semibold px-3 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60'
-  const link = 'text-[12.5px] font-semibold text-primary-light hover:text-primary'
-  const muted = 'text-[12px] text-text-muted hover:text-danger'
+  const scanning = verified && !!c.private && !c.scanned
 
-  // Left-side state indicator: grade badge once scanned, else a status chip.
-  let leftChip: React.ReactNode = null
-  if (verified && c.scanned) leftChip = c.score != null ? <TrustMini score={c.score} /> : null
-  else if (verified && c.private && !c.scanned) leftChip = <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded bg-primary/15 text-primary-light shrink-0">scanning…</span>
-  else if (verified) leftChip = <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded bg-success/15 text-success shrink-0">✓ owned</span>
-  else leftChip = <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded bg-warning/15 text-warning shrink-0">unverified</span>
+  // One small line under the name: the answer (once checked), ownership, listing.
+  const bits: React.ReactNode[] = []
+  if (verified && c.trust_score != null) bits.push(<PhraseText key="p" row={c} />)
+  if (c.private) bits.push('private')
+  bits.push(verified
+    ? <span key="o" className="text-success">✓ owned{c.proof_method ? ` (${c.proof_method})` : ''}</span>
+    : <span key="o" className="text-warning">not verified yet</span>)
+  if (verified) bits.push(c.published ? 'listed' : 'not listed')
 
-  // Right-side actions cluster, consistent order: [state] [primary] [report] [remove]
+  // Actions, in one order: [verify] [publish / unlist] [report] [remove]
   const actions: React.ReactNode[] = []
   if (!verified) {
-    actions.push(<button key="v" onClick={() => setShowVerify((s) => !s)} className={link}>Verify {showVerify ? '▾' : '▸'}</button>)
+    actions.push(<button key="v" type="button" onClick={() => setShowVerify((v) => !v)} aria-expanded={showVerify} className={rowAct}>Verify {showVerify ? '▾' : '▸'}</button>)
   } else {
-    if (canPublish) actions.push(<button key="pub" onClick={() => publish.mutate()} disabled={publish.isPending} className={btn}>{publish.isPending ? 'Publishing…' : '🌐 Publish'}</button>)
-    if (canUnlist) actions.push(<span key="listed" className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded bg-primary/15 text-primary-light">🌐 Listed</span>)
-    if (canUnlist) actions.push(<button key="unpub" onClick={() => unpublish.mutate()} disabled={unpublish.isPending} className={muted + ' hover:text-text'}>{unpublish.isPending ? 'Unlisting…' : 'Unlist'}</button>)
+    if (canPublish) actions.push(<button key="pub" type="button" onClick={() => publish.mutate()} disabled={publish.isPending} className={rowAct}>{publish.isPending ? 'Publishing…' : 'Publish to search'}</button>)
+    if (canUnlist) actions.push(<button key="unpub" type="button" onClick={() => unpublish.mutate()} disabled={unpublish.isPending} className={rowAct}>{unpublish.isPending ? 'Unlisting…' : 'Unlist'}</button>)
     // Repo claims gate Report on a completed catalog scan; surface claims scan the
     // report live, so always offer it.
-    if (c.scanned || !isRepoLike) actions.push(<Link key="rep" to={claimReportHref(c)} className={link}>Report →</Link>)
+    if (c.scanned || !isRepoLike) actions.push(<Link key="rep" to={claimReportHref(c)} className={rowAct}>Report</Link>)
   }
-  actions.push(<ConfirmAction key="rm" label="Remove" className={muted} question="Remove this claim?" confirmLabel="Remove"
+  actions.push(<ConfirmAction key="rm" label="Remove" className={rowAct} question="Remove this claim?" confirmLabel="Remove"
     onConfirm={() => remove.mutate()} pending={remove.isPending} pendingLabel="Removing…" />)
 
-  return (
-    <div className={`glass rounded-xl p-4 relative overflow-hidden transition-shadow duration-500 ${ring ? 'ring-2 ring-primary-light shadow-lg shadow-primary/20' : ''}`}>
-      {celebrating && <ConfettiBurst />}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2.5 min-w-0">
-          {leftChip}
-          {!isRepoLike && <span className="font-mono text-[9.5px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-primary/12 text-primary-light shrink-0">{surface}</span>}
-          <span className="font-mono text-[13.5px] break-all min-w-0">{c.full_name}</span>
-          {c.private && <span className="text-[11px] text-text-muted shrink-0">🔒 private</span>}
-          {verified && c.proof_method && <span className="text-[10.5px] text-text-muted shrink-0" title="How ownership was proven">· {c.proof_method}</span>}
-        </div>
-        <div className="flex items-center gap-3 shrink-0">{actions}</div>
-      </div>
+  const status = scanning
+    ? <span className="font-mono text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-primary/15 text-primary-light">scanning…</span>
+    : undefined
+  const failed = publish.error ?? unpublish.error ?? remove.error
 
-      {/* pending claim → per-surface proof expands in-row (the one expander) */}
-      {!verified && showVerify && (
-        <div className="mt-3 rounded-lg border border-border/70 p-3 text-[12.5px] text-text-muted">
-          {!isRepoLike && (surface === 'npm' || surface === 'pypi' || surface === 'crates') && (
-            <ClaimPkgProof c={c} onVerify={() => verify.mutate()} pending={verify.isPending} msg={msg} />
-          )}
-          {!isRepoLike && surface === 'mcp' && (
-            <ClaimMcpProof c={c} onVerify={() => verify.mutate()} pending={verify.isPending} msg={msg} />
-          )}
-          {isRepoLike && (<>
-          <div className="font-semibold text-text">Prove you own this {surface === 'openclaw' ? 'skill' : 'public repo'} — add a GitHub topic:</div>
-          <div className="mt-2 flex items-center gap-2 flex-wrap">
-            <code className="inline-block font-mono text-[12px] bg-surface border border-border rounded px-2 py-1 break-all select-all">{c.topic}</code>
-            <button type="button" onClick={() => { navigator.clipboard?.writeText(c.topic); setCopied(true); setTimeout(() => setCopied(false), 1500) }} className="text-[11.5px] font-medium px-2 py-1 rounded-md border border-border text-text-muted hover:text-text hover:border-primary-light">{copied ? 'Copied ✓' : 'Copy'}</button>
+  return (
+    <div className={`relative overflow-hidden transition-shadow duration-500 ${ring ? 'ring-2 ring-inset ring-primary-light' : ''}`}>
+      {celebrating && <ConfettiBurst />}
+      <AccRow
+        name={c.full_name}
+        chip={isRepoLike ? (surface === 'openclaw' ? 'skill' : undefined) : surface}
+        sub={bits.map((b, i) => <span key={i}>{i > 0 && ' · '}{b}</span>)}
+        art={<ToolArt row={verified ? c : {}} status={status ?? (!verified ? <span className="font-mono text-[10px] text-text-muted">unverified</span> : undefined)} />}
+        actions={actions}
+      >
+        {/* pending claim → per-surface proof expands in-row (the one expander) */}
+        {!verified && showVerify && (
+          <div className="mt-3 rounded-lg border border-border/70 p-3 text-[12.5px] text-text-muted">
+            {!isRepoLike && (surface === 'npm' || surface === 'pypi' || surface === 'crates') && (
+              <ClaimPkgProof c={c} onVerify={() => verify.mutate()} pending={verify.isPending} msg={msg} />
+            )}
+            {!isRepoLike && surface === 'mcp' && (
+              <ClaimMcpProof c={c} onVerify={() => verify.mutate()} pending={verify.isPending} msg={msg} />
+            )}
+            {isRepoLike && (<>
+            <div className="font-semibold text-text">Prove you own this {surface === 'openclaw' ? 'skill' : 'public repo'}: add a GitHub topic.</div>
+            <div className="mt-2 flex items-center gap-2 flex-wrap">
+              <code className="inline-block font-mono text-[12px] bg-surface border border-border rounded px-2 py-1 break-all select-all">{c.topic}</code>
+              <button type="button" onClick={() => { navigator.clipboard?.writeText(c.topic); setCopied(true); setTimeout(() => setCopied(false), 1500) }} className="text-[11.5px] font-medium px-2 py-1 rounded-md border border-border text-text-muted hover:text-text hover:border-primary-light">{copied ? 'Copied ✓' : 'Copy'}</button>
+            </div>
+            <ol className="mt-2.5 flex flex-col gap-1 list-decimal pl-4 marker:text-primary-light marker:font-semibold">
+              <li>Open <a href={`https://github.com/${c.full_name}`} target="_blank" rel="noopener noreferrer" className="text-primary-light hover:text-primary font-mono">github.com/{c.full_name}</a> → the <span className="text-text font-medium">gear ⚙️</span> by <span className="text-text font-medium">&ldquo;About&rdquo;</span>.</li>
+              <li>Paste the topic into <span className="text-text font-medium">Topics</span>, press <span className="text-text font-medium">Enter</span>, then <span className="text-text font-medium">Save changes</span>.</li>
+              <li>Come back and press <span className="text-text font-medium">Verify topic</span> (topics can take a few seconds).</li>
+            </ol>
+            <details className="mt-2">
+              <summary className="cursor-pointer hover:text-text">Prefer the command line?</summary>
+              <code className="mt-1.5 block font-mono text-[11.5px] bg-surface border border-border rounded px-2 py-1.5 break-all">gh repo edit {c.full_name} --add-topic {c.topic}</code>
+            </details>
+            <button type="button" onClick={() => verify.mutate()} disabled={verify.isPending} className={btnSm + ' mt-2.5'}>{verify.isPending ? 'Checking…' : 'Verify topic'}</button>
+            {msg && <div className="mt-2 text-warning">{msg}</div>}
+            </>)}
           </div>
-          <ol className="mt-2.5 flex flex-col gap-1 list-decimal pl-4 marker:text-primary-light marker:font-semibold">
-            <li>Open <a href={`https://github.com/${c.full_name}`} target="_blank" rel="noopener noreferrer" className="text-primary-light hover:text-primary font-mono">github.com/{c.full_name}</a> → the <span className="text-text font-medium">gear ⚙️</span> by <span className="text-text font-medium">&ldquo;About&rdquo;</span>.</li>
-            <li>Paste the topic into <span className="text-text font-medium">Topics</span>, press <span className="text-text font-medium">Enter</span>, then <span className="text-text font-medium">Save changes</span>.</li>
-            <li>Come back and click <span className="text-text font-medium">Verify</span> (topics can take a few seconds).</li>
-          </ol>
-          <details className="mt-2">
-            <summary className="cursor-pointer hover:text-text">Prefer the command line?</summary>
-            <code className="mt-1.5 block font-mono text-[11.5px] bg-surface border border-border rounded px-2 py-1.5 break-all">gh repo edit {c.full_name} --add-topic {c.topic}</code>
-          </details>
-          <button onClick={() => verify.mutate()} disabled={verify.isPending} className={btn + ' mt-2.5'}>{verify.isPending ? 'Checking…' : 'Verify topic'}</button>
-          {msg && <div className="mt-2 text-warning">{msg}</div>}
-          </>)}
-        </div>
-      )}
-      {celebrating && (
-        <motion.div className="mt-2 text-[12.5px] font-semibold text-success" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}>✓ Verified — you own this!</motion.div>
-      )}
+        )}
+        {celebrating && (
+          <motion.div className="mt-2 text-[12.5px] font-semibold text-success" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}>✓ Verified. You own this.</motion.div>
+        )}
+        {failed && <div className="mt-2 text-[12.5px] text-danger" role="alert">That didn&apos;t work. Try again.</div>}
+      </AccRow>
     </div>
   )
 }
@@ -539,28 +542,27 @@ function ToolRow({ c, highlight = false }: { c: Claim; highlight?: boolean }) {
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 /**
- * "My Tools" — one home for adding + managing the repos you own, organized by
- * job (not method): Add a tool → Connections → Your tools. Every repo lives in
- * one unified list with a consistent row, whatever way it was claimed.
+ * "My Tools", a tab of the account shell: Add a tool → Connections → Your tools. Every
+ * claimed tool lives in one list with one row shape, whatever way it was claimed, and
+ * each row carries the Browse-row artwork (trust or Certified mini + adoption).
  */
-export default function RebrandMyTools() {
-  const { user, isLoading: authLoading } = useAuth()
+function MyToolsBody() {
   const location = useLocation()
-  useRequireUser(user, authLoading)
-
-  const { data, isLoading: cLoading, isError: cError, refetch: refetchClaims, isRefetching: cRefetching } = useClaims(!!user)
-  const { data: appData } = useAppStatus(!!user)
+  const [params] = useSearchParams()
+  const { data, isLoading: cLoading, isError: cError, refetch: refetchClaims, isRefetching: cRefetching } = useClaims(true)
+  const { data: appData } = useAppStatus(true)
   const [justClaimedId, setJustClaimedId] = useState<string | null>(null)
 
-  // Owners arriving from a score page's "Manage" land on their tools list.
+  // Owners arriving from a score page's "Manage" land on their tools list; "Check a
+  // private repo" lands on Connections, with the token form open.
   useEffect(() => {
-    if (location.hash === '#your-repos' && !cLoading) {
-      const t = setTimeout(() => document.getElementById('your-repos')?.scrollIntoView({ behavior: 'smooth' }), 250)
+    const target = location.hash === '#your-repos' ? 'your-repos' : params.get('private') === '1' ? 'connections' : null
+    if (target && !cLoading) {
+      const t = setTimeout(() => document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 250)
       return () => clearTimeout(t)
     }
-  }, [location.hash, cLoading])
+  }, [location.hash, params, cLoading])
 
-  if (!user) return <AccountSkeleton width="max-w-[680px]" />
   const claims = data?.claims ?? []
   const claimByName = new Map(claims.map((c) => [c.full_name.toLowerCase(), c]))
   // Every repo the connected App can reach (deduped across installs). Claimed ones
@@ -573,50 +575,41 @@ export default function RebrandMyTools() {
   // One list, most-recently-actionable first: pending, then scanning, then rest.
   const rank = (c: Claim) => (c.status !== 'verified' ? 0 : c.private && !c.scanned ? 1 : 2)
   const tools = [...claims].sort((a, b) => rank(a) - rank(b))
+  const focusAdd = () => document.getElementById('add-tool-input')?.focus()
 
   return (
-    <div className="max-w-[680px] mx-auto px-6 py-14">
-      <Reveal>
-        <div>
-          <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">My Tools</span>
-          <h1 className="mt-1 text-2xl md:text-3xl font-extrabold tracking-tight">Your tools</h1>
-          <p className="mt-2 text-text-muted text-[14px] max-w-[62ch]">Claim the repos you own to scan them, get continuous re-scans with change alerts, and control how each is listed. Public repos verify with a GitHub topic; private repos connect through the GitHub App.</p>
-        </div>
-      </Reveal>
-
-      {/* ZONE 1 — Add a tool */}
-      <section className="mt-10">
-        <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-3">Add a tool</h2>
+    <>
+      <AccSection title="Add a tool" id="add">
         <AddToolForm onClaimed={(c) => setJustClaimedId(c.status === 'verified' ? null : c.id)} />
         <AppRepoPicker repos={appRepos} claimByName={claimByName} />
-      </section>
+      </AccSection>
 
-      <div className="mt-10 border-t border-border/60" />
-
-      {/* ZONE 2 — Connections */}
-      <section className="mt-8">
-        <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-3">Connections</h2>
+      <AccSection title="Connections" id="connections">
         <GitHubAppConnection />
         <OneTimeScanExpander />
-      </section>
+      </AccSection>
 
-      <div className="mt-10 border-t border-border/60" />
+      <AccSection title={<>Your tools{tools.length > 0 && ` · ${tools.length}`}</>} id="your-repos">
+        {cLoading ? <SkeletonRows n={2} />
+          : cError ? <LoadError what="your tools" note="It's on our side. Your claims are safe." onRetry={() => void refetchClaims()} retrying={cRefetching} />
+            : tools.length === 0 ? (
+              <EmptyCard title="No tools yet" action={<button type="button" onClick={focusAdd} className={btnSm}>Claim a tool</button>}>
+                Claim a repo, package or MCP server you maintain. We&apos;ll watch it for you, and its result shows a claimed chip.
+              </EmptyCard>
+            ) : (
+              <AccList>
+                {tools.map((c) => <ToolRow key={c.id} c={c} highlight={c.id === justClaimedId} />)}
+              </AccList>
+            )}
+      </AccSection>
+    </>
+  )
+}
 
-      {/* ZONE 3 — Your tools */}
-      <section className="mt-8 scroll-mt-24" id="your-repos">
-        <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-3">Your tools {tools.length > 0 && `· ${tools.length}`}</h2>
-        {cLoading ? (
-          <div className="flex flex-col gap-2.5">{[0, 1].map((i) => <div key={i} className="glass rounded-xl h-[64px] animate-pulse" />)}</div>
-        ) : cError ? (
-          <LoadError what="your tools" onRetry={() => void refetchClaims()} retrying={cRefetching} />
-        ) : tools.length === 0 ? (
-          <div className="text-text-muted text-[13px]">No tools yet. Claim a public repo above, or connect the GitHub App to claim a private one.</div>
-        ) : (
-          <div className="flex flex-col gap-2.5">
-            {tools.map((c) => <ToolRow key={c.id} c={c} highlight={c.id === justClaimedId} />)}
-          </div>
-        )}
-      </section>
-    </div>
+export default function RebrandMyTools() {
+  return (
+    <AccountShell tab="tools">
+      <MyToolsBody />
+    </AccountShell>
   )
 }

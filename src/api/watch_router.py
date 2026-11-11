@@ -28,8 +28,11 @@ class WatchCreate(BaseModel):
     repo: str
 
 
-def _serialize(w: ToolWatch) -> dict:
-    return {
+def _serialize(w: ToolWatch, summary: dict | None = None) -> dict:
+    """A watch row. ``summary`` (src/api/tool_summary.py) adds the row artwork: the
+    answer, trust score, Certified mark and adoption. Additive fields; the watch's own
+    last re-scan wins for the score and answer, the catalog fills the rest."""
+    out = {
         "id": str(w.id),
         "surface": getattr(w, "surface", "github") or "github",
         "owner": w.owner,
@@ -37,6 +40,27 @@ def _serialize(w: ToolWatch) -> dict:
         "last_score": w.last_score,
         "active": w.active,
     }
+    out.update(watch_row_fields(w, summary))
+    return out
+
+
+def watch_row_fields(w: ToolWatch, summary: dict | None) -> dict:
+    """trust_score / decision / decision_reason / certified_mark / adoption_* for a
+    watch. When the watch has its own answer from its last re-scan, that answer and its
+    score lead (alerts are measured against them); otherwise the stored catalog row's."""
+    from src.api.tool_summary import empty_summary
+
+    s = dict(summary or empty_summary())
+    own_decision = getattr(w, "last_decision", None)
+    if w.last_score is not None and own_decision in ("safe", "review", "do_not_connect"):
+        same = s.get("decision") == own_decision and s.get("trust_score") == w.last_score
+        s["trust_score"] = w.last_score
+        s["decision"] = own_decision
+        s["decision_reason"] = (s.get("decision_reason") or "") if same else ""
+        s["certified_mark"] = bool(getattr(w, "last_certified", False)) and own_decision == "safe"
+    elif w.last_score is not None and s.get("trust_score") is None:
+        s["trust_score"] = w.last_score
+    return s
 
 
 @dataclass
@@ -207,7 +231,11 @@ async def list_watches(
             .order_by(ToolWatch.created_at.desc())
         )
     ).scalars().all()
-    return [_serialize(w) for w in rows]
+    from src.api.tool_summary import coord_key, tool_summaries
+
+    keys = {w.id: coord_key(w.surface, w.owner, w.repo) for w in rows}
+    summaries = await tool_summaries(db, keys.values())
+    return [_serialize(w, summaries.get(keys[w.id])) for w in rows]
 
 
 @router.delete("/watches/{watch_id}", status_code=status.HTTP_204_NO_CONTENT)

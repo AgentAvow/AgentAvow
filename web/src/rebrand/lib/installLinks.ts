@@ -49,6 +49,14 @@ export function vscodeInstall(t: McpTarget, insiders = false): string {
   return `${scheme}:mcp/install?${encodeURIComponent(JSON.stringify(obj))}`
 }
 
+/** The https fallback for the VS Code deeplink: vscode.dev answers with a 302 to the same
+ * `vscode:mcp/install?…` link (checked 2026-11-11), so it works where a custom scheme
+ * is dropped. `config` is the JSON without the name. */
+export function vscodeWebInstall(t: McpTarget): string {
+  const p = new URLSearchParams({ name: t.name, config: JSON.stringify({ type: 'http', url: t.url }) })
+  return `https://vscode.dev/redirect/mcp/install?${p.toString()}`
+}
+
 export function gooseInstall(t: McpTarget): string {
   const p = new URLSearchParams({
     url: t.url,

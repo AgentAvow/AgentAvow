@@ -393,6 +393,12 @@ async def list_claims(
     _: None = Depends(rate_limit_reads),
 ):
     from src.api.public_scan_router import _grade_from_score
+    from src.api.tool_summary import (
+        coord_key,
+        empty_summary,
+        summary_from_score,
+        tool_summaries,
+    )
     from src.models import CommunityScan
 
     result = await db.execute(
@@ -410,10 +416,16 @@ async def list_claims(
         select(
             PrivateScanResult.full_name, PrivateScanResult.published,
             PrivateScanResult.grade, PrivateScanResult.trust_score,
+            # The blocking counts only (not the whole stored report), so the row's
+            # answer is decided the same way a catalog row's is.
+            PrivateScanResult.result_json["findings"]["critical"].as_integer(),
+            PrivateScanResult.result_json["findings"]["high"].as_integer(),
         ).where(PrivateScanResult.entity_id == entity.id)
     )).all()
-    for fn, pub, grade, score in priv_rows:
+    private_summary: dict[str, dict] = {}
+    for fn, pub, grade, score, crit, high in priv_rows:
         meta[fn] = {"scanned": True, "published": bool(pub), "grade": grade, "score": score}
+        private_summary[fn] = summary_from_score(score, crit, high)
 
     pub_names = [c.full_name for c in claims if not c.is_private]
     if pub_names:
@@ -431,7 +443,19 @@ async def list_claims(
                 "score": score,
             }
 
-    return {"claims": [_serialize(c, meta) for c in claims]}
+    # Row artwork (answer, trust or Certified mini, adoption), read from stored scans
+    # in one query. A private repo's comes from its own report: no adoption signal.
+    keys = {c.id: coord_key(c.surface, c.owner, c.repo) for c in claims}
+    summaries = await tool_summaries(db, [keys[c.id] for c in claims if not c.is_private])
+    out = []
+    for c in claims:
+        row = _serialize(c, meta)
+        if c.is_private:
+            row.update(private_summary.get(c.full_name) or empty_summary())
+        else:
+            row.update(summaries.get(keys[c.id]) or empty_summary())
+        out.append(row)
+    return {"claims": out}
 
 
 @router.get("/claim-status")

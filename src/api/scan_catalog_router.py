@@ -769,6 +769,30 @@ async def _community_rows(db: AsyncSession) -> list[CatalogRow]:
         return list(rows)
 
 
+async def community_mark_grade(c: Any) -> str | None:
+    """The stored grade of a community row with the Certified-mark rule applied, as
+    Browse lists it: a pre-rule A+ counts only if its cached scan still earns the mark,
+    and an A+ shows only when the row's own page shows the mark (sandbox final and
+    clean). Reads the cache only; never scans. Shared with the account rows
+    (src/api/tool_summary.py) so a watch or claim shows the same mark as Browse."""
+    scanned_at = getattr(c, "last_scanned_at", None)
+    stored_grade = _stored_grade_for_mark(c.grade, scanned_at)
+    if _is_pre_rule_a_plus(c.grade, scanned_at) and (
+        await _mark_from_cached_scan(c.owner, c.repo, c.trust_score)
+    ):
+        stored_grade = "A+"
+    if stored_grade == "A+":
+        # A stored A+ is written from the static scan, before the sandbox has
+        # run. The list shows the mark only when the row's own page does
+        # (sandbox final and clean); a row with no cached scan to check keeps
+        # its stored mark. Re-evaluated every COMMUNITY_ROWS_TTL_SECONDS, so a
+        # row gains the mark once its sandbox run lands.
+        page_mark = await _mark_as_page_shows(c.owner, c.repo, c.trust_score)
+        if page_mark is False:
+            stored_grade = "A"
+    return stored_grade
+
+
 async def _fetch_community_rows(db: AsyncSession) -> list[CatalogRow] | None:
     """One DB read of the community rows; None on a DB error."""
     from src.models import CommunityScan
@@ -787,20 +811,7 @@ async def _fetch_community_rows(db: AsyncSession) -> list[CatalogRow] | None:
                 if _key in seen:
                     continue
                 seen.add(_key)
-            stored_grade = _stored_grade_for_mark(c.grade, getattr(c, "last_scanned_at", None))
-            if _is_pre_rule_a_plus(c.grade, getattr(c, "last_scanned_at", None)) and (
-                await _mark_from_cached_scan(c.owner, c.repo, c.trust_score)
-            ):
-                stored_grade = "A+"
-            if stored_grade == "A+":
-                # A stored A+ is written from the static scan, before the sandbox has
-                # run. The list shows the mark only when the row's own page does
-                # (sandbox final and clean); a row with no cached scan to check keeps
-                # its stored mark. Re-evaluated every COMMUNITY_ROWS_TTL_SECONDS, so a
-                # row gains the mark once its sandbox run lands.
-                page_mark = await _mark_as_page_shows(c.owner, c.repo, c.trust_score)
-                if page_mark is False:
-                    stored_grade = "A"
+            stored_grade = await community_mark_grade(c)
             # Route each community row by its real surface (default github for
             # pre-t18 rows): npm/pypi → package name, mcp → endpoint URL, else repo.
             surf = (getattr(c, "surface", None) or "github").lower()

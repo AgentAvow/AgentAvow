@@ -8,8 +8,9 @@ import { AtmosphericBackground } from '../components/AtmosphericBackground'
 import { useAuth } from '../hooks/useAuth'
 import api from '../lib/api'
 import { currentPath, trackEvent, trackLandingView } from '../lib/analytics'
-import { NotifRow, type Notif } from './components/NotificationBits'
+import { BellRow, type Notif } from './components/NotificationBits'
 import { RELEVANT_KIND_PARAM } from './lib/notifKinds'
+import { ALERT_QUERY_KEYS, useUnreadAlertCount } from './lib/useUnreadAlerts'
 import { here, loginHref } from './lib/returnTo'
 import { dropSnapshot, inSnapshot } from './lib/snapshot'
 import { AppsLine } from './components/AppsStrip'
@@ -30,30 +31,24 @@ function AccountMenu() {
   const notifRef = useRef<HTMLDivElement>(null)
 
   // Count unread of the same tool-safety kinds the dropdown lists (alerts and good
-  // news). The global unread-count includes the user's old social-era notifications
-  // (that's the "large number" bug), which the tool-safety rebrand shouldn't surface.
-  const { data: unread } = useQuery({
-    queryKey: ['rebrand-unread-watch'],
-    queryFn: async () => {
-      const r = await api.get<{ notifications: unknown[] }>('/notifications', { params: { kind: RELEVANT_KIND_PARAM, unread_only: true, limit: 50 } })
-      return r.data.notifications.length
-    },
-    enabled: !!user,
-    refetchInterval: 60_000,
-  })
+  // news), so the badge never counts old social-era notifications the site hides.
+  const count = useUnreadAlertCount(!!user)
 
-  // The dropdown list (tool-safety notifications only, filtered server-side) — fetched when opened.
+  // The dropdown list (tool-safety notifications only, filtered server-side), fetched when opened.
   const { data: notifList, isLoading: notifLoading, isError: notifError, refetch: refetchNotifs } = useQuery({
     queryKey: ['rebrand-notif-list'],
     queryFn: async () => (await api.get<{ notifications: Notif[] }>('/notifications', { params: { kind: RELEVANT_KIND_PARAM, limit: 3 } })).data,
     enabled: !!user && notifOpen,
   })
-  const invalidateNotifs = () => ['rebrand-notif-list', 'rebrand-unread-watch', 'rebrand-all-notifs', 'rebrand-notifs']
-    .forEach((k) => qc.invalidateQueries({ queryKey: [k] }))
+  const invalidateNotifs = () => ALERT_QUERY_KEYS.forEach((k) => qc.invalidateQueries({ queryKey: [k] }))
   const markRead = useMutation({ mutationFn: (id: string) => api.post(`/notifications/${id}/read`), onSuccess: invalidateNotifs })
-  const removeNotif = useMutation({ mutationFn: (id: string) => api.delete(`/notifications/${id}`), onSuccess: invalidateNotifs })
+  const markAll = useMutation({
+    mutationFn: () => api.post('/notifications/read-all', null, { params: { kind: RELEVANT_KIND_PARAM } }),
+    onSuccess: invalidateNotifs,
+  })
   const recent = [...(notifList?.notifications ?? [])]
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 3)
+  const openNotif = (n: Notif) => { if (!n.is_read) markRead.mutate(n.id); setNotifOpen(false) }
 
   useEffect(() => {
     if (!open && !notifOpen) return
@@ -69,7 +64,6 @@ function AccountMenu() {
     return <Link to={loginHref(here(location))} className="text-[14px] text-text-muted hover:text-text transition-colors">Sign in</Link>
   }
 
-  const count = unread ?? 0
   const initial = user.display_name?.charAt(0).toUpperCase() || '?'
 
   return (
@@ -80,21 +74,30 @@ function AccountMenu() {
           {count > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 grid place-items-center rounded-full bg-accent text-white text-[10px] font-bold tabular-nums">{count > 9 ? '9+' : count}</span>}
         </button>
         {notifOpen && (
-          // Mobile: pinned to the viewport under the header, so it can't run off the left
-          // edge (the avatar and menu button sit to the bell's right). md+: under the bell.
-          <div className="fixed left-4 right-4 top-[62px] md:absolute md:left-auto md:right-0 md:top-auto md:mt-2 md:w-[360px] glass rounded-xl border border-border/60 shadow-xl z-30 overflow-hidden">
-            <div className="px-3.5 py-2.5 border-b border-border/60 flex items-center justify-between">
-              <span className="text-[13px] font-semibold">Notifications</span>
-              <Link to={rp('/rebrand/notifications')} onClick={() => setNotifOpen(false)} className="text-[12px] font-semibold text-primary-light hover:text-primary">See all →</Link>
+          // Phone: full width under the header, so it can't run off the left edge (the
+          // avatar and menu button sit to the bell's right). md+: under the bell. Solid
+          // surface, no blur.
+          <div className="fixed left-3 right-3 top-[62px] md:absolute md:left-auto md:right-0 md:top-auto md:mt-2 md:w-[380px] bg-surface rounded-xl border border-border shadow-[0_14px_30px_rgba(0,0,0,.25)] z-30 overflow-hidden">
+            <div className="px-3 py-2.5 border-b border-border flex items-center justify-between gap-3">
+              <b className="text-[13.5px]">Alerts</b>
+              {count > 0 && (
+                <button type="button" onClick={() => markAll.mutate()} disabled={markAll.isPending} className="text-[12.5px] font-semibold text-primary-light hover:text-primary disabled:opacity-60">
+                  {markAll.isPending ? 'Marking…' : 'Mark all read'}
+                </button>
+              )}
             </div>
-            <div className="max-h-[70vh] overflow-y-auto p-2 flex flex-col gap-1.5">
+            <div className="max-h-[70vh] overflow-y-auto divide-y divide-border/60">
               {notifLoading
-                ? [0, 1].map((i) => <div key={i} className="glass rounded-xl h-[72px] animate-pulse" />)
+                ? [0, 1].map((i) => <div key={i} className="h-[62px] bg-surface-hover/60 animate-pulse" />)
                 : notifError
-                  ? <div className="py-5 text-center text-[13px] text-text-muted">Couldn&apos;t load notifications. <button type="button" onClick={() => void refetchNotifs()} className="font-semibold text-primary-light hover:text-primary">Try again</button></div>
+                  ? <div className="px-3 py-5 text-center text-[13px] text-text-muted">Couldn&apos;t load alerts. <button type="button" onClick={() => void refetchNotifs()} className="font-semibold text-primary-light hover:text-primary">Try again</button></div>
                   : recent.length
-                    ? recent.map((n) => <NotifRow key={n.id} n={n} compact onRead={markRead.mutate} onDelete={removeNotif.mutate} onNavigate={() => setNotifOpen(false)} />)
+                    ? recent.map((n) => <BellRow key={n.id} n={n} onOpen={openNotif} />)
                     : <p className="text-text-muted text-[13px] py-6 text-center">You&apos;re all caught up.</p>}
+            </div>
+            <div className="px-3 py-2.5 border-t border-border text-[13px] flex justify-between gap-3">
+              <span className="text-text-muted">{count > 0 ? `${count} unread` : ''}</span>
+              <Link to={rp('/rebrand/notifications')} onClick={() => setNotifOpen(false)} className="font-semibold text-primary-light hover:text-primary">See all →</Link>
             </div>
           </div>
         )}
@@ -113,6 +116,7 @@ function AccountMenu() {
             </div>
             <Link to={rp("/rebrand/tools")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">My Tools</Link>
             <Link to={rp("/rebrand/account")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Watches &amp; alerts</Link>
+            <Link to={rp("/rebrand/notifications")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Notifications</Link>
             <Link to={rp("/rebrand/settings")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Settings</Link>
             {user.is_admin && <Link to={rp("/rebrand/admin-dashboard")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Admin</Link>}
             <button onClick={() => { setOpen(false); logout(); navigate(rp('/rebrand')) }} className="block w-full text-left px-3.5 py-2 text-[13.5px] text-text-muted hover:text-danger hover:bg-surface border-t border-border/60 mt-1">Sign out</button>
@@ -178,6 +182,7 @@ const NAV = [
   ['/rebrand/browse', 'Browse'],
   ['/rebrand/get', 'Get AgentAvow'],
   ['/rebrand/teams', 'For teams'],
+  ['/rebrand/for-developers', 'Developers'],
   ['/rebrand/docs', 'Docs'],
 ]
 
@@ -258,7 +263,7 @@ type FooterLink = [label: string, to: string]
 
 const FOOTER: [heading: string, links: FooterLink[]][] = [
   ['Check', [['Browse', '/rebrand/browse'], ['Trust Index', '/rebrand/index'], ['Certified', '/rebrand/certified'], ['API sandbox', '/rebrand/sandbox']]],
-  ['Build', [['For developers', '/rebrand/for-developers'], ['Badges', '/rebrand/badge'], ['List your tool', '/rebrand/submit'], ['Preflight', '/rebrand/preflight'], ['API', '/api/v1/redoc'], ['Verify keys', '/.well-known/jwks.json']]],
+  ['Build', [['For developers', '/rebrand/for-developers'], ['Badges', '/rebrand/for-developers#badge'], ['Check a private repo', '/rebrand/for-developers#private'], ['List your tool', '/rebrand/submit'], ['Preflight', '/rebrand/preflight'], ['API', '/api/v1/redoc'], ['Verify keys', '/.well-known/jwks.json']]],
   ['About', [['How it works', '/rebrand/how-it-works'], ['Research', '/rebrand/research'], ['FAQ', '/rebrand/faq'], ['Community', '/feed'], ['Feedback', 'https://github.com/AgentAvow/AgentAvow/issues/new'], ['Terms', '/rebrand/legal/terms'], ['Privacy', '/rebrand/legal/privacy']]],
 ]
 
@@ -330,10 +335,13 @@ export default function RebrandLayout() {
       if (iconEl && prevIcon) iconEl.setAttribute('href', prevIcon)
     }
   }, [])
+  // "Developers" joins the desktop nav from lg up, where it fits without crowding;
+  // between md and lg it is in the footer (and below md, in the menu).
   const link = (to: string, label: string) => (
     <Link
+      key={to}
       to={rp(to)}
-      className={`text-[14.5px] transition-colors ${
+      className={`text-[14.5px] whitespace-nowrap transition-colors ${to === '/rebrand/for-developers' ? 'hidden lg:inline' : ''} ${
         pathname === rp(to) ? 'text-text' : 'text-text-muted hover:text-text'
       }`}
     >
@@ -357,14 +365,14 @@ export default function RebrandLayout() {
           <Link to={rp("/rebrand")} aria-label="AgentAvow home" className="shrink-0">
             <Wordmark />
           </Link>
-          <nav className="hidden md:flex items-center gap-6 ml-2">
+          <nav className="hidden md:flex items-center gap-4 lg:gap-6 ml-2">
             {NAV.map(([to, label]) => link(to, label))}
           </nav>
           <div className="ml-auto flex items-center gap-4">
             <AccountMenu />
             <Link
               to={rp("/rebrand/check")}
-              className="hidden md:inline-block text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow"
+              className="hidden md:inline-block whitespace-nowrap text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow"
             >
               Check a tool
             </Link>
