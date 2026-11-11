@@ -353,6 +353,7 @@ WHERE_TOOLS = " in its tool definitions"
 WHERE_DEPENDENCY = " in a dependency"
 WHERE_CARD = " in its agent card"
 WHERE_LISTING = " in its listing"  # an x402 endpoint's Bazaar listing
+WHERE_DEVCONTAINER = " in its dev container setup"
 
 # Files an agent is handed as instructions (mirrors src.scanner.package_context).
 _AGENT_FILE_NAMES = frozenset({
@@ -400,6 +401,10 @@ def finding_where(i: dict) -> str:
     # is low and never decides, so what is left runs from an install lifecycle script.
     if name == "package.json":
         return WHERE_INSTALL
+    # A dev container's postCreateCommand runs when the repo is opened in one: not a
+    # data file (colinhacks/zod, 2026-11-11).
+    if ".devcontainer" in parts[:-1] or name in ("devcontainer.json", ".devcontainer.json"):
+        return WHERE_DEVCONTAINER
     if name in _AGENT_FILE_NAMES or name.endswith(".mdc") or (
             name.endswith(_TEXT_EXTS) and (name.startswith("readme")
                                            or any(p in _AGENT_DIRS for p in parts[:-1]))):
