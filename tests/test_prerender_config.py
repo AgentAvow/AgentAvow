@@ -155,7 +155,9 @@ def test_every_public_page_is_in_the_sitemap():
         assert f"<loc>https://agentavow.com/docs/{slug}</loc>" in sitemap, slug
     public = ROOT / "web/public"
     for page in public.rglob("index.html"):
-        url = "/" + str(page.parent.relative_to(public)) + "/"
+        # Listed at the page's canonical URL (no trailing slash).
+        url = "/" + str(page.parent.relative_to(public))
         assert f"<loc>https://agentavow.com{url}</loc>" in sitemap, url
+        assert f'rel="canonical" href="https://agentavow.com{url}"' in page.read_text(), url
     for pdf in public.glob("*.pdf"):
         assert f"<loc>https://agentavow.com/{pdf.name}</loc>" in sitemap, pdf.name
