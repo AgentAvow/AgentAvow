@@ -278,8 +278,8 @@ const SOCIAL: [string, string, string][] = [
 type FooterLink = [label: string, to: string]
 
 const FOOTER: [heading: string, links: FooterLink[]][] = [
-  ['Check', [['Browse', '/rebrand/browse'], ['Trust Index', '/rebrand/index'], ['Certified', '/rebrand/certified'], ['API sandbox', '/rebrand/sandbox']]],
-  ['Build', [['For developers', '/rebrand/for-developers'], ['Badges', '/rebrand/for-developers#badge'], ['Check a private repo', '/rebrand/for-developers#private'], ['Preflight', '/rebrand/preflight'], ['API', '/api/v1/redoc'], ['Verify keys', '/.well-known/jwks.json']]],
+  ['Explore', [['Browse', '/rebrand/browse'], ['Trust Index', '/rebrand/index'], ['Certified', '/rebrand/certified'], ['API sandbox', '/rebrand/sandbox']]],
+  ['Build', [['For developers', '/rebrand/for-developers'], ['Badges', '/rebrand/for-developers#badge'], ['Check a private repo', '/rebrand/for-developers#private'], ['Preflight', '/rebrand/preflight'], ['API', '/api/v1/redoc'], ['Verify a result', '/rebrand/docs/verify-attestations'], ['Verify keys', '/.well-known/jwks.json']]],
   ['About', [['How it works', '/rebrand/how-it-works'], ['Research', '/rebrand/research'], ['FAQ', '/rebrand/faq'], ['Community', '/feed'], ['Feedback', 'https://github.com/AgentAvow/AgentAvow/issues/new'], ['Terms', '/rebrand/legal/terms'], ['Privacy', '/rebrand/legal/privacy']]],
 ]
 
