@@ -188,24 +188,16 @@ function Card3({ title, children }: { title: string; children: React.ReactNode }
   )
 }
 
-/**
- * The Certified row, right under the three answers. The badge is the Safe example's
- * live row (zod) when that row carries the mark; with no certified row to show (and
- * in the prerender, which names no tool) it falls back to the plain seal. The full
- * checklist lives on /certified.
- */
-function CertifiedRow({ row }: { row: CatalogRow | null }) {
-  const earned = row != null && row.trust_score != null && decisionOf({ ...row, findings: { critical: row.critical ?? 0, high: row.high ?? 0 } }).decision === 'safe' && isCertified(row)
+/** The Certified row, right under the three answers. The full checklist lives on /certified. */
+function CertifiedRow() {
+  // Always the plain seal: the Safe example card just above already shows the scored
+  // badge when its tool is Certified, so the mark never appears twice in one section.
   return (
     <div className="mt-8 max-w-[760px] mx-auto flex flex-col sm:flex-row items-center gap-x-5 gap-y-3 rounded-2xl px-5 py-4 text-center sm:text-left"
       style={{ background: 'linear-gradient(100deg,rgba(45,212,191,.10),rgba(232,121,249,.08) 70%), var(--color-surface)', border: '1px solid rgba(232,121,249,.30)' }}>
       <div className="shrink-0 flex flex-col items-center gap-1">
-        {earned
-          ? <><CertifiedBadge score={row.trust_score as number} size="md" /><small className="text-[11.5px] text-text-muted">{row.name}, today</small></>
-          : <>
-              <div className="w-[52px] h-[52px] rounded-full grid place-items-center text-[24px] font-black text-[#06231f]" style={{ background: 'conic-gradient(from 210deg,#2DD4BF,#E879F9,#2DD4BF)' }} aria-hidden="true">✓</div>
-              <div className="font-mono text-[10.5px] font-extrabold tracking-[0.18em] gradient-text">CERTIFIED</div>
-            </>}
+        <div className="w-[52px] h-[52px] rounded-full grid place-items-center text-[24px] font-black text-[#06231f]" style={{ background: 'conic-gradient(from 210deg,#2DD4BF,#E879F9,#2DD4BF)' }} aria-hidden="true">✓</div>
+        <div className="font-mono text-[10.5px] font-extrabold tracking-[0.18em] gradient-text">CERTIFIED</div>
       </div>
       <p className="min-w-0 text-[14.5px] text-text-muted">
         <b className="text-text font-semibold">Certified is the top mark:</b> every check passes, no averaging, and it comes off the moment one fails.{' '}
@@ -402,7 +394,7 @@ export default function RebrandHome() {
             <p className="mt-3.5 text-center text-[13px] text-text-muted">Hundreds of Claude Code machines connect every day. A check you run here is normally no more than an hour old.</p>
           </Reveal>
           <Reveal>
-            <CertifiedRow row={examples?.safe ?? null} />
+            <CertifiedRow />
           </Reveal>
         </div>
       </section>
