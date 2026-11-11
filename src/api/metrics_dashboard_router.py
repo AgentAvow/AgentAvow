@@ -1348,12 +1348,18 @@ async def growth_metrics(
     excluded; npm / PyPI downloads), the catalog mix right now, and search / AI
     referrals to landing pages over ``days``. Admin only."""
     require_admin(current_entity)
+    from src import cache
     from src.jobs.metrics_daily import (
         CATALOG_PREFIX,
         DOWNLOADS_PREFIX,
         current_catalog_mix,
         read_daily,
     )
+
+    cache_key = f"admin:metrics:growth:{days}"
+    cached = await cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     day_strs = window_day_strs(days)
     catalog = await read_daily(CATALOG_PREFIX, day_strs)
@@ -1364,7 +1370,7 @@ async def growth_metrics(
         logging.getLogger(__name__).exception("catalog mix unavailable")
         now = None
     latest_dl = downloads[max(downloads)] if downloads else None
-    return {
+    result = {
         "days": day_strs,
         "catalog_daily": catalog,
         "catalog_now": now,
@@ -1381,6 +1387,8 @@ async def growth_metrics(
             "that sent them. Only the host is stored. Counted from the PR 2 deploy.",
         ],
     }
+    await cache.set(cache_key, result, ttl=cache.TTL_SHORT)
+    return result
 
 
 _EVAL_TASKS: set[asyncio.Task] = set()

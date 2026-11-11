@@ -266,7 +266,11 @@ async def test_growth_groups_landing_referrals(client, db, monkeypatch):  # noqa
         return {"safe": 1, "review": 0, "do_not_connect": 0, "unscored": 0,
                 "certified": 1, "total": 1}
 
+    async def no_cache(key):
+        return None
+
     monkeypatch.setattr(metrics_daily, "current_catalog_mix", mix)
+    monkeypatch.setattr("src.cache.get", no_cache)
     token = await _token(client, db, admin=True)
     for ref in ("https://www.google.com/search?q=x", "https://www.google.de/",
                 "https://chatgpt.com/", "https://www.reddit.com/r/mcp", None):
