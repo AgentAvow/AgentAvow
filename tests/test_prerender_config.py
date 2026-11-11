@@ -141,3 +141,21 @@ def test_og_image_url_carries_no_letter_grade(data):
 
     url = _og_image_url("x/y", 92, "t", data)
     assert "grade=" not in url and "score=92" in url
+
+
+def test_every_public_page_is_in_the_sitemap():
+    """Google finds pages through the sitemap (it ignores IndexNow), so a public page
+    that isn't listed may never be indexed. Docs slugs and static pages under
+    web/public must all be listed."""
+    import re
+
+    sitemap = (ROOT / "web/public/sitemap.xml").read_text()
+    docs = (ROOT / "web/src/rebrand/pages/Docs.tsx").read_text()
+    for slug in re.findall(r"\{ slug: '([\w-]+)'", docs):
+        assert f"<loc>https://agentavow.com/docs/{slug}</loc>" in sitemap, slug
+    public = ROOT / "web/public"
+    for page in public.rglob("index.html"):
+        url = "/" + str(page.parent.relative_to(public)) + "/"
+        assert f"<loc>https://agentavow.com{url}</loc>" in sitemap, url
+    for pdf in public.glob("*.pdf"):
+        assert f"<loc>https://agentavow.com/{pdf.name}</loc>" in sitemap, pdf.name
