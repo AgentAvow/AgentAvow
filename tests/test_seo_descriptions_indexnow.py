@@ -45,7 +45,7 @@ ROUTES = _route_components()
 
 
 def test_every_prerendered_route_is_covered():
-    assert len(ROUTES) == 17  # /badge became a redirect to /for-developers#badge (11-11)
+    assert len(ROUTES) == 16  # /badge and /submit became redirects into /for-developers (11-11)
     assert all(p.exists() for p in ROUTES.values())
 
 

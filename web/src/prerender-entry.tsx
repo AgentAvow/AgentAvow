@@ -27,13 +27,13 @@ import Research from './rebrand/pages/Research'
 import Sandbox from './rebrand/pages/Sandbox'
 import StateOfAgentSecurity2026 from './rebrand/pages/StateOfAgentSecurity2026'
 import StateOfAgentSecurityQ3 from './rebrand/pages/StateOfAgentSecurityQ3'
-import Submit from './rebrand/pages/Submit'
 import Teams from './rebrand/pages/Teams'
 import TrustIndex from './rebrand/pages/TrustIndex'
 
 /**
- * /claim and /badge are left out on purpose: each is only a redirect (/claim to the
- * signed-in tools page, /badge to /for-developers#badge), so there is nothing to render.
+ * /claim, /badge and /submit are left out on purpose: each is only a redirect (/claim to
+ * the signed-in tools page, /badge to /for-developers#badge, /submit to
+ * /for-developers#list), so there is nothing to render.
  */
 const PAGES: Record<string, ReactNode> = {
   '/': <Home />,
@@ -46,7 +46,6 @@ const PAGES: Record<string, ReactNode> = {
   '/browse': <Browse />,
   '/index': <TrustIndex />,
   '/for-developers': <ForDevelopers />,
-  '/submit': <Submit />,
   '/certified': <Certified />,
   '/preflight': <Preflight />,
   '/sandbox': <Sandbox />,

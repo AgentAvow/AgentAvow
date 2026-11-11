@@ -4,6 +4,7 @@ import { Link, useLocation } from 'react-router-dom'
 import { rp } from '../basePath'
 import { claudeCodeStdio, cursorStdio, stdioServersConfig, vscodeStdio } from '../lib/installLinks'
 import { parseBadgeTarget, type BadgeStyle } from '../lib/badgeTarget'
+import ListToolForm from '../components/ListToolForm'
 import SEOHead from '../../components/SEOHead'
 import api from '../../lib/api'
 import { isCertified as certifiedMark } from '../../components/trust/gradeSystem'
@@ -13,7 +14,8 @@ import { trackBadgeCopied, trackCta, trackPluginCommandCopy } from '../../lib/an
  * /for-developers: the one entry point for a tool author (approved mock "Developers",
  * 2026-11-10). The top is three cards for the three jobs they come to do: claim the
  * tool, put its badge on the README, check a private repo first. The badge maker that
- * used to be /badge lives here now (#badge); /badge redirects to it. Under that: why a
+ * used to be /badge lives here now (#badge); /badge redirects to it. The "add a tool to
+ * the catalog" form that used to be /submit follows it (#list). Under that: why a
  * score is worth having, gating in CI and at runtime, the registry snippet, and our own
  * MCP server.
  */
@@ -329,6 +331,21 @@ export default function RebrandForDevelopers() {
                 <p className="mt-3 text-[13px] text-text-muted">The widget shows repos and packages. For an MCP server, use the badge in its Card style.</p>
               )}
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* add a tool to the catalog (was /submit) */}
+      <div id="list" className={`${section} scroll-mt-16`}>
+        <div className={`${wrap} grid lg:grid-cols-2 gap-x-10 gap-y-5 items-start`}>
+          <div className="min-w-0">
+            <h2 className={h2}>Not listed yet? Add it.</h2>
+            <p className="mt-3 max-w-[60ch] text-[15px] text-text-muted">
+              Pasting a link into <Link to={rp('/rebrand/check')} className="text-primary-light hover:underline">Check</Link> is the fastest way to see an answer, and a GitHub repo or an npm, PyPI, crates, Docker or Hugging Face package you check there joins the public catalog on its own. A live MCP server checked by URL doesn&apos;t. Add it here: we scan it, sign the result and list it in Browse. Free, no account.
+            </p>
+          </div>
+          <div className="glass rounded-2xl border border-border/60 p-5 min-w-0">
+            <ListToolForm />
           </div>
         </div>
       </div>
