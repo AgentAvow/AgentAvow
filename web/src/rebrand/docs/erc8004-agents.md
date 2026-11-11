@@ -2,7 +2,7 @@
 
 Check any ERC-8004 agent on Ethereum, Base or BNB Chain: we read its registration and answer for every MCP server and A2A agent it lists.
 
-On the [check page](/check), enter `erc8004:<chain>:<agent id>`, for example `erc8004:base:1234`. The chain is `ethereum`, `base` or `bnb`.
+On the [check page](/check), enter `erc8004:<chain>:<agent id>`, for example `erc8004:base:1178486` (AgentAvow's own agent). The chain is `ethereum`, `base` or `bnb`.
 
 ## What we read
 
@@ -27,6 +27,12 @@ The agent's answer is about the tools it lists:
 
 Each tool's answer is signed on its own page with its own attestation, which you can [verify offline](./verify-attestations.md). The agent-level headline is a summary of those signed answers and is not signed separately.
 
+## AgentAvow's own registration
+
+AgentAvow is registered too: **agent 1178486 on Base** ([check it](/check/erc8004/base/1178486)). Its registration file is at [/.well-known/agent-registration.json](https://agentavow.com/.well-known/agent-registration.json) and lists two tools, our MCP server and our signed A2A agent card. Any agent or directory that reads the ERC-8004 registry can find us there and connect to either one.
+
+The registration is identity only. It makes no claims about trust on-chain, and no AgentAvow verdict is written on-chain.
+
 ## API
 
 No account needed:
@@ -36,7 +42,7 @@ GET /api/v1/public/scan/erc8004/{chain}/{agent_id}
 ```
 
 ```
-curl https://agentavow.com/api/v1/public/scan/erc8004/ethereum/33256
+curl https://agentavow.com/api/v1/public/scan/erc8004/base/1178486
 ```
 
 The response has `agent` (chain, agent id, owner, registration URI and sha256, block), `tools` (each with its `state`, `decision`, `trust_score` and the API path for its own result), `other_services`, `file_findings`, `headline` (`decision`, `reason`, `coverage_note`, `certified: false`) and `coverage_gaps`.
