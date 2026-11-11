@@ -1172,8 +1172,34 @@ def _old_decision(w) -> dict:
             "certified": bool(getattr(w, "last_certified", None))}
 
 
-def _grade_change_payload(w, new_score, reason: str, triggers: list[tuple[str, str]],
-                          decision: dict) -> dict:
+def alert_triggers(dropped: bool, drift: bool, answer: AnswerChange) -> list[tuple[str, str]]:
+    """Every reason one re-scan alerts for, most important first, as
+    ``(trigger code, human reason)``. Shared by the watch loop and the GitHub App
+    private-repo re-scan (``src/jobs/app_scan.py``): one alert carries them all."""
+    triggers: list[tuple[str, str]] = []
+    if dropped:
+        triggers.append(("score_drop", "score dropped"))
+    if drift:
+        triggers.append(("definition_change", "signed definition changed"))
+    if answer.worse:
+        triggers.append(("answer_worse", "answer changed"))
+    if answer.certified_lost:
+        triggers.append(("certified_lost", "Certified mark removed"))
+    return triggers
+
+
+def alert_extra_reasons(triggers: list[tuple[str, str]]) -> str:
+    """The answer / Certified reasons after the first, as "; answer changed; ...", for
+    the notification body (the first reason is already in its lead sentence)."""
+    return "".join(
+        f"; {h}" for c, h in triggers[1:] if c in ("answer_worse", "certified_lost"))
+
+
+def grade_change_payload(
+    owner: str, repo: str, old_score, new_score, reason: str,
+    triggers: list[tuple[str, str]], decision: dict,
+    old_decision: str | None, old_certified: bool | None,
+) -> dict:
     """The ``agentavow.alert.grade_change`` webhook body. ``reason`` is the first
     trigger (unchanged from before ``triggers`` existed); ``triggers`` / ``reasons``
     list every one this re-scan fired for, and ``old_decision`` /
@@ -1181,17 +1207,25 @@ def _grade_change_payload(w, new_score, reason: str, triggers: list[tuple[str, s
     (null before one was stored). All additive."""
     return {
         "type": "agentavow.alert.grade_change",
-        "owner": w.owner,
-        "repo": w.repo,
-        "old_score": w.last_score,
+        "owner": owner,
+        "repo": repo,
+        "old_score": old_score,
         "new_score": new_score,
         "reason": reason,
         "triggers": [c for c, _ in triggers],
         "reasons": [h for _, h in triggers],
-        "old_decision": getattr(w, "last_decision", None),
-        "old_certified_mark": getattr(w, "last_certified", None),
+        "old_decision": old_decision,
+        "old_certified_mark": old_certified,
         **decision,
     }
+
+
+def _grade_change_payload(w, new_score, reason: str, triggers: list[tuple[str, str]],
+                          decision: dict) -> dict:
+    """``grade_change_payload`` for a ``ToolWatch``."""
+    return grade_change_payload(
+        w.owner, w.repo, w.last_score, new_score, reason, triggers, decision,
+        getattr(w, "last_decision", None), getattr(w, "last_certified", None))
 
 
 async def _watcher_hook(db, watcher_id):
@@ -1342,21 +1376,11 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                 getattr(w, "last_decision", None), getattr(w, "last_certified", None))
             # Every reason this one re-scan alerts for, most important first. One
             # alert carries them all; ``reason`` stays the first, as before.
-            triggers: list[tuple[str, str]] = []
-            if dropped:
-                triggers.append(("score_drop", "score dropped"))
-            if drift:
-                triggers.append(("definition_change", "signed definition changed"))
-            if answer.worse:
-                triggers.append(("answer_worse", "answer changed"))
-            if answer.certified_lost:
-                triggers.append(("certified_lost", "Certified mark removed"))
+            triggers = alert_triggers(dropped, drift, answer)
             answer_alert = answer.worse or answer.certified_lost
             if triggers:
                 reason = triggers[0][1]
-                extra = "".join(
-                    f"; {h}" for c, h in triggers[1:]
-                    if c in ("answer_worse", "certified_lost"))
+                extra = alert_extra_reasons(triggers)
                 title = f"{w.owner}/{w.repo} — {reason}"
                 body = (
                     f"A tool you're watching changed: {reason}"

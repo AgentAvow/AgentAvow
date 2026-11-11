@@ -2639,6 +2639,12 @@ class PrivateScanResult(Base):
     source = Column(String(16), default="app", nullable=False)  # "app" (GitHub App install)
     # Owner opted to publish this private repo's grade to the public catalog/search.
     published = Column(Boolean, default=False, server_default="false", nullable=False)
+    # The answer (src/scanner/verdict.py decide(): safe / review / do_not_connect) and
+    # the Certified mark at the last re-scan, so the re-scan can alert when the answer
+    # gets worse or the mark comes off (same rule as ToolWatch). NULL until observed:
+    # the first re-scan after the columns land sets the baseline silently.
+    last_decision = Column(String(32), nullable=True)
+    last_certified = Column(Boolean, nullable=True)
     scanned_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
