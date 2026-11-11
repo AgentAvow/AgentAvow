@@ -207,6 +207,10 @@ export const THIN_REASON_REMOTE_MCP = 'tool definitions clean; server code not i
 export const CARD_SIGNATURE_UNVERIFIED_REASON = "the agent card's signature could not be verified"
 export const A2A_CLEAN_REASON = 'agent card clean; agent code not inspected'
 export const A2A_FOUND_REASON = 'no critical or high findings in its agent card'
+// An x402 endpoint read from its public Bazaar listing: the reason says what was read.
+export const X402_CLEAN_REASON = "nothing found in the listing; the endpoint's code isn't visible"
+export const X402_FOUND_REASON =
+  "no critical or high findings in the listing; the endpoint's code isn't visible"
 
 // A hardcoded credential shipped in a tool (category `secret`) exposes the vendor whose
 // key leaked, not the person installing it: on its own it caps at Review, never Do not
@@ -327,6 +331,7 @@ export function findingWhere(i: Obj): string {
     return ' in its tool definitions'
   }
   if (path.startsWith('card:')) return ' in its agent card'
+  if (path.startsWith('x402:')) return ' in its listing'
   const parts = path.split('/').filter((p) => p)
   const name = parts.length ? parts[parts.length - 1] : ''
   // A deciding finding in package.json sits in its scripts: a maintainer-only script
@@ -598,6 +603,9 @@ export function decide(input: unknown): Decision {
   if (asObj(data.coverage).surface === 'a2a' || asObj(data.surface_detail).surface === 'a2a') {
     return safe(found ? A2A_FOUND_REASON : A2A_CLEAN_REASON)
   }
+  if (asObj(data.coverage).surface === 'x402' || asObj(data.surface_detail).surface === 'x402') {
+    return safe(found ? X402_FOUND_REASON : X402_CLEAN_REASON)
+  }
   if (filesKnown && files >= 0 && files < THIN_COVERAGE_FILES && !found) {
     if (isRemoteMcp(data)) return safe(THIN_REASON_REMOTE_MCP)
     return safe(files > 0 ? THIN_REASON : THIN_REASON_NO_CODE)
@@ -664,6 +672,8 @@ export function cheapCoverageGap(input: unknown): boolean {
   if (toInt(g.encoded_text_unread) > 0) return true
   if (toInt(g.bytecode_unread) > 0) return true
   if (toInt(g.skills_ungraded) > 0) return true
+  // An x402 endpoint: only its listing was read, never the code behind it.
+  if (g.x402_code_unread === true) return true
   if (toInt(g.repo_advisory_range_unparsed) > 0) return true
   if (surfaceIs(data, 'openclaw') && (toInt(g.oversized_files) > 0 || toInt(g.over_file_cap) > 0
     || g.tree_truncated === true)) return true
