@@ -20,7 +20,8 @@ The agent's answer is about the tools it lists:
 
 - It is the **worst answer** among the tools we checked.
 - It is **Safe to connect only if every listed tool was checked and each one reads Safe**.
-- If any listed tool could not be checked (unreachable, not https, still being checked, or over the cap), the answer is at most **Review before you connect**, with "N of M listed tools checked".
+- If any listed tool could not be checked (unreachable, not https, or over the cap), the answer is at most **Review before you connect**, with "N of M listed tools checked".
+- While a listed tool is still being checked, there is no answer yet: the page says "checking N of M listed tools" and updates when the checks finish (the API returns `decision: null` and `checking: N`). A tool that already reads **Do not connect** shows that answer at once.
 - A high or critical finding on the registration file makes it at least Review.
 - An agent that lists no tools we can check is Review. Identity alone never makes an agent Safe.
 - An agent is **never Certified**. Certified belongs to a single tool, so look for it on each tool's own page.

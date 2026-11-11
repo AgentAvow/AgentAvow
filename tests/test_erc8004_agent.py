@@ -238,8 +238,32 @@ def test_safe_only_when_every_tool_checked_and_safe():
 
 
 def test_one_unchecked_tool_caps_at_review():
-    h = ea.headline([_t("safe"), _t(None, "checking")], [])
+    h = ea.headline([_t("safe"), _t(None, "not_checked")], [])
     assert h["decision"] == "review" and h["coverage_note"] == "1 of 2 listed tools checked"
+
+
+def test_tools_still_being_checked_have_no_answer_yet():
+    # base/1178486 a minute after minting: both scans queued must not read Review.
+    h = ea.headline([_t(None, "checking"), _t(None, "checking")], [])
+    assert h["decision"] is None and h["checking"] == 2
+    assert h["reason"] == "checking 2 of 2 listed tools"
+    assert h["coverage_note"] == "0 of 2 listed tools checked"
+    h1 = ea.headline([_t("safe"), _t(None, "checking")], [])
+    assert h1["decision"] is None and h1["reason"] == "checking 1 of 2 listed tools"
+    assert ea.headline([_t(None, "checking")], [])["reason"] == "checking 1 of 1 listed tool"
+
+
+def test_pending_tool_never_hides_a_review_cap_once_done():
+    # still checking + one review: no answer yet (the pending one could be worse)
+    assert ea.headline([_t("review"), _t(None, "checking")], [])["decision"] is None
+    # all settled again: the usual rules
+    h = ea.headline([_t("safe"), _t(None, "not_checked")], [])
+    assert h["decision"] == "review" and h["checking"] == 0
+
+
+def test_do_not_connect_is_final_even_while_others_are_checked():
+    h = ea.headline([_t("do_not_connect"), _t(None, "checking")], [])
+    assert h["decision"] == "do_not_connect" and h["checking"] == 1
 
 
 def test_worst_tool_leads():
@@ -321,7 +345,8 @@ async def test_uncached_tool_is_checked_in_the_background(route):
     (tool,) = resp.tools
     assert tool.kind == "a2a" and tool.state == "checking"
     assert route["scheduled"] == [("a2a", "https://api.normies.art/agents/agent-card/6574")]
-    assert resp.headline["decision"] == "review"
+    assert resp.headline["decision"] is None and resp.headline["checking"] == 1
+    assert resp.coverage_gaps["tools_being_checked"] == 1
     assert [s.name for s in resp.other_services] == ["web"]
 
 
