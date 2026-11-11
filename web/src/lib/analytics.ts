@@ -96,11 +96,28 @@ export function currentPath(): string {
   }
 }
 
+/**
+ * The host of the page that sent this visit (document.referrer), or undefined for a
+ * direct visit or one from our own site. Host only: never the path or query string,
+ * which can carry a search term.
+ */
+export function referrerHost(): string | undefined {
+  try {
+    if (!document.referrer) return undefined
+    const host = new URL(document.referrer).hostname.toLowerCase()
+    if (!host || host === window.location.hostname.toLowerCase()) return undefined
+    return host.slice(0, 253)
+  } catch {
+    return undefined
+  }
+}
+
 export function trackEvent(
   type: string,
   page: string,
   intent?: string,
   metadata?: Record<string, unknown>,
+  referrer?: string,
 ): void {
   try {
     const utm = getUtmParams()
@@ -112,6 +129,7 @@ export function trackEvent(
       page: page.slice(0, MAX_PAGE_LENGTH),
     }
     if (intent) body.intent = intent
+    if (referrer) body.referrer = referrer
     if (Object.keys(mergedMetadata).length > 0) body.metadata = mergedMetadata
 
     // Fire and forget — don't block UI
@@ -131,7 +149,7 @@ export function trackLandingView(): void {
   const utm = readStored(session, UTM_KEY) ?? ''
   if (readStored(session, LANDED_KEY) === utm) return
   writeStored(session, LANDED_KEY, utm)
-  trackEvent('lp_view', currentPath())
+  trackEvent('lp_view', currentPath(), undefined, undefined, referrerHost())
 }
 
 /** Someone submitted a check box. Never pass the input: what they typed stays out of analytics. */
