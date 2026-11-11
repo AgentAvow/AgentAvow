@@ -101,8 +101,8 @@ async def test_exception_fails_open(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_unknown_surface_falls_back_to_github(monkeypatch):
-    """Any unrecognized surface routes to the github public_scan path."""
+async def test_github_dispatches_to_public_scan(monkeypatch):
+    """The github surface (and an empty one, the column default) uses public_scan."""
     called = {}
 
     async def fake_public_scan(owner, repo, force, db):
@@ -114,6 +114,44 @@ async def test_unknown_surface_falls_back_to_github(monkeypatch):
     assert called["args"] == ("torvalds", "linux")
     assert score == 55
     assert digest == "ghdigest"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface,name", [("crates", "serde"),
+                                          ("huggingface", "openai/whisper-large-v3")])
+async def test_crates_and_huggingface_dispatch_to_scan_package(monkeypatch, surface, name):
+    # A crates claim's auto-watch (owner "crates") used to fall through to the GitHub
+    # scan of crates/<name> and never scored (2026-11-10).
+    called = {}
+
+    async def fake_scan_package(s, n):
+        called["args"] = (s, n)
+        return SimpleNamespace(error=None, trust_score=81)
+
+    async def no_public_scan(**kw):
+        raise AssertionError("must not reach the GitHub scan")
+
+    monkeypatch.setattr("src.scanner.scan.scan_package", fake_scan_package)
+    monkeypatch.setattr("src.api.public_scan_router.public_scan", no_public_scan)
+    score, digest = await watch_router.scan_watch_target(surface, surface, name, db=None)
+    assert called["args"] == (surface, name)
+    assert score == 81 and digest is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["gitlab", "rubygems", "x402", "community"])
+async def test_unsupported_surface_never_reaches_the_github_scan(monkeypatch, surface):
+    async def no_public_scan(**kw):
+        raise AssertionError("must not reach the GitHub scan")
+
+    monkeypatch.setattr("src.api.public_scan_router.public_scan", no_public_scan)
+    score, digest = await watch_router.scan_watch_target(surface, surface, "x", db=None)
+    assert score is None and digest is None
+
+
+def test_claim_surfaces_are_all_watchable():
+    from src.api import account_claims_router as cr
+    assert set(cr._SURFACES) <= set(watch_router.WATCH_SURFACES)
 
 
 # ── re-scan loop: drift decision + baseline ──────────────────────────────────
