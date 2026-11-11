@@ -884,7 +884,7 @@ function Hero() {
   ]
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-20 text-center">
-      <SEOHead title="Check a tool" description="Is this tool safe for your agent to connect? Paste a GitHub repo, MCP server, npm/PyPI/crates package, Docker image, Hugging Face model or agent skill for Safe to connect, Review before you connect, or Do not connect, with a signed trust score." path="/check" />
+      <SEOHead title="Check a tool" description="Check a repo, MCP server, package or skill: Safe to connect, Review before you connect, or Do not connect, with a signed trust score and an adoption score." path="/check" />
       <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight">Is this AI tool <span className="gradient-text-bio">safe</span> to connect?</h1>
       <p className="mt-4 text-text-muted max-w-[46ch] mx-auto">Paste anything your agent connects to. We'll tell you — in plain English — whether it's safe, and prove it with a signed score.</p>
       <p className="mt-2 text-[13px] text-text-muted max-w-[56ch] mx-auto">Paste any A2A Agent Card URL for an answer, findings and a signed attestation, including whether the card&apos;s own signature verifies.</p>

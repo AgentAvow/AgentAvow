@@ -213,7 +213,7 @@ export default function RebrandPreflight() {
     <div className="max-w-[820px] mx-auto px-6 py-16">
       <SEOHead
         title="Connector preflight — will it pass app-store review?"
-        description="Check your MCP server or Claude plugin against the Claude directory and ChatGPT apps review rules before you submit, with a source for every rule and a signed trust score. Free."
+        description="Check your MCP server or Claude plugin against Claude directory and ChatGPT app review rules before you submit, with a source for every rule. Free."
         path="/preflight"
       />
       <Reveal>

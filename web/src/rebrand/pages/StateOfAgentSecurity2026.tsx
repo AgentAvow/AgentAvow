@@ -141,7 +141,7 @@ export default function RebrandStateOfAgentSecurity2026() {
     <div>
       <SEOHead
         title="State of Agent Security 2026"
-        description="The May 2026 State of Agent Security report: scans of x402 Bazaar, OpenClaw, the MCP Registry and npm/PyPI agent packages, and CTEF interop receipts from AgentAvow and 8 spec collaborators."
+        description="The May 2026 State of Agent Security report: scans of x402 Bazaar, OpenClaw, the MCP Registry and npm/PyPI agent packages, plus CTEF interop receipts."
         path="/state-of-agent-security-2026"
         type="article"
       />

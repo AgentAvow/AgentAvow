@@ -389,4 +389,7 @@ else
   echo ""
   echo -e "  Site:  http://${EC2_HOST}"
   echo -e "  Logs:  ssh ${SSH_OPTS} ${EC2_USER}@${EC2_HOST} 'cd ~/${PROJECT_DIR} && docker-compose -f ${COMPOSE_FILE} logs -f'"
+  # Tell IndexNow engines (Bing, Yandex, Seznam, Naver) which sitemap pages changed.
+  # Runs here, on the deploying machine: one line of output, and it never fails the deploy.
+  echo "  $(python3 "$(dirname "$0")/indexnow_ping.py" --changed-only 2>&1 | tail -1 || true)"
 fi

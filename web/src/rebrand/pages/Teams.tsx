@@ -86,7 +86,7 @@ export default function RebrandTeams() {
     <div>
       <SEOHead
         title="For teams: a signed safety check in front of agent tools"
-        description="Gate CI, agents and developers on one signed answer per tool: Safe to connect, Review before you connect, or Do not connect, with a trust score and an adoption score you can verify offline."
+        description="Gate CI and agents on one answer per tool: Safe to connect, Review before you connect, or Do not connect, over a signed trust score and an adoption score."
         path="/teams"
       />
       <div className="relative pt-14 pb-10">
