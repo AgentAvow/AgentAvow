@@ -252,7 +252,7 @@ async def newsletter_signup(
         session_id=f"newsletter-{body.source}",
         page=f"/{body.source}",
         intent="subscribe",
-        referrer=request.headers.get("referer"),
+        referrer=referrer_host(request.headers.get("referer")),
         extra_metadata={"email": body.email, "source": body.source},
         **(await request_privacy_fields(request)),
     )
