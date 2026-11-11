@@ -50,6 +50,7 @@ from src.api.docs_content_router import router as docs_ssr_router
 from src.api.docs_router import router as docs_content_router
 from src.api.endorsement_router import router as endorsement_router
 from src.api.enhanced_profile_router import router as enhanced_profile_router
+from src.api.erc8004_router import router as erc8004_router
 from src.api.evolution_router import router as evolution_router
 from src.api.export_router import router as export_router
 from src.api.feed_router import router as feed_router
@@ -861,6 +862,9 @@ app.include_router(jwks_router)
 
 # Public scan API — trust-tiered security scanning (no auth required)
 app.include_router(sandbox_stats_router, prefix=settings.api_v1_prefix)
+# Before public_scan_router: /public/scan/erc8004/{chain}/{id} must not reach the
+# generic /public/scan/{owner}/{repo}/... routes.
+app.include_router(erc8004_router, prefix=settings.api_v1_prefix)
 app.include_router(public_scan_router, prefix=settings.api_v1_prefix)
 app.include_router(preflight_router, prefix=settings.api_v1_prefix)
 app.include_router(watch_router, prefix=settings.api_v1_prefix)
