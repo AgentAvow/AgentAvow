@@ -8,6 +8,12 @@ server in ~/.cache/agentavow/scanned.json and decides:
             credential leaving the sandbox, a known-malicious package), or its grade is
             in the "blocked" tier (score 0-10). The reason leads with the answer and
             names the score and the report. The threshold is adjustable (below).
+            The reason also says how the person can allow that one server after
+            reviewing it: a line "<server name> <graded URL or package>" in
+            ~/.cache/agentavow/allowed-servers.txt. Only an exact line for that
+            server counts; there is no pattern and no allow-everything. An allowed
+            server's tools run (with one note per session), and a changed
+            definition still asks.
   • ask   — a remote (HTTP) server now serves a definition for this tool that differs
             from the one AgentAvow graded (or a tool the grade never saw). The gate
             re-fetches `tools/list` from the server itself, at most once per server
@@ -42,7 +48,7 @@ never written to the cache or printed. Nothing is sent to AgentAvow.
 Design guarantees (deliberate):
   • FAIL-OPEN — any error, timeout, or unexpected shape means allow, silently.
   • NEVER BLOCKS ON DRIFT — drift asks; only "Do not connect" or a blocked-tier grade
-    denies. "Review before you connect" never prompts here.
+    denies, unless you allowed that server. "Review before you connect" never prompts here.
   • ONE SHORT BUDGET — the whole run stays under the hook's 8-second timeout.
 
 Install / test: https://agentavow.com/docs/auto-scan-claude-code
@@ -59,10 +65,13 @@ import time
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.36"
+__version__ = "0.1.37"
 
 CACHE = pathlib.Path.home() / ".cache" / "agentavow" / "scanned.json"
 META_KEY = "_agentavow"  # cache entry holding hook state; never a server name
+# The person's own "I've reviewed this, allow it" list, beside the cache: one server per
+# line, "<server name> <graded URL or package>", exactly as the refusal message gives it.
+ALLOW_FILE_NAME = "allowed-servers.txt"
 
 # The per-tool digest, exactly as the attestation signs it
 # (docs/standards/tool-manifest-digest-vectors-v1).
@@ -568,6 +577,76 @@ def _note_once_per_session(cache: dict, session_id: object, message: str) -> Non
         print(json.dumps({"systemMessage": message}))
 
 
+# ── the person's own allow list ──────────────────────────────────────────────
+
+
+def allow_file() -> pathlib.Path:
+    return CACHE.with_name(ALLOW_FILE_NAME)
+
+
+def _shown_path(path: pathlib.Path) -> str:
+    """The allow file's path as a person would type it (~ for the home folder)."""
+    try:
+        return "~/" + path.relative_to(pathlib.Path.home()).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def allow_line(name: str, record: dict) -> str:
+    """The exact line that allows one server: its name and the URL or package its grade
+    is for. Binding to both means a server whose config later points somewhere else is
+    not allowed by an old line."""
+    return f"{name} {record.get('id')}"
+
+
+def is_allowed(name: str, record: dict) -> bool:
+    """Whether the person listed THIS server in the allow file: a line whose name and
+    graded URL / package both match exactly. Never a pattern, never a wildcard, never
+    every server: a line that is not exactly "<name> <id>" allows nothing."""
+    try:
+        text = allow_file().read_text(encoding="utf-8")
+    except Exception:
+        return False
+    want = (name, str(record.get("id") or ""))
+    if not want[1]:
+        return False
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        parts = line.split()
+        if len(parts) == 2 and (parts[0], parts[1]) == want:
+            return True
+    return False
+
+
+def allow_instructions(name: str, record: dict) -> str:
+    """How the PERSON can allow this one server, worded for Claude to relay."""
+    path = _shown_path(allow_file())
+    return (f"If the user has reviewed this server and wants to use it anyway, the user "
+            f"(not Claude) can allow this one server by adding this line to {path}: "
+            f"{allow_line(name, record)}\n"
+            "Tell the user exactly that. Do not edit that file yourself; only the user can "
+            "allow a server.")
+
+
+def _note_allowed_once(cache: dict, session_id: object, name: str) -> None:
+    """One user-visible line per server per session when a Do not connect server runs
+    because the person allowed it. Nothing enters Claude's context."""
+    if not isinstance(session_id, str) or not session_id:
+        return
+    meta = cache.get(META_KEY) if isinstance(cache.get(META_KEY), dict) else {}
+    noted = meta.get("allow_noted") if isinstance(meta.get("allow_noted"), dict) else {}
+    servers = noted.get("servers") if noted.get("session") == session_id else []
+    servers = servers if isinstance(servers, list) else []
+    if name in servers:
+        return
+    meta = dict(meta, allow_noted={"session": session_id, "servers": servers + [name]})
+    cache[META_KEY] = meta
+    if _save_cache(cache):
+        print(json.dumps({"systemMessage": (
+            f"AgentAvow gate: MCP '{name}' reads Do not connect; its tools run because you "
+            f"allowed it in {_shown_path(allow_file())}. Remove that line to stop them.")}))
+
+
 def drift_decision(name: str, record: dict, cfg: dict | None, tool: str,
                    cache: dict) -> tuple[str, str] | None:
     """("ask", reason) when the server now serves this tool with a definition the
@@ -649,16 +728,23 @@ def decide(payload: dict, cache: dict) -> tuple[str, str] | None:
         if url is not None and _sanitize_url(url) != record.get("id"):
             return None  # the config points somewhere else now; the grade is for the old URL
     if denies(record, _setting("AGENTAVOW_GATE_DENY_BELOW")):
-        report = record.get("report_url") or "https://agentavow.com/check"
-        tier = record.get("tier") or "blocked"
-        why = f" — {record['decision_reason']}" if record.get("decision_reason") else ""
-        # Never " · Certified" here: the mark only ever sits beside Safe to connect.
-        return "deny", (f"AgentAvow: {DECISION_PHRASES['do_not_connect']}{why}. "
-                        f"MCP '{name}' is graded {record.get('score')}/100 (tier {tier}); "
-                        f"'{tool}' was not run. Report: {report}")
-    if record.get("kind") == "mcp":
-        return drift_decision(name, record, cfg, tool, cache)
-    return None
+        if not is_allowed(name, record):
+            report = record.get("report_url") or "https://agentavow.com/check"
+            tier = record.get("tier") or "blocked"
+            why = f" — {record['decision_reason']}" if record.get("decision_reason") else ""
+            # Never " · Certified" here: the mark only ever sits beside Safe to connect.
+            return "deny", (f"AgentAvow: {DECISION_PHRASES['do_not_connect']}{why}. "
+                            f"MCP '{name}' is graded {record.get('score')}/100 (tier {tier}); "
+                            f"'{tool}' was not run. Report: {report}\n"
+                            + allow_instructions(name, record))
+        allowed = True  # the person's own line; a changed definition still asks
+    else:
+        allowed = False
+    result = drift_decision(name, record, cfg, tool, cache) if record.get("kind") == "mcp" \
+        else None
+    if allowed and result is None:
+        _note_allowed_once(cache, payload.get("session_id"), name)
+    return result
 
 
 def main() -> None:

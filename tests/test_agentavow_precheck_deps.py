@@ -251,7 +251,7 @@ def test_dependency_pass_errors_never_break_the_server_report(hook, monkeypatch,
 def test_intro_only_when_neither_servers_nor_manifests(hook, monkeypatch, capsys):
     out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: _ok(90, "safe"))
     assert "nothing to grade here yet" in out["systemMessage"]
-    assert "package.json / requirements.txt" in out["systemMessage"]
+    assert "package.json, requirements.txt, pyproject.toml or Cargo.toml" in out["systemMessage"]
 
 
 def test_dependency_lines_lead_with_the_phrase_and_never_block(hook, monkeypatch, capsys, tmp_path):
