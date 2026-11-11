@@ -308,12 +308,27 @@ function SiteFooter() {
   )
 }
 
-/** Paid landing pages: no nav, no footer, and a logo that isn't a link. One goal each. */
+/** Paid landing pages: no nav and no footer for ad arrivals (see isPaidArrival); the logo links home. */
 const BARE_PAGES = new Set([rp('/rebrand/claude-code')])
 
+/** A paid-ad arrival: the bare (one-goal) layout is only for visitors who came from an ad.
+ * Everyone else (site links, search, direct) gets the normal nav and footer. */
+const PAID_MEDIUMS = new Set(['paid-social', 'paid', 'cpc', 'ppc', 'display'])
+const PAID_SOURCES = new Set(['reddit', 'meta', 'facebook', 'instagram'])
+function isPaidArrival(search: string): boolean {
+  try {
+    const q = new URLSearchParams(search)
+    const medium = (q.get('utm_medium') || '').toLowerCase()
+    const source = (q.get('utm_source') || '').toLowerCase()
+    return PAID_MEDIUMS.has(medium) || PAID_SOURCES.has(source)
+  } catch {
+    return false
+  }
+}
+
 export default function RebrandLayout() {
-  const { pathname } = useLocation()
-  const bare = BARE_PAGES.has(pathname)
+  const { pathname, search } = useLocation()
+  const bare = BARE_PAGES.has(pathname) && isPaidArrival(search)
 
   // Anonymous page-view tracking (fire-and-forget) so the admin traffic funnel
   // has real session data — the live cutover tree never emitted this before, so
@@ -355,7 +370,8 @@ export default function RebrandLayout() {
       {bare ? (
         <div className="relative z-[3] py-4">
           <div className="max-w-[860px] mx-auto px-6 flex items-center justify-between gap-3">
-            <Wordmark />
+            {/* Full page load on purpose: the ad pixel must not ride along into the app. */}
+            <a href={rp('/rebrand')} aria-label="AgentAvow home" className="shrink-0"><Wordmark /></a>
             <span className="text-[13px] text-text-muted">Free. No account.</span>
           </div>
         </div>

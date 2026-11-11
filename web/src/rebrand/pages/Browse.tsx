@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { fetchCatalog, fetchRecent, rowIdentity, type CatalogRow, type CatalogSandbox } from '../catalog'
@@ -249,8 +249,15 @@ function CatalogGraphic({ mix, decision, certifiedOn, onDecision, onCertified, r
   const ready = mix && mix.total > 0
   const cell = 'flex flex-col gap-0.5 min-w-0 text-left px-3.5 pt-3 pb-0.5 border-l border-border/60'
   const kicker = 'font-mono text-[10.5px] tracking-[0.12em] uppercase text-primary-light'
+  const navigate = useNavigate()
+  // The whole panel opens the Trust Index; its own filters and links keep working.
+  const openIndex = (e: { target: EventTarget }) => {
+    if ((e.target as HTMLElement).closest('a,button')) return
+    navigate(rp('/rebrand/index'))
+  }
   return (
-    <div className="glass rounded-2xl border border-border/60 px-5 py-[18px]">
+    <div onClick={openIndex} title="Open the Trust Index"
+      className="glass rounded-2xl border border-border/60 px-5 py-[18px] cursor-pointer transition-colors hover:border-primary-light/50">
       <div className="flex flex-wrap justify-between items-end gap-x-5 gap-y-2">
         <div>
           <b className="block gradient-text font-extrabold leading-none tracking-[-.02em] tabular-nums text-[clamp(30px,5vw,40px)]">{ready ? mix.total.toLocaleString() : '—'}</b>
