@@ -19,7 +19,7 @@ export function unsupportedRepoHost(raw: string): string | null {
 
 /** The docs pointer for each host's CI scan: [link label, docs path]. */
 export const HOST_DOCS: Record<string, [string, string]> = {
-  'GitLab': ['Docs → GitLab CI', '/rebrand/docs/run-locally#gitlab-ci-self-managed-behind-a-firewall'],
+  'GitLab': ['Docs → GitLab CI', '/rebrand/docs/run-locally#gitlab-ci'],
   'Bitbucket': ['Docs → Bitbucket Pipelines', '/rebrand/docs/run-locally#bitbucket-pipelines'],
   'Azure DevOps': ['Docs → Azure DevOps', '/rebrand/docs/run-locally#azure-devops'],
 }

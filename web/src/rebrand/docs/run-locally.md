@@ -59,43 +59,55 @@ jobs:
 
 Findings show up as inline PR annotations (via code scanning) and a job-summary; `decision`, `decision-reason`, `trust-score` and `tier` are exposed as step outputs. `min-score` still works as a legacy score gate. Full reference: [local-scan-action](https://github.com/AgentAvow/AgentAvow/tree/main/local-scan-action).
 
-## GitLab CI (self-managed, behind a firewall)
+## GitLab CI
 
-If your GitLab instance cannot be reached from the internet, the hosted scanner cannot see your repositories. The same scan runs inside your own runner instead, from a slim image you mirror into your registry. Nothing leaves your network.
+The scan runs inside your own GitLab runner, on the code the pipeline checked out. Nothing leaves your network: no token, no upload, no call to agentavow.com. By default the job fails the pipeline when the answer is Do not connect, and it publishes a Code Quality report so findings show in the merge-request widget.
 
-The image is published as `ghcr.io/agentavow/scanner:0.1` (built from `docker/scanner.Dockerfile`: `python:3.12-slim` plus `git`, `httpx`, `pyyaml` and the scanner package). Pull it and mirror it into a registry your runners can reach, or build it yourself from the repository root:
+### Component (gitlab.com)
 
-```bash
-docker pull ghcr.io/agentavow/scanner:0.1
-# or build it:
-docker build -f docker/scanner.Dockerfile -t registry.example.internal/mirrors/agentavow/scanner:0.1 .
-docker push registry.example.internal/mirrors/agentavow/scanner:0.1
-```
-
-### Component
-
-GitLab 17.0 or newer can include the scan as a CI/CD component. By default it fails the pipeline when the answer is Do not connect. Pin the version after `@`; it is a git tag you create on your component project (AgentAvow does not publish component tags yet).
+The component is published in the GitLab CI/CD Catalog as [AgentAvow scan](https://gitlab.com/explore/catalog/agentavow/agentavow-scan) ([gitlab.com/agentavow/agentavow-scan](https://gitlab.com/agentavow/agentavow-scan), MIT). It needs GitLab 17.0 or newer. Add one include to `.gitlab-ci.yml`:
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<group>/agentavow-scan/scan@<your-tag>
+  - component: gitlab.com/agentavow/agentavow-scan/scan@0.1.0
     inputs:
       fail_on: do_not_connect  # or review; none reports without gating
       fail_on_findings: high   # also fail on any high or critical finding (optional)
-      image: registry.example.internal/mirrors/agentavow/scanner:0.1
 ```
 
-Self-managed instances cannot reach components hosted on gitlab.com. Mirror the AgentAvow repository into your instance and point the include at the mirror, or use the plain job below.
+Pin the version after `@` to a release. `@~latest` follows the newest release and is the wrong choice for a gate you want to stay reproducible.
+
+### GitLab CI (self-managed, behind a firewall)
+
+If your GitLab instance cannot be reached from the internet, the hosted scanner cannot see your repositories, and your runners may not reach gitlab.com or ghcr.io either. Mirror two things into your instance:
+
+1. The scanner image, `ghcr.io/agentavow/scanner:0.1` (built from `docker/scanner.Dockerfile`: `python:3.12-slim` plus `git`, `httpx`, `pyyaml` and the scanner package). Pull it into a registry your runners can reach, or build it yourself from the AgentAvow repository root:
+
+   ```bash
+   docker pull ghcr.io/agentavow/scanner:0.1
+   # or build it:
+   docker build -f docker/scanner.Dockerfile -t registry.example.internal/mirrors/agentavow/scanner:0.1 .
+   docker push registry.example.internal/mirrors/agentavow/scanner:0.1
+   ```
+
+2. The component project, [gitlab.com/agentavow/agentavow-scan](https://gitlab.com/agentavow/agentavow-scan), into a group on your instance. Then include it from there and point `image:` at your mirror:
+
+   ```yaml
+   include:
+     - component: $CI_SERVER_FQDN/<group>/agentavow-scan/scan@0.1.0
+       inputs:
+         image: registry.example.internal/mirrors/agentavow/scanner:0.1
+   ```
 
 ### Plain include
 
-For older instances, or when you want to own the YAML, include the job file from your mirror (at `main` or a tag you create there), or copy it into your repository.
+For instances older than 17.0, or when you want to own the YAML, include the job file from the component project (or your mirror of it) at a release tag, or copy it into your repository.
 
 ```yaml
 include:
-  - project: <group>/agentavow
-    ref: main
-    file: /gitlab/agentavow-scan.gitlab-ci.yml
+  - project: agentavow/agentavow-scan   # or <group>/agentavow-scan on your mirror
+    ref: 0.1.0
+    file: /agentavow-scan.gitlab-ci.yml
 
 variables:
   AGENTAVOW_IMAGE: registry.example.internal/mirrors/agentavow/scanner:0.1
@@ -119,7 +131,7 @@ Each of these needs a network, a key, or infrastructure the runner does not have
 
 The static score is computed exactly as the hosted service computes it, so the number you see in CI is the number a hosted scan of the same tree starts from. For a signed attestation a third party can verify, run the hosted scan on top.
 
-Full reference, including inputs, exit codes and the report format: [gitlab/README.md](https://github.com/AgentAvow/AgentAvow/tree/main/gitlab).
+Full reference, including inputs, exit codes and the report format: the [component README](https://gitlab.com/agentavow/agentavow-scan) (also in [gitlab/README.md](https://github.com/AgentAvow/AgentAvow/tree/main/gitlab)).
 
 ## Bitbucket Pipelines
 
