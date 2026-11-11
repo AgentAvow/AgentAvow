@@ -423,12 +423,17 @@ export default function RebrandBrowse() {
           background: no blur on a persistent element. */}
       <div className="sticky top-[62px] z-20 mt-3.5 bg-background relative after:absolute after:left-0 after:right-0 after:bottom-0 after:translate-y-full after:h-4 after:bg-gradient-to-b after:from-background/50 after:to-transparent after:pointer-events-none">
         <div className="max-w-[1080px] mx-auto px-4 sm:px-6 py-3 flex flex-col gap-2.5">
-          <div className="flex gap-1.5 overflow-x-auto pb-0.5 -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden snap-x" role="group" aria-label="Kind of tool">
-            {SURFACES.map((sf, i) => (
-              <button key={sf.key} type="button" aria-pressed={tab === i} onClick={() => setTab(i)} className={`snap-start ${pill(tab === i)}`}>
-                {sf.label}
-              </button>
-            ))}
+          {/* Desktop: the pills wrap inside the container. Phones: one scrollable row
+              with a fade at the right edge as the overflow hint. */}
+          <div className="relative">
+            <div className="flex gap-1.5 max-sm:overflow-x-auto sm:flex-wrap pb-0.5 max-sm:-mx-1 max-sm:px-1 max-sm:pr-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden snap-x" role="group" aria-label="Kind of tool">
+              {SURFACES.map((sf, i) => (
+                <button key={sf.key} type="button" aria-pressed={tab === i} onClick={() => setTab(i)} className={`snap-start ${pill(tab === i)}`}>
+                  {sf.label}
+                </button>
+              ))}
+            </div>
+            <span className="sm:hidden pointer-events-none absolute right-0 top-0 bottom-0.5 w-10 bg-gradient-to-l from-background to-transparent" aria-hidden="true" />
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {/* desktop: inline filter dropdowns */}
