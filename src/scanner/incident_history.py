@@ -185,6 +185,35 @@ def _range_affects(rng: dict, eco: str, version: str) -> bool:
     return affected
 
 
+def _fix_after(rng: dict, eco: str, version: str) -> str | None:
+    """The fix that closes the stretch of ``rng`` the version sits in. One range can hold
+    several stretches ([introduced 0, fixed 2.0.1, introduced 2025.9.24]); the first
+    ``fixed`` event is the right fix only for the first stretch."""
+    cur = _parse_version(eco, version)
+    if cur is None:
+        return None
+    active = False
+    for ev in rng.get("events") or []:
+        if "introduced" in ev:
+            intro = ev["introduced"]
+            iv = _parse_version(eco, intro) if intro != "0" else None
+            if intro == "0" or (iv is not None and cur >= iv):
+                active = True
+        elif "fixed" in ev:
+            fv = _parse_version(eco, ev["fixed"])
+            if fv is None:
+                continue
+            if cur >= fv:
+                active = False
+            elif active:
+                return str(ev["fixed"])
+        elif "last_affected" in ev:
+            lv = _parse_version(eco, ev["last_affected"])
+            if lv is not None and cur > lv:
+                active = False
+    return None
+
+
 def advisory_affects(vuln: dict, eco: str, version: str | None,
                      name: str | None = None) -> bool:
     """Does this advisory affect ``version`` of package ``name`` (explicit versions list
@@ -205,12 +234,19 @@ def _fixed_in(vuln: dict, eco: str | None = None, name: str | None = None,
     if version and eco:
         # Prefer the range the scanned version sits in (an advisory can list one per
         # release line: 8.10.x, 9.1.x, 10.1.x).
+        in_a_range = False
         for aff in entries:
             for r in aff.get("ranges") or []:
                 if _range_affects(r, eco, version):
-                    for ev in r.get("events") or []:
-                        if "fixed" in ev:
-                            return str(ev["fixed"])
+                    in_a_range = True
+                    fix = _fix_after(r, eco, version)
+                    if fix:
+                        return fix
+        if in_a_range:
+            # The scanned version's own range has no fix (server-everything's date-
+            # numbered line, 2025.9.24 to 2026.8.31): never name another range's fix as
+            # its upgrade.
+            return None
     for aff in entries:
         for r in aff.get("ranges") or []:
             for ev in r.get("events") or []:
