@@ -147,7 +147,61 @@ def _install_checks_enabled() -> bool:
     return os.environ.get(INSTALL_ENV, "").strip().lower() not in ("off", "0", "false", "no")
 
 
-_SEGMENTS = re.compile(r"&&|\|\||;|\n|\|")
+_SEGMENTS = re.compile(r"&&|\|\||;|\n|\||&")  # run after _strip_redirections
+
+
+def _strip_redirections(command: str) -> str:
+    """The command with every shell redirection removed, operator and target both
+    (``2>&1``, ``>/dev/null``, ``>file``, ``>>log``, ``&>out``, ``<in``, ``2>err``), so
+    ``pip install requests 2>&1`` is not read as a package named '2'. Quoted text is
+    left alone (``"requests>=2"`` is a version spec, not a redirection)."""
+    out: list[str] = []
+    i, n, quote = 0, len(command), ""
+    while i < n:
+        c = command[i]
+        if quote:
+            out.append(c)
+            if c == "\\" and quote == '"' and i + 1 < n:
+                out.append(command[i + 1])
+                i += 1
+            elif c == quote:
+                quote = ""
+            i += 1
+            continue
+        if c == "\\" and i + 1 < n:
+            out.append(command[i:i + 2])
+            i += 2
+            continue
+        if c in "'\"":
+            quote = c
+            out.append(c)
+            i += 1
+            continue
+        if c in "<>" or (c == "&" and command[i + 1:i + 2] == ">"):
+            j = len(out)
+            while j and out[j - 1].isdigit():
+                j -= 1
+            if j < len(out) and (j == 0 or out[j - 1].isspace()):
+                del out[j:]  # the file-descriptor number in front: the 2 of 2>
+            while i < n and command[i] in "<>&|":
+                i += 1  # the operator: > >> >& &> >| < << <&
+            while i < n and command[i] in " \t":
+                i += 1
+            target_quote = ""
+            while i < n and (target_quote or not command[i].isspace()):
+                ch = command[i]
+                if target_quote:
+                    target_quote = "" if ch == target_quote else target_quote
+                elif ch in "'\"":
+                    target_quote = ch
+                elif ch in ";|&\n":
+                    break  # the target ends where the next command starts
+                i += 1
+            out.append(" ")
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
 _ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _JS_VERBS = {"npm": {"install", "i", "add", "in"}, "pnpm": {"add", "install", "i"},
              "yarn": {"add"}, "bun": {"add", "install", "i"}}
@@ -216,7 +270,7 @@ def _package_installs(command: str, pc) -> list[tuple[str, str, str]]:
     file, local paths, git URLs and tarballs are not registry packages and are skipped."""
     out: list[tuple[str, str, str]] = []
     seen: set[tuple[str, str]] = set()
-    for seg in _SEGMENTS.split(command or ""):
+    for seg in _SEGMENTS.split(_strip_redirections(command or "")):
         try:
             argv = shlex.split(seg)
         except ValueError:

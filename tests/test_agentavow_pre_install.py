@@ -262,6 +262,48 @@ def test_package_installs_are_recognised(hook, cmd, want):
     assert mod._package_installs(cmd, pc) == want
 
 
+@pytest.mark.parametrize("cmd,want", [
+    # Redirections are the shell's, never package names (sweep 2026-11-11: '2>&1' was
+    # read as a PyPI package named '2').
+    ("pip install requests 2>&1", [("pypi", "requests", "")]),
+    ("pip install requests 2>&1 | tail -3", [("pypi", "requests", "")]),
+    ("pip install requests >/dev/null", [("pypi", "requests", "")]),
+    ("pip install requests > /dev/null 2>&1", [("pypi", "requests", "")]),
+    ("pip install requests >install.log", [("pypi", "requests", "")]),
+    ("pip install requests >>install.log rich", [("pypi", "requests", ""), ("pypi", "rich", "")]),
+    ("pip install requests 2>err.txt", [("pypi", "requests", "")]),
+    ("pip install requests 2> err.txt", [("pypi", "requests", "")]),
+    ("pip install requests &>out.txt", [("pypi", "requests", "")]),
+    ("pip install requests &> /dev/null", [("pypi", "requests", "")]),
+    ("pip install requests </dev/null", [("pypi", "requests", "")]),
+    ("pip install requests 2>&1 | tee pip.log", [("pypi", "requests", "")]),
+    ("pip install requests 2>&1 && echo done", [("pypi", "requests", "")]),
+    ("pip install requests; echo done", [("pypi", "requests", "")]),
+    ("pip install requests & echo done", [("pypi", "requests", "")]),
+    ("python3 -m pip install -q httpx 2>/dev/null", [("pypi", "httpx", "")]),
+    ("uv pip install rich 2>&1", [("pypi", "rich", "")]),
+    ("uv add fastapi >/dev/null 2>&1", [("pypi", "fastapi", "")]),
+    ("poetry add sqlalchemy 2>&1 | tail -1", [("pypi", "sqlalchemy", "")]),
+    ("pipx install ruff 1>/dev/null", [("pypi", "ruff", "")]),
+    ("npm i left-pad 2>&1", [("npm", "left-pad", "")]),
+    ("npm install chalk >/dev/null 2>&1", [("npm", "chalk", "")]),
+    # Quoted text is not a redirection: a version spec stays a version spec.
+    ("pip install 'requests>=2' 2>&1", [("pypi", "requests", ">=2")]),
+    ('pip install "pydantic<3" >/dev/null', [("pypi", "pydantic", "<3")]),
+])
+def test_shell_redirections_are_not_read_as_packages(hook, cmd, want):
+    mod, pc = hook
+    assert mod._package_installs(cmd, pc) == want
+
+
+@pytest.mark.parametrize("cmd", [
+    "pip install -r requirements.txt 2>&1", "pip install 2>&1", "pip install >/dev/null",
+])
+def test_redirection_only_commands_install_nothing(hook, cmd):
+    mod, pc = hook
+    assert mod._package_installs(cmd, pc) == []
+
+
 @pytest.mark.parametrize("cmd", [
     "npm install", "npm ci", "pnpm install", "uv sync", "pip install -r requirements.txt",
     "pip install -e .", "pip install ./dist/pkg-1.0.whl", "npm i ./local-pkg",

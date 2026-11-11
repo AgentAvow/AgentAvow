@@ -839,9 +839,12 @@ def decide(payload: dict, cache: dict) -> tuple | None:
     found = find_record(cache, server)
     if not found:
         if _gradable(_server_config(server)):
+            entry = cache.get(server)
+            checking = isinstance(entry, dict) and "pending_since" in entry
             _note_once_per_session(cache, payload.get("session_id"), (
-                f"AgentAvow gate: MCP '{server}' has no grade on file, so its tools run "
-                "unchecked. It is graded at your next session start."))
+                f"AgentAvow gate: MCP '{server}' has no grade on file"
+                + (" yet (AgentAvow is still checking it)" if checking else "")
+                + ", so its tools run unchecked. It is graded at your next session start."))
         return None
     name, record = found
     cfg = _server_config(name)
