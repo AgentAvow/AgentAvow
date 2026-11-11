@@ -36,6 +36,7 @@ interface Metrics {
   scan_kinds?: { checks?: Record<string, number>; renders?: Record<string, number>; other?: Record<string, number> }
   watch_alerts?: Record<string, { public?: number; private?: number }>
   funnel?: { scanned?: number; watched?: number; claimed?: number; installs?: number }
+  installs_by_client?: Record<string, number>
   mcp?: { calls_window?: number; callers_window?: number; ok_window?: number; errors_window?: number; safe_window?: number; needs_review_window?: number; answers_window?: Record<string, number>; checks_window?: number; by_tool?: Record<string, number>; by_surface?: Record<string, { calls?: number; callers?: number; errors?: number; safe?: number; needs_review?: number; checks?: number; answer_safe?: number; answer_review?: number; answer_do_not_connect?: number }> }
   hook?: { scans_window?: number; machines_window?: number }
   private_repos?: { app_scans?: number; published_to_search?: number; app_installs_active?: number; onetime_scans_window?: number }
@@ -145,6 +146,11 @@ function TrendChart({ days, lines, empty }: { days?: string[]; lines: TrendLine[
     </div>
   )
 }
+
+const INSTALL_CLIENT_LABEL: Record<string, string> = { cursor: 'Cursor', vscode: 'VS Code', goose: 'Goose' }
+/** "Cursor 3 · VS Code 1 · Goose 0": one-click installs by client (split from Nov 12; older clicks are in the total only). */
+const installSplit = (by?: Record<string, number>) =>
+  by ? Object.entries(INSTALL_CLIENT_LABEL).map(([k, label]) => `${label} ${fmt(by[k])}`).join(' · ') : undefined
 
 function Stat({ label, value, sub, series }: { label: string; value: string | number; sub?: string; series?: number[] }) {
   return (
@@ -448,6 +454,8 @@ interface TrafficRow {
   cc_machines_excl_owner?: number | null; hook_machines_excl_owner?: number | null; log_complete?: number | null
   checked_machines?: number | null; checked_machines_excl_owner?: number | null
   preinstall_machines?: number | null; preinstall_reqs?: number | null
+  gate_machines?: number | null; tool_gate_machines?: number | null; tool_gate_reqs?: number | null
+  a2a_card_fetches?: number | null; a2a_card_fetchers?: number | null
 }
 interface Traffic { days?: string[]; rows?: TrafficRow[]; series?: Record<string, (number | null)[]>; latest?: TrafficRow | null; covered_days?: number; notes?: string[] }
 
@@ -523,6 +531,10 @@ interface Growth {
   downloads_daily?: Record<string, Record<string, number>>
   downloads_latest?: Record<string, number> | null
   referrals?: { search?: Record<string, number>; ai?: Record<string, number>; other_top?: Record<string, number>; search_total?: number; ai_total?: number; other_total?: number }
+  indexnow_runs?: { at: string; outcome: string; submitted: number; status: number | null }[]
+}
+const INDEXNOW_OUTCOME: Record<string, string> = {
+  sent: 'sent', not_confirmed: 'not confirmed', nothing_changed: 'nothing changed', http_error: 'HTTP error', skipped: 'skipped (error)',
 }
 type GrowthTrafficRow = Record<string, number | string | null | undefined>
 const EP_LABEL: Record<string, string> = { desktop: 'Desktop app', cli: 'CLI + IDE extensions', sdk: 'Agent SDK', cloud: 'Anthropic cloud (remote)', other: 'Other / unknown' }
@@ -620,6 +632,16 @@ function GrowthPanel() {
           {Object.keys(ref.ai || {}).length > 0 && <div className="mt-3"><BarList title="AI assistants" rows={ref.ai || {}} labels={{}} empty="" gradient="linear-gradient(90deg,#818cf8,#e879f9)" /></div>}
           {Object.keys(ref.other_top || {}).length > 0 && <div className="mt-3"><BarList title="Top other sites" rows={ref.other_top || {}} labels={{}} empty="" gradient="linear-gradient(90deg,#64748b,#94a3b8)" /></div>}
           <p className="mt-2 text-[11px] text-text-muted/60">Only the referrer's host is stored, never its path or search terms. Direct visits and visits from our own pages carry no referrer. Search Console and Bing Webmaster stay manual.</p>
+          <div className="mt-3 pt-3 border-t border-border/40 text-[12.5px]">
+            <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-1">IndexNow pings · after each deploy</div>
+            {(g.indexnow_runs || []).length ? (
+              <ul className="space-y-0.5 tabular-nums">
+                {(g.indexnow_runs || []).map((r) => (
+                  <li key={r.at}><span className="font-mono text-text-muted">{r.at.slice(0, 16).replace('T', ' ')}</span> · {INDEXNOW_OUTCOME[r.outcome] ?? r.outcome} · {fmt(r.submitted)} URL{r.submitted === 1 ? '' : 's'}{r.status != null ? ` · HTTP ${r.status}` : ''}</li>
+                ))}
+              </ul>
+            ) : <p className="text-text-muted/70">No ping recorded yet. The next production deploy stores one.</p>}
+          </div>
         </div>
       </div>
     </Section>
@@ -676,6 +698,9 @@ function ClaudeTrafficPanel() {
         <Stat label="Hook machines" value={fmt(latest?.hook_machines_nginx)} sub={`${fmt(latest?.hook_reqs)} scans · top ${latest?.hook_top_version ?? '—'}`} series={num(s.hook_machines_nginx)} />
         <Stat label="Claude Code tool calls" value={fmt(latest?.calls_claude_code)} sub={`${fmt(latest?.callers_claude_code)} distinct machines`} series={num(s.calls_claude_code)} />
         <Stat label="Days covered" value={fmt(data?.covered_days)} sub={`of last ${days}`} />
+        <Stat label="Plugin gate machines" value={fmt(latest?.gate_machines)} sub="agentavow-gate/ UA" series={num(s.gate_machines)} />
+        <Stat label="npm tool gate machines" value={fmt(latest?.tool_gate_machines)} sub={`${fmt(latest?.tool_gate_reqs)} requests · agentavow-tool-gate/ UA, from Nov 12`} series={num(s.tool_gate_machines)} />
+        <Stat label="A2A card fetches" value={fmt(latest?.a2a_card_fetches)} sub={`${fmt(latest?.a2a_card_fetchers)} distinct IPs · our /.well-known/agent-card.json, from Nov 12`} series={num(s.a2a_card_fetches)} />
       </div>
       <div className="glass rounded-2xl p-5">
         <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">{mode === 'machines' ? 'Machines per day' : 'Requests and tool calls per day'}</div>
@@ -710,6 +735,75 @@ function ClaudeTrafficPanel() {
   )
 }
 
+// ── Landing trend: lp_view and copy_plugin_cmd per day, paid vs organic ─────
+interface LandingDay { date: string; lp_view: number; lp_view_paid: number; copy_plugin_cmd: number; copy_plugin_cmd_paid: number }
+
+function LandingTrendPanel() {
+  const [days, setDays] = useState<14 | 30 | 90>(30)
+  const { data } = useQuery<{ landing?: LandingDay[] }>({
+    queryKey: ['admin-dash-landing-daily', days],
+    queryFn: async () => { try { return (await api.get('/analytics/conversion/daily', { params: { days } })).data } catch { return {} } },
+  })
+  // Every UTC day in the window, oldest first, so a day with nothing reads as zero.
+  const [now] = useState(() => Date.now())
+  const dayList = Array.from({ length: days }, (_, i) => new Date(now - (days - 1 - i) * 86_400_000).toISOString().slice(0, 10))
+  const byDay = Object.fromEntries((data?.landing || []).map((d) => [d.date, d]))
+  const col = (k: keyof Omit<LandingDay, 'date'>) => dayList.map((d) => byDay[d]?.[k] ?? 0)
+  const lines: TrendLine[] = [
+    { key: 'lp', label: 'Landed (lp_view) · organic', color: '#2dd4bf', data: dayList.map((d) => (byDay[d]?.lp_view ?? 0) - (byDay[d]?.lp_view_paid ?? 0)) },
+    { key: 'lp-paid', label: 'Landed · paid', color: '#818cf8', data: col('lp_view_paid') },
+    { key: 'copy', label: 'Copied plugin command · organic', color: '#22c55e', dashed: true, data: dayList.map((d) => (byDay[d]?.copy_plugin_cmd ?? 0) - (byDay[d]?.copy_plugin_cmd_paid ?? 0)) },
+    { key: 'copy-paid', label: 'Copied · paid', color: '#f59e0b', dashed: true, data: col('copy_plugin_cmd_paid') },
+  ]
+  const toggle = (
+    <div className="flex gap-1 font-mono text-[12px]">
+      {([14, 30, 90] as const).map((d) => (
+        <button key={d} onClick={() => setDays(d)} className={`px-2.5 py-1 rounded-lg transition-colors ${days === d ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>{d}d</button>
+      ))}
+    </div>
+  )
+  return (
+    <Section title="Landings and plugin-command copies — day by day" note="Distinct sessions per UTC day that landed (lp_view) and that copied the /plugin command (copy_plugin_cmd), split by whether the session's first campaign tags were paid (utm_medium paid-social / paid / cpc / ppc / display, or utm_source reddit / meta / facebook / instagram). Bots left out. For before/after reads around the ad test; read it next to protected machines." right={toggle}>
+      <div className="glass rounded-2xl p-5">
+        <TrendChart days={dayList} lines={lines} empty="No landings in this window yet." />
+      </div>
+    </Section>
+  )
+}
+
+const ACTION_AREAS: [string, string][] = [['browse', 'Browse'], ['trust_index', 'Trust Index'], ['certified', 'Certified'], ['preflight', 'Preflight'], ['dev', 'For developers']]
+
+function PageActionsPanel() {
+  const [days, setDays] = useState<7 | 30>(30)
+  const { data } = useQuery<{ views?: Record<string, number>; actions?: Record<string, number> }>({
+    queryKey: ['admin-dash-page-actions', days],
+    queryFn: async () => { try { return (await api.get('/analytics/page-actions', { params: { days } })).data } catch { return {} } },
+  })
+  const actions = data?.actions || {}
+  const toggle = (
+    <div className="flex gap-1 font-mono text-[12px]">
+      {([7, 30] as const).map((d) => (
+        <button key={d} onClick={() => setDays(d)} className={`px-2.5 py-1 rounded-lg transition-colors ${days === d ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>{d}d</button>
+      ))}
+    </div>
+  )
+  return (
+    <Section title="Catalog and developer pages — views and actions" note="Distinct sessions that viewed each page and that took each main action on it (searches and filters, opening a tool, copies, claim / private-scan starts, gate checks, Preflight runs). What someone typed is never sent. Bots left out. Counted from the Nov 12 deploy." right={toggle}>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        {ACTION_AREAS.map(([area, label]) => {
+          const rows = Object.fromEntries(Object.entries(actions).filter(([k]) => k.startsWith(`${area}:`)).map(([k, n]) => [k.slice(area.length + 1).replace(/_/g, ' '), n]))
+          return (
+            <div key={area} className="min-w-0">
+              <Stat label={label} value={fmt(data?.views?.[area])} sub="sessions viewing" />
+              <div className="mt-2"><BarList title="Actions" rows={rows} labels={{}} empty="No actions yet." gradient="linear-gradient(90deg,#2dd4bf,#818cf8)" /></div>
+            </div>
+          )
+        })}
+      </div>
+    </Section>
+  )
+}
+
 // ── METRICS TAB ──────────────────────────────────────────────────────────────
 function MetricsTab() {
   const [win, setWin] = useState<Win>('7d')
@@ -736,6 +830,7 @@ function MetricsTab() {
     <>
       <StartHerePanel />
       <CampaignPanel />
+      <LandingTrendPanel />
       <Section title="Product & adoption" note="Everything the product surfaces — the full set, not a slice." right={<WindowToggle win={win} setWin={setWin} />}>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           <Stat label="Repos scanned" value={fmt(h.repos_scanned)} sub={`${fmt(h.new_repos)} new`} series={s.repos_scanned} />
@@ -744,7 +839,7 @@ function MetricsTab() {
           <Stat label="Unique checkers" value={fmt(h.unique_checkers)} />
           <Stat label="Unique humans" value={fmt(h.unique_humans)} sub="browser UA · per-day salted HLL" />
           <Stat label="Adoption lookups" value={fmt(h.adoption_hits)} series={s.adoption_hits} />
-          <Stat label="Install clicks" value={fmt(h.install_clicks)} series={s.install_clicks} />
+          <Stat label="Install clicks" value={fmt(h.install_clicks)} sub={installSplit(data?.installs_by_client)} series={s.install_clicks} />
           <Stat label="Fresh re-scans" value={fmt(h.force_rescans)} series={s.force_rescans} />
           <Stat label="API calls" value={fmt(h.api_calls)} series={s.api_calls} />
           <Stat label="Attestations" value={fmt(h.attestations_issued)} />
@@ -880,6 +975,8 @@ function MetricsTab() {
       })()}
 
       <ClaudeTrafficPanel />
+
+      <PageActionsPanel />
 
       <ScanKindsPanel data={data} />
 

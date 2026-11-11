@@ -977,9 +977,9 @@ function PkgInstall({ surface, name, isMcp }: { surface: string; name: string; i
       <>
         <p className="text-text-muted text-[13px] mt-1">This package is an <span className="text-text">MCP server</span> — one click for Cursor, VS Code, or Goose (runs <span className="font-mono text-text">{t.command} {t.args.join(' ')}</span>):</p>
         <div className="mt-3 flex flex-wrap gap-2">
-          <a href={cursorStdio(t)} onClick={() => beacon('install_click')} target="_blank" rel="noopener noreferrer" className={DEEPLINK_BTN}>▸ Add to Cursor</a>
-          <a href={vscodeStdio(t)} onClick={() => beacon('install_click')} className={DEEPLINK_BTN}>▸ Add to VS Code</a>
-          <a href={gooseStdio(t)} onClick={() => beacon('install_click')} className={DEEPLINK_BTN}>▸ Add to Goose</a>
+          <a href={cursorStdio(t)} onClick={() => beacon('install_cursor')} target="_blank" rel="noopener noreferrer" className={DEEPLINK_BTN}>▸ Add to Cursor</a>
+          <a href={vscodeStdio(t)} onClick={() => beacon('install_vscode')} className={DEEPLINK_BTN}>▸ Add to VS Code</a>
+          <a href={gooseStdio(t)} onClick={() => beacon('install_goose')} className={DEEPLINK_BTN}>▸ Add to Goose</a>
         </div>
         <button onClick={() => setMore((m) => !m)} className="mt-3 text-[12px] text-text-muted hover:text-text">Claude Code, Gemini, Codex &amp; config {more ? '▾' : '▸'}</button>
         {more && (
@@ -1454,9 +1454,9 @@ function AddToAgent(props: AddToAgentProps) {
             <>
               <p className="text-text-muted text-[13px] mt-1 max-w-[62ch]">One click for Cursor, VS Code, or Goose — the checked server, ready to connect.</p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <a href={cursorInstall(t)} onClick={() => beacon('install_click')} target="_blank" rel="noopener noreferrer" className={deeplinkBtn}>▸ Add to Cursor</a>
-                <a href={vscodeInstall(t)} onClick={() => beacon('install_click')} className={deeplinkBtn}>▸ Add to VS Code</a>
-                <a href={gooseInstall(t)} onClick={() => beacon('install_click')} className={deeplinkBtn}>▸ Add to Goose</a>
+                <a href={cursorInstall(t)} onClick={() => beacon('install_cursor')} target="_blank" rel="noopener noreferrer" className={deeplinkBtn}>▸ Add to Cursor</a>
+                <a href={vscodeInstall(t)} onClick={() => beacon('install_vscode')} className={deeplinkBtn}>▸ Add to VS Code</a>
+                <a href={gooseInstall(t)} onClick={() => beacon('install_goose')} className={deeplinkBtn}>▸ Add to Goose</a>
               </div>
               <button onClick={() => setMore((m) => !m)} className="mt-3 text-[12px] text-text-muted hover:text-text">Claude, Gemini, Codex &amp; more {more ? '▾' : '▸'}</button>
               {more && (

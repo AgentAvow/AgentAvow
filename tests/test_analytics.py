@@ -580,3 +580,97 @@ async def test_events_without_a_class_still_count(client: AsyncClient, db):
     rows = (await client.get(
         f"{ANALYTICS_URL}/attribution/campaigns", headers=_auth(token))).json()["campaigns"]
     assert [r["lp_view"] for r in rows if r["campaign"] == "old"] == [1]
+
+
+# --- page_action (catalog / developer pages) ---
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("intent", [
+    "browse:search", "browse:open_tool", "trust_index:open_tool", "certified:check",
+    "preflight:run", "dev:copy_badge",
+])
+async def test_page_action_accepts_known_areas(client: AsyncClient, intent: str):
+    resp = await _send(client, "page_action", str(uuid.uuid4()), intent=intent)
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("intent", [
+    None, "", "browse", "elsewhere:search", "browse:Search", "browse:search term",
+    "browse:" + "x" * 33,
+])
+async def test_page_action_rejects_bad_intents(client: AsyncClient, intent):
+    resp = await _send(client, "page_action", str(uuid.uuid4()), intent=intent)
+    assert resp.status_code == 422
+
+
+# --- Daily landing trend (lp_view / copy_plugin_cmd, paid vs organic) ---
+
+
+@pytest.mark.asyncio
+async def test_daily_landing_counts_sessions_and_splits_paid(client: AsyncClient, db):
+    token, entity_id = await _setup_user(client, ADMIN)
+    await _make_admin(db, entity_id)
+
+    paid = str(uuid.uuid4())
+    await _send(client, "lp_view", paid, metadata=_utm())
+    await _send(client, "lp_view", paid)  # the same session again: one session
+    await _send(client, "cta_click", paid, intent="copy_plugin_cmd")
+
+    organic = str(uuid.uuid4())
+    await _send(client, "lp_view", organic, metadata={"utm_source": "newsletter"})
+    await _send(client, "cta_click", organic, intent="copy_plugin_cmd")
+    await _send(client, "cta_click", organic, intent="add_claude")  # not counted
+
+    await _send(client, "lp_view", str(uuid.uuid4()))  # direct, no tags
+    await _send(client, "lp_view", str(uuid.uuid4()), ua=BOT_UA)  # bots left out
+
+    resp = await client.get(
+        f"{ANALYTICS_URL}/conversion/daily", params={"days": 7}, headers=_auth(token),
+    )
+    assert resp.status_code == 200
+    landing = resp.json()["landing"]
+    assert len(landing) == 1
+    assert landing[0] == {
+        "date": landing[0]["date"],
+        "lp_view": 3, "lp_view_paid": 1,
+        "copy_plugin_cmd": 2, "copy_plugin_cmd_paid": 1,
+    }
+    # The legacy per-type map is unchanged: no landing keys mixed into it.
+    assert "lp_view_paid" not in resp.json()["daily"][0]
+
+
+@pytest.mark.asyncio
+async def test_page_actions_view_counts_sessions_per_area(client: AsyncClient, db):
+    token, entity_id = await _setup_user(client, ADMIN)
+    await _make_admin(db, entity_id)
+
+    one, two = str(uuid.uuid4()), str(uuid.uuid4())
+    for sid in (one, two):
+        await client.post(f"{ANALYTICS_URL}/event", json={
+            "event_type": "guest_page_view", "session_id": sid, "page": "/browse"})
+    await client.post(f"{ANALYTICS_URL}/event", json={
+        "event_type": "guest_page_view", "session_id": one, "page": "/rebrand/index"})
+    await client.post(f"{ANALYTICS_URL}/event", json={
+        "event_type": "guest_page_view", "session_id": one, "page": "/check"})  # not listed
+    await _send(client, "page_action", one, intent="browse:search")
+    await _send(client, "page_action", one, intent="browse:search")  # same session
+    await _send(client, "page_action", two, intent="browse:search")
+    await _send(client, "page_action", two, intent="dev:copy_badge")
+    await _send(client, "page_action", str(uuid.uuid4()), ua=BOT_UA, intent="browse:search")
+
+    resp = await client.get(f"{ANALYTICS_URL}/page-actions", headers=_auth(token))
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["views"] == {
+        "browse": 2, "trust_index": 1, "certified": 0, "preflight": 0, "dev": 0,
+    }
+    assert data["actions"] == {"browse:search": 2, "dev:copy_badge": 1}
+
+
+@pytest.mark.asyncio
+async def test_page_actions_view_is_admin_only(client: AsyncClient):
+    token, _ = await _setup_user(client, USER)
+    resp = await client.get(f"{ANALYTICS_URL}/page-actions", headers=_auth(token))
+    assert resp.status_code == 403
