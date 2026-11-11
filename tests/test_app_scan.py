@@ -94,7 +94,7 @@ async def _ensure_tables():
             "ALTER TABLE private_scan_results "
             "ADD COLUMN IF NOT EXISTS published BOOLEAN NOT NULL DEFAULT false"
         ))
-        # The answer baseline (migration t28).
+        # The answer baseline (migration t29).
         await conn.execute(text(
             "ALTER TABLE private_scan_results "
             "ADD COLUMN IF NOT EXISTS last_decision VARCHAR(32)"

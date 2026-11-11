@@ -442,7 +442,7 @@ async def _clean_db_once():
             "ALTER TABLE IF EXISTS tool_watches ADD COLUMN IF NOT EXISTS surface "
             "VARCHAR(16) NOT NULL DEFAULT 'github'",
             "ALTER TABLE IF EXISTS tool_watches ALTER COLUMN repo TYPE VARCHAR(512)",
-            # private_scan_results answer baseline (migration t28)
+            # private_scan_results answer baseline (migration t29)
             "ALTER TABLE IF EXISTS private_scan_results ADD COLUMN IF NOT EXISTS "
             "last_decision VARCHAR(32)",
             "ALTER TABLE IF EXISTS private_scan_results ADD COLUMN IF NOT EXISTS "
