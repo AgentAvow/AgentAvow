@@ -85,7 +85,7 @@ const ROW_ANSWER = 'Answer: Safe to connect at 81+'
 const ROW_PROVENANCE = 'Published package matches its source'
 const ROW_FILES = 'Every file read, nothing changed'
 const ROW_SEVERE = 'No critical or high finding'
-const ROW_SANDBOX = 'Sandbox ran it, anyone can recompute'
+const ROW_SANDBOX = 'Sandbox result is in, anyone can recompute'
 
 const PHRASE_SHORT = { safe: 'Safe', review: 'Review', do_not_connect: 'Do not connect' } as const
 

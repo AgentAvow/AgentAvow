@@ -81,11 +81,6 @@ fail the build when the answer is Do not connect:
 The action scans the repository the workflow runs in. For a private repo, or to scan without a round trip,
 see [Run locally & in CI](./run-locally.md).
 
-## The viral loop
-
-Every README reader sees the badge → clicking it lands on that repo's full report → whose primary action is
-minting *their own* badge. Each adoption seeds the next.
-
 ## Next
 
 - [Verify an AgentAvow attestation](./verify-attestations.md)
