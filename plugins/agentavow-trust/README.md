@@ -2,7 +2,7 @@
 
 **What you'll see.** Install the plugin and start a session. Claude's first reply opens with
 one line, for example: "AgentAvow pre-check: graded 8 MCP servers — 5 Safe, 2 Review, 1
-Don't connect (needs attention: 'task-master' Do not connect — one critical finding: eval of
+Don't connect (needs attention: 'example-server' Do not connect — one critical finding: eval of
 input). Dependencies: graded 12 of 38 — 11 Safe, 1 Review (needs attention: 'left-pad'
 Review before you connect — the maintainer has deprecated this package)." Every line leads
 with one of three answers — **Safe to connect**, **Review before you connect** or **Do not
