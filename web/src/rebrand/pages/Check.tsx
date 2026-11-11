@@ -860,7 +860,6 @@ function Hero() {
     ['Container', 'docker:nginx'],
     ['MCP server', 'mcp:https://mcp.deepwiki.com/mcp'],
     ['A2A agent card', 'a2a:https://agentavow.com/.well-known/agent-card.json'],
-    ['ERC-8004 agent', 'erc8004:ethereum:33256'],
   ]
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-20 text-center">
