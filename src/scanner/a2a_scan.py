@@ -397,6 +397,40 @@ def _host(url: str) -> str:
     return _host_of(url)
 
 
+TRUST_VERDICT_EXT_URI = "https://agentavow.com/ext/trust-verdict/v1"
+_VERDICT_PATH = "/api/v1/public/scan/a2a"
+
+
+def _card_identity(url: str) -> str | None:
+    try:
+        from src.ssrf import mcp_endpoint_identity
+        return mcp_endpoint_identity(str(url).strip())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def trust_verdict_url_ok(verdict_url: Any, card_url: str) -> bool:
+    """``verdict_url`` is AgentAvow's verdict endpoint for exactly ``card_url``: https,
+    host agentavow.com, path /api/v1/public/scan/a2a, one ``card`` query parameter that
+    names the same card (after the same normalisation our A2A route applies)."""
+    from urllib.parse import parse_qs
+    if not isinstance(verdict_url, str) or not verdict_url.strip():
+        return False
+    try:
+        parts = urlsplit(verdict_url.strip())
+    except ValueError:
+        return False
+    if (parts.scheme != "https" or (parts.hostname or "").lower() != "agentavow.com"
+            or parts.port not in (None, 443) or parts.username or parts.password
+            or parts.path.rstrip("/") != _VERDICT_PATH or parts.fragment):
+        return False
+    q = parse_qs(parts.query, keep_blank_values=True)
+    if set(q) != {"card"} or len(q["card"]) != 1:
+        return False
+    claimed, actual = _card_identity(q["card"][0]), _card_identity(card_url)
+    return bool(claimed) and claimed == actual
+
+
 def _url_findings(url: str, where: str, what: str, card_host: str) -> list:
     """Transport + private-host + origin findings for one URL the card tells a client
     to call (an interface, or an OAuth / OIDC / jku URL when ``what`` says so)."""
@@ -633,6 +667,25 @@ def analyze_a2a_card(raw: dict, *, card_url: str, signature: dict | None = None
         res.findings.append(_finding(
             "auth_scheme", "The card declares no authentication", "low", "card:security",
             "Fine for a public read-only agent; declare a scheme before it does more."))
+
+    # 3b. the AgentAvow trust-verdict extension (https://agentavow.com/ext/trust-verdict/v1):
+    # a card that declares it must point at OUR verdict for THIS card. Anything else is
+    # a borrowed or forged claim.
+    for idx, ext in enumerate(card["capabilities"]["extensions"]):
+        if ext.get("uri") != TRUST_VERDICT_EXT_URI:
+            continue
+        ok = trust_verdict_url_ok((ext.get("params") or {}).get("verdict_url"), card_url)
+        if ok:
+            res.positive_signals.append("The card links its own AgentAvow verdict")
+        else:
+            res.findings.append(_finding(
+                "card_signature",
+                "The card claims an AgentAvow verdict that is not this card's own",
+                "medium", _loc("extension", idx),
+                "The trust-verdict extension's verdict_url must be "
+                "https://agentavow.com/api/v1/public/scan/a2a?card=<this card's URL>. "
+                "A verdict for another card, or from another host, says nothing about "
+                "this one."))
 
     # 4. card-level text an agent reads
     texts.add(f"{card['name']}\n{card['description']}", "card:description")

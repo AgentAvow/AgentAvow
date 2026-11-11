@@ -248,6 +248,12 @@ def parse_agent_card(data: dict) -> dict:
     extensions = [{
         "uri": _s(e.get("uri")), "description": _s(e.get("description")),
         "required": e.get("required") is True,
+        # Scalar params only, bounded: the AgentAvow trust-verdict extension reads
+        # ``verdict_url`` from here (src.scanner.a2a_scan).
+        "params": {str(k)[:64]: v for k, v in list(e["params"].items())[:20]
+                   if isinstance(v, (str, int, float, bool))
+                   and (not isinstance(v, str) or len(v) <= 2048)}
+        if isinstance(e.get("params"), dict) else {},
     } for e in _dicts(caps.get("extensions"))]
     extended = caps.get("extendedAgentCard") is True or (
         data.get("supportsAuthenticatedExtendedCard") is True
