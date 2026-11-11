@@ -176,6 +176,14 @@ async def _finish(scope: UsageScope, status_code: int, request) -> None:
     path = request.url.path
     if path.startswith(HOOK_PATH_PREFIX) and status_code < 400:
         await bump_metric_by_client("scan_request", user_agent)
+    # The same requests (plus Preflight and the drift feed) by kind: checks per
+    # surface, badge/card/OG renders, catalog reads (src/scan_kind).
+    if status_code < 400:
+        from src.scan_kind import scan_kind
+
+        kind = scan_kind(path, request.url.query)
+        if kind is not None:
+            await bump_metric(f"scan_kind:{kind}")
     # The Claude Code plugin's session-start hook: same place, same reason.
     if is_hook_request(path, user_agent):
         from src.api.rate_limit import _get_client_ip

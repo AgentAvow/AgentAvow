@@ -151,6 +151,27 @@ class CampaignAttribution(BaseModel):
     campaigns: list[CampaignRow]
 
 
+def referrer_host(referrer: str | None) -> str | None:
+    """Only the host of a referrer is ever stored: a path or query string can carry a
+    search term. Accepts a bare host ("www.google.com") or a URL; None when empty,
+    unparseable, or our own site."""
+    from urllib.parse import urlsplit
+
+    raw = (referrer or "").replace("\x00", "").strip()
+    if not raw:
+        return None
+    try:
+        host = urlsplit(raw if "//" in raw else f"//{raw}").hostname or ""
+    except ValueError:
+        return None
+    host = host.lower().strip(".")[:253]
+    if "." not in host or not all(c.isalnum() or c in "-." for c in host):
+        return None
+    if host in ("agentavow.com", "www.agentavow.com", "localhost"):
+        return None
+    return host
+
+
 def _first_touch_tags(metadata: dict | None) -> dict[str, str]:
     """The usable UTM tags in an event's metadata, cleaned to fit the first-touch columns."""
     tags: dict[str, str] = {}
@@ -193,7 +214,7 @@ async def track_event(
         session_id=body.session_id,
         page=body.page,
         intent=body.intent,
-        referrer=body.referrer,
+        referrer=referrer_host(body.referrer),
         extra_metadata=body.metadata or {},
         **(await request_privacy_fields(request)),
     )
