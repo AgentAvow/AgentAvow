@@ -106,3 +106,15 @@ def test_our_card_has_no_default_valued_extension_fields():
     # verifier reading of the signature agrees (tests/test_agent_card_wellknown.py).
     for e in CARD["capabilities"]["extensions"]:
         assert "required" not in e
+
+
+def test_spec_page_names_both_jwks_hosts():
+    """The API's jwks_url names agentgraph.co; the spec names agentavow.com. Both
+    serve the same keys, and the spec must say either works."""
+    from pathlib import Path
+
+    page = (Path(__file__).resolve().parent.parent / "web" / "public" / "ext"
+            / "trust-verdict" / "v1" / "index.html").read_text()
+    assert "https://agentavow.com/.well-known/jwks.json" in page
+    assert "https://agentgraph.co/.well-known/jwks.json" in page
+    assert "either works" in page

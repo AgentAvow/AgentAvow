@@ -102,6 +102,8 @@ def parse_package_lock(text: str) -> list[Dep]:
         for path, meta in packages.items():
             if not path or not isinstance(meta, dict):
                 continue  # "" is the root project
+            if "node_modules/" not in path:
+                continue  # a workspace member ("src/everything") is the project, not a dep
             ver = meta.get("version")
             if not isinstance(ver, str):
                 continue
@@ -371,6 +373,119 @@ def pnpm_v9_unshipped(text: str, private_importers: set[str]) -> set[str] | None
     return set(edges) - _reach(roots, edges)
 
 
+def _npm_packages(text: str) -> dict | None:
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    pk = data.get("packages") if isinstance(data, dict) else None
+    return pk if isinstance(pk, dict) else None
+
+
+def npm_workspace_members(text: str) -> list[str]:
+    """Workspace members of an npm v2/v3 lockfile: the root (``""``) and every
+    ``packages`` key outside node_modules (``src/everything``). Empty for a plain
+    (non-workspace) project or a v1 lockfile."""
+    pk = _npm_packages(text)
+    if not pk:
+        return []
+    members = [k for k in pk if isinstance(k, str) and "node_modules/" not in k]
+    return members if len(members) >= 2 else []
+
+
+def _npm_parent(path: str) -> str | None:
+    """The directory whose node_modules a package at ``path`` falls back to."""
+    if not path:
+        return None
+    i = path.rfind("node_modules/")
+    if i > 0:
+        return path[:i - 1]
+    if i == 0:
+        return ""
+    return path.rsplit("/", 1)[0] if "/" in path else ""
+
+
+def _npm_resolve(pk: dict, frm: str, name: str) -> str | None:
+    """Node's lookup: ``<dir>/node_modules/<name>`` from ``frm`` up to the root; a
+    workspace link resolves to the member it points at."""
+    base: str | None = frm
+    while base is not None:
+        cand = (base + "/" if base else "") + "node_modules/" + name
+        meta = pk.get(cand)
+        if isinstance(meta, dict):
+            if meta.get("link") and isinstance(meta.get("resolved"), str):
+                tgt = meta["resolved"]
+                return tgt if tgt in pk else None
+            return cand
+        base = _npm_parent(base)
+    return None
+
+
+def npm_workspace_unshipped(text: str, private_members: set[str]) -> set[str] | None:
+    """``name@ver`` an npm workspace installs that no shipped member reaches through
+    its production deps, or None when that can't be read (then nothing changes).
+
+    The npm twin of ``pnpm_v9_unshipped``. npm's own ``dev`` flags are computed over
+    the whole workspace, so what only a private member uses (a docs site, examples)
+    still reads as production. Shipped members are the public ones; when every member
+    is private (an app), all ship. A member a shipped member depends on ships too.
+    Only used when some member is known private.
+
+    Fail-safe: None when it isn't a workspace lockfile, or a shipped member's own prod
+    dep can't be resolved."""
+    pk = _npm_packages(text)
+    members = npm_workspace_members(text)
+    if not pk or not members:
+        return None
+
+    def prod_names(meta: dict) -> list[tuple[str, bool]]:
+        out = []
+        for fld, required in (("dependencies", True), ("optionalDependencies", False),
+                              ("peerDependencies", False)):
+            deps = meta.get(fld)
+            if isinstance(deps, dict):
+                out += [(n, required) for n in deps if isinstance(n, str)]
+        return out
+
+    shipped = {m for m in members if m not in private_members} or set(members)
+    seen: set[str] = set()
+    stack: list[str] = []
+    for m in shipped:
+        for n, required in prod_names(pk.get(m) or {}):
+            tgt = _npm_resolve(pk, m, n)
+            if tgt is None:
+                if required:
+                    return None
+                continue
+            stack.append(tgt)
+    stack += list(shipped)
+    while stack:
+        node = stack.pop()
+        if node in seen:
+            continue
+        seen.add(node)
+        meta = pk.get(node)
+        if not isinstance(meta, dict):
+            continue
+        for n, _ in prod_names(meta):
+            tgt = _npm_resolve(pk, node, n)
+            if tgt is not None and tgt not in seen:
+                stack.append(tgt)
+
+    def key(path: str, meta: dict) -> str | None:
+        ver = meta.get("version")
+        name = path.split("node_modules/")[-1]
+        if "node_modules/" not in path or not isinstance(ver, str) or not name:
+            return None
+        return f"{name}@{_clean_version(ver)}"
+
+    shipped_keys = {k for p in seen if isinstance(pk.get(p), dict)
+                    for k in [key(p, pk[p])] if k}
+    all_keys = {k for p, meta in pk.items() if isinstance(meta, dict)
+                for k in [key(p, meta)] if k}
+    return all_keys - shipped_keys
+
+
 def pnpm_private_only(text: str, private_importers: set[str]) -> set[str]:
     """``name@ver`` pulled in ONLY by private workspace members: reachable from a
     private importer's production deps and NOT from any public importer's
@@ -615,8 +730,9 @@ def parse_all(files: dict[str, str],
     deps is marked dev (``pnpm_v9_unshipped``): dev tools' transitive deps, and what
     only ``private_importers`` (per lockfile path: members whose package.json is
     ``"private": true``) pull in, e.g. colinhacks/zod's private docs site
-    (2026-11-11). When one lockfile ships a package another marks dev, the shipped
-    (production) entry wins.
+    (2026-11-11). npm v2/v3 workspace lockfiles get the same treatment when some member
+    is known private (``npm_workspace_unshipped``). When one lockfile ships a package
+    another marks dev, the shipped (production) entry wins.
     """
     from dataclasses import replace
     private_importers = private_importers or {}
@@ -635,6 +751,11 @@ def parse_all(files: dict[str, str],
             try:
                 unshipped = pnpm_v9_unshipped(content, private_importers.get(path) or set()) \
                     or set()
+            except Exception:  # noqa: BLE001 — fail safe: deps keep production weight
+                unshipped = set()
+        elif path.lower().endswith("package-lock.json") and private_importers.get(path):
+            try:
+                unshipped = npm_workspace_unshipped(content, private_importers[path]) or set()
             except Exception:  # noqa: BLE001 — fail safe: deps keep production weight
                 unshipped = set()
         for dep in parse_lockfile(path, content):

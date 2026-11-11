@@ -2,12 +2,15 @@
 """AgentAvow SessionStart pre-check — OPT-IN, warn-only, fail-open.
 
 Scans the MCP servers THIS session can use (user scope, this project's local
-scope, and the project's .mcp.json / settings) that haven't been scanned yet and
+scope, the project's .mcp.json / settings, and the servers your installed plugins
+bring) that haven't been scanned yet and
 injects a one-line AgentAvow trust verdict into the session, so you see it BEFORE
 you rely on a newly added tool. Servers configured for other projects are counted
 in the summary and graded when those projects are opened.
-It also grades the project's DIRECT dependencies (package.json "dependencies";
-requirements.txt / pyproject [project].dependencies), up to DEPS_CAP per session
+It also grades the project's DIRECT dependencies (package.json "dependencies", or
+"devDependencies" when there are none; requirements.txt / pyproject
+[project].dependencies; Cargo.toml [dependencies]; in a workspace root with none of
+its own, the manifests one folder down), up to DEPS_CAP per session
 start in manifest order, the rest on later starts, re-graded only when the declared
 version changes. Most projects have no MCP servers but every project has
 dependencies, so this is what gives a first session something to say. Dependencies
@@ -29,6 +32,8 @@ A URL whose path looks like it carries a secret (a long token or a UUID) is not
 sent either; it is reported as not scanned.
 The first time there is nothing to scan at all, the hook shows one line saying so
 (and how to scan a tool on demand), then never repeats it. That line makes no request.
+In a folder with nothing of its own whose servers were all graded before, it says
+once a day what they read ("your 3 tools are fine"), from the cache, no request.
 Each verdict (score, tier, grade, the signed per-tool digests) is kept in the cache
 file so the per-call gate (agentavow_pretool_gate.py) can act on it without a request.
 How the result reaches the person: Claude Code never displays a SessionStart hook's
@@ -60,7 +65,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.36"
+__version__ = "0.1.37"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -195,7 +200,9 @@ def _resolve_target(name: str, cfg: dict) -> dict | None:
     """Classify one MCP server config into a scannable target, or None to skip."""
     url = cfg.get("url") or cfg.get("endpoint")
     if isinstance(url, str) and url.startswith("http"):
-        if _is_local_host(url):
+        # A ${VAR} placeholder is expanded by Claude Code from the environment; the hook
+        # never reads the environment, so such a URL is not the real one: skip it.
+        if _is_local_host(url) or "${" in url:
             return None
         safe = _sanitize_url(url)
         if _has_secret_path(safe):
@@ -227,7 +234,10 @@ def _resolve_target(name: str, cfg: dict) -> dict | None:
     return None
 
 
-def _take(servers: object, seen: dict[str, dict]) -> None:
+def _take(servers: object, seen: dict[str, dict], scope: str = "project") -> None:
+    """Add each scannable server in an ``mcpServers`` map to ``seen``. ``scope`` says
+    where it came from: "user" (every session on this machine), "project" (this
+    folder) or "plugin" (bundled by an installed plugin)."""
     if not isinstance(servers, dict):
         return
     for sname, cfg in servers.items():
@@ -235,6 +245,7 @@ def _take(servers: object, seen: dict[str, dict]) -> None:
             continue
         t = _resolve_target(sname, cfg)
         if t:
+            t["scope"] = scope
             seen[sname] = t
 
 
@@ -304,7 +315,7 @@ def _targets() -> list[dict]:
     seen: dict[str, dict] = {}
     data = _read_json(pathlib.Path.home() / ".claude.json")
     if isinstance(data, dict):
-        _take(data.get("mcpServers"), seen)
+        _take(data.get("mcpServers"), seen, "user")
         projects = data.get("projects")
         if isinstance(projects, dict):
             for key in _cwd_keys():
@@ -317,7 +328,116 @@ def _targets() -> list[dict]:
         node = _read_json(path)
         if node is not None:
             _walk_for_servers(node, seen)
+    try:
+        _plugin_servers(seen)
+    except Exception:
+        pass  # fail-open: a plugin's config can never break the rest of the list
     return list(seen.values())
+
+
+# --------------------------------------------------------------------------- #
+# MCP servers bundled by installed Claude Code plugins
+# --------------------------------------------------------------------------- #
+OWN_PLUGIN = "agentavow-trust"
+OWN_HOSTS = ("agentavow.com", "agentgraph.co")  # our own connector: not graded by itself
+PLUGIN_DIRS_CAP = 50
+
+
+def _plugin_dirs() -> list[tuple[str, pathlib.Path]]:
+    """(plugin name, install folder) for each plugin Claude Code has installed for this
+    session: ``~/.claude/plugins/installed_plugins.json`` (user scope, or a project
+    scope for this folder; a plugin switched off in ``~/.claude/settings.json``
+    ``enabledPlugins`` is left out) and plugins synced from a claude.ai account
+    (``~/.claude/plugins/synced/<account>/<plugin>/``). Marketplace checkouts that are
+    not installed are never read."""
+    root = pathlib.Path.home() / ".claude" / "plugins"
+    settings = _read_json(pathlib.Path.home() / ".claude" / "settings.json")
+    enabled = settings.get("enabledPlugins") if isinstance(settings, dict) else None
+    enabled = enabled if isinstance(enabled, dict) else {}
+    here = _cwd_keys()
+    out: list[tuple[str, pathlib.Path]] = []
+    data = _read_json(root / "installed_plugins.json")
+    plugins = data.get("plugins") if isinstance(data, dict) else None
+    if isinstance(plugins, dict):
+        for key, entries in plugins.items():
+            if not isinstance(key, str) or enabled.get(key) is False:
+                continue
+            for e in entries if isinstance(entries, list) else [entries]:
+                if not isinstance(e, dict) or not isinstance(e.get("installPath"), str):
+                    continue
+                scope = e.get("scope") or "user"
+                if scope != "user" and str(e.get("projectPath") or "") not in here:
+                    continue
+                out.append((key.split("@", 1)[0], pathlib.Path(e["installPath"])))
+    try:
+        for account in sorted((root / "synced").iterdir()):
+            if not account.is_dir() or account.name.startswith("."):
+                continue
+            for d in sorted(account.iterdir()):
+                if d.is_dir() and not d.name.startswith(".") and (d / ".claude-plugin").is_dir():
+                    out.append(("", d))
+    except Exception:
+        pass
+    return out[:PLUGIN_DIRS_CAP]
+
+
+def _plugin_server_map(pdir: pathlib.Path) -> tuple[str, dict]:
+    """(the plugin's own name, its ``mcpServers`` map) from ``.claude-plugin/plugin.json``
+    (an inline map, or a path or list of paths inside the plugin) or the default
+    ``.mcp.json``. Both ``{"mcpServers": {...}}`` and a bare ``{name: config}`` file are
+    read."""
+    manifest = _read_json(pdir / ".claude-plugin" / "plugin.json")
+    manifest = manifest if isinstance(manifest, dict) else {}
+    name = manifest.get("name") if isinstance(manifest.get("name"), str) else ""
+    spec = manifest.get("mcpServers", "./.mcp.json")
+    servers: dict = {}
+    for part in spec if isinstance(spec, list) else [spec]:
+        if isinstance(part, dict):
+            servers.update(part)
+            continue
+        if not isinstance(part, str):
+            continue
+        try:
+            path = (pdir / part).resolve()
+            path.relative_to(pdir.resolve())  # stay inside the plugin folder
+        except Exception:
+            continue
+        node = _read_json(path)
+        if isinstance(node, dict):
+            inner = node.get("mcpServers")
+            servers.update(inner if isinstance(inner, dict) else node)
+    return name, {k: v for k, v in servers.items() if isinstance(k, str) and isinstance(v, dict)}
+
+
+def _own_connector(t: dict) -> bool:
+    host = (urllib.parse.urlsplit(t.get("url") or "").hostname or "").lower()
+    return host in OWN_HOSTS or host.endswith(tuple("." + h for h in OWN_HOSTS))
+
+
+def _plugin_servers(seen: dict[str, dict]) -> None:
+    """Add the MCP servers that installed plugins bring. Each is keyed by its own
+    name, as the per-call gate looks it up (a plugin's tool arrives as
+    ``mcp__plugin_<plugin>_<server>__<tool>`` and the gate tries every cut); when that
+    name is already taken by a different server here, it is keyed
+    ``plugin_<plugin>_<server>``, the gate's first candidate. AgentAvow's own
+    connector is left out."""
+    for key_name, pdir in _plugin_dirs():
+        name, servers = _plugin_server_map(pdir)
+        name = name or key_name
+        if name == OWN_PLUGIN:
+            continue
+        for sname, cfg in servers.items():
+            t = _resolve_target(sname, cfg)
+            if not t or _own_connector(t):
+                continue
+            if sname in seen and seen[sname]["id"] == t["id"]:
+                continue  # the same server, already listed from your own config
+            key = sname if sname not in seen and sname != META_KEY else f"plugin_{name}_{sname}"
+            if key in seen:
+                continue
+            t["name"] = key
+            t["scope"] = "plugin"
+            seen[key] = t
 
 
 # --------------------------------------------------------------------------- #
@@ -337,12 +457,21 @@ def _dep(registry: str, pkg: str, spec: str) -> dict:
 
 
 def _npm_deps(data: object) -> list[dict]:
-    """package.json → direct runtime dependencies only (not devDependencies, not
-    transitive). Local / git / URL specs have no registry grade and are skipped."""
-    if not isinstance(data, dict) or not isinstance(data.get("dependencies"), dict):
+    """package.json → direct runtime dependencies (not transitive). When there are none
+    (a tool, a template or a workspace root often lists only devDependencies), the
+    devDependencies are read instead. Local / git / URL specs have no registry grade
+    and are skipped."""
+    if not isinstance(data, dict):
+        return []
+    out = _npm_dep_map(data.get("dependencies"))
+    return out or _npm_dep_map(data.get("devDependencies"))
+
+
+def _npm_dep_map(deps: object) -> list[dict]:
+    if not isinstance(deps, dict):
         return []
     out = []
-    for name, spec in data["dependencies"].items():
+    for name, spec in deps.items():
         if not isinstance(name, str) or not isinstance(spec, str):
             continue
         low = spec.strip().lower()
@@ -425,24 +554,118 @@ def _pyproject_deps(text: str) -> list[dict]:
     return out
 
 
+_CARGO_KEY = re.compile(r"""^\s*("?)([A-Za-z0-9_-]+)\1\s*=\s*(.+?)\s*$""")
+
+
+def _cargo_entry(name: str, val: object) -> dict | None:
+    """One Cargo.toml dependency: ``name = "1.0"`` or ``name = { version = "1", ... }``
+    (``package = "real-name"`` renames it). A path, git or workspace dependency has no
+    crates.io grade and is skipped."""
+    if isinstance(val, str):
+        return _dep("crates", name, val)
+    if not isinstance(val, dict) or any(k in val for k in ("path", "git", "workspace")):
+        return None
+    real = val.get("package") if isinstance(val.get("package"), str) else name
+    ver = val.get("version") if isinstance(val.get("version"), str) else ""
+    return _dep("crates", real, ver)
+
+
+def _cargo_deps(text: str) -> list[dict]:
+    """Cargo.toml [dependencies] (crates.io), or a workspace root's
+    [workspace.dependencies] when the root has none. tomllib when available, else a
+    line reader for the two common forms."""
+    try:
+        import tomllib  # type: ignore[import-not-found]
+        data = tomllib.loads(text)
+        deps = data.get("dependencies")
+        if not deps:
+            deps = (data.get("workspace") or {}).get("dependencies")
+        items = list(deps.items()) if isinstance(deps, dict) else []
+    except Exception:
+        items = []
+        for table in ("dependencies", "workspace.dependencies"):
+            m = re.search(r"^\[" + re.escape(table) + r"\][ \t]*\n(.*?)(?=^\[|\Z)",
+                          text, re.S | re.M)
+            if not m:
+                continue
+            for line in m.group(1).splitlines():
+                hit = _CARGO_KEY.match(line.split("#", 1)[0])
+                if not hit:
+                    continue
+                raw = hit.group(3)
+                if raw.startswith(("'", '"')):
+                    items.append((hit.group(2), raw.strip("'\"")))
+                elif raw.startswith("{"):
+                    fields = dict(re.findall(r"""(\w+)\s*=\s*["']([^"']*)["']""", raw))
+                    if re.search(r"\b(path|git|workspace)\s*=", raw):
+                        fields["path"] = "x"
+                    items.append((hit.group(2), fields))
+            if items:
+                break
+    out = []
+    for name, val in items:
+        t = _cargo_entry(name, val) if isinstance(name, str) else None
+        if t:
+            out.append(t)
+    return out
+
+
+def _manifest_deps(folder: pathlib.Path) -> list[dict]:
+    """Every direct dependency the manifests in one folder declare."""
+    found: list[dict] = []
+    pj = _read_json(folder / "package.json")
+    if pj is not None:
+        found += _npm_deps(pj)
+    for fname, parse in (("requirements.txt", _requirements_deps),
+                         ("pyproject.toml", _pyproject_deps),
+                         ("Cargo.toml", _cargo_deps)):
+        try:
+            found += parse((folder / fname).read_text())
+        except Exception:
+            pass
+    return found
+
+
+# Folders never read for a sub-project's manifest: dependencies, builds, environments.
+_SKIP_SUBDIRS = frozenset({"node_modules", "venv", "env", "target", "dist", "build",
+                           "vendor", "site-packages", "__pycache__"})
+SUBPROJECTS_CAP = 5  # sub-folders with a manifest read in a workspace root
+SUBDIRS_SCAN_CAP = 60  # sub-folders looked at in one start
+
+
+def _subproject_deps(cwd: pathlib.Path) -> list[dict]:
+    """In a workspace root with nothing of its own to grade (a monorepo folder, a
+    folder of services), the manifests one level down: the first SUBPROJECTS_CAP
+    sub-folders with one, by name. Never in the home folder, where the sub-folders
+    are unrelated projects."""
+    try:
+        if cwd.resolve() == pathlib.Path.home().resolve():
+            return []
+        subdirs = sorted(d for d in cwd.iterdir()
+                         if d.is_dir() and not d.name.startswith(".")
+                         and d.name not in _SKIP_SUBDIRS)[:SUBDIRS_SCAN_CAP]
+    except Exception:
+        return []
+    found: list[dict] = []
+    projects = 0
+    for d in subdirs:
+        deps = _manifest_deps(d)
+        if deps:
+            found += deps
+            projects += 1
+            if projects >= SUBPROJECTS_CAP:
+                break
+    return found
+
+
 def _dependency_targets() -> list[dict]:
-    """Direct dependencies declared by the project in cwd, in manifest order; [] when
-    there is no manifest or the pass is off. Same package under two manifests → once."""
+    """Direct dependencies declared by the project in cwd, in manifest order (one level
+    down in a workspace root with none of its own); [] when there is no manifest or
+    the pass is off. Same package under two manifests → once."""
     if not _deps_enabled():
         return []
     cwd = _cwd()
-    found: list[dict] = []
-    pj = _read_json(cwd / "package.json")
-    if pj is not None:
-        found += _npm_deps(pj)
-    try:
-        found += _requirements_deps((cwd / "requirements.txt").read_text())
-    except Exception:
-        pass
-    try:
-        found += _pyproject_deps((cwd / "pyproject.toml").read_text())
-    except Exception:
-        pass
+    found = _manifest_deps(cwd) or _subproject_deps(cwd)
     seen: dict[str, dict] = {}
     for t in found:
         seen.setdefault(t["name"], t)
@@ -1111,8 +1334,9 @@ def _intro_message() -> str:
         if _install_source() == "plugin"
         else 'ask Claude "is <tool> safe?" or open https://agentavow.com/check'
     )
-    return ("AgentAvow: nothing to grade here yet — no remote MCP servers and no "
-            "package.json / requirements.txt in this folder. Add a server (for example "
+    return ("AgentAvow: nothing to grade here yet — no MCP servers it can grade and no "
+            "package.json, requirements.txt, pyproject.toml or Cargo.toml in this folder. "
+            "Add a server (for example "
             "`claude mcp add <name> <https url>` or `claude mcp add <name> -- npx <package>`) "
             "and it is graded before it is added and again at your next session start; open "
             "a project and its direct dependencies are graded too. To check any tool right "
@@ -1175,6 +1399,67 @@ def _show_intro_once() -> None:
     cache[META_KEY] = {"intro_shown": __version__}
     if _save_cache(cache):
         print(json.dumps({"systemMessage": _intro_message()}))
+
+
+def _fine_message(cache: dict, targets: list[dict]) -> str:
+    """'AgentAvow: your 3 tools are fine — all Safe to connect. …' for a session in a
+    folder with nothing of its own (no project servers, no dependencies) whose servers
+    (your user-scope servers and the ones your plugins bring) were all graded earlier.
+    Empty when any server here belongs to the project, or none has a grade yet."""
+    if not targets or any(t.get("scope") not in ("user", "plugin") for t in targets):
+        return ""
+    graded = []
+    for t in targets:
+        e = cache.get(t["name"])
+        if isinstance(e, dict) and e.get("id") == t["id"] and "score" in e:
+            graded.append((t["name"], e))
+    if not graded:
+        return ""
+    n = len(graded)
+    tools = f"{n} tool{'' if n == 1 else 's'}"
+    tail = (" Open a project folder and its direct dependencies are checked too. "
+            "Ask for the AgentAvow pre-check for details.")
+    worst = _worst(graded)
+    if not worst:
+        return (f"AgentAvow: your {tools} {'is' if n == 1 else 'are'} fine — "
+                f"{'Safe' if n == 1 else 'all Safe'} to connect." + tail)
+    name, r = worst
+    return (f"AgentAvow: your {tools}: {_counts(graded)} "
+            f"(needs attention: '{name}' {_headline(r)}{_why(r)})." + tail)
+
+
+FINE_SHOWN_KEY = "fine_shown_day"  # meta: the day the "your N tools" line was last shown
+
+
+def _show_fine_once_a_day(cache: dict, targets: list[dict], now: float) -> bool:
+    """In a folder with nothing of its own, say once a day what the person's own tools
+    read, instead of the intro line or silence. Shown to the person only; recorded in
+    the cache so it never repeats that day (and is skipped if the cache can't be
+    written). No request. True when shown."""
+    msg = _fine_message(cache, targets)
+    if not msg:
+        return False
+    day = time.strftime("%Y-%m-%d", time.localtime(now))
+    meta = cache.get(META_KEY) if isinstance(cache.get(META_KEY), dict) else {}
+    if meta.get(FINE_SHOWN_KEY) == day:
+        return False
+    cache[META_KEY] = dict(meta, **{FINE_SHOWN_KEY: day})
+    if not _save_cache(cache):
+        return False
+    earlier = _previously_graded(cache, targets, [], [])
+    print(json.dumps({
+        "systemMessage": msg,
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": (
+                "AgentAvow pre-check: nothing new since the last session start; the user was "
+                f"shown: \"{msg}\" Do NOT mention AgentAvow unless the user asks about it. If "
+                "they ask for the pre-check, this is the complete current list:\n"
+                + "\n".join(earlier) + "\n" + _LEGEND
+                + " Full reports: https://agentavow.com/check"),
+        },
+    }))
+    return True
 
 
 def _summary(graded: list[tuple[str, dict]], elsewhere: int = 0, deps: str = "",
@@ -1318,6 +1603,11 @@ def main() -> None:
         if install_clause:
             _print_install_only(install_clause.strip())
             return
+        try:
+            if not deps and _show_fine_once_a_day(cache, targets, now):
+                return
+        except Exception:
+            pass
         _quiet_context(cache, targets, deps)
         return
 

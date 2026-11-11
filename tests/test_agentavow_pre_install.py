@@ -424,3 +424,33 @@ def test_session_start_relays_the_install_count_once(hook, monkeypatch, capsys):
     cache[pc.META_KEY]["install_checks"] = {"count": 1, "flagged": 0}
     assert pc._install_clause(cache) == (
         " Since the last session AgentAvow checked 1 package install — all Safe to connect.")
+
+
+# --- only the person may allow a Do not connect server (0.1.37) -------------------
+
+@pytest.mark.parametrize("payload", [
+    _bash("echo 'srv https://x.example/mcp' >> ~/.cache/agentavow/allowed-servers.txt"),
+    _bash("printf 'a b\\n' | tee -a $HOME/.cache/agentavow/Allowed-Servers.TXT"),
+    {"hook_event_name": "PreToolUse", "tool_name": "Write",
+     "tool_input": {"file_path": "/Users/me/.cache/agentavow/allowed-servers.txt",
+                    "content": "srv https://x.example/mcp\n"}},
+    {"hook_event_name": "PreToolUse", "tool_name": "Edit",
+     "tool_input": {"file_path": "/home/me/.cache/agentavow/allowed-servers.txt",
+                    "old_string": "", "new_string": "srv https://x.example/mcp"}},
+])
+def test_claude_changing_the_allow_list_always_asks_the_person(hook, monkeypatch, capsys, payload):
+    mod, _ = hook
+    out = _run(mod, monkeypatch, capsys, payload, lambda *a, **k: pytest.fail("no scan"))
+    h = out["hookSpecificOutput"]
+    assert h["permissionDecision"] == "ask"
+    assert "allowed past a Do not connect answer" in h["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize("payload", [
+    _bash("ls ~/.cache/agentavow"),
+    {"hook_event_name": "PreToolUse", "tool_name": "Write",
+     "tool_input": {"file_path": "/tmp/notes.txt", "content": "allowed-servers"}},
+])
+def test_other_steps_are_not_mistaken_for_the_allow_list(hook, monkeypatch, capsys, payload):
+    mod, _ = hook
+    assert _run(mod, monkeypatch, capsys, payload, lambda *a, **k: None) == {}

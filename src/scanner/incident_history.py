@@ -185,6 +185,35 @@ def _range_affects(rng: dict, eco: str, version: str) -> bool:
     return affected
 
 
+def _fix_after(rng: dict, eco: str, version: str) -> str | None:
+    """The fix that closes the stretch of ``rng`` the version sits in. One range can hold
+    several stretches ([introduced 0, fixed 2.0.1, introduced 2025.9.24]); the first
+    ``fixed`` event is the right fix only for the first stretch."""
+    cur = _parse_version(eco, version)
+    if cur is None:
+        return None
+    active = False
+    for ev in rng.get("events") or []:
+        if "introduced" in ev:
+            intro = ev["introduced"]
+            iv = _parse_version(eco, intro) if intro != "0" else None
+            if intro == "0" or (iv is not None and cur >= iv):
+                active = True
+        elif "fixed" in ev:
+            fv = _parse_version(eco, ev["fixed"])
+            if fv is None:
+                continue
+            if cur >= fv:
+                active = False
+            elif active:
+                return str(ev["fixed"])
+        elif "last_affected" in ev:
+            lv = _parse_version(eco, ev["last_affected"])
+            if lv is not None and cur > lv:
+                active = False
+    return None
+
+
 def advisory_affects(vuln: dict, eco: str, version: str | None,
                      name: str | None = None) -> bool:
     """Does this advisory affect ``version`` of package ``name`` (explicit versions list
@@ -205,12 +234,19 @@ def _fixed_in(vuln: dict, eco: str | None = None, name: str | None = None,
     if version and eco:
         # Prefer the range the scanned version sits in (an advisory can list one per
         # release line: 8.10.x, 9.1.x, 10.1.x).
+        in_a_range = False
         for aff in entries:
             for r in aff.get("ranges") or []:
                 if _range_affects(r, eco, version):
-                    for ev in r.get("events") or []:
-                        if "fixed" in ev:
-                            return str(ev["fixed"])
+                    in_a_range = True
+                    fix = _fix_after(r, eco, version)
+                    if fix:
+                        return fix
+        if in_a_range:
+            # The scanned version's own range has no fix (server-everything's date-
+            # numbered line, 2025.9.24 to 2026.8.31): never name another range's fix as
+            # its upgrade.
+            return None
     for aff in entries:
         for r in aff.get("ranges") or []:
             for ev in r.get("events") or []:
@@ -317,15 +353,46 @@ def summarize_incidents(vulns: list[dict], version: str | None = None,
     }
 
 
-async def fetch_incident_history(
-    surface: str, name: str, version: str | None = None,
-) -> dict:
-    """Query OSV for the package's own MAL- and malware-class (CWE-506) GHSA advisories
-    (incident history) and its other advisories. Fail-open; returns
-    ``{"checked": False}`` on any error or unsupported ecosystem."""
+def exact_version_incidents(vulns: list[dict], version: str | None, eco: str | None,
+                            name: str | None) -> list[str]:
+    """Ids of compromise records (MAL- or CWE-506 GHSA) that list ``version`` itself in
+    this package's ``affected[].versions``. A range alone doesn't count: this is what
+    lets a version the registry removed read Do not connect without its code, so a
+    record for a neighbouring version must never trip it."""
+    if not version:
+        return []
+    out: list[str] = []
+    for v in vulns or []:
+        if not isinstance(v, dict) or not _is_incident(v):
+            continue
+        for aff in _affected_entries(v, eco, name):
+            vers = aff.get("versions") if isinstance(aff, dict) else None
+            if isinstance(vers, list) and version in [str(x) for x in vers]:
+                vid = str(v.get("id") or "")
+                if vid and vid not in out:
+                    out.append(vid)
+                break
+    return out
+
+
+def any_record_lists_version(vulns: list[dict], version: str | None, eco: str | None,
+                             name: str | None) -> bool:
+    """True when any OSV record lists ``version`` itself: proof the version existed."""
+    if not version:
+        return False
+    for v in vulns or []:
+        for aff in (_affected_entries(v, eco, name) if isinstance(v, dict) else []):
+            vers = aff.get("versions") if isinstance(aff, dict) else None
+            if isinstance(vers, list) and version in [str(x) for x in vers]:
+                return True
+    return False
+
+
+async def fetch_osv_vulns(surface: str, name: str) -> list[dict] | None:
+    """Every OSV record for the package, or None when OSV can't be read (fail-open)."""
     eco = _OSV_ECOSYSTEM.get((surface or "").lower())
     if not eco or not name:
-        return {"checked": False}
+        return None
     try:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
             resp = await client.post(
@@ -333,7 +400,20 @@ async def fetch_incident_history(
             )
             resp.raise_for_status()
             vulns = resp.json().get("vulns") or []
-    except (httpx.HTTPError, ValueError, KeyError):
+    except (httpx.HTTPError, ValueError, KeyError, AttributeError):
+        return None
+    return [v for v in vulns if isinstance(v, dict)]
+
+
+async def fetch_incident_history(
+    surface: str, name: str, version: str | None = None,
+) -> dict:
+    """Query OSV for the package's own MAL- and malware-class (CWE-506) GHSA advisories
+    (incident history) and its other advisories. Fail-open; returns
+    ``{"checked": False}`` on any error or unsupported ecosystem."""
+    eco = _OSV_ECOSYSTEM.get((surface or "").lower())
+    vulns = await fetch_osv_vulns(surface, name)
+    if vulns is None or not eco:
         return {"checked": False}
     summary = summarize_incidents(vulns, version, eco, name)
     # The package's own (non-MAL) advisories ride along; scan.py turns the ones that

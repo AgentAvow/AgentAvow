@@ -499,6 +499,14 @@ async def _scheduler_loop(interval: int = SCHEDULER_INTERVAL) -> None:
         except Exception:
             logger.exception("Agent cleanup failed")
 
+        # Job 12: AgentAvow's own ERC-8004 identity on Base (tokenURI + owner unchanged).
+        try:
+            from src.jobs.erc8004_self_watch import run_self_watch
+
+            await run_self_watch()
+        except Exception:
+            logger.exception("ERC-8004 self watch failed")
+
         # Job 9: [REMOVED] Moltbook auto-import — synthetic data removed March 2026
 
         # Job 10: [DISABLED] GitHub issue outreach — killed March 2026.

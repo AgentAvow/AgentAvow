@@ -157,6 +157,14 @@ CASES = [
         {"id": "GHSA-a", "affects_scanned_version": True, "fixed_in": "3.0.1"},
         {"id": "GHSA-old", "affects_scanned_version": False, "fixed_in": "9.9.9"}]),
      "review", True, "a published advisory affects this version (GHSA-a); fixed in 3.0.1"),
+    ("advisory_fix_mixed_date_and_semver_names_none", _scan(88, 200, advisories=[
+        {"id": "GHSA-a", "affects_scanned_version": True, "fixed_in": "2.0.1"},
+        {"id": "GHSA-b", "affects_scanned_version": True, "fixed_in": "2026.9.1"}]),
+     "review", True, "a published advisory affects this version (GHSA-a)"),
+    ("advisory_fix_all_date_numbered_picks_highest", _scan(88, 200, advisories=[
+        {"id": "GHSA-a", "affects_scanned_version": True, "fixed_in": "2025.9.24"},
+        {"id": "GHSA-b", "affects_scanned_version": True, "fixed_in": "2026.1.14"}]),
+     "review", True, "a published advisory affects this version (GHSA-a); fixed in 2026.1.14"),
     ("advisory_in_incident_history", _scan(88, 200, incident_history={"advisories": [
         {"id": "PYSEC-1", "affects_scanned_version": True}]}),
      "review", True, "a published advisory affects this version (PYSEC-1)"),
@@ -509,6 +517,14 @@ CASES = [
                              coverage_gaps={"x402_code_unread": True}),
      "review", True, "one high finding in its listing: the paid endpoint uses plain"
                      " http:// (http://api.example/x)"),
+    ("x402_live_payee_moved", _scan(60, 1, [_f("high", "the endpoint asks to pay a "
+                                               "different address than its listing says",
+                                               category="payment_terms",
+                                               file_path="x402:live-402")],
+                                    high=1, coverage={"surface": "x402"},
+                                    coverage_gaps={"x402_code_unread": True}),
+     "review", True, "one high finding in its live payment request: the endpoint asks to"
+                     " pay a different address than its listing says"),
     # ── A2A Agent Card (src/scanner/a2a_scan.py; files = skills) ─────────────────
     ("a2a_clean_thin", _scan(74, 2, coverage={"surface": "a2a"}),
      "safe", True, "agent card clean; agent code not inspected"),
