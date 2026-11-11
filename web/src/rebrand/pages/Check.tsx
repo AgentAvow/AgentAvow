@@ -2034,13 +2034,13 @@ function A2aResult({ card }: { card: string }) {
                   <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Skills it declares</h3>
                   <div className="mt-3 flex flex-col gap-3">
                     {skills.slice(0, 40).map((s) => (
-                      <div key={s.id} className="text-[13px]">
+                      <div key={s.id} className="text-[13px] min-w-0 [overflow-wrap:anywhere]">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-semibold">{s.name || s.id}</span>
                           {!s.authenticated && <span className="font-mono text-[11px] text-text-muted">no auth</span>}
                           {s.capabilities.map((c) => <span key={c} className="font-mono text-[11px] text-warning bg-warning/10 border border-warning/25 rounded-full px-2 py-0.5">{c}</span>)}
                         </div>
-                        {s.description && <div className="text-[12.5px] text-text-muted">{s.description}</div>}
+                        {s.description && <div className="text-[12.5px] text-text-muted [overflow-wrap:anywhere]">{s.description}</div>}
                       </div>
                     ))}
                   </div>
