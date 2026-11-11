@@ -220,7 +220,6 @@ export default function RebrandForDevelopers() {
               [true, 'Public GitHub repos and skills: the GitHub topic'],
               [true, "npm, PyPI, crates: automatic when the package links to a repo you've claimed, or a keyword you publish"],
               [true, <>MCP servers: return the code in an <code className={codeCls}>X-AgentAvow-Verify</code> header or <code className={codeCls}>serverInfo</code></>],
-              [false, 'Docker images and Hugging Face models'],
             ]} />
             <div className="mt-auto pt-2 flex flex-wrap gap-2">
               <Link to={rp('/rebrand/tools')} className={btnPrimary}>Claim your tool</Link>
@@ -242,8 +241,6 @@ export default function RebrandForDevelopers() {
             </div>
             <Today rows={[
               [true, 'GitHub repos, npm, PyPI and crates packages, and MCP servers'],
-              [false, 'A single skill inside a collection, A2A agents'],
-              [false, "A private repo, until it's published"],
             ]} />
             <div className="mt-auto pt-2 flex flex-wrap gap-2">
               <a href="#badge" className={btnGhost}>Styles and the website widget ↓</a>
@@ -262,8 +259,6 @@ export default function RebrandForDevelopers() {
             <Today rows={[
               [true, 'A private report (GitHub App: kept and re-checked daily; token: one check, nothing kept)'],
               [true, '"Publish to search" for GitHub App repos, which also turns on the badge'],
-              [false, 'A badge for a private README without publishing'],
-              [false, 'Publishing a one-time token check'],
             ]} />
             <div className="mt-auto pt-2 flex flex-wrap gap-2">
               <Link to={rp('/rebrand/tools') + '?private=1'} className={btnPrimary}>Check a private repo</Link>
