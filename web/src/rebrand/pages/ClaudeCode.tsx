@@ -121,7 +121,7 @@ function Install() {
 const ACTIONS: [string, string, string][] = [
   ['Safe to connect', 'text-success', 'Stays silent. A tool that cleared the full gate reads Safe to connect · Certified.'],
   ['Review before you connect', 'text-warning', 'One line with the reason. The install goes ahead.'],
-  ['Do not connect', 'text-danger', 'Before an add or install, Claude Code asks you first. Calls to a server that is already connected are stopped, with the report link.'],
+  ['Do not connect', 'text-danger', 'Before an add or install, Claude Code asks you first. Calls to a server that is already connected are stopped, with the report link, unless you allowed that server.'],
   ['Tool definition changed', 'text-primary-light', 'Claude Code asks before the call.'],
 ]
 
