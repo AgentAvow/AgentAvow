@@ -860,6 +860,7 @@ function Hero() {
     ['Container', 'docker:nginx'],
     ['MCP server', 'mcp:https://mcp.deepwiki.com/mcp'],
     ['A2A agent card', 'a2a:https://agentavow.com/.well-known/agent-card.json'],
+    ['ERC-8004 agent', 'erc8004:base:1178486'],
   ]
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-20 text-center">
@@ -1541,7 +1542,8 @@ interface Erc8004Response {
   other_services: Array<{ name: string; endpoint: string }>
   file_findings: Array<{ severity: string; name: string; category: string; where: string }>
   registration_error?: string | null
-  headline: { decision: string; reason: string; coverage_note?: string; certified?: boolean }
+  /** decision is null while a listed tool is still being checked (`checking` > 0). */
+  headline: { decision: string | null; reason: string; coverage_note?: string; certified?: boolean; checking?: number }
   coverage_gaps: Record<string, unknown>
 }
 
@@ -1589,9 +1591,11 @@ function Erc8004Result({ chain, agentId }: { chain: string; agentId: string }) {
   if (isError || !data) return <Erc8004CouldntCheck chain={chain} agentId={agentId} detail={errorDetail(error)} />
   const a = data.agent
   const h = data.headline
-  const d = (h.decision in ERC_ANSWER ? h.decision : 'review') as keyof typeof ERC_ANSWER
-  const [icon, fg, border] = ERC_ANSWER[d]
-  const phrase = decisionPhrase(d).phrase
+  // No answer yet while listed tools are still being checked: never show Review for queued scans.
+  const pendingAnswer = h.decision == null
+  const d = (h.decision && h.decision in ERC_ANSWER ? h.decision : 'review') as keyof typeof ERC_ANSWER
+  const [icon, fg, border] = pendingAnswer ? ['…', 'text-text', 'border-border'] : ERC_ANSWER[d]
+  const phrase = pendingAnswer ? 'Checking its tools' : decisionPhrase(d).phrase
   const name = a.name || `ERC-8004 agent #${a.agent_id}`
   const checking = data.tools.some((t) => t.state === 'checking')
   const reason = h.reason ? h.reason.charAt(0).toUpperCase() + h.reason.slice(1) + '.' : ''
@@ -1614,9 +1618,10 @@ function Erc8004Result({ chain, agentId }: { chain: string; agentId: string }) {
         chips={<span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">ERC-8004 agent</span>}
         intro={a.description ? <p className="mt-2 text-[13.5px] text-text-muted max-w-[68ch] [overflow-wrap:anywhere]">{a.description}</p> : undefined} />
       <Reveal>
-        <div className={`mt-6 glass rounded-2xl border ${border} px-6 py-6`} data-decision={d} data-certified="no" data-testid="answer-card">
+        <div className={`mt-6 glass rounded-2xl border ${border} px-6 py-6`} data-decision={pendingAnswer ? 'checking' : d} data-certified="no" data-testid="answer-card">
           <div className={`flex items-center gap-2.5 text-[22px] sm:text-[26px] font-extrabold tracking-tight leading-tight ${fg}`}><span aria-hidden="true">{icon}</span><span>{phrase}</span></div>
           <p className="mt-2 text-[14.5px] text-text-muted max-w-[68ch]">{reason}{h.coverage_note ? <> <span className="font-mono text-[12.5px]">({h.coverage_note})</span></> : null}</p>
+          {pendingAnswer ? <p className="mt-2 text-[13px] text-text-muted max-w-[68ch]">{polls < 12 ? 'The answer appears here when the checks finish; this page updates on its own.' : 'The checks are taking longer than usual. Use Recheck in a minute.'}</p> : null}
           <p className="mt-3 text-[12.5px] text-text-muted max-w-[68ch]">This answer is about the tools the agent lists: Safe only when every one was checked and reads Safe. Each tool&apos;s answer is signed on its own page. The agent&apos;s on-chain identity is shown below and is not part of any score. <Link to={rp('/rebrand/docs/erc8004-agents')} className="text-primary-light hover:text-primary">How this works</Link></p>
         </div>
       </Reveal>

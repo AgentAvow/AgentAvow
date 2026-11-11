@@ -315,6 +315,9 @@ async def scan_erc8004_agent(
     not_checked = sum(1 for t in tools if t.state != "done")
     if not_checked:
         gaps["tools_not_checked"] = not_checked
+    being_checked = sum(1 for t in tools if t.state == "checking")
+    if being_checked:
+        gaps["tools_being_checked"] = being_checked
     return AgentResponse(
         agent=AgentIdentity(
             chain=a["chain"], chain_id=a["chain_id"], agent_id=a["agent_id"],
