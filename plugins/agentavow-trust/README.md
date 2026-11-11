@@ -75,22 +75,32 @@ call and says nothing.
 
 If you have looked at a server that reads "Do not connect" and want to use it anyway,
 add one line for it to `~/.cache/agentavow/allowed-servers.txt` (create the file if it
-is not there). The refusal message gives you the exact line: the server's name, a space,
-and the URL or package its grade is for. For example:
+is not there). When the gate stops the server, it shows you (not Claude) the exact line:
+the server's name, the URL or package its grade is for, and a confirmation code. For
+example:
 
 ```
-example-server https://mcp.example.com/mcp
+example-server https://mcp.example.com/mcp K7Q2M-9XA3B
 ```
 
+- The code is what makes the line yours. It is shown only to you, in the gate's notice;
+  Claude's copy of the refusal never carries it, so a line Claude writes, by whatever
+  route, allows nothing. Don't paste the code into the chat. It comes from a random key
+  the gate keeps in `~/.cache/agentavow/allow.key` (readable only by you); deleting that
+  file turns every allow line off, and the next refusal shows new codes.
 - It allows that one server only. There are no patterns and no "allow everything": a
-  line that is not exactly `<name> <graded URL or package>` allows nothing.
+  line that is not exactly `<name> <graded URL or package> <code>` allows nothing. A
+  line written for 0.1.37 (without a code) no longer counts; the next refusal shows the
+  new line.
 - It is tied to what was graded. If the server's config later points at a different URL
   or package, the old line no longer matches and the gate stops calls again.
 - A changed tool definition still asks, allowed or not.
 - Each session shows one note when an allowed server's tools run.
 - Lines starting with `#` are comments. Delete a line to stop allowing that server.
-- Claude cannot quietly allow a server for you: if Claude tries to write or run anything
-  that names this file, the install-time hook asks you first.
+- As a second check, if Claude tries to run a command that names AgentAvow's folder
+  `~/.cache/agentavow` (or a file in it), or to write into that folder, the
+  install-time hook asks you first, and so does the gate for an MCP tool call that
+  names it.
 
 Settings, all optional, read from the environment and never sent anywhere:
 
@@ -181,15 +191,17 @@ for example) is reported once and retried after a week. Delete the file to scan
 everything again.
 
 **The gate reads** the same config files, for the URL and any `Authorization` header
-of the one server being called, your allow list `~/.cache/agentavow/allowed-servers.txt`
-if it exists, plus its own `AGENTAVOW_GATE*` settings from the
+of the one server being called, your allow list `~/.cache/agentavow/allowed-servers.txt` and its key
+if they exist, plus its own `AGENTAVOW_GATE*` settings from the
 environment. **It sends** one short `initialize` + `tools/list` exchange to that
 server, over the URL in your config (`user:password@` and `#fragment` removed), with
 the configured `Authorization` header if there is one, as Claude Code itself does when
 it connects. A header that still holds a `${...}` placeholder is not expanded and not
 sent. Nothing goes to AgentAvow, and the header is never written to the cache or
 printed. The gate writes the digests it last saw to the same cache file; the graded
-digests are never overwritten by it. It never writes the allow list.
+digests are never overwritten by it. It never writes the allow list. The first time it
+stops a server it creates `~/.cache/agentavow/allow.key`, a random key readable only by
+you that the confirmation codes come from; the key never leaves your machine.
 
 The first time the hook finds nothing to scan (no MCP servers it can grade and no
 manifest), it shows one line saying so and how to scan a tool on demand. That line is

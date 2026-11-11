@@ -22,9 +22,11 @@ not connect" — then the 0-100 score (" · Certified" when the tool carries the
                        one gets.
   • anything else   -> silent, exit 0 (fail-open). A hook bug can never block a command.
 
-A step that writes or runs anything naming the per-call gate's allow list
-(~/.cache/agentavow/allowed-servers.txt) always asks the person first: only they may
-allow a server that reads Do not connect.
+A command that names AgentAvow's own folder (~/.cache/agentavow: the grades, the
+per-call gate's allow list and the key behind its confirmation codes), or a write into
+that folder, always asks the person first. That is a second line of defence: an allow
+line only counts with a code the gate shows the person alone, so a line Claude writes
+allows nothing however it reaches the file.
 
 The graded server is written to the same cache the session-start hook reads, so it is
 not reported a second time at the next session start. Reuses the precheck's target
@@ -34,6 +36,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import pathlib
 import re
 import shlex
@@ -41,7 +44,7 @@ import sys
 import time
 import urllib.error
 
-__version__ = "0.1.37"
+__version__ = "0.1.38"
 
 TIMEOUT = 12  # seconds per scan: an install is rare, so a slower fresh scan is fine
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -431,30 +434,84 @@ def _line(t: dict, r: dict | None, pc) -> str:
 
 
 ALLOW_FILE_NAME = "allowed-servers.txt"  # the per-call gate's allow list (same name there)
+ALLOW_KEY_NAME = "allow.key"             # the key its confirmation codes come from
 
 
-def _touches_allow_list(payload: dict) -> bool:
-    """Whether Claude is about to write or run something that names the per-call gate's
-    allow list. Only the person may allow a Do not connect server, so such a step is
-    always put to them, whatever Claude's own permissions say."""
+def _own_dir() -> pathlib.Path:
+    return pathlib.Path.home() / ".cache" / "agentavow"
+
+
+# A second line of defence only: an allow line Claude writes does not count anyway (it
+# lacks the code the gate shows the person alone). These catch the plain and the common
+# disguised spellings of AgentAvow's folder in a shell command, so reading the key or
+# changing the files is put to the person; no string match can catch every disguise.
+_NAMED_FILE = re.compile(r"allowed[-_]?servers|allow\.key")
+_STANDALONE = re.compile(r"(?<![\w.@-])agentavow(?![\w.-])")
+# The GitHub org and repo (AgentAvow/AgentAvow, github.com/AgentAvow/...), not the folder.
+_REPO_SLUG = re.compile(r"agentavow/agentavow|(?:github(?:usercontent)?|gitlab)\.com/+agentavow")
+_PATH_PART = re.compile(r"/agentavow(?![\w.-])")
+_CACHE_DIR = re.compile(r"\.cache\b|xdg_cache_home")
+_GLOB_AFTER_CACHE = re.compile(r"\.cache/+[^\s/]*[*?\[]")
+_CD_INTO = re.compile(r"\b(?:cd|pushd|chdir)\b[\s(]+[^;&|\n]*agentavow")
+
+
+def _shell_names_own_files(command: str) -> bool:
+    """Whether a shell command names AgentAvow's cache folder or one of its files, in
+    any of the spellings a person or a script would use: ~ / $HOME / ${HOME} /
+    expanduser, quotes or backslashes inside a word, path pieces joined in Python,
+    `cd` into the folder, a glob over ~/.cache. Our own repo and package names
+    (AgentAvow/AgentAvow, agentavow-trust, agentavow_precheck) do not count."""
+    s = re.sub(r"[\"'`\\]", "", command.lower())
+    if _NAMED_FILE.search(s):
+        return True
+    t = _REPO_SLUG.sub("", s)
+    if _PATH_PART.search(t):  # .../agentavow as a folder, however the rest is spelled
+        return True
+    standalone = bool(_STANDALONE.search(t))
+    if _CACHE_DIR.search(s) and (standalone or _GLOB_AFTER_CACHE.search(s)
+                                 or "allow" in s):
+        return True
+    return standalone and bool(_CD_INTO.search(s) or re.search(r"allow|scanned", s))
+
+
+def _path_in_own_dir(raw: str, cwd: object) -> bool:
+    """Whether a file path lands in AgentAvow's folder, symlinks resolved."""
+    if not raw:
+        return False
+    if _shell_names_own_files(raw):
+        return True
+    try:
+        base = pathlib.Path(str(cwd)) if isinstance(cwd, str) and cwd else pathlib.Path.cwd()
+        path = pathlib.Path(raw).expanduser()
+        path = path if path.is_absolute() else base / path
+        real = pathlib.Path(os.path.realpath(path))
+        own = pathlib.Path(os.path.realpath(_own_dir()))
+        return real == own or own in real.parents
+    except Exception:
+        return False
+
+
+def _touches_own_files(payload: dict) -> bool:
+    """Whether Claude is about to run something that names AgentAvow's own files, or to
+    write or edit a file in its folder. Only the person may allow a Do not connect
+    server, so such a step is always put to them, whatever Claude's own permissions say."""
     inp = payload.get("tool_input")
     if not isinstance(inp, dict):
         return False
     tool = str(payload.get("tool_name") or "")
     if tool == "Bash":
-        text = str(inp.get("command") or "")
-    elif tool in ("Write", "Edit", "MultiEdit"):
-        text = str(inp.get("file_path") or "")
-    else:
-        return False
-    low = text.lower()
-    return ALLOW_FILE_NAME in low or ("allowed-servers" in low and "agentavow" in low)
+        return _shell_names_own_files(str(inp.get("command") or ""))
+    if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
+        raw = inp.get("file_path") or inp.get("notebook_path") or ""
+        return _path_in_own_dir(str(raw), payload.get("cwd"))
+    return False
 
 
 def _ask_about_allow_list() -> None:
-    reason = ("AgentAvow: this changes the list of servers you have allowed past a Do not "
-              "connect answer (~/.cache/agentavow/allowed-servers.txt). Only approve it if "
-              "you reviewed that server yourself and asked for this.")
+    reason = ("AgentAvow: this reads or changes AgentAvow's own files (~/.cache/agentavow: "
+              "the grades, the list of servers you allowed past a Do not connect answer, "
+              "and the key behind its confirmation codes). Only approve it if you asked "
+              "for this yourself.")
     print(json.dumps({"systemMessage": reason, "hookSpecificOutput": {
         "hookEventName": "PreToolUse", "permissionDecision": "ask",
         "permissionDecisionReason": reason}}))
@@ -468,7 +525,7 @@ def main() -> None:
     if not isinstance(payload, dict) or payload.get("hook_event_name") not in (None, "PreToolUse"):
         return
     try:
-        if _touches_allow_list(payload):
+        if _touches_own_files(payload):
             _ask_about_allow_list()
             return
     except Exception:

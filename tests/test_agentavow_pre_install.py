@@ -426,31 +426,101 @@ def test_session_start_relays_the_install_count_once(hook, monkeypatch, capsys):
         " Since the last session AgentAvow checked 1 package install — all Safe to connect.")
 
 
-# --- only the person may allow a Do not connect server (0.1.37) -------------------
+# --- only the person may read or change AgentAvow's own files (0.1.37, widened 0.1.38) -
+# The second line of defence: an allow line Claude writes lacks the person's code and
+# allows nothing anyway (tests/test_agentavow_pretool_gate.py). These are attack twins
+# for the spellings a prompt-injected Claude would try first.
 
-@pytest.mark.parametrize("payload", [
-    _bash("echo 'srv https://x.example/mcp' >> ~/.cache/agentavow/allowed-servers.txt"),
-    _bash("printf 'a b\\n' | tee -a $HOME/.cache/agentavow/Allowed-Servers.TXT"),
-    {"hook_event_name": "PreToolUse", "tool_name": "Write",
-     "tool_input": {"file_path": "/Users/me/.cache/agentavow/allowed-servers.txt",
-                    "content": "srv https://x.example/mcp\n"}},
-    {"hook_event_name": "PreToolUse", "tool_name": "Edit",
-     "tool_input": {"file_path": "/home/me/.cache/agentavow/allowed-servers.txt",
-                    "old_string": "", "new_string": "srv https://x.example/mcp"}},
-])
-def test_claude_changing_the_allow_list_always_asks_the_person(hook, monkeypatch, capsys, payload):
-    mod, _ = hook
+def _ask_reason(mod, monkeypatch, capsys, payload):
     out = _run(mod, monkeypatch, capsys, payload, lambda *a, **k: pytest.fail("no scan"))
     h = out["hookSpecificOutput"]
     assert h["permissionDecision"] == "ask"
-    assert "allowed past a Do not connect answer" in h["permissionDecisionReason"]
+    return h["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize("cmd", [
+    # plain
+    "echo 'srv https://x.example/mcp' >> ~/.cache/agentavow/allowed-servers.txt",
+    "printf 'a b\\n' | tee -a $HOME/.cache/agentavow/Allowed-Servers.TXT",
+    # obfuscated paths: quotes and backslashes inside words, ${HOME}, a glob, cd + variable
+    "echo x >> ~/.cache/agent''avow/allowed-'servers'.txt",
+    'echo x >> "${HOME}/.cache/agent"avow/al\\lowed-servers.txt',
+    "echo x >> ~/.cache/agent*/allow*",
+    "echo x >> ~/.ca*/agentavow/x",
+    "cd ~/.cache/agentavow && f=allowed; echo x >> $f-servers.txt",
+    "cd ~/.cache && cd agentavow && echo x >> \"$(ls | grep allow)\"",
+    "cd agentavow; echo x >> \"$F\"",
+    "D=$HOME/.cache; echo x >> $D/agentavow/$N",
+    "f=~/.cache/agentavow; printf '%s\\n' x >> $f/$(echo YWxsb3dlZA== | base64 -d)",
+    # reading the key behind the codes
+    "cat ~/.cache/agentavow/allow.key",
+    "xxd \"$HOME/.cache/agentavow/\"*",
+    "cat ~/.cache/*/allow*",
+    # python -c and friends
+    "python3 -c \"import pathlib; (pathlib.Path.home()/'.cache'/'agentavow'/'allowed-servers.txt')"
+    ".write_text('srv x')\"",
+    "python3 -c \"import os; open(os.path.join(os.path.expanduser('~'), '.cache', 'agentavow', "
+    "'a'+'llowed-servers.txt'), 'a').write('x')\"",
+    "python3 -c \"import os;d=os.path.expanduser('~/.cache/agentavow');open(d+'/k','w')\"",
+    "node -e \"require('fs').appendFileSync(require('os').homedir()+'/.cache/agentavow/x','y')\"",
+    "XDG_CACHE_HOME=/x; ls $XDG_CACHE_HOME/agentavow",
+    # cp / mv / tee / ln from another file
+    "cp /tmp/list ~/.cache/agentavow/allowed-servers.txt",
+    "mv /tmp/l \"$HOME/.cache/agentavow/\"",
+    "tee ~/.cache/agentavow/a < /tmp/l",
+    "ln -sf /tmp/mine ~/.cache/agentavow/allowed-servers.txt",
+    "ln -s ~/.cache/agentavow /tmp/av",
+    "rsync /tmp/l ~/.cache/agentavow/",
+])
+def test_shell_steps_on_agentavow_files_ask_the_person(hook, monkeypatch, capsys, cmd):
+    mod, _ = hook
+    reason = _ask_reason(mod, monkeypatch, capsys, _bash(cmd))
+    assert "AgentAvow's own files" in reason
+
+
+@pytest.mark.parametrize("tool,path", [
+    ("Write", "/Users/me/.cache/agentavow/allowed-servers.txt"),
+    ("Edit", "/home/me/.cache/agentavow/allowed-servers.txt"),
+    ("Write", "~/.cache/agentavow/allow.key"),
+    ("MultiEdit", "~/.cache/agentavow/scanned.json"),
+    ("Write", "~/.cache/agentavow/x.txt"),
+])
+def test_writes_into_agentavow_folder_ask_the_person(hook, monkeypatch, capsys, tool, path):
+    mod, _ = hook
+    payload = {"hook_event_name": "PreToolUse", "tool_name": tool,
+               "tool_input": {"file_path": path, "content": "srv https://x.example/mcp\n",
+                              "old_string": "", "new_string": "x"}}
+    _ask_reason(mod, monkeypatch, capsys, payload)
+
+
+def test_a_write_through_a_symlink_or_relative_path_into_the_folder_asks(
+        hook, monkeypatch, capsys, tmp_path):
+    mod, _ = hook
+    own = tmp_path / "home" / ".cache" / "agentavow"
+    own.mkdir(parents=True)
+    monkeypatch.setattr(mod, "_own_dir", lambda: own)
+    link = tmp_path / "innocent"
+    link.symlink_to(own)
+    for path, cwd in ((str(link / "list.txt"), "/"), ("innocent/list.txt", str(tmp_path)),
+                      ("x", str(own))):
+        payload = {"hook_event_name": "PreToolUse", "tool_name": "Write", "cwd": cwd,
+                   "tool_input": {"file_path": path, "content": "x"}}
+        _ask_reason(mod, monkeypatch, capsys, payload)
 
 
 @pytest.mark.parametrize("payload", [
-    _bash("ls ~/.cache/agentavow"),
+    _bash("ls ~/.cache"),
+    _bash("pytest tests/test_agentavow_pre_install.py --noconftest"),
+    _bash("gh pr create --repo AgentAvow/AgentAvow --title 'allow lists'"),
+    _bash("du -sh ~/.cache/pip && echo agentavow-trust agentavow_precheck"),
+    _bash("sh plugins/agentavow-trust/scripts/run_hook.sh agentavow_precheck.py"),
+    _bash("curl -s https://agentavow.com/api/v1/public/scan/repo/a/b"),
     {"hook_event_name": "PreToolUse", "tool_name": "Write",
      "tool_input": {"file_path": "/tmp/notes.txt", "content": "allowed-servers"}},
+    {"hook_event_name": "PreToolUse", "tool_name": "Edit",
+     "tool_input": {"file_path": "plugins/agentavow-trust/README.md", "old_string": "a",
+                    "new_string": "~/.cache/agentavow/allowed-servers.txt"}},
 ])
-def test_other_steps_are_not_mistaken_for_the_allow_list(hook, monkeypatch, capsys, payload):
+def test_other_steps_are_not_mistaken_for_agentavow_files(hook, monkeypatch, capsys, payload):
     mod, _ = hook
     assert _run(mod, monkeypatch, capsys, payload, lambda *a, **k: None) == {}

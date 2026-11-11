@@ -494,7 +494,7 @@ def test_gate_never_raises_out_of_main(gate, monkeypatch, capsys):
     assert _run(gate, monkeypatch, capsys, _call()) == {}
 
 
-# ── the person's per-server allow list (0.1.37) ──────────────────────────────
+# ── the person's per-server allow list (0.1.37; confirmation codes 0.1.38) ───
 
 
 def _dnc(**extra):
@@ -502,13 +502,38 @@ def _dnc(**extra):
                    decision_reason="one critical finding", **extra)
 
 
-def test_refusal_says_exactly_how_to_allow_that_one_server(gate, monkeypatch, capsys):
+def _code(gate, name="srv", server_id=URL):
+    key = gate._allow_key(create=True)
+    return gate.allow_code(key, name, server_id)
+
+
+def test_refusal_tells_claude_how_the_person_allows_it_without_the_code(
+        gate, monkeypatch, capsys):
     gate.CACHE.write_text(json.dumps({"srv": _dnc()}))
-    decision, reason = _decision(_run(gate, monkeypatch, capsys, _call()))
+    out = _run(gate, monkeypatch, capsys, _call())
+    decision, reason = _decision(out)
     assert decision == "deny"
     assert reason.startswith("AgentAvow: Do not connect — one critical finding.")
-    assert f"allowed-servers.txt: srv {URL}\n" in reason
     assert "the user (not Claude)" in reason and "Do not edit that file yourself" in reason
+    code = _code(gate)
+    # The code reaches the person (systemMessage) and never Claude (the reason).
+    assert code not in reason and code.replace("-", "") not in reason
+    assert out["systemMessage"].endswith(f"allowed-servers.txt (the code at the end is "
+                                         f"shown only to you; do not paste it into the "
+                                         f"chat):\nsrv {URL} {code}")
+
+
+def test_allow_key_is_random_private_and_stable(gate, monkeypatch, capsys):
+    gate.CACHE.write_text(json.dumps({"srv": _dnc()}))
+    _run(gate, monkeypatch, capsys, _call())
+    key_file = gate.allow_key_file()
+    assert key_file.stat().st_mode & 0o777 == 0o600
+    first = key_file.read_text()
+    _run(gate, monkeypatch, capsys, _call())
+    assert key_file.read_text() == first  # same code every refusal
+    other = _load(GATE)
+    monkeypatch.setattr(other, "CACHE", gate.CACHE.parent / "elsewhere" / "scanned.json")
+    assert other._allow_key(create=True) != gate._allow_key(create=False)  # per machine
 
 
 def test_allow_file_is_shown_with_a_tilde(gate, monkeypatch, tmp_path):
@@ -517,11 +542,12 @@ def test_allow_file_is_shown_with_a_tilde(gate, monkeypatch, tmp_path):
         "~/.cache/agentavow/allowed-servers.txt")
     real = _load(GATE)
     assert real.allow_file() == real.CACHE.with_name("allowed-servers.txt")
+    assert real.allow_key_file() == real.CACHE.with_name("allow.key")
 
 
 def test_allowed_server_runs_with_one_note_per_session(gate, monkeypatch, capsys):
     gate.CACHE.write_text(json.dumps({"srv": _dnc()}))
-    gate.allow_file().write_text(f"# reviewed it on 11-11\nsrv {URL}   # my note\n")
+    gate.allow_file().write_text(f"# reviewed it on 11-11\nsrv {URL} {_code(gate)}  # mine\n")
     first = _run(gate, monkeypatch, capsys, _call())
     assert _decision(first)[0] is None
     assert "reads Do not connect; its tools run because you allowed it" in first["systemMessage"]
@@ -529,33 +555,104 @@ def test_allowed_server_runs_with_one_note_per_session(gate, monkeypatch, capsys
     assert "systemMessage" in _run(gate, monkeypatch, capsys, _call(session="s2"))
 
 
+@pytest.mark.parametrize("spelling", [str.lower, lambda c: c.replace("-", "")])
+def test_code_is_forgiving_about_case_and_the_dash(gate, monkeypatch, capsys, spelling):
+    gate.CACHE.write_text(json.dumps({"srv": _dnc()}))
+    gate.allow_file().write_text(f"srv {URL} {spelling(_code(gate))}\n")
+    assert _decision(_run(gate, monkeypatch, capsys, _call()))[0] is None
+
+
 @pytest.mark.parametrize("line", [
     "srv",                                # name only: not bound to what was graded
-    f"other {URL}",                       # another server's line
+    f"srv {URL}",                         # a 0.1.37 line: no confirmation code
+    f"other {URL} CODE",                  # another server's line
     "srv https://elsewhere.example/mcp",  # the line is for a different URL
-    "* *", f"* {URL}", "srv *",           # no wildcards, no allow-everything
+    "* *", f"* {URL}", "srv *", f"srv {URL} *",  # no wildcards, no allow-everything
     f"SRV {URL}",                         # exact names only
+    f"srv {URL} AAAAA-AAAAA",             # a made-up code
     f"srv {URL} extra",
     f"# srv {URL}",
 ])
-def test_only_an_exact_line_for_this_server_allows_it(gate, monkeypatch, capsys, line):
+def test_only_an_exact_line_with_the_code_allows_it(gate, monkeypatch, capsys, line):
     gate.CACHE.write_text(json.dumps({"srv": _dnc()}))
-    gate.allow_file().write_text(line + "\n")
+    _code(gate)  # the key exists
+    gate.allow_file().write_text(line.replace("CODE", _code(gate, "other")) + "\n")
     assert _decision(_run(gate, monkeypatch, capsys, _call()))[0] == "deny"
 
 
-def test_allowing_one_server_leaves_the_others_denied(gate, monkeypatch, capsys):
+def test_a_code_for_one_server_does_not_allow_another(gate, monkeypatch, capsys):
     other = "https://two.example/mcp"
     gate.CACHE.write_text(json.dumps({"srv": _dnc(), "two": _dnc(id=other, url=other)}))
-    gate.allow_file().write_text(f"srv {URL}\n")
+    gate.allow_file().write_text(f"srv {URL} {_code(gate)}\ntwo {other} {_code(gate)}\n")
     assert _decision(_run(gate, monkeypatch, capsys, _call("two")))[0] == "deny"
     assert _decision(_run(gate, monkeypatch, capsys, _call("srv")))[0] is None
+
+
+# Attack twins: whatever route Claude takes to the file (an obfuscated path, python -c,
+# cp / tee / ln from another file, a variable file name), what lands there is a line
+# Claude composed from what it was told, and Claude was never told the code.
+@pytest.mark.parametrize("write", [
+    lambda f, line: f.write_text(line + "\n"),                       # plain write / tee
+    lambda f, line: f.write_text("# ok\n" + line + "  # reviewed\n"),  # tucked among comments
+    lambda f, line: (f.with_name("x.txt").write_text(line + "\n"),    # cp / mv from elsewhere
+                     f.with_name("x.txt").replace(f)),
+    lambda f, line: (f.with_name("y.txt").write_text(line + "\n"),    # ln -s from elsewhere
+                     f.symlink_to(f.with_name("y.txt"))),
+])
+def test_a_line_claude_composes_never_allows_however_it_is_written(
+        gate, monkeypatch, capsys, write):
+    gate.CACHE.write_text(json.dumps({"srv": _dnc()}))
+    out = _run(gate, monkeypatch, capsys, _call())   # the refusal Claude sees
+    reason = _decision(out)[1]
+    told = reason.split("Report: ")[0]
+    for guess in (f"srv {URL}", f"srv {URL} {told[-11:].strip()}"):
+        if gate.allow_file().is_symlink() or gate.allow_file().exists():
+            gate.allow_file().unlink()
+        write(gate.allow_file(), guess)
+        assert _decision(_run(gate, monkeypatch, capsys, _call()))[0] == "deny"
+
+
+def test_a_key_claude_replaces_or_deletes_only_turns_allow_lines_off(
+        gate, monkeypatch, capsys):
+    gate.CACHE.write_text(json.dumps({"srv": _dnc()}))
+    gate.allow_file().write_text(f"srv {URL} {_code(gate)}\n")
+    gate.allow_key_file().unlink()
+    assert _decision(_run(gate, monkeypatch, capsys, _call()))[0] == "deny"
+    gate.allow_key_file().write_text("not a key\n")
+    assert _decision(_run(gate, monkeypatch, capsys, _call()))[0] == "deny"
+
+
+def test_no_key_and_no_way_to_make_one_means_no_line_and_still_deny(
+        gate, monkeypatch, capsys):
+    gate.CACHE.write_text(json.dumps({"srv": _dnc()}))
+    monkeypatch.setattr(gate, "_allow_key", lambda create: None)
+    out = _run(gate, monkeypatch, capsys, _call())
+    assert _decision(out)[0] == "deny" and "systemMessage" not in out
+
+
+@pytest.mark.parametrize("tool_input", [
+    {"path": "~/.cache/agentavow/allow.key"},
+    {"path": "/Users/me/.cache/agentavow/scanned.json"},
+    {"path": "C:\\Users\\me\\.cache\\agentavow\\allowed-servers.txt"},
+    {"content": "srv x", "path": "/home/me/.cache/'agentavow'/x"},
+    {"paths": ["/tmp/a", "/home/me/.cache/agentavow/allowed-servers.txt"]},
+])
+def test_an_mcp_call_naming_agentavow_files_asks(gate, monkeypatch, capsys, tool_input):
+    call = dict(_call("filesystem", "read_file"), tool_input=tool_input)
+    decision, reason = _decision(_run(gate, monkeypatch, capsys, call))
+    assert decision == "ask" and "AgentAvow's own files" in reason
+
+
+def test_ordinary_mcp_inputs_do_not_ask(gate, monkeypatch, capsys):
+    call = dict(_call("plugin_agentavow-trust_agentavow", "scan_repo"),
+                tool_input={"repo": "AgentAvow/AgentAvow"})
+    assert _run(gate, monkeypatch, capsys, call) == {}
 
 
 def test_an_allowed_server_still_asks_when_a_definition_changed(
         gate, monkeypatch, capsys, fake_server):
     gate.CACHE.write_text(json.dumps({"srv": _dnc()}))
-    gate.allow_file().write_text(f"srv {URL}\n")
+    gate.allow_file().write_text(f"srv {URL} {_code(gate)}\n")
     _wire(gate, monkeypatch, fake_server)
     _FakeMCP.tools = [{"name": "ask", "description": "now does something else"}]
     out = _run(gate, monkeypatch, capsys, _call())

@@ -8,12 +8,18 @@ server in ~/.cache/agentavow/scanned.json and decides:
             credential leaving the sandbox, a known-malicious package), or its grade is
             in the "blocked" tier (score 0-10). The reason leads with the answer and
             names the score and the report. The threshold is adjustable (below).
-            The reason also says how the person can allow that one server after
-            reviewing it: a line "<server name> <graded URL or package>" in
-            ~/.cache/agentavow/allowed-servers.txt. Only an exact line for that
-            server counts; there is no pattern and no allow-everything. An allowed
+            The person (never Claude) can allow that one server after reviewing it:
+            a line "<server name> <graded URL or package> <code>" in
+            ~/.cache/agentavow/allowed-servers.txt. The code is a confirmation code
+            shown ONLY to the person, in the refusal's systemMessage; Claude's copy
+            of the refusal never carries it, so a line Claude writes does not count,
+            however it reaches the file. Only an exact line for that server with its
+            code counts; there is no pattern and no allow-everything. An allowed
             server's tools run (with one note per session), and a changed
             definition still asks.
+  • ask   — any MCP tool call whose input names AgentAvow's own files (the cache
+            folder, the allow list, the allow key): only the person may read or
+            change them.
   • ask   — a remote (HTTP) server now serves a definition for this tool that differs
             from the one AgentAvow graded (or a tool the grade never saw). The gate
             re-fetches `tools/list` from the server itself, at most once per server
@@ -55,23 +61,32 @@ Install / test: https://agentavow.com/docs/auto-scan-claude-code
 """
 from __future__ import annotations
 
+import base64
 import hashlib
+import hmac
 import ipaddress
 import json
 import os
 import pathlib
+import re
+import secrets
 import sys
 import time
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.37"
+__version__ = "0.1.38"
 
 CACHE = pathlib.Path.home() / ".cache" / "agentavow" / "scanned.json"
 META_KEY = "_agentavow"  # cache entry holding hook state; never a server name
 # The person's own "I've reviewed this, allow it" list, beside the cache: one server per
 # line, "<server name> <graded URL or package>", exactly as the refusal message gives it.
 ALLOW_FILE_NAME = "allowed-servers.txt"
+# The random key the confirmation codes on allow lines are derived from (HMAC-SHA256).
+# The gate creates it (0600) the first time it refuses a server. It never leaves this
+# machine and is never printed.
+ALLOW_KEY_NAME = "allow.key"
+ALLOW_CODE_LABEL = b"agentavow-allow-v1"
 
 # The per-tool digest, exactly as the attestation signs it
 # (docs/standards/tool-manifest-digest-vectors-v1).
@@ -551,14 +566,18 @@ def _save_cache(cache: dict) -> bool:
 # ── decisions ────────────────────────────────────────────────────────────────
 
 
-def _emit(decision: str, reason: str) -> None:
-    print(json.dumps({
+def _emit(decision: str, reason: str, message: str | None = None) -> None:
+    """``reason`` reaches Claude; ``message`` (systemMessage) is shown to the person only."""
+    out: dict = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": decision,
             "permissionDecisionReason": reason,
         }
-    }))
+    }
+    if message:
+        out["systemMessage"] = message
+    print(json.dumps(out))
 
 
 def _note_once_per_session(cache: dict, session_id: object, message: str) -> None:
@@ -592,40 +611,115 @@ def _shown_path(path: pathlib.Path) -> str:
         return str(path)
 
 
-def allow_line(name: str, record: dict) -> str:
-    """The exact line that allows one server: its name and the URL or package its grade
-    is for. Binding to both means a server whose config later points somewhere else is
-    not allowed by an old line."""
-    return f"{name} {record.get('id')}"
+def allow_key_file() -> pathlib.Path:
+    return CACHE.with_name(ALLOW_KEY_NAME)
+
+
+def _allow_key(create: bool) -> bytes | None:
+    """The machine's random allow key, or None. With ``create`` a missing or malformed
+    key is replaced by a fresh one (0600). A new key voids every code made from the old
+    one, so a key someone removed or garbled can only ever turn allow lines off."""
+    path = allow_key_file()
+    try:
+        text = path.read_text(encoding="ascii").strip()
+        if re.fullmatch(r"[0-9a-f]{64}", text):
+            return bytes.fromhex(text)
+    except Exception:
+        pass
+    if not create:
+        return None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="ascii") as fh:
+            fh.write(secrets.token_hex(32) + "\n")
+        os.replace(tmp, path)
+        return bytes.fromhex(path.read_text(encoding="ascii").strip())
+    except Exception:
+        return None
+
+
+def allow_code(key: bytes, name: str, server_id: str) -> str:
+    """The confirmation code for one server: HMAC-SHA256 over (name, graded id) under
+    the machine's allow key, as 10 base32 characters (50 bits) in two groups of five."""
+    mac = hmac.new(key, ALLOW_CODE_LABEL + b"\0" + name.encode("utf-8") + b"\0"
+                   + server_id.encode("utf-8"), hashlib.sha256).digest()
+    code = base64.b32encode(mac).decode("ascii")[:10]
+    return f"{code[:5]}-{code[5:]}"
+
+
+def allow_line(name: str, record: dict, code: str) -> str:
+    """The exact line that allows one server: its name, the URL or package its grade is
+    for, and its confirmation code. Binding to name and id means a server whose config
+    later points somewhere else is not allowed by an old line."""
+    return f"{name} {record.get('id')} {code}"
 
 
 def is_allowed(name: str, record: dict) -> bool:
     """Whether the person listed THIS server in the allow file: a line whose name and
-    graded URL / package both match exactly. Never a pattern, never a wildcard, never
-    every server: a line that is not exactly "<name> <id>" allows nothing."""
+    graded URL / package both match exactly and whose third field is this server's
+    confirmation code. Never a pattern, never a wildcard, never every server: any other
+    line (a 0.1.37 two-field line included) allows nothing."""
+    server_id = str(record.get("id") or "")
+    if not server_id:
+        return False
+    key = _allow_key(create=False)
+    if key is None:
+        return False
     try:
         text = allow_file().read_text(encoding="utf-8")
     except Exception:
         return False
-    want = (name, str(record.get("id") or ""))
-    if not want[1]:
-        return False
+    want = allow_code(key, name, server_id).replace("-", "").encode("ascii")
     for raw in text.splitlines():
-        line = raw.split("#", 1)[0].strip()
-        parts = line.split()
-        if len(parts) == 2 and (parts[0], parts[1]) == want:
-            return True
+        parts = raw.split("#", 1)[0].split()
+        if len(parts) == 3 and (parts[0], parts[1]) == (name, server_id):
+            got = parts[2].upper().replace("-", "").encode("ascii", "replace")
+            if hmac.compare_digest(got, want):
+                return True
     return False
 
 
-def allow_instructions(name: str, record: dict) -> str:
-    """How the PERSON can allow this one server, worded for Claude to relay."""
+def allow_instructions(name: str) -> str:
+    """How the PERSON can allow this one server, worded for Claude to relay. It never
+    carries the confirmation code: that is shown to the person alone."""
     path = _shown_path(allow_file())
     return (f"If the user has reviewed this server and wants to use it anyway, the user "
-            f"(not Claude) can allow this one server by adding this line to {path}: "
-            f"{allow_line(name, record)}\n"
-            "Tell the user exactly that. Do not edit that file yourself; only the user can "
-            "allow a server.")
+            f"(not Claude) can allow this one server: AgentAvow has shown them, outside "
+            f"this conversation, the exact line to add to {path}, with a confirmation code "
+            "only they can see. Tell the user exactly that.\n"
+            "Do not edit that file yourself, do not read AgentAvow's files in "
+            "~/.cache/agentavow, and do not ask for or work out the code: a line without "
+            "the user's own code allows nothing.")
+
+
+def allow_message(name: str, record: dict) -> str | None:
+    """The person-only notice (systemMessage) with the line to paste, or None when the
+    key cannot be made (then no line could count anyway)."""
+    server_id = str(record.get("id") or "")
+    key = _allow_key(create=True) if server_id else None
+    if key is None:
+        return None
+    line = allow_line(name, record, allow_code(key, name, server_id))
+    return (f"AgentAvow gate: MCP '{name}' reads Do not connect, so its tools were stopped. "
+            f"If you reviewed it and want to use it anyway, add this line yourself to "
+            f"{_shown_path(allow_file())} (the code at the end is shown only to you; do not "
+            f"paste it into the chat):\n{line}")
+
+
+# Spellings of AgentAvow's own files in an MCP tool's input (a filesystem server, say).
+_STATE_MARKERS = (".cache/agentavow", ALLOW_FILE_NAME, "allowed-servers", ALLOW_KEY_NAME)
+
+
+def names_own_files(tool_input: object) -> bool:
+    """Whether an MCP tool's input names AgentAvow's cache folder, allow list or key."""
+    try:
+        text = json.dumps(tool_input, ensure_ascii=False).lower().replace("\\\\", "/")
+    except Exception:
+        return False
+    text = re.sub(r"[\"'`]", "", text)
+    return any(m in text for m in _STATE_MARKERS)
 
 
 def _note_allowed_once(cache: dict, session_id: object, name: str) -> None:
@@ -708,12 +802,17 @@ def drift_decision(name: str, record: dict, cfg: dict | None, tool: str,
     return None
 
 
-def decide(payload: dict, cache: dict) -> tuple[str, str] | None:
-    """The gate's decision for one PreToolUse payload, or None to stay silent."""
+def decide(payload: dict, cache: dict) -> tuple | None:
+    """The gate's decision for one PreToolUse payload, or None to stay silent:
+    (decision, reason for Claude) or (decision, reason, notice for the person only)."""
     parsed = parse_tool_name(payload.get("tool_name"))
     if not parsed:
         return None
     server, tool = parsed
+    if names_own_files(payload.get("tool_input")):
+        return "ask", ("AgentAvow: this MCP call names AgentAvow's own files "
+                       "(~/.cache/agentavow: the grades, your allow list, its key). Only "
+                       "approve it if you asked for this yourself.")
     found = find_record(cache, server)
     if not found:
         if _gradable(_server_config(server)):
@@ -733,10 +832,11 @@ def decide(payload: dict, cache: dict) -> tuple[str, str] | None:
             tier = record.get("tier") or "blocked"
             why = f" — {record['decision_reason']}" if record.get("decision_reason") else ""
             # Never " · Certified" here: the mark only ever sits beside Safe to connect.
-            return "deny", (f"AgentAvow: {DECISION_PHRASES['do_not_connect']}{why}. "
-                            f"MCP '{name}' is graded {record.get('score')}/100 (tier {tier}); "
-                            f"'{tool}' was not run. Report: {report}\n"
-                            + allow_instructions(name, record))
+            return ("deny", (f"AgentAvow: {DECISION_PHRASES['do_not_connect']}{why}. "
+                             f"MCP '{name}' is graded {record.get('score')}/100 (tier {tier}); "
+                             f"'{tool}' was not run. Report: {report}\n"
+                             + allow_instructions(name)),
+                    allow_message(name, record))
         allowed = True  # the person's own line; a changed definition still asks
     else:
         allowed = False
