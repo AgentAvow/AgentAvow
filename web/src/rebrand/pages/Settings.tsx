@@ -1,51 +1,104 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { rp } from '../basePath'
 import api from '../../lib/api'
 import { useAuth } from '../../hooks/useAuth'
 import { useTheme } from '../../hooks/useTheme'
-import { Reveal } from '../components/motion'
-import { AccountSkeleton } from '../components/AccountBits'
-import { useRequireUser } from '../lib/useRequireUser'
+import { AccountShell, ConfirmAction, LoadError, SkeletonRows, btnGhostSm, btnSm, rowAct } from '../components/AccountBits'
 
 /**
- * AgentAvow account settings — the relevant bits carried over from the legacy
- * settings: profile/avatar, email verification, password, email, appearance,
- * email notifications, data export, and account deletion. Social-era prefs
- * (followers/votes/marketplace/trust-weights) intentionally left out. Watches,
- * alerts and API keys live on /account.
+ * Settings, a tab of the account shell: profile, sign-in, appearance, which alerts
+ * email you, Developer (API keys, moved here from Watches & alerts), your data, and
+ * deactivation. The alert webhook stays on Watches & alerts, beside the alerts.
  */
 
 interface NotifPrefs { email_notifications_enabled: boolean }
+interface ApiKey { id: string; label: string; created_at: string | null }
 
-const inputCls = 'w-full bg-surface border border-border rounded-xl px-3.5 py-2.5 text-[14px] outline-none focus:border-primary-light'
-const btnCls = 'text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60'
-const errText = (m: unknown) => (m as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Something went wrong.'
+const inputCls = 'w-full min-w-0 bg-surface border border-border rounded-[10px] px-3 py-2 text-[14px] outline-none focus:border-primary-light'
+const errText = (m: unknown) => (m as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Something went wrong. Try again.'
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function SetCard({ title, id, tone, children }: { title: string; id?: string; tone?: 'danger'; children: ReactNode }) {
   return (
-    <Reveal>
-      <div className="mt-4 glass rounded-2xl p-6">
-        <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-3">{title}</h2>
-        {children}
-      </div>
-    </Reveal>
+    <div id={id} className={`mt-3 glass rounded-2xl border border-border/60 px-[18px] py-4 scroll-mt-24 ${tone === 'danger' ? 'border-l-4 border-l-danger/50' : ''}`}>
+      <h3 className={`text-[15px] font-bold ${tone === 'danger' ? 'text-danger' : ''}`}>{title}</h3>
+      {children}
+    </div>
   )
 }
 
-export default function RebrandSettings() {
-  const { user, isLoading, logout } = useAuth()
+function Toggle({ on, onClick, disabled, label }: { on: boolean; onClick: () => void; disabled?: boolean; label: string }) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} aria-pressed={on} aria-label={label}
+      className={`relative w-9 h-5 rounded-full transition-colors shrink-0 disabled:opacity-60 ${on ? 'bg-primary' : 'bg-border'}`}>
+      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
+    </button>
+  )
+}
+
+/** Developer API keys: create (shown once), list, revoke. */
+function ApiKeys() {
+  const qc = useQueryClient()
+  const [label, setLabel] = useState('')
+  const [fresh, setFresh] = useState<string | null>(null)
+  const { data, isLoading, isError, refetch, isRefetching } = useQuery({
+    queryKey: ['rebrand-apikeys'],
+    queryFn: async () => (await api.get<{ keys: ApiKey[] }>('/account/api-keys')).data,
+  })
+  const create = useMutation({
+    mutationFn: async () => (await api.post<{ key: string }>('/account/api-keys', { label: label.trim() || 'default' })).data,
+    onSuccess: (d) => { setFresh(d.key); setLabel(''); qc.invalidateQueries({ queryKey: ['rebrand-apikeys'] }) },
+  })
+  const revoke = useMutation({
+    mutationFn: (id: string) => api.delete(`/account/api-keys/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['rebrand-apikeys'] }),
+  })
+  const keys = data?.keys ?? []
+  return (
+    <>
+      <div className="mt-3 font-mono text-[11px] uppercase tracking-wide text-text-muted">API keys</div>
+      <p className="text-text-muted text-[13.5px] mt-1">Call the scan API from your code; keys carry your higher rate limit. <a href="/api/v1/redoc" target="_blank" rel="noopener noreferrer" className="text-primary-light hover:text-primary">API reference ↗</a></p>
+      {fresh && (
+        <div className="mt-2.5 glass rounded-xl p-3.5 border-l-4 border-success/60">
+          <div className="text-[12.5px] text-success font-semibold mb-1">Copy this key now. It won&apos;t be shown again.</div>
+          <code className="font-mono text-[12px] break-all bg-surface px-2 py-1 rounded">{fresh}</code>
+        </div>
+      )}
+      <div className="mt-2.5">
+        {isLoading ? <SkeletonRows n={1} />
+          : isError ? <LoadError what="your API keys" onRetry={() => void refetch()} retrying={isRefetching} />
+            : keys.length === 0 ? <p className="text-text-muted text-[13px]">No keys yet.</p>
+              : keys.map((k) => (
+                <div key={k.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2 border-t border-border/60 text-[13.5px]">
+                  <span className="font-semibold min-w-0 [overflow-wrap:anywhere]">{k.label}</span>
+                  <span className="text-text-muted text-[12.5px]">created {k.created_at ? new Date(k.created_at).toLocaleDateString() : '—'}</span>
+                  <span className="ml-auto">
+                    <ConfirmAction label="Revoke" question="Anything using this key stops working now." confirmLabel="Revoke key" className={rowAct}
+                      onConfirm={() => revoke.mutate(k.id)} pending={revoke.isPending && revoke.variables === k.id} pendingLabel="Revoking…" />
+                  </span>
+                </div>
+              ))}
+      </div>
+      <form onSubmit={(e) => { e.preventDefault(); create.mutate() }} className="mt-2.5 flex gap-2 flex-wrap">
+        <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Key label (for example ci-pipeline)" aria-label="Key label" className={`${inputCls} flex-[1_1_200px] w-auto`} />
+        <button type="submit" disabled={create.isPending} className={btnSm}>{create.isPending ? 'Creating…' : 'New API key'}</button>
+      </form>
+      {(create.isError || revoke.isError) && <div className="mt-2 text-[12.5px] text-danger" role="alert">{errText(create.error ?? revoke.error)}</div>}
+    </>
+  )
+}
+
+function SettingsBody() {
+  const { user, logout } = useAuth()
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { theme, toggleTheme } = useTheme()
-  useRequireUser(user, isLoading)
 
   const [curPass, setCurPass] = useState('')
   const [newPass, setNewPass] = useState('')
   const [newEmail, setNewEmail] = useState('')
   const [emailPass, setEmailPass] = useState('')
-  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const changePassword = useMutation({
     mutationFn: () => api.post('/account/change-password', { current_password: curPass, new_password: newPass }),
@@ -57,10 +110,9 @@ export default function RebrandSettings() {
   })
   const resendVerify = useMutation({ mutationFn: () => api.post('/auth/resend-verification') })
 
-  const { data: prefs } = useQuery<NotifPrefs>({
+  const { data: prefs, isError: prefsError } = useQuery<NotifPrefs>({
     queryKey: ['rebrand-notif-prefs'],
     queryFn: async () => (await api.get('/notifications/preferences')).data,
-    enabled: !!user,
     staleTime: 5 * 60_000,
   })
   const updatePref = useMutation({
@@ -85,110 +137,91 @@ export default function RebrandSettings() {
     onSuccess: () => { logout(); navigate(rp('/rebrand')) },
   })
 
-  if (!user) return <AccountSkeleton width="max-w-[640px]" />
+  if (!user) return null
   const emailOn = prefs?.email_notifications_enabled ?? true
 
   return (
-    <div className="max-w-[640px] mx-auto px-6 py-14">
-      <Reveal>
-        <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Settings</span>
-        <h1 className="mt-2 text-3xl font-extrabold tracking-tight">Account settings</h1>
-      </Reveal>
-
-      {/* profile / avatar */}
-      <Card title="Profile">
-        <div className="flex items-center gap-4">
+    <div className="mt-[22px]">
+      <SetCard title="Profile">
+        <div className="mt-3 flex items-center gap-3.5">
           {user.avatar_url
-            ? <img src={user.avatar_url} alt="" className="w-16 h-16 rounded-full object-cover ring-2 ring-primary/30 shrink-0" />
-            : <span className="w-16 h-16 rounded-full grid place-items-center text-xl font-bold text-white bg-gradient-to-br from-primary to-accent shrink-0">{user.display_name?.charAt(0).toUpperCase() || '?'}</span>}
+            ? <img src={user.avatar_url} alt="" className="w-14 h-14 rounded-full object-cover ring-2 ring-primary/30 shrink-0" />
+            : <span className="w-14 h-14 rounded-full grid place-items-center text-xl font-bold text-white bg-gradient-to-br from-primary to-accent shrink-0">{user.display_name?.charAt(0).toUpperCase() || '?'}</span>}
           <div className="min-w-0">
-            <div className="text-[17px] font-bold">{user.display_name}</div>
+            <div className="text-[16px] font-bold">{user.display_name}</div>
             <div className="text-[13px] text-text-muted break-all">{user.email}</div>
             <Link to={rp('/rebrand/avatar')} className="text-[12.5px] text-primary-light hover:text-primary">Change avatar →</Link>
           </div>
         </div>
         {!user.email_verified && (
-          <div className="mt-4 flex items-center justify-between gap-3 rounded-xl bg-warning/10 border border-warning/30 px-4 py-2.5">
-            <span className="text-[13px] text-warning">Your email isn't verified.</span>
-            <button onClick={() => resendVerify.mutate()} disabled={resendVerify.isPending || resendVerify.isSuccess} className="text-[12.5px] font-semibold text-primary-light hover:text-primary disabled:opacity-60">{resendVerify.isSuccess ? 'Sent ✓' : resendVerify.isPending ? 'Sending…' : 'Resend'}</button>
+          <div className="mt-3 flex items-center justify-between gap-3 flex-wrap rounded-xl bg-warning/10 border border-warning/30 px-3.5 py-2.5">
+            <span className="text-[13px] text-warning">Your email isn&apos;t verified.</span>
+            <button type="button" onClick={() => resendVerify.mutate()} disabled={resendVerify.isPending || resendVerify.isSuccess} className="text-[12.5px] font-semibold text-primary-light hover:text-primary disabled:opacity-60">{resendVerify.isSuccess ? 'Sent ✓' : resendVerify.isPending ? 'Sending…' : 'Resend'}</button>
           </div>
         )}
-      </Card>
+      </SetCard>
 
-      {/* change password */}
-      <Card title="Change password">
-        <form onSubmit={(e) => { e.preventDefault(); changePassword.mutate() }} className="flex flex-col gap-2.5">
-          <input type="password" autoComplete="current-password" placeholder="Current password" value={curPass} onChange={(e) => setCurPass(e.target.value)} className={inputCls} />
-          <input type="password" autoComplete="new-password" placeholder="New password" value={newPass} onChange={(e) => setNewPass(e.target.value)} className={inputCls} />
-          <button type="submit" disabled={changePassword.isPending || !curPass || !newPass} className={`${btnCls} self-start`}>{changePassword.isPending ? 'Saving…' : 'Update password'}</button>
+      <SetCard title="Sign-in">
+        <p className="text-text-muted text-[13.5px] mt-0.5">Change your password or email.</p>
+        <form onSubmit={(e) => { e.preventDefault(); changePassword.mutate() }} className="mt-3 flex flex-col gap-2">
+          <input type="password" autoComplete="current-password" placeholder="Current password" aria-label="Current password" value={curPass} onChange={(e) => setCurPass(e.target.value)} className={inputCls} />
+          <input type="password" autoComplete="new-password" placeholder="New password" aria-label="New password" value={newPass} onChange={(e) => setNewPass(e.target.value)} className={inputCls} />
+          <button type="submit" disabled={changePassword.isPending || !curPass || !newPass} className={`${btnGhostSm} self-start`}>{changePassword.isPending ? 'Saving…' : 'Change password'}</button>
           {changePassword.isSuccess && <div className="text-[13px] text-success">Password updated ✓</div>}
-          {changePassword.isError && <div className="text-[13px] text-danger">{errText(changePassword.error)}</div>}
+          {changePassword.isError && <div className="text-[13px] text-danger" role="alert">{errText(changePassword.error)}</div>}
         </form>
-      </Card>
-
-      {/* change email */}
-      <Card title="Change email">
-        <form onSubmit={(e) => { e.preventDefault(); changeEmail.mutate() }} className="flex flex-col gap-2.5">
-          <input type="email" placeholder="New email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className={inputCls} />
-          <input type="password" autoComplete="current-password" placeholder="Current password" value={emailPass} onChange={(e) => setEmailPass(e.target.value)} className={inputCls} />
-          <button type="submit" disabled={changeEmail.isPending || !newEmail || !emailPass} className={`${btnCls} self-start`}>{changeEmail.isPending ? 'Saving…' : 'Update email'}</button>
-          {changeEmail.isSuccess && <div className="text-[13px] text-success">Email updated — check your inbox to verify.</div>}
-          {changeEmail.isError && <div className="text-[13px] text-danger">{errText(changeEmail.error)}</div>}
+        <form onSubmit={(e) => { e.preventDefault(); changeEmail.mutate() }} className="mt-4 pt-3 border-t border-border/60 flex flex-col gap-2">
+          <input type="email" placeholder="New email" aria-label="New email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className={inputCls} />
+          <input type="password" autoComplete="current-password" placeholder="Current password" aria-label="Current password for email change" value={emailPass} onChange={(e) => setEmailPass(e.target.value)} className={inputCls} />
+          <button type="submit" disabled={changeEmail.isPending || !newEmail || !emailPass} className={`${btnGhostSm} self-start`}>{changeEmail.isPending ? 'Saving…' : 'Change email'}</button>
+          {changeEmail.isSuccess && <div className="text-[13px] text-success">Email updated. Check your inbox to verify it.</div>}
+          {changeEmail.isError && <div className="text-[13px] text-danger" role="alert">{errText(changeEmail.error)}</div>}
         </form>
-      </Card>
+      </SetCard>
 
-      {/* appearance */}
-      <Card title="Appearance">
-        <div className="flex items-center justify-between">
-          <span className="text-[14px]">Theme</span>
-          <button onClick={toggleTheme} className="text-[13px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">
-            {theme === 'dark' ? '🌙 Dark' : '☀️ Light'} · switch
-          </button>
+      <SetCard title="Appearance">
+        <div className="mt-2 flex justify-between items-center gap-3 text-[14px]">
+          <span>Light theme</span>
+          <Toggle on={theme === 'light'} onClick={toggleTheme} label="Light theme" />
         </div>
-      </Card>
+      </SetCard>
 
-      {/* email notifications */}
-      <Card title="Notifications">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[14px]">Email notifications</div>
-            <div className="text-[12px] text-text-muted">Score-change alerts, verification, and account emails.</div>
-          </div>
-          <button
-            onClick={() => updatePref.mutate({ email_notifications_enabled: !emailOn })}
-            disabled={updatePref.isPending}
-            className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${emailOn ? 'bg-primary' : 'bg-surface-hover'}`}
-            aria-pressed={emailOn}
-          >
-            <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${emailOn ? 'left-[22px]' : 'left-0.5'}`} />
-          </button>
+      <SetCard title="Alerts by email" id="alerts">
+        <p className="text-text-muted text-[13.5px] mt-0.5">Per-tool delivery is on <Link to={rp('/rebrand/account')} className="text-primary-light hover:text-primary">Watches &amp; alerts</Link>.</p>
+        <div className="mt-2 flex justify-between items-center gap-3 py-2 text-[14px]">
+          <span>Email me when a tool I watch changes: its answer gets worse or the Certified mark comes off, its trust score drops, a tool definition changes, or it gets safer. Account emails too.</span>
+          <Toggle on={emailOn} disabled={updatePref.isPending} onClick={() => updatePref.mutate({ email_notifications_enabled: !emailOn })} label="Email alerts" />
         </div>
-        <p className="mt-3 text-[12px] text-text-muted">Per-tool alert delivery (email / webhook) is set on <Link to={rp('/rebrand/account')} className="text-primary-light hover:text-primary">Watches &amp; alerts</Link>.</p>
-      </Card>
+        {(prefsError || updatePref.isError) && <div className="text-[12.5px] text-danger" role="alert">Couldn&apos;t {updatePref.isError ? 'save' : 'load'} this setting. Try again.</div>}
+      </SetCard>
 
-      {/* data export */}
-      <Card title="Your data">
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-[13.5px] text-text-muted">Download everything we hold about your account as JSON.</span>
-          <button onClick={() => exportData.mutate()} disabled={exportData.isPending} className="text-[13px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors shrink-0">{exportData.isPending ? 'Preparing…' : 'Export'}</button>
-        </div>
-      </Card>
+      <SetCard title="Developer" id="developer">
+        <p className="text-text-muted text-[13.5px] mt-0.5">For CI, gates and your own tools. The alert webhook is on <Link to={rp('/rebrand/account')} className="text-primary-light hover:text-primary">Watches &amp; alerts</Link>, beside your alerts.</p>
+        <ApiKeys />
+      </SetCard>
 
-      {/* danger zone */}
-      <Reveal>
-        <div className="mt-4 glass rounded-2xl p-6 border-l-4 border-danger/50">
-          <h2 className="text-[13px] font-mono uppercase tracking-wide text-danger mb-2">Danger zone</h2>
-          <p className="text-[13.5px] text-text-muted mb-3">Deactivating disables your account and signs you out. To delete your data, email privacy@agentavow.com. Public scan results about tools stay public.</p>
-          {!confirmDelete ? (
-            <button onClick={() => setConfirmDelete(true)} className="text-[13px] font-semibold px-4 py-2 rounded-xl border border-danger/50 text-danger hover:bg-danger/10 transition-colors">Deactivate account</button>
-          ) : (
-            <div className="flex items-center gap-2 flex-wrap">
-              <button onClick={() => deactivate.mutate()} disabled={deactivate.isPending} className="text-[13px] font-semibold px-4 py-2 rounded-xl bg-danger text-white disabled:opacity-60">{deactivate.isPending ? 'Deactivating…' : 'Yes, deactivate my account'}</button>
-              <button onClick={() => setConfirmDelete(false)} className="text-[13px] text-text-muted hover:text-text">Cancel</button>
-            </div>
-          )}
+      <SetCard title="Your data">
+        <p className="text-text-muted text-[13.5px] mt-0.5">Download everything we keep about your account, as JSON.</p>
+        <div className="mt-2.5"><button type="button" onClick={() => exportData.mutate()} disabled={exportData.isPending} className={btnGhostSm}>{exportData.isPending ? 'Preparing…' : 'Export my data'}</button></div>
+        {exportData.isError && <div className="mt-2 text-[12.5px] text-danger" role="alert">{errText(exportData.error)}</div>}
+      </SetCard>
+
+      <SetCard title="Deactivate" tone="danger">
+        <p className="text-text-muted text-[13.5px] mt-0.5">Deactivating disables your account and signs you out. To delete your data, email privacy@agentavow.com. Public scan results about tools stay public.</p>
+        <div className="mt-2.5">
+          <ConfirmAction label="Deactivate" question="Deactivate your account?" confirmLabel="Deactivate" className={btnGhostSm}
+            onConfirm={() => deactivate.mutate()} pending={deactivate.isPending} pendingLabel="Deactivating…" />
         </div>
-      </Reveal>
+        {deactivate.isError && <div className="mt-2 text-[12.5px] text-danger" role="alert">{errText(deactivate.error)}</div>}
+      </SetCard>
     </div>
+  )
+}
+
+export default function RebrandSettings() {
+  return (
+    <AccountShell tab="settings">
+      <SettingsBody />
+    </AccountShell>
   )
 }

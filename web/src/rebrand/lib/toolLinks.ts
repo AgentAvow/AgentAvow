@@ -22,6 +22,18 @@ export function toolLink(surface: string | undefined, owner: string, repo: strin
   return { label: `${owner}/${repo}`, badge: 'github', href: rp(`/rebrand/check/${owner}/${repo}`) }
 }
 
+/** Label, chip and route for a watch alert's tool. `surface` is the API's resolved
+ * surface (notification.tool.surface) when known, so a skill isn't shown as a repo. */
+export function referenceLink(referenceId: string, surface?: string | null): ToolLink {
+  const i = referenceId.indexOf('/')
+  if (i <= 0) return toolLink('github', referenceId, '')
+  const head = referenceId.slice(0, i)
+  const rest = referenceId.slice(i + 1)
+  const s = (surface || head).toLowerCase()
+  if (PKG_SURFACES.has(s) || s === 'mcp') return toolLink(s, head, rest)
+  return toolLink(s === 'openclaw' ? 'openclaw' : 'github', head, rest)
+}
+
 /** A watch alert's reference_id is the watch's "owner/repo"; the owner names the
  * surface for packages ("npm/@scope/pkg") and MCP ("mcp/https://…"). */
 export function referenceHref(referenceId: string): string {

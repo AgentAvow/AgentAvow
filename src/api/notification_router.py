@@ -218,6 +218,19 @@ async def create_notification(
 # --- Schemas ---
 
 
+class NotificationTool(BaseModel):
+    """The watched tool a watch alert is about, for the row artwork (trust or
+    Certified mini + adoption gauge). Read from stored scan data; never scanned."""
+
+    surface: str
+    trust_score: int | None = None
+    decision: str | None = None
+    decision_reason: str | None = None
+    certified_mark: bool = False
+    adoption_count: int | None = None
+    adoption_unit: str | None = None
+
+
 class NotificationResponse(BaseModel):
     id: uuid.UUID
     kind: str
@@ -226,8 +239,52 @@ class NotificationResponse(BaseModel):
     reference_id: str | None
     is_read: bool
     created_at: str
+    # Watch alerts only (additive): the tool's current answer, scores and adoption.
+    tool: NotificationTool | None = None
 
     model_config = {"from_attributes": True}
+
+
+_WATCH_KINDS = ("watch_alert", "watch_good_news")
+
+
+async def _watch_alert_tools(
+    db: AsyncSession, entity_id: uuid.UUID, notifications: list,
+) -> dict[uuid.UUID, NotificationTool]:
+    """The tool behind each watch alert, in two queries for the whole page: the
+    account's watches and the stored scan rows (src/api/tool_summary.py). The watch's
+    own last re-scan leads, as on the Watches page; the catalog fills adoption."""
+    from src.api.tool_summary import coord_key, coords_from_reference, tool_summaries
+    from src.api.watch_router import watch_row_fields
+    from src.models import ToolWatch
+
+    cands = {
+        n.id: coords_from_reference(n.reference_id)
+        for n in notifications if n.kind in _WATCH_KINDS and n.reference_id
+    }
+    cands = {k: v for k, v in cands.items() if v}
+    if not cands:
+        return {}
+    try:
+        watches = (await db.execute(
+            select(ToolWatch).where(ToolWatch.watcher_id == entity_id)
+        )).scalars().all()
+        by_coord = {coord_key(w.surface, w.owner, w.repo): w for w in watches}
+        summaries = await tool_summaries(db, {c for cs in cands.values() for c in cs})
+    except Exception:  # noqa: BLE001 — artwork is optional; the list must still load
+        logger.warning("watch alert tool lookup failed", exc_info=True)
+        return {}
+    out: dict[uuid.UUID, NotificationTool] = {}
+    for nid, cs in cands.items():
+        for c in cs:
+            w, summ = by_coord.get(c), summaries.get(c)
+            if w is None and summ is None:
+                continue
+            fields = watch_row_fields(w, summ) if w is not None else summ
+            out[nid] = NotificationTool(
+                surface=c[0], **{**fields, "certified_mark": bool(fields.get("certified_mark"))})
+            break
+    return out
 
 
 class NotificationListResponse(BaseModel):
@@ -301,6 +358,8 @@ async def get_notifications(
         )
     ) or 0
 
+    tools = await _watch_alert_tools(db, current_entity.id, notifications)
+
     return NotificationListResponse(
         notifications=[
             NotificationResponse(
@@ -311,6 +370,7 @@ async def get_notifications(
                 reference_id=n.reference_id,
                 is_read=n.is_read,
                 created_at=n.created_at.isoformat(),
+                tool=tools.get(n.id),
             )
             for n in notifications
         ],
