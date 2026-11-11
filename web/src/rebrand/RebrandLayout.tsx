@@ -12,6 +12,7 @@ import { BellRow, type Notif } from './components/NotificationBits'
 import { RELEVANT_KIND_PARAM } from './lib/notifKinds'
 import { ALERT_QUERY_KEYS, useUnreadAlertCount } from './lib/useUnreadAlerts'
 import { here, loginHref } from './lib/returnTo'
+import { accountTabFor } from './lib/accountRoutes'
 import { dropSnapshot, inSnapshot } from './lib/snapshot'
 import { AppsLine } from './components/AppsStrip'
 
@@ -417,9 +418,11 @@ export default function RebrandLayout() {
       <main>
         <AtmosphericBackground intensity="medium" confineFaceToHero>
           {/* per-route entrance — a gentle fade+rise on every navigation.
-              Keyed on pathname; no exit anim (plays nice with lazy/Suspense). */}
+              Keyed on pathname; no exit anim (plays nice with lazy/Suspense). The four
+              account tabs share one key, so switching tabs keeps their shared layout
+              mounted instead of remounting the page. */}
           <motion.div
-            key={pathname}
+            key={accountTabFor(pathname) ? 'account' : pathname}
             initial={inSnapshot() ? false : { opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.32, ease: 'easeOut' }}

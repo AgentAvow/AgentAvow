@@ -12,7 +12,13 @@ export const H1_CLASS = 'text-[clamp(30px,4.6vw,46px)] font-extrabold leading-[1
 export const H2_CLASS = 'text-[clamp(25px,3.4vw,33px)] font-bold tracking-tight leading-tight'
 export const H2S_CLASS = 'text-[21px] font-bold tracking-tight leading-snug'
 export const LEDE_CLASS = 'text-[18px] font-light text-text-muted max-w-[58ch]'
-export const SECTION_CLASS = 'relative z-[2] py-[60px] max-sm:py-11 border-t border-border/60'
+/**
+ * The divider above a section: a top rule held to the 1080 content grid (24px in from
+ * each edge on narrow screens) rather than running edge to edge (Kenne, 11-11). The
+ * wrapper it goes on must be `relative`. Card borders and the footer rule stay as they are.
+ */
+export const DIVIDER_CLASS = "before:content-[''] before:absolute before:top-0 before:left-1/2 before:-translate-x-1/2 before:w-[min(1080px,calc(100%-48px))] before:border-t before:border-border/60 before:pointer-events-none"
+export const SECTION_CLASS = `relative z-[2] py-[60px] max-sm:py-11 ${DIVIDER_CLASS}`
 export const BTN_CLASS = 'inline-flex items-center justify-center font-semibold text-[15px] px-5 py-[11px] rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow'
 export const BTN_GHOST_CLASS = 'inline-flex items-center justify-center font-semibold text-[15px] px-5 py-[11px] rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors'
 

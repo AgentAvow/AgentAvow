@@ -9,7 +9,7 @@ import { rp } from '../basePath'
 import { NotifRow, type Notif } from '../components/NotificationBits'
 import { RELEVANT_KIND_PARAM } from '../lib/notifKinds'
 import { ALERT_QUERY_KEYS } from '../lib/useUnreadAlerts'
-import { AccList, AccSection, AccountShell, EmptyCard, LoadError, SkeletonRows, btnGhostSm } from '../components/AccountBits'
+import { AccList, AccSection, EmptyCard, LoadError, SkeletonRows, btnGhostSm } from '../components/AccountBits'
 
 type Filter = 'all' | 'unread' | 'watch_alert' | 'watch_good_news'
 const FILTERS: [Filter, string][] = [['all', 'All'], ['unread', 'Unread'], ['watch_alert', 'Alerts'], ['watch_good_news', 'Good news']]
@@ -73,10 +73,7 @@ function NotificationsBody() {
   )
 }
 
+/** Rendered inside AccountLayout (the shared header and tabs), see App.tsx. */
 export default function Notifications() {
-  return (
-    <AccountShell tab="notif">
-      <NotificationsBody />
-    </AccountShell>
-  )
+  return <NotificationsBody />
 }

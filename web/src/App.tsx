@@ -130,6 +130,8 @@ const RebrandSubmit = lazyWithReload(() => import('./rebrand/pages/Submit'))
 const RebrandLogin = lazyWithReload(() => import('./rebrand/pages/Login'))
 const RebrandLegal = lazyWithReload(() => import('./rebrand/pages/Legal'))
 const RebrandAccount = lazyWithReload(() => import('./rebrand/pages/Account'))
+// The shared header + tabs for the four account routes: stays mounted across tab switches.
+const RebrandAccountLayout = lazyWithReload(() => import('./rebrand/components/AccountBits').then((m) => ({ default: m.AccountLayout })))
 const RebrandMyTools = lazyWithReload(() => import('./rebrand/pages/MyTools'))
 const RebrandHowItWorks = lazyWithReload(() => import('./rebrand/pages/HowItWorks'))
 const RebrandResearch = lazyWithReload(() => import('./rebrand/pages/Research'))
@@ -267,7 +269,6 @@ function AppRoutes() {
           <Route path="admin-dashboard" element={<RebrandAdminDashboard />} />
           <Route path="admin-posts" element={<RebrandAdminPosts />} />
           <Route path="admin-replies" element={<RebrandAdminReplies />} />
-          <Route path="notifications" element={<RebrandNotifications />} />
           <Route path="submit" element={<RebrandSubmit />} />
           <Route path="badge" element={<RebrandBadge />} />
           <Route path="for-developers" element={<RebrandForDevelopers />} />
@@ -285,15 +286,19 @@ function AppRoutes() {
           <Route path="check/:owner/:repo" element={<RebrandCheck />} />
           <Route path="check/*" element={<RebrandCheck />} />
           <Route path="login" element={<RebrandLogin />} />
-          <Route path="account" element={<RebrandAccount />} />
-          <Route path="tools" element={<RebrandMyTools />} />
+          {/* Account area: one persistent layout, only the tab content swaps. URLs unchanged. */}
+          <Route element={<RebrandAccountLayout />}>
+            <Route path="tools" element={<RebrandMyTools />} />
+            <Route path="account" element={<RebrandAccount />} />
+            <Route path="notifications" element={<RebrandNotifications />} />
+            <Route path="settings" element={<RebrandSettings />} />
+          </Route>
           <Route path="how-it-works" element={<RebrandHowItWorks />} />
           <Route path="research" element={<RebrandResearch />} />
           <Route path="state-of-agent-security-2026" element={<RebrandSoas2026 />} />
           <Route path="state-of-agent-security-q3-2026" element={<RebrandSoasQ3 />} />
           <Route path="claim" element={<RebrandClaim />} />
           <Route path="faq" element={<RebrandFAQ />} />
-          <Route path="settings" element={<RebrandSettings />} />
           <Route path="avatar" element={<RebrandAvatar />} />
           <Route path="sandbox" element={<RebrandSandbox />} />
           <Route path="claude-code" element={<RebrandClaudeCode />} />

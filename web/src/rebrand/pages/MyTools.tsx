@@ -6,7 +6,7 @@ import { motion, useReducedMotion } from 'framer-motion'
 import api from '../../lib/api'
 import { holdOneTimeScan } from '../lib/oneTimeScan'
 import {
-  AccList, AccRow, AccSection, AccountShell, ConfirmAction, EmptyCard, LoadError, PhraseText,
+  AccList, AccRow, AccSection, ConfirmAction, EmptyCard, LoadError, PhraseText,
   SkeletonRows, ToolArt, btnSm, rowAct, type RowArt,
 } from '../components/AccountBits'
 
@@ -606,10 +606,7 @@ function MyToolsBody() {
   )
 }
 
+/** Rendered inside AccountLayout (the shared header and tabs), see App.tsx. */
 export default function RebrandMyTools() {
-  return (
-    <AccountShell tab="tools">
-      <MyToolsBody />
-    </AccountShell>
-  )
+  return <MyToolsBody />
 }

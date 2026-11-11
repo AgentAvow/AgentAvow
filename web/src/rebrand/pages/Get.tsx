@@ -4,12 +4,14 @@ import SEOHead from '../../components/SEOHead'
 import { currentPath, trackEvent } from '../../lib/analytics'
 import { rp } from '../basePath'
 import { AppsButtons } from '../components/AppsStrip'
+import { DIVIDER_CLASS } from '../components/PageBits'
 import { trackListing } from '../lib/listings'
 import { codexCmd, cursorInstall, vscodeInstall, vscodeWebInstall } from '../lib/installLinks'
 
 /**
- * /get: every place AgentAvow is listed, in one left-aligned 860px column (approved
- * mock "/get v2", 2026-11-10). Claude Code leads (Kenne's pick, the same order as
+ * /get: every place AgentAvow is listed, in one 860px column held to the left edge of
+ * the 1080 grid, so it lines up with the header logo (approved mock "/get v2",
+ * 2026-11-10; alignment fix 11-11). Claude Code leads (Kenne's pick, the same order as
  * Home), then the Claude and ChatGPT apps as one row, then the other clients, the
  * packages and gates, the pipelines and the API. Only listings that exist go here.
  * Left off: Docker (not listed yet), PulseMCP (unconfirmed) and the GitHub Marketplace
@@ -149,26 +151,30 @@ export default function RebrandGet() {
         path="/get"
       />
       <div className="relative pt-14 pb-[30px]">
-        <div className="relative z-[2] max-w-[860px] mx-auto px-6">
-          <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Get AgentAvow</span>
-          <h1 className="mt-3 text-[clamp(30px,4.6vw,46px)] font-extrabold leading-[1.1] tracking-[-.025em] [text-wrap:balance]">Get AgentAvow where you work.</h1>
-          <p className="mt-[18px] max-w-[58ch] text-[18px] font-light text-text-muted">
-            The same check everywhere: <b className="font-medium text-text">Safe to connect</b>, <b className="font-medium text-text">Review before you connect</b>, or <b className="font-medium text-text">Do not connect</b>, with a signed 0-100 trust score, an adoption score, and the Certified mark where a tool has earned it. Free, no account.
-          </p>
+        <div className="relative z-[2] max-w-[1080px] mx-auto px-6">
+          <div className="max-w-[860px]">
+            <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Get AgentAvow</span>
+            <h1 className="mt-3 text-[clamp(30px,4.6vw,46px)] font-extrabold leading-[1.1] tracking-[-.025em] [text-wrap:balance]">Get AgentAvow where you work.</h1>
+            <p className="mt-[18px] max-w-[58ch] text-[18px] font-light text-text-muted">
+              The same check everywhere: <b className="font-medium text-text">Safe to connect</b>, <b className="font-medium text-text">Review before you connect</b>, or <b className="font-medium text-text">Do not connect</b>, with a signed 0-100 trust score, an adoption score, and the Certified mark where a tool has earned it. Free, no account.
+            </p>
+          </div>
         </div>
       </div>
 
-      <div className="relative z-[2] pt-[34px] pb-[60px] border-t border-border/60">
-        <div className="max-w-[860px] mx-auto px-6 flex flex-col gap-[34px]">
-          {GROUPS.map((g) => (
-            <section key={g.title}>
-              <h2 className="text-[21px] font-bold tracking-tight">{g.title}</h2>
-              <p className="mt-1 text-[14.5px] text-text-muted">{g.sub}</p>
-              <div className="mt-3 glass rounded-[14px] border border-border/60 overflow-hidden">
-                {g.items.map((item, i) => <Row key={item.name} item={item} first={i === 0} />)}
-              </div>
-            </section>
-          ))}
+      <div className={`relative z-[2] pt-[34px] pb-[60px] ${DIVIDER_CLASS}`}>
+        <div className="max-w-[1080px] mx-auto px-6">
+          <div className="max-w-[860px] flex flex-col gap-[34px]">
+            {GROUPS.map((g) => (
+              <section key={g.title}>
+                <h2 className="text-[21px] font-bold tracking-tight">{g.title}</h2>
+                <p className="mt-1 text-[14.5px] text-text-muted">{g.sub}</p>
+                <div className="mt-3 glass rounded-[14px] border border-border/60 overflow-hidden">
+                  {g.items.map((item, i) => <Row key={item.name} item={item} first={i === 0} />)}
+                </div>
+              </section>
+            ))}
+          </div>
         </div>
       </div>
     </div>

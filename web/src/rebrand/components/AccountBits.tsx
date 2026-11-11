@@ -2,8 +2,8 @@
  * Settings): the one account shell (header + tabs at 720px, approved mock "Account
  * v2", 2026-11-10), list sections with their loading, empty and error states, the
  * Browse-style row artwork, and an in-page confirm for destructive actions. */
-import { useEffect, useState, type ReactNode } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Suspense, useEffect, useState, type ReactNode } from 'react'
+import { Link, Outlet, useLocation } from 'react-router-dom'
 import { rp } from '../basePath'
 import SEOHead from '../../components/SEOHead'
 import { useAuth } from '../../hooks/useAuth'
@@ -11,6 +11,7 @@ import { decisionOf, decisionPhrase } from '../../components/trust/gradeSystem'
 import { useRequireUser } from '../lib/useRequireUser'
 import { AdoptionMini, TrustOrCertifiedMini } from './TrustMark'
 import { useUnreadAlertCount } from '../lib/useUnreadAlerts'
+import { ACCOUNT_TABS, accountTabFor, type AccountTab } from '../lib/accountRoutes'
 
 /** What an account page shows while we find out who is signed in (instead of a blank page). */
 export function AccountSkeleton({ width = 'max-w-[720px]' }: { width?: string }) {
@@ -172,20 +173,13 @@ export function ConfirmAction({ label, question, confirmLabel, onConfirm, pendin
   )
 }
 
-export type AccountTab = 'tools' | 'watch' | 'notif' | 'settings'
-
-const TABS: [AccountTab, string, string][] = [
-  ['tools', 'My Tools', '/rebrand/tools'],
-  ['watch', 'Watches & alerts', '/rebrand/account'],
-  ['notif', 'Notifications', '/rebrand/notifications'],
-  ['settings', 'Settings', '/rebrand/settings'],
-]
+export type { AccountTab } from '../lib/accountRoutes'
 
 /** The row of account tabs. They are links to the four routes, so URLs don't change. */
 function AccountTabs({ tab, unread }: { tab: AccountTab; unread: number }) {
   return (
     <nav aria-label="Account" className="mt-5 flex gap-1 border-b border-border/60 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      {TABS.map(([k, label, to]) => (
+      {ACCOUNT_TABS.map(([k, label, to]) => (
         <Link key={k} to={rp(to)} aria-current={tab === k ? 'page' : undefined}
           className={`shrink-0 whitespace-nowrap px-3 py-[9px] text-[14px] border-b-2 -mb-px transition-colors ${tab === k ? 'text-text border-primary-light font-semibold' : 'text-text-muted border-transparent hover:text-text'}`}>
           {label}
@@ -198,24 +192,37 @@ function AccountTabs({ tab, unread }: { tab: AccountTab; unread: number }) {
   )
 }
 
+/** Warm the other tabs' chunks once the shell is up, so a tab switch never waits on a download. */
+function preloadAccountTabs() {
+  void import('../pages/MyTools')
+  void import('../pages/Account')
+  void import('../pages/Notifications')
+  void import('../pages/Settings')
+}
+
 /**
  * The account shell: one 720px column, one header, one row of tabs, for My Tools,
- * Watches & alerts, Notifications and Settings. Signed out it shows the skeleton and
- * sends you to /login?returnTo=… (no blank flash). Children render only signed in.
+ * Watches & alerts, Notifications and Settings. It is the parent route of all four
+ * (App.tsx), so it stays mounted while you switch tabs and only the <Outlet/> swaps.
+ * The signed-in user lives in AuthProvider for the whole session, so the skeleton
+ * shows only on a true first load. Signed out it shows the skeleton and sends you to
+ * /login?returnTo=… (no blank flash). The tab pages render only signed in.
  */
-export function AccountShell({ tab, children }: { tab: AccountTab; children: ReactNode }) {
+export function AccountLayout() {
   const { user, isLoading } = useAuth()
   useRequireUser(user, isLoading)
   const unread = useUnreadAlertCount(!!user)
-  const { hash } = useLocation()
+  const { pathname, hash } = useLocation()
+  const tab = accountTabFor(pathname) ?? 'watch'
   const signedIn = !!user
+  useEffect(() => { if (signedIn) preloadAccountTabs() }, [signedIn])
   // A link to a section (/settings#developer) scrolls there once the page has rendered.
   useEffect(() => {
     if (!hash || !signedIn) return
     const t = setTimeout(() => document.getElementById(hash.slice(1))?.scrollIntoView({ block: 'start' }), 250)
     return () => clearTimeout(t)
-  }, [hash, signedIn])
-  const [, label, route] = TABS.find(([k]) => k === tab)!
+  }, [hash, signedIn, pathname])
+  const [, label, route] = ACCOUNT_TABS.find(([k]) => k === tab)!
   // Private pages: titled, never indexed.
   const head = <SEOHead title={label} path={route.replace('/rebrand', '')} noindex />
   if (!user) return <>{head}<AccountSkeleton /></>
@@ -226,7 +233,10 @@ export function AccountShell({ tab, children }: { tab: AccountTab; children: Rea
       <h1 className="mt-2.5 text-[clamp(26px,3.6vw,32px)] font-extrabold tracking-tight">Your tools and alerts</h1>
       <p className="mt-1.5 text-text-muted text-[15px]">Claim tools you maintain, watch the ones you depend on, and choose how alerts reach you.</p>
       <AccountTabs tab={tab} unread={unread} />
-      {children}
+      {/* Only the tab content swaps. A tab whose chunk is still loading shows rows, not a page skeleton. */}
+      <Suspense fallback={<div className="mt-[22px]"><SkeletonRows n={3} /></div>}>
+        <Outlet />
+      </Suspense>
     </div>
   )
 }
