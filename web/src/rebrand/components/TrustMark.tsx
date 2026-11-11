@@ -10,6 +10,8 @@ import { shortUnit } from '../lib/adoptionUnit'
  *
  * Sizes: TrustBar/AdoptionNeedle = hero (score page); TrustMini/AdoptionMini =
  * list scale (Browse rows, Home cards); TrustPill = the bare number chip.
+ * Certified: CertifiedBadge (lg / md / sm rosette with the score inside), shown in
+ * place of the trust mark, once, only where the tool earned it.
  */
 
 const P = (cx: number, cy: number, r: number, d: number) => {
@@ -61,7 +63,7 @@ export function TrustBar({ score, scale = 1 }: { score: number; scale?: number }
   )
 }
 
-/** The 10-segment column shared by TrustBar and CertifiedMark. */
+/** The 10-segment column of TrustBar. */
 function Segments({ scale, fill }: { scale: number; fill: (i: number) => string }) {
   return (
     <div className="flex flex-col-reverse shrink-0" style={{ gap: 2.4 * scale }} aria-hidden="true">
@@ -134,22 +136,76 @@ export function AdoptionNeedle({ count, unit, scorePct, tier, scale = 1 }: { cou
   )
 }
 
-/** Certified — the earned, gated top tier, in the option C layout: the full
- * teal→magenta bar with the gradient pill (branded ring-check + number) to its right
- * and CERTIFIED beneath. Only rendered for a tool that carries the Certified mark. */
-export function CertifiedMark({ score = 98, scale = 1 }: { score?: number; scale?: number }) {
-  return (
-    <div className="flex items-center text-left max-[480px]:flex-col max-[480px]:text-center" style={{ gap: 14 * scale }}>
-      <Segments scale={scale} fill={() => 'linear-gradient(90deg,#2dd4bf,#e879f9)'} />
-      <div className="flex flex-col items-start min-w-0 max-[480px]:items-center">
-        <div className="inline-flex items-center rounded-full shadow-lg" style={{ gap: 6 * scale, paddingLeft: 13 * scale, paddingRight: 15 * scale, paddingTop: 5 * scale, paddingBottom: 5 * scale, background: 'linear-gradient(120deg,#2dd4bf,#e879f9)', boxShadow: '0 6px 20px -6px rgba(45,212,191,0.5)' }}>
-          <svg width={17 * scale} height={17 * scale} viewBox="0 0 40 40" fill="none" aria-hidden="true"><circle cx="20" cy="20" r="16.5" stroke="#06231f" strokeWidth="3.2" /><path d="M12 21l6 6 12-13" stroke="#06231f" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" /></svg>
-          <span className="font-extrabold leading-none tabular-nums" style={{ fontSize: 24 * scale, color: '#06231f' }}>{score}</span>
-        </div>
-        <div className="font-mono font-extrabold tracking-[0.18em]" style={{ ...GRAD_TEXT, fontSize: 10.5 * scale, marginTop: 7 * scale }}>CERTIFIED</div>
-      </div>
-    </div>
+// ── CERTIFIED BADGE ─────────────────────────────────────────────────────────────
+
+/** The rosette outline: n scalloped petals between radius r and R (the mockup's
+ * `rosette(60,54,50,45,22)`), computed once. */
+function rosettePath(cx: number, cy: number, R: number, r: number, n: number): string {
+  const step = (Math.PI * 2) / n
+  let d = ''
+  for (let i = 0; i < n; i++) {
+    const a0 = i * step - Math.PI / 2, a1 = a0 + step, am = a0 + step / 2
+    const x0 = cx + r * Math.cos(a0), y0 = cy + r * Math.sin(a0)
+    const x1 = cx + r * Math.cos(a1), y1 = cy + r * Math.sin(a1)
+    const xm = cx + R * 1.08 * Math.cos(am), ym = cy + R * 1.08 * Math.sin(am)
+    d += (i ? '' : `M${x0.toFixed(1)} ${y0.toFixed(1)}`) + `Q${xm.toFixed(1)} ${ym.toFixed(1)} ${x1.toFixed(1)} ${y1.toFixed(1)}`
+  }
+  return d + 'Z'
+}
+const ROSETTE = rosettePath(60, 54, 50, 45, 22)
+
+/** Pixel sizes of the three badges. lg/md carry the TRUST caption and CERTIFIED ribbon;
+ * sm is the list size (just the rosette and the score). */
+const BADGE_SIZE = { lg: [112, 124], md: [72, 80], sm: [34, 34] } as const
+export type CertifiedBadgeSize = keyof typeof BADGE_SIZE
+
+/**
+ * Certified — the earned, gated top tier: a teal→fuchsia rosette with the trust score
+ * inside. Render it ONLY for a tool that carries the mark (isCertified /
+ * certified_mark: all six checks pass and the answer is Safe to connect at 81+), and
+ * never with a second "Certified" tag beside it. A 3-digit score (100) gets a smaller
+ * numeral so it fits.
+ */
+export function CertifiedBadge({ score, size = 'md', className = '' }: { score: number; size?: CertifiedBadgeSize; className?: string }) {
+  const gid = useId()
+  const [w, h] = BADGE_SIZE[size]
+  const long = String(score).length > 2
+  const body = (
+    <>
+      <defs>
+        <linearGradient id={gid} x1="10" y1="4" x2="110" y2="104" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#2DD4BF" /><stop offset="1" stopColor="#E879F9" />
+        </linearGradient>
+      </defs>
+      <path d={ROSETTE} fill={`url(#${gid})`} />
+      <circle cx="60" cy="54" r="38" style={{ fill: 'var(--color-surface)' }} />
+      <circle cx="60" cy="54" r="33.5" fill="none" stroke={`url(#${gid})`} strokeWidth="1.3" opacity=".55" />
+    </>
   )
+  if (size === 'sm') {
+    return (
+      <svg viewBox="4 0 112 110" width={w} height={h} role="img" aria-label={`Certified, trust score ${score}`} className={`block shrink-0 overflow-visible ${className}`}>
+        {body}
+        <text x="60" y="69" textAnchor="middle" fontFamily="Geist,system-ui,sans-serif" fontSize={long ? 32 : 44} fontWeight={900} fill={`url(#${gid})`}>{score}</text>
+      </svg>
+    )
+  }
+  return (
+    <svg viewBox="0 0 120 128" width={w} height={h} role="img" aria-label={`Certified, trust score ${score} out of 100`} className={`block shrink-0 overflow-visible ${className}`}>
+      {body}
+      <text x="60" y="37" textAnchor="middle" fontFamily="ui-monospace,Menlo,monospace" fontSize="7.5" fontWeight={700} letterSpacing="1.6" style={{ fill: 'var(--color-text-muted)' }}>TRUST</text>
+      <text x="60" y="70" textAnchor="middle" fontFamily="Geist,system-ui,sans-serif" fontSize={long ? 25 : 34} fontWeight={900} fill={`url(#${gid})`}>{score}</text>
+      <path d="M2 96H118L111 107L118 118H2L9 107Z" fill={`url(#${gid})`} />
+      <text x="60" y="111" textAnchor="middle" fontFamily="ui-monospace,Menlo,monospace" fontSize="10.5" fontWeight={800} letterSpacing="2.4" fill="#06231f">CERTIFIED</text>
+    </svg>
+  )
+}
+
+/** The large/medium Certified mark (the score-card slot on Home, Preflight and the
+ * Certified page). Kept under its old name so existing imports keep working; it now
+ * draws the rosette badge. `scale` < 1 picks the medium badge. */
+export function CertifiedMark({ score = 98, scale = 1, size }: { score?: number; scale?: number; size?: 'lg' | 'md' }) {
+  return <CertifiedBadge score={score} size={size ?? (scale >= 1.2 ? 'lg' : 'md')} />
 }
 
 // ── LIST SCALE ────────────────────────────────────────────────────────────────
@@ -171,50 +227,73 @@ export function TrustMini({ score }: { score: number }) {
   )
 }
 
-/** Certified — the list-scale form of CertifiedMark: the gradient mini bar, the score in
- * the gradient and a small CERTIFIED caption. Shown in place of TrustMini on a row that
- * carries `certified_mark` (the same rule as the scan page's big mark). */
-export function CertifiedMini({ score }: { score: number }) {
-  const n = 6
+/** Certified at list scale: the small rosette with the score inside, shown in place of
+ * TrustMini on a row that carries `certified_mark`. `caption` adds the CERTIFIED /
+ * "trust 92" label beside it (Browse cards); pills and tight rows leave it off. */
+export function CertifiedMini({ score, caption = false }: { score: number; caption?: boolean }) {
   return (
-    <span className="inline-flex items-center gap-1.5" title={`Certified · trust ${score}/100`}>
-      <span className="inline-flex gap-[2px] items-end">
-        {Array.from({ length: n }).map((_, i) => (
-          <span key={i} className="w-[5px] h-[10px] rounded-[1px]" style={{ background: 'linear-gradient(180deg,#2dd4bf,#e879f9)' }} />
-        ))}
-      </span>
-      <span className="inline-flex flex-col items-start leading-none">
-        <span className="text-[14px] font-extrabold tabular-nums" style={GRAD_TEXT}>{score}</span>
-        <span className="font-mono text-[7.5px] font-extrabold tracking-[0.14em] mt-[2px]" style={GRAD_TEXT}>CERTIFIED</span>
-      </span>
+    <span className="inline-flex items-center gap-2" title={`Certified · trust ${score}/100`}>
+      <CertifiedBadge score={score} size="sm" />
+      {caption && (
+        <span className="font-mono text-[9px] font-extrabold tracking-[0.16em] leading-[1.1]">
+          <span style={GRAD_TEXT}>CERTIFIED</span>
+          <small className="block text-[9px] font-medium tracking-[0.04em] text-text-muted mt-0.5">trust {score}</small>
+        </span>
+      )}
     </span>
   )
 }
 
 /** Trust at list scale: CertifiedMini when the row carries the Certified mark (only ever
  * beside Safe to connect), else TrustMini. */
-export function TrustOrCertifiedMini({ row }: { row: { trust_score?: number | null } & Record<string, unknown> }) {
+export function TrustOrCertifiedMini({ row, caption = false }: { row: { trust_score?: number | null } & Record<string, unknown>; caption?: boolean }) {
   if (row.trust_score == null) return null
-  const d = decisionOf({ ...row, findings: { critical: (row.critical as number) ?? 0, high: (row.high as number) ?? 0 } })
-  return d.decision === 'safe' && isCertified(row)
-    ? <CertifiedMini score={row.trust_score} />
+  return rowIsCertified(row)
+    ? <CertifiedMini score={row.trust_score} caption={caption} />
     : <TrustMini score={row.trust_score} />
 }
 
-/** The three-phrase headline for a list row / card: "Safe to connect · Certified" in the
- * phrase colour, with the reason (when known) muted beside it. Reads the row's own
- * `decision` (catalog / API) or decides from what the row carries. */
-export function DecisionLine({ row, className = '' }: {
+/** True when a list row carries the Certified mark: the answer is Safe to connect and
+ * isCertified (certified_mark from the API; never inferred from a letter grade). */
+function rowIsCertified(row: { trust_score?: number | null } & Record<string, unknown>): boolean {
+  if (row.trust_score == null) return false
+  const d = decisionOf({ ...row, findings: { critical: (row.critical as number) ?? 0, high: (row.high as number) ?? 0 } })
+  return d.decision === 'safe' && isCertified(row)
+}
+
+/** The list-row score pair, in the Browse order: the trust or Certified mark, then the
+ * adoption half-gauge. With no adoption signal the gauge shows muted, reading "New".
+ * `stack` puts them in a column (Browse cards); otherwise side by side. */
+export function ScorePairMini({ row, stack = false, caption = false }: {
+  row: { trust_score?: number | null; adoption_count?: number | null; adoption_unit?: string | null } & Record<string, unknown>
+  stack?: boolean; caption?: boolean
+}) {
+  if (row.trust_score == null) return null
+  return (
+    <span className={`inline-flex shrink-0 ${stack ? 'flex-col items-end gap-1.5' : 'items-center gap-3'}`}>
+      <TrustOrCertifiedMini row={row} caption={caption} />
+      <AdoptionMini count={row.adoption_count} unit={row.adoption_unit} />
+    </span>
+  )
+}
+
+/** The three-phrase headline for a list row / card, in the phrase colour, with the
+ * reason (when known) muted beside it. Reads the row's own `decision` (catalog / API)
+ * or decides from what the row carries. Certified is shown ONCE, as the badge in the
+ * score slot, so the line carries no "· Certified" unless `certifiedSuffix` is set (for
+ * a surface that shows no badge). */
+export function DecisionLine({ row, className = '', certifiedSuffix = false }: {
   row: { trust_score?: number | null; decision?: string | null; decision_reason?: string | null
     critical?: number | null; high?: number | null; grade?: string | null
     certified?: { eligible?: boolean } | null; certified_mark?: boolean | null }
   className?: string
+  certifiedSuffix?: boolean
 }) {
   const d = decisionOf({ ...row, findings: { critical: row.critical ?? 0, high: row.high ?? 0 } })
   const p = decisionPhrase(d.decision)
   // The mark only ever sits beside Safe to connect; catalog rows and API results both
   // carry it as certified_mark (never inferred from a stored letter grade).
-  const cert = d.decision === 'safe' && isCertified(row)
+  const cert = certifiedSuffix && d.decision === 'safe' && isCertified(row)
   return (
     <div className={`text-[12.5px] font-semibold ${className}`} style={{ color: p.color }} data-decision={p.value}>
       {p.phrase}{cert && <span className="ml-1" style={GRAD_TEXT}>· Certified</span>}

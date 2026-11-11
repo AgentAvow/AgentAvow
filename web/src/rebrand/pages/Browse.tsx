@@ -3,12 +3,12 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { fetchCatalog, fetchRecent, rowIdentity, type CatalogRow, type CatalogSandbox } from '../catalog'
-import { TrustOrCertifiedMini, AdoptionMini } from '../components/TrustMark'
-import { DECISIONS, decide, decisionPhrase } from '../../components/trust/gradeSystem'
+import { ScorePairMini } from '../components/TrustMark'
+import { DECISIONS, decide, decisionPhrase, getTrustTier } from '../../components/trust/gradeSystem'
 
 import { RevealStagger } from '../components/motion'
-import { AnswerMixBar } from '../components/AnswerMix'
-import { DNC_LIST, useAnswerMix } from '../lib/answerMix'
+import { useAnswerMix, type AnswerMix } from '../lib/answerMix'
+import { PageHeader } from '../components/PageBits'
 import SEOHead from '../../components/SEOHead'
 
 /**
@@ -19,9 +19,11 @@ import SEOHead from '../../components/SEOHead'
  * result count, and pagination.
  */
 
+// One row of kind pills, "All tools" first; MCP servers stays the default view.
 const SURFACES = [
+  { key: 'all', label: 'All tools' },
   { key: 'mcp', label: 'MCP servers' },
-  { key: 'openclaw', label: 'OpenClaw skills' },
+  { key: 'openclaw', label: 'Agent skills' },
   { key: 'npm', label: 'npm packages' },
   { key: 'pypi', label: 'Python packages' },
   { key: 'github', label: 'GitHub repos' },
@@ -30,7 +32,6 @@ const SURFACES = [
   { key: 'docker', label: 'Container images' },
   { key: 'x402', label: 'x402 endpoints' },
   { key: 'community', label: 'All on-demand scans' },
-  { key: 'all', label: 'All tools' },
 ]
 
 const SORTS = [
@@ -106,7 +107,8 @@ function statusChip(row: CatalogRow): { label: string; cls: string; title?: stri
     // Lead with the three-phrase short label (Safe / Review / Don't connect); Certified rides beside.
     const d = decisionPhrase(row.decision ?? decide({ trust_score: row.trust_score, findings: { critical: row.critical ?? 0, high: row.high ?? 0 } }).decision)
     const cls = d.value === 'safe' ? 'text-success bg-success/15' : d.value === 'review' ? 'text-warning bg-warning/15' : 'text-danger bg-danger/15'
-    return { label: d.label + (row.certified_mark && d.value === 'safe' ? ' · ✦ Certified' : ''), cls, title: row.decision_reason ? `${d.phrase} — ${row.decision_reason}` : d.phrase }
+    // Certified shows once, as the badge in the score slot, never as a second tag here.
+    return { label: d.label, cls, title: row.decision_reason ? `${d.phrase} — ${row.decision_reason}` : d.phrase }
   }
   return { label: 'unscored', cls: 'text-text-muted bg-surface-hover' }
 }
@@ -170,10 +172,7 @@ function ToolCard({ row }: { row: CatalogRow }) {
           <span className="font-mono text-[13.5px] truncate min-w-0" title={display}>{display}</span>
         </span>
         {row.trust_score != null ? (
-          <div className="flex flex-col items-end gap-1.5 shrink-0">
-            <TrustOrCertifiedMini row={row as unknown as Record<string, unknown> & { trust_score: number }} />
-            {row.adoption_count != null && row.adoption_count > 0 && <AdoptionMini count={row.adoption_count} unit={row.adoption_unit} />}
-          </div>
+          <ScorePairMini row={row as unknown as Record<string, unknown> & { trust_score: number }} stack />
         ) : (
           <span className="font-mono text-[11px] px-2 py-0.5 rounded-lg shrink-0 text-text-muted bg-surface-hover">unscored</span>
         )}
@@ -222,7 +221,95 @@ function ToolCard({ row }: { row: CatalogRow }) {
   )
 }
 
-const DEFAULT_SURFACE = SURFACES[0].key
+/** Pill look for the one filter row: teal outline when selected. */
+const pill = (on: boolean) => `shrink-0 whitespace-nowrap text-[13px] rounded-full border px-[13px] py-1.5 transition-colors ${
+  on ? 'border-primary-light text-primary-light bg-primary/10' : 'border-border bg-surface text-text-muted hover:border-primary-light hover:text-primary-light'}`
+
+const MIX_SEGMENTS = [
+  { key: 'safe', dec: 'safe', phrase: 'Safe to connect', color: '#34d399' },
+  { key: 'review', dec: 'review', phrase: 'Review before you connect', color: '#F59E0B' },
+  { key: 'dnc', dec: 'do_not_connect', phrase: 'Do not connect', color: '#f43f5e' },
+] as const
+
+const share = (n: number, of: number) => (of > 0 ? Math.round((n / of) * 1000) / 10 : 0)
+
+/**
+ * How the catalog reads, as one graphic: the total and the answer mix (each bar
+ * segment filters the list), then the Certified and Do not connect counts (both
+ * filters, in place of the old quick pills) and the newest checks. Live numbers only.
+ */
+function CatalogGraphic({ mix, decision, certifiedOn, onDecision, onCertified, recent }: {
+  mix: AnswerMix | undefined
+  decision: string
+  certifiedOn: boolean
+  onDecision: (dec: string) => void
+  onCertified: () => void
+  recent: { name: string; full_name: string | null; surface: string; trust_score: number | null; href: string | null }[] | undefined
+}) {
+  const ready = mix && mix.total > 0
+  const cell = 'flex flex-col gap-0.5 min-w-0 text-left px-3.5 pt-3 pb-0.5 border-l border-border/60'
+  const kicker = 'font-mono text-[10.5px] tracking-[0.12em] uppercase text-primary-light'
+  return (
+    <div className="glass rounded-2xl border border-border/60 px-5 py-[18px]">
+      <div className="flex flex-wrap justify-between items-end gap-x-5 gap-y-2">
+        <div>
+          <b className="block gradient-text font-extrabold leading-none tracking-[-.02em] tabular-nums text-[clamp(30px,5vw,40px)]">{ready ? mix.total.toLocaleString() : '—'}</b>
+          <span className="block mt-1 text-[13.5px] text-text-muted">tools checked, and how they read</span>
+        </div>
+        <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[13px] text-text-muted">
+          {MIX_SEGMENTS.map((s) => (
+            <span key={s.key} className="inline-flex items-baseline">
+              <i className="inline-block w-[9px] h-[9px] rounded-[2px] mr-1.5" style={{ background: s.color }} />
+              <b className="text-text tabular-nums mr-1">{ready ? `${share(mix[s.key], mix.total)}%` : '—'}</b>{s.phrase}
+            </span>
+          ))}
+        </div>
+      </div>
+      {ready ? (
+        <div className="flex mt-3.5 h-[18px] rounded-full overflow-hidden bg-surface-hover" role="group"
+          aria-label={MIX_SEGMENTS.map((s) => `${share(mix[s.key], mix.total)}% ${s.phrase}`).join(', ')}>
+          {MIX_SEGMENTS.map((s) => (
+            <button key={s.key} type="button" onClick={() => onDecision(s.dec)} aria-pressed={decision === s.dec}
+              aria-label={`Show ${s.phrase}`} title={`Show ${s.phrase}`}
+              className={`block h-full transition-opacity hover:opacity-80 ${decision && decision !== s.dec ? 'opacity-40' : ''}`}
+              style={{ width: `${share(mix[s.key], mix.total)}%`, background: s.color }} />
+          ))}
+        </div>
+      ) : <div className="mt-3.5 h-[18px] rounded-full bg-surface-hover animate-pulse" aria-hidden="true" />}
+      <div className="grid grid-cols-2 sm:grid-cols-4 mt-3.5 border-t border-border/60">
+        <button type="button" onClick={onCertified} aria-pressed={certifiedOn} className={`${cell} !border-l-0 !pl-0 group`}>
+          <span className={kicker}>Certified</span>
+          <b className={`text-[22px] font-extrabold leading-tight tabular-nums gradient-text ${certifiedOn ? 'underline decoration-primary-light underline-offset-4' : ''}`}>{ready ? mix.certified.toLocaleString() : '—'}</b>
+          <small className="text-[12px] text-text-muted group-hover:text-text">{certifiedOn ? 'showing them · clear ×' : 'cleared the bar →'}</small>
+        </button>
+        <button type="button" onClick={() => onDecision('do_not_connect')} aria-pressed={decision === 'do_not_connect'} className={`${cell} group`}>
+          <span className={kicker}>Do not connect</span>
+          <b className={`text-[22px] font-extrabold leading-tight tabular-nums text-danger ${decision === 'do_not_connect' ? 'underline underline-offset-4' : ''}`}>{ready ? mix.dnc.toLocaleString() : '—'}</b>
+          <small className="text-[12px] text-text-muted group-hover:text-text">{decision === 'do_not_connect' ? 'showing them · clear ×' : 'see them →'}</small>
+        </button>
+        <div className={`${cell} col-span-2 max-sm:!border-l-0 max-sm:!pl-0 max-sm:border-t max-sm:mt-1`}>
+          <span className={kicker}>Just checked</span>
+          <span className="text-[12.5px] text-text-muted [overflow-wrap:anywhere]">
+            {recent?.length
+              ? recent.map((it, i) => {
+                  const label = <>{it.name || it.full_name}{it.trust_score != null && <b className="ml-1 text-[12.5px] tabular-nums" style={{ color: getTrustTier(it.trust_score).color }}>{it.trust_score}</b>}</>
+                  return (
+                    <span key={`${it.surface}:${it.name}`}>
+                      {i > 0 && ' · '}
+                      {it.href ? <Link to={it.href} className="hover:text-text">{label}</Link> : label}
+                    </span>
+                  )
+                })
+              : '—'}
+          </span>
+          <Link to={rp('/rebrand/index')} className="mt-0.5 text-[12.5px] font-semibold text-primary-light hover:text-primary">See the full Trust Index →</Link>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const DEFAULT_SURFACE = 'mcp'
 const DEFAULT_SORT = 'adoption'
 
 export default function RebrandBrowse() {
@@ -289,15 +376,6 @@ export default function RebrandBrowse() {
   // names no tool and its answer.
   const { data: recent } = useQuery({ queryKey: ['recent-scans', 3], queryFn: () => fetchRecent(3), staleTime: 60_000 })
 
-  // The quick filters under search. A surface chip keeps the other filters; Certified
-  // and Do not connect toggle their filter and look across every surface.
-  const QUICK: { label: string; on: boolean; go: () => void }[] = [
-    { label: 'MCP servers', on: surface === 'mcp', go: () => patch({ surface: '' }) },
-    { label: 'Agent skills', on: surface === 'openclaw', go: () => patch({ surface: 'openclaw' }) },
-    { label: 'Packages', on: surface === 'npm', go: () => patch({ surface: 'npm' }) },
-    { label: 'Certified', on: grade === 'certified', go: () => patch(grade === 'certified' ? { grade: '' } : { grade: 'certified', surface: 'all' }) },
-    { label: 'Do not connect', on: decision === 'do_not_connect', go: () => patch(decision === 'do_not_connect' ? { dec: '' } : { dec: 'do_not_connect', surface: 'all' }) },
-  ]
   const totalPages = matching != null ? Math.ceil(matching / PAGE_SIZE) : 0
 
   return (
@@ -307,19 +385,23 @@ export default function RebrandBrowse() {
         description="The public catalog of scanned repos, packages, MCP servers, and skills — each with a signed trust score and adoption score you can recompute yourself."
         path="/browse"
       />
-      {/* header block: the hero, how the catalog reads, then search */}
-      <div className="max-w-[1080px] mx-auto px-6 pt-14">
-        <div className="max-w-[62ch]">
-          <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Browse</span>
-          <h1 className="mt-3 text-3xl md:text-5xl font-extrabold tracking-tight">Find tools your agent can trust.</h1>
-          <p className="mt-3 text-text-muted text-[17px]">Every tool we've checked, with its answer, trust score and adoption score.</p>
-        </div>
+      <PageHeader eyebrow="Browse" title="Find tools your agent can trust." lede="Every tool we've checked, with its answer, trust score and adoption score." />
 
-        <div className="mt-7"><AnswerMixBar size="slim" /></div>
+      {/* one graphic: the total and the answer mix, then Certified and Do not connect
+          (both filters), then the newest checks. Then search. */}
+      <div className="relative z-[2] max-w-[1080px] mx-auto px-6">
+        <CatalogGraphic
+          mix={mix}
+          decision={decision}
+          certifiedOn={grade === 'certified'}
+          onDecision={(v) => patch(decision === v ? { dec: '' } : { dec: v, surface: 'all' })}
+          onCertified={() => patch(grade === 'certified' ? { grade: '' } : { grade: 'certified', surface: 'all' })}
+          recent={recent?.map((it) => ({ ...it, href: listingHref(it as unknown as CatalogRow) }))}
+        />
 
         <form
           onSubmit={(e) => { e.preventDefault(); applySearch() }}
-          className="glass mt-3.5 flex gap-2.5 rounded-2xl p-2 pl-4 shadow-lg shadow-primary/10"
+          className="glass mt-4 flex gap-2.5 rounded-2xl p-2 pl-4 shadow-lg shadow-primary/10"
         >
           <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 self-center text-text-muted shrink-0" aria-hidden="true">
             <path d="M11 19a8 8 0 1 1 5.7-2.3L21 21" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
@@ -334,83 +416,39 @@ export default function RebrandBrowse() {
           {qInput && <button type="button" onClick={clearSearch} aria-label="Clear search" className="text-text-muted hover:text-text px-1 text-[18px] leading-none">×</button>}
           <button type="submit" className="font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow whitespace-nowrap">Search</button>
         </form>
-        <div className="mt-3.5 flex flex-wrap gap-2 items-center">
-          <span className="text-[13px] text-text-muted">Show:</span>
-          {QUICK.map((c) => (
-            <button key={c.label} type="button" aria-pressed={c.on} onClick={c.go}
-              className={`text-[13px] rounded-full border px-[13px] py-1.5 transition-colors ${c.on ? 'border-primary-light text-primary-light bg-primary/10' : 'border-border bg-surface text-text-muted hover:border-primary-light hover:text-primary-light'}`}>
-              {c.label}
-            </button>
-          ))}
-        </div>
-
-        {/* three small cards */}
-        <div className="glass rounded-2xl mt-4 px-[18px] py-3.5 grid gap-x-[18px] gap-y-3 grid-cols-1 sm:grid-cols-3 items-center">
-          <Link to={rp('/rebrand/certified')} className="flex flex-col gap-0.5 min-w-0 group">
-            <span className="font-mono text-[11px] tracking-[0.12em] uppercase text-primary-light">Certified</span>
-            <b className="text-[24px] leading-tight gradient-text tabular-nums">{mix ? mix.certified.toLocaleString() : '—'}</b>
-            <small className="text-[12px] text-text-muted group-hover:text-text">cleared the bar →</small>
-          </Link>
-          <Link to={rp(DNC_LIST)} className="flex flex-col gap-0.5 min-w-0 group">
-            <span className="font-mono text-[11px] tracking-[0.12em] uppercase text-primary-light">Do not connect</span>
-            <b className="text-[24px] leading-tight text-danger tabular-nums">{mix ? mix.dnc.toLocaleString() : '—'}</b>
-            <small className="text-[12px] text-text-muted group-hover:text-text">see them →</small>
-          </Link>
-          <div className="flex flex-col gap-0.5 min-w-0">
-            <span className="font-mono text-[11px] tracking-[0.12em] uppercase text-primary-light">Just checked</span>
-            <small className="text-[12px] text-text-muted">
-              {recent?.length
-                ? recent.map((it, i) => {
-                    const href = listingHref(it as unknown as CatalogRow)
-                    const label = <>{it.name || it.full_name}{it.trust_score != null && <b className="ml-1 text-primary-light text-[13px]">{it.trust_score}</b>}</>
-                    return (
-                      <span key={`${it.surface}:${it.name}`}>
-                        {i > 0 && ' · '}
-                        {href ? <Link to={href} className="hover:text-text">{label}</Link> : label}
-                      </span>
-                    )
-                  })
-                : '—'}
-            </small>
-          </div>
-        </div>
-        <div className="mt-2.5 text-[13px]">
-          <Link to={rp('/rebrand/index')} className="font-semibold text-primary-light hover:text-primary">See the full Trust Index →</Link>
-        </div>
       </div>
 
-      {/* sticky controls: the filter set (inline dropdowns on desktop, a bottom sheet
-          on mobile) and the scrollable surface chips. Solid background: no blur on a
-          persistent element. */}
-      <div className="sticky top-[62px] z-20 mt-6 bg-background relative after:absolute after:left-0 after:right-0 after:bottom-0 after:translate-y-full after:h-4 after:bg-gradient-to-b after:from-background/50 after:to-transparent after:pointer-events-none">
+      {/* ONE sticky filter row: the kind pills (one scrollable row), then the five
+          dropdowns (a Filters bottom sheet on phones). Selected = teal outline. Solid
+          background: no blur on a persistent element. */}
+      <div className="sticky top-[62px] z-20 mt-3.5 bg-background relative after:absolute after:left-0 after:right-0 after:bottom-0 after:translate-y-full after:h-4 after:bg-gradient-to-b after:from-background/50 after:to-transparent after:pointer-events-none">
         <div className="max-w-[1080px] mx-auto px-4 sm:px-6 py-3 flex flex-col gap-2.5">
-          {/* row 1 — inline filters on desktop, a Filters button on mobile */}
-          <div className="flex items-center gap-2">
-            {/* desktop: inline filter dropdowns */}
-            <div className="hidden sm:flex items-center gap-2 flex-wrap">
-              {[{ v: category, set: setCategory, opts: CATEGORIES }, { v: decision, set: setDecision, opts: DECISION_OPTS }, { v: grade, set: setGrade, opts: GRADES }, { v: severity, set: setSeverity, opts: SEVERITIES }, { v: sort, set: setSort, opts: SORTS }].map((f, i) => (
-                <select key={i} value={f.v} onChange={(e) => f.set(e.target.value)}
-                  className="text-[13px] rounded-full border border-border bg-surface text-text-muted px-3 py-1.5 outline-none hover:border-primary-light max-w-[190px]">
-                  {f.opts.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
-                </select>
-              ))}
-            </div>
-            {/* mobile: one Filters button → bottom sheet */}
-            <button onClick={() => setSheetOpen(true)} className="sm:hidden shrink-0 ml-auto flex items-center gap-1.5 text-[13px] font-medium rounded-full border border-border bg-surface text-text px-3.5 py-2">
-              <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4"><path d="M4 6h16M7 12h10M10 18h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
-              Filters{activeFilters > 0 && <span className="grid place-items-center min-w-[18px] h-[18px] text-[10px] font-bold rounded-full bg-primary text-white">{activeFilters}</span>}
-            </button>
-          </div>
-          {/* row 2 — surface chips: one scrollable row, never wraps */}
-          <div className="flex gap-2 overflow-x-auto pb-0.5 -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden snap-x">
+          <div className="flex gap-1.5 overflow-x-auto pb-0.5 -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden snap-x" role="group" aria-label="Kind of tool">
             {SURFACES.map((sf, i) => (
-              <button key={sf.key} onClick={() => setTab(i)}
-                className={`snap-start shrink-0 whitespace-nowrap text-[13px] px-3.5 py-1.5 rounded-full border transition-colors ${
-                  tab === i ? 'text-white border-transparent bg-gradient-to-r from-primary to-primary-dark' : 'text-text-muted border-border bg-surface hover:border-primary-light'
-                }`}>
+              <button key={sf.key} type="button" aria-pressed={tab === i} onClick={() => setTab(i)} className={`snap-start ${pill(tab === i)}`}>
                 {sf.label}
               </button>
             ))}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* desktop: inline filter dropdowns */}
+            {[
+              { label: 'Answer', v: decision, def: '', set: setDecision, opts: DECISION_OPTS },
+              { label: 'Trust score', v: grade, def: '', set: setGrade, opts: GRADES },
+              { label: 'Findings', v: severity, def: '', set: setSeverity, opts: SEVERITIES },
+              { label: 'Category', v: category, def: '', set: setCategory, opts: CATEGORIES },
+              { label: 'Sort', v: sort, def: DEFAULT_SORT, set: setSort, opts: SORTS },
+            ].map((f) => (
+              <select key={f.label} aria-label={f.label} value={f.v} onChange={(e) => f.set(e.target.value)}
+                className={`hidden sm:block text-[13px] rounded-full border px-3 py-1.5 outline-none max-w-[190px] transition-colors ${f.v !== f.def ? 'border-primary-light text-primary-light bg-primary/10' : 'border-border bg-surface text-text-muted hover:border-primary-light'}`}>
+                {f.opts.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+              </select>
+            ))}
+            {/* mobile: one Filters button → bottom sheet */}
+            <button type="button" onClick={() => setSheetOpen(true)} className={`sm:hidden flex items-center gap-1.5 ${pill(activeFilters > 0)}`}>
+              <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+              Filters{activeFilters > 0 && <span className="grid place-items-center min-w-[18px] h-[18px] text-[10px] font-bold rounded-full bg-primary text-white">{activeFilters}</span>}
+            </button>
           </div>
         </div>
       </div>
@@ -424,7 +462,7 @@ export default function RebrandBrowse() {
               <h2 className="text-[16px] font-bold">Filters</h2>
               <button onClick={() => setSheetOpen(false)} aria-label="Close" className="text-text-muted text-[22px] leading-none">×</button>
             </div>
-            {[{ label: 'Category', v: category, set: setCategory, opts: CATEGORIES }, { label: 'Answer', v: decision, set: setDecision, opts: DECISION_OPTS }, { label: 'Trust', v: grade, set: setGrade, opts: GRADES }, { label: 'Findings', v: severity, set: setSeverity, opts: SEVERITIES }, { label: 'Sort', v: sort, set: setSort, opts: SORTS }].map((f) => (
+            {[{ label: 'Answer', v: decision, set: setDecision, opts: DECISION_OPTS }, { label: 'Trust score', v: grade, set: setGrade, opts: GRADES }, { label: 'Findings', v: severity, set: setSeverity, opts: SEVERITIES }, { label: 'Category', v: category, set: setCategory, opts: CATEGORIES }, { label: 'Sort', v: sort, set: setSort, opts: SORTS }].map((f) => (
               <div key={f.label} className="mb-5">
                 <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted mb-2">{f.label}</div>
                 <div className="flex flex-wrap gap-2">

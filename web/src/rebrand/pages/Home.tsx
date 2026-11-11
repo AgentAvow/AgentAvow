@@ -7,7 +7,7 @@ import { motion, useReducedMotion } from 'framer-motion'
 import { useQuery } from '@tanstack/react-query'
 import { fetchCatalog, type CatalogRow } from '../catalog'
 import { decisionOf, decisionPhrase, getTrustTier, isCertified } from '../../components/trust/gradeSystem'
-import { TrustBar, AdoptionNeedle, CertifiedMark } from '../components/TrustMark'
+import { TrustBar, AdoptionNeedle, CertifiedBadge } from '../components/TrustMark'
 import { Reveal } from '../components/motion'
 import { currentPath, trackCheckSubmit, trackEvent } from '../../lib/analytics'
 import { useRotatingPlaceholder } from '../lib/hooks'
@@ -15,15 +15,17 @@ import SEOHead from '../../components/SEOHead'
 import { inSnapshot } from '../lib/snapshot'
 import { AnswerMixBar, StatCards } from '../components/AnswerMix'
 import { DNC_LIST, useAnswerMix } from '../lib/answerMix'
-import { AppsButtons, AppsStrip } from '../components/AppsStrip'
-import { BuiltInTheOpenLine } from '../components/BuiltInTheOpen'
+import { BuiltInTheOpen } from '../components/BuiltInTheOpen'
+import { WhereItWorks } from '../components/WhereItWorks'
+import { CtaBand, SECTION_CLASS, SectionH2 } from '../components/PageBits'
 
 const CHECK_HINTS = ['Paste a link to check', 'github.com/owner/repo', 'npmjs.com/package/…', 'https://mcp.example.com/mcp', 'pypi:requests', 'an A2A agent card URL']
 
 /**
- * AgentAvow homepage (website build spec 2026-11-07). Six sections:
- * hero (the check itself + the Claude/ChatGPT strip) → the three answers, on live
- * examples → how the catalog reads → where you work → Certified → why believe it.
+ * AgentAvow homepage (approved mockup 2026-11-10, "Home order"). Five sections:
+ * hero (the check itself + one "works with" line) → the three answers on live
+ * examples, with how the catalog reads → where it works (Claude Code first) → why
+ * trust it (findings, signatures, limits, Certified, built in the open) → closing band.
  */
 
 /**
@@ -32,7 +34,7 @@ const CHECK_HINTS = ['Paste a link to check', 'github.com/owner/repo', 'npmjs.co
  */
 type ExampleKey = 'safe' | 'deep' | 'review'
 const EXAMPLES: { key: ExampleKey; chip: string; input: string; surface: string; q: string; match: (r: CatalogRow) => boolean }[] = [
-  { key: 'safe', chip: 'An MCP server package', input: 'npmjs.com/package/@notionhq/notion-mcp-server', surface: 'npm', q: '@notionhq/notion-mcp-server', match: (r) => r.full_name === 'npm:@notionhq/notion-mcp-server' },
+  { key: 'safe', chip: 'A Certified package', input: 'npmjs.com/package/zod', surface: 'npm', q: 'zod', match: (r) => r.full_name === 'npm:zod' },
   { key: 'deep', chip: 'A live MCP server', input: 'https://mcp.deepwiki.com/mcp', surface: 'mcp', q: 'mcp.deepwiki.com', match: (r) => r.endpoint_url === 'https://mcp.deepwiki.com/mcp' },
   { key: 'review', chip: 'A deprecated server', input: 'npmjs.com/package/@modelcontextprotocol/server-puppeteer', surface: 'npm', q: '@modelcontextprotocol/server-puppeteer', match: (r) => r.full_name === 'npm:@modelcontextprotocol/server-puppeteer' },
 ]
@@ -104,7 +106,9 @@ function reportHref(row: CatalogRow): string {
   return rp(row.full_name?.includes('/') ? `/rebrand/check/${row.full_name}` : '/rebrand/check')
 }
 
-function VerdictLine({ value, certified }: { value: 'safe' | 'review' | 'do_not_connect'; certified?: boolean }) {
+/** The answer line. Certified is never tagged here: it shows once, as the badge in the
+ * trust-score slot. */
+function VerdictLine({ value }: { value: 'safe' | 'review' | 'do_not_connect' }) {
   const p = decisionPhrase(value)
   const icon = value === 'safe' ? '✓' : value === 'review' ? '!' : '✕'
   // Theme tokens (success / warning / danger), so the line reads in light theme too.
@@ -114,7 +118,6 @@ function VerdictLine({ value, certified }: { value: 'safe' | 'review' | 'do_not_
     <div className={`mt-[7px] flex items-center gap-[9px] flex-wrap text-[21px] font-bold tracking-[-0.01em] ${tone}`} data-decision={value}>
       <span className={`w-6 h-6 rounded-full inline-grid place-items-center text-[13px] font-extrabold shrink-0 ${toneBg}`} aria-hidden="true">{icon}</span>
       {p.phrase}
-      {certified && <span className="font-mono text-[11.5px] font-extrabold tracking-[0.14em] text-[#06231f] px-[9px] py-[3px] rounded-full" style={{ background: 'linear-gradient(90deg,#2DD4BF,#E879F9)' }}>CERTIFIED</span>}
     </div>
   )
 }
@@ -134,12 +137,12 @@ function ExampleCard({ row }: { row: CatalogRow }) {
     <>
       <div className="px-5 py-[18px] border-b border-border/60">
         <div className="font-mono text-[13.5px] break-all text-text-muted">{row.endpoint_url || row.name}</div>
-        <VerdictLine value={d} certified={certified} />
+        <VerdictLine value={d} />
         {row.decision_reason && <p className="mt-1.5 text-[14.5px] text-text">{sentence(row.decision_reason)}.</p>}
       </div>
       <div className="grid grid-cols-2">
         <div className="px-5 py-[18px] max-[520px]:px-2 flex flex-col items-center gap-[9px] text-center">
-          <div className="min-h-[90px] flex items-center justify-center">{certified ? <CertifiedMark score={score} /> : <TrustBar score={score} />}</div>
+          <div className="min-h-[90px] flex items-center justify-center">{certified ? <CertifiedBadge score={score} size="md" /> : <TrustBar score={score} />}</div>
           <div className="font-mono text-[10.5px] font-bold uppercase tracking-[0.14em]" style={{ color: certified ? undefined : t.color }}>Trust score</div>
         </div>
         <div className="px-5 py-[18px] max-[520px]:px-2 flex flex-col items-center gap-[9px] text-center border-l border-border/60">
@@ -175,24 +178,56 @@ function DoNotConnectCard() {
   )
 }
 
-function Card3({ title, children, lead = false }: { title: string; children: React.ReactNode; lead?: boolean }) {
+function Card3({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className={`glass rounded-2xl p-[22px] flex flex-col gap-[9px] min-w-0 ${lead ? 'border-primary-light/45' : ''}`}>
+    <div className="glass rounded-2xl border border-border/60 p-[22px] flex flex-col gap-[9px] min-w-0">
       <h3 className="text-[19px] font-bold tracking-[-0.01em]">{title}</h3>
       {children}
     </div>
   )
 }
 
-const BTN = 'inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow'
-const BTN_GHOST = 'inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors'
-
 const CERT_ROWS: [string, string][] = [
   ['Reads Safe to connect at 81+', 'no critical or high finding, nothing known-malicious'],
   ['Published package matches its source', 'verified build provenance (Sigstore / PEP 740)'],
-  ['Every file read, nothing changed', 'full coverage; the published package matches its source, no added files or install hook'],
-  ['Sandbox ran it, anyone can recompute', 'finished sandbox run, offline-verifiable result'],
+  ['Every file read, nothing changed', 'full coverage; no added files or install hook'],
+  ['Sandbox result is in, anyone can recompute', 'not pending, offline-verifiable result'],
 ]
+
+/**
+ * The Certified band. The badge is the Safe example's live row (zod) when that row
+ * carries the mark; with no certified row to show (and in the prerender, which names
+ * no tool) it falls back to the plain seal.
+ */
+function CertifiedBand({ row }: { row: CatalogRow | null }) {
+  const earned = row != null && row.trust_score != null && decisionOf({ ...row, findings: { critical: row.critical ?? 0, high: row.high ?? 0 } }).decision === 'safe' && isCertified(row)
+  return (
+    <div className="mt-[22px] grid gap-x-7 gap-y-[22px] items-center rounded-2xl px-6 py-5 grid-cols-1 sm:grid-cols-[auto_minmax(0,1fr)] lg:grid-cols-[auto_minmax(0,1fr)_minmax(0,1.35fr)]"
+      style={{ background: 'linear-gradient(100deg,rgba(45,212,191,.12),rgba(232,121,249,.10) 70%), var(--color-surface)', border: '1.5px solid rgba(232,121,249,.35)' }}>
+      <div className="flex sm:flex-col items-center gap-1.5 sm:min-w-[96px]">
+        {earned
+          ? <><CertifiedBadge score={row.trust_score as number} size="md" /><small className="text-[11.5px] text-text-muted text-center">{row.name}, today</small></>
+          : <>
+              <div className="w-[62px] h-[62px] rounded-full grid place-items-center text-[28px] font-black text-[#06231f]" style={{ background: 'conic-gradient(from 210deg,#2DD4BF,#E879F9,#2DD4BF)' }} aria-hidden="true">✓</div>
+              <div className="font-mono text-[10.5px] font-extrabold tracking-[0.18em] gradient-text">CERTIFIED</div>
+            </>}
+      </div>
+      <div className="min-w-0">
+        <h3 className="text-[18px] font-bold leading-tight">Certified is a bar a tool has to clear.</h3>
+        <p className="mt-1 text-[13.5px] text-text-muted">It sits beside Safe to connect, it comes off the moment any check slips, and nobody can buy it. <b className="text-text font-medium">zod</b>, <b className="text-text font-medium">react</b> and <b className="text-text font-medium">requests</b> clear it today.</p>
+        <Link to={rp('/rebrand/certified')} className="inline-block mt-2 text-[13.5px] font-semibold text-primary-light hover:text-primary">See the gate and who's Certified →</Link>
+      </div>
+      <ul className="grid sm:grid-cols-2 gap-x-3.5 gap-y-2 sm:col-span-2 lg:col-span-1 list-none m-0 p-0">
+        {CERT_ROWS.map(([h, s]) => (
+          <li key={h} className="flex gap-[9px] items-start text-[13.5px] leading-[1.35] text-text">
+            <i className="not-italic shrink-0 font-mono text-[10.5px] font-extrabold tracking-[0.06em] px-[7px] py-0.5 rounded-[5px] mt-px bg-success/[0.16] text-success">PASS</i>
+            <span>{h}<small className="block text-text-muted text-[12px]">{s}</small></span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
 
 export default function RebrandHome() {
   const [value, setValue] = useState('')
@@ -319,7 +354,7 @@ export default function RebrandHome() {
               Check
             </button>
           </form>
-          {notice && <p role="alert" className="mt-3 mx-auto max-w-[600px] text-[13px] text-amber-300"><NoticeText text={notice} /></p>}
+          {notice && <p role="alert" className="mt-3 mx-auto max-w-[600px] text-[13px] text-warning"><NoticeText text={notice} /></p>}
 
           <div className="mt-4 flex flex-wrap gap-2 justify-center items-center">
             <span className="text-[13px] text-text-muted">Try one:</span>
@@ -335,118 +370,98 @@ export default function RebrandHome() {
             ))}
           </div>
           <p className="mt-3.5 text-[13px] text-text-muted">Free. No account. Every answer is signed.</p>
-          <AppsStrip className="mt-[18px]" />
+          <p className="mt-3.5 mx-auto max-w-[62ch] text-[14px] text-text-muted">
+            Works with Claude Code, Claude, ChatGPT, Codex, Cursor, VS Code, Gemini CLI and CI.{' '}
+            <a href="#where" onClick={(e) => { e.preventDefault(); document.getElementById('where')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}
+              className="font-semibold text-primary-light hover:text-primary whitespace-nowrap">See where it works ↓</a>
+          </p>
         </motion.div>
       </section>
 
-      {/* 2 · THE THREE ANSWERS, on live examples */}
-      <section ref={resultRef} id="result" className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60 scroll-mt-20">
-        <Reveal>
-          <div className="text-center max-w-[60ch] mx-auto">
-            <h2 className="text-2xl md:text-3xl font-bold">Every check ends in one of three answers.</h2>
-            <p className="mt-3 text-text-muted">The answer comes first, with its reason. Under it sit two scores: a signed 0-100 trust score and an adoption score.</p>
-          </div>
-          <div className="mt-[22px] flex gap-1.5 flex-wrap justify-center" role="group" aria-label="Example answers">
-            {([['safe', 'Safe to connect'], ['review', 'Review before you connect'], ['dnc', 'Do not connect']] as [Tab, string][]).map(([k, label]) => (
-              <button key={k} type="button" aria-pressed={pressed(k)} onClick={() => setTab(k)}
-                className={`rounded-[10px] border px-[13px] py-2 text-[13.5px] font-semibold transition-colors ${pressed(k) ? SEG_STYLE[k] : 'bg-surface border-border text-text-muted hover:text-text'}`}>
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="glass rounded-2xl overflow-hidden max-w-[640px] mx-auto mt-[18px] text-left">
-            {tab === 'dnc'
-              ? <DoNotConnectCard />
-              : shown
-                ? <ExampleCard row={shown} />
-                : examplesFailed || examples
-                  ? <div className="p-8 text-center text-[14px] text-text-muted">This example isn't available right now. <Link to={rp('/rebrand/browse')} className="text-primary-light hover:text-primary font-semibold">Browse the catalog →</Link></div>
-                  : <div className="h-[300px] animate-pulse" aria-hidden="true" />}
-          </div>
-          <div className="grid sm:grid-cols-2 gap-3.5 max-w-[640px] mx-auto mt-4 text-[14px] text-text-muted text-left">
-            <p><b className="text-text font-semibold">Trust score.</b> How safe the tool looks, worked out from what the check found.</p>
-            <p><b className="text-text font-semibold">Adoption score.</b> How much people really use it. Popular doesn't mean safe, so the two stay separate.</p>
-          </div>
-        </Reveal>
-      </section>
-
-      {/* 3 · HOW THE CATALOG READS — live */}
-      <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
-        <Reveal>
-          <div className="max-w-[980px] mx-auto">
-            <AnswerMixBar size="big" />
-            <StatCards set="home" />
-          </div>
-          <p className="mt-3.5 text-center text-[13px] text-text-muted">Hundreds of Claude Code machines connect every day. A check you run here is normally no more than an hour old.</p>
-          <BuiltInTheOpenLine className="mt-5" />
-        </Reveal>
-      </section>
-
-      {/* 4 · WHERE YOU WORK */}
-      <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
-        <Reveal>
-          <h2 className="text-2xl md:text-3xl font-bold">Get the check where you work.</h2>
-          <div className="grid md:grid-cols-3 gap-3.5 mt-[26px]">
-            <Card3 title="In Claude Code, Cursor or CI" lead>
-              <p className="text-text-muted text-[14.5px] flex-1">In Claude Code it runs by itself: your servers at session start, and new servers and packages before they install. In Cursor, your agent checks when you ask. In CI, the build fails on Do not connect.</p>
-              <div className="flex flex-col gap-[9px] items-start mt-[7px]">
-                <Link to={rp('/rebrand/claude-code')} className={BTN}>Add it to Claude Code</Link>
-                <Link to={rp('/rebrand/get')} className="text-[14px] font-semibold text-primary-light hover:text-primary">Cursor, VS Code and CI →</Link>
-              </div>
-            </Card3>
-            <Card3 title="Check your connectors in Claude or ChatGPT">
-              <p className="text-text-muted text-[14.5px] flex-1">Add AgentAvow and ask before you connect anything. Nothing runs by itself in chat, so it checks when you ask.</p>
-              <AppsButtons className="mt-[7px]" />
-            </Card3>
-            <Card3 title="For your team">
-              <p className="text-text-muted text-[14.5px] flex-1">Gate CI on the answer, get an alert when a tool changes, and verify every result offline.</p>
-              <div className="mt-[7px]"><Link to={rp('/rebrand/teams')} className={BTN_GHOST}>See how teams use it</Link></div>
-            </Card3>
-          </div>
-          <p className="mt-5 text-[14.5px] text-text-muted">Publish a tool? Get a signed badge and claim your listing. <Link to={rp('/rebrand/for-developers')} className="font-semibold text-primary-light hover:text-primary">For developers →</Link></p>
-        </Reveal>
-      </section>
-
-      {/* 5 · CERTIFIED — the concept band, Home only */}
-      <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
-        <Reveal>
-          <div className="grid gap-x-7 gap-y-[22px] items-center rounded-2xl px-6 py-5 grid-cols-1 sm:grid-cols-[auto_minmax(0,1fr)] lg:grid-cols-[auto_minmax(0,1fr)_minmax(0,1.35fr)]"
-            style={{ background: 'linear-gradient(100deg,rgba(45,212,191,.12),rgba(232,121,249,.10) 70%), var(--color-surface)', border: '1.5px solid rgba(232,121,249,.35)' }}>
-            <div className="flex sm:flex-col items-center gap-1.5 sm:min-w-[96px]">
-              <div className="w-[62px] h-[62px] rounded-full grid place-items-center text-[28px] font-black text-[#06231f]" style={{ background: 'conic-gradient(from 210deg,#2DD4BF,#E879F9,#2DD4BF)' }} aria-hidden="true">✓</div>
-              <div className="font-mono text-[10.5px] font-extrabold tracking-[0.18em] gradient-text">CERTIFIED</div>
+      {/* 2 · THE THREE ANSWERS, on live examples, then how the catalog reads */}
+      <section ref={resultRef} id="result" className={`${SECTION_CLASS} scroll-mt-20`}>
+        <div className="max-w-[1080px] mx-auto px-6">
+          <Reveal>
+            <div className="text-center max-w-[60ch] mx-auto">
+              <SectionH2>Every check ends in one of three answers.</SectionH2>
+              <p className="mt-2.5 text-text-muted">The answer comes first, with its reason. Under it sit two scores: a signed 0-100 trust score and an adoption score.</p>
             </div>
-            <div className="min-w-0">
-              <h3 className="text-[18px] font-bold leading-tight">Certified is a bar a tool has to clear.</h3>
-              <p className="mt-1 text-[13.5px] text-text-muted">It sits beside Safe to connect, it comes off the moment any check slips, and nobody can buy it. <b className="text-text font-medium">zod</b>, <b className="text-text font-medium">react</b> and <b className="text-text font-medium">requests</b> clear it today.</p>
-              <Link to={rp('/rebrand/certified')} className="inline-block mt-2 text-[13.5px] font-semibold text-primary-light hover:text-primary">See the gate and who's Certified →</Link>
-            </div>
-            <ul className="grid sm:grid-cols-2 gap-x-3.5 gap-y-2 sm:col-span-2 lg:col-span-1 list-none m-0 p-0">
-              {CERT_ROWS.map(([h, s]) => (
-                <li key={h} className="flex gap-[9px] items-start text-[13.5px] leading-[1.35] text-text">
-                  <i className="not-italic shrink-0 font-mono text-[10.5px] font-extrabold tracking-[0.06em] px-[7px] py-0.5 rounded-[5px] mt-px bg-success/[0.16] text-success">PASS</i>
-                  <span>{h}<small className="block text-text-muted text-[12px]">{s}</small></span>
-                </li>
+            <div className="mt-[22px] flex gap-1.5 flex-wrap justify-center" role="group" aria-label="Example answers">
+              {([['safe', 'Safe to connect'], ['review', 'Review before you connect'], ['dnc', 'Do not connect']] as [Tab, string][]).map(([k, label]) => (
+                <button key={k} type="button" aria-pressed={pressed(k)} onClick={() => setTab(k)}
+                  className={`rounded-[10px] border px-[13px] py-2 text-[13.5px] font-semibold transition-colors ${pressed(k) ? SEG_STYLE[k] : 'bg-surface border-border text-text-muted hover:text-text'}`}>
+                  {label}
+                </button>
               ))}
-            </ul>
-          </div>
-        </Reveal>
+            </div>
+            <div className="glass rounded-2xl overflow-hidden max-w-[640px] mx-auto mt-[18px] text-left">
+              {tab === 'dnc'
+                ? <DoNotConnectCard />
+                : shown
+                  ? <ExampleCard row={shown} />
+                  : examplesFailed || examples
+                    ? <div className="p-8 text-center text-[14px] text-text-muted">This example isn't available right now. <Link to={rp('/rebrand/browse')} className="text-primary-light hover:text-primary font-semibold">Browse the catalog →</Link></div>
+                    : <div className="h-[300px] animate-pulse" aria-hidden="true" />}
+            </div>
+            <div className="grid sm:grid-cols-2 gap-3.5 max-w-[640px] mx-auto mt-4 text-[14px] text-text-muted text-left">
+              <p><b className="text-text font-semibold">Trust score.</b> How safe the tool looks, worked out from what the check found.</p>
+              <p><b className="text-text font-semibold">Adoption score.</b> How much people really use it. Popular doesn't mean safe, so the two stay separate.</p>
+            </div>
+          </Reveal>
+          <Reveal>
+            <div className="max-w-[980px] mx-auto mt-10">
+              <AnswerMixBar size="big" />
+              <StatCards set="home" />
+            </div>
+            <p className="mt-3.5 text-center text-[13px] text-text-muted">Hundreds of Claude Code machines connect every day. A check you run here is normally no more than an hour old.</p>
+          </Reveal>
+        </div>
       </section>
 
-      {/* 6 · WHY BELIEVE IT */}
-      <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
-        <Reveal>
-          <h2 className="text-2xl md:text-3xl font-bold">You don't have to take our word for it.</h2>
-          <div className="grid md:grid-cols-3 gap-3.5 mt-[26px]">
-            <Card3 title="Findings you can read"><p className="text-text-muted text-[14.5px]">Each finding has a severity and points at the exact file, line or manifest entry.</p></Card3>
-            <Card3 title="Results you can verify"><p className="text-text-muted text-[14.5px]">Every result is signed with Ed25519. Anyone can check it offline against our public keys.</p></Card3>
-            <Card3 title="Limits we state"><p className="text-text-muted text-[14.5px]">A check reads code, dependencies, advisories and tool definitions. It can miss things, so the report says what it couldn't read.</p></Card3>
-          </div>
-          <div className="mt-8 flex gap-3 justify-center flex-wrap">
-            <Link to={rp('/rebrand/check')} className="font-semibold px-6 py-3 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25">Check a tool</Link>
-            <Link to={rp('/rebrand/get')} className="font-semibold px-6 py-3 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Get AgentAvow</Link>
-          </div>
-        </Reveal>
+      {/* 3 · WHERE IT WORKS — Claude Code first */}
+      <section id="where" className={`${SECTION_CLASS} scroll-mt-20`}>
+        <div className="max-w-[1080px] mx-auto px-6">
+          <Reveal>
+            <SectionH2>Get the check where you work.</SectionH2>
+            <WhereItWorks />
+            <p className="mt-1.5 text-[14.5px] text-text-muted">For your team: gate CI on the answer, get an alert when a tool changes, and verify every result offline. <Link to={rp('/rebrand/teams')} className="font-semibold text-primary-light hover:text-primary">See how teams use it →</Link></p>
+            <p className="mt-1.5 text-[14.5px] text-text-muted">Publish a tool? Get a signed badge and claim your listing. <Link to={rp('/rebrand/for-developers')} className="font-semibold text-primary-light hover:text-primary">For developers →</Link></p>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* 4 · WHY TRUST IT — the three cards, the Certified band, built in the open */}
+      <section className={SECTION_CLASS}>
+        <div className="max-w-[1080px] mx-auto px-6">
+          <Reveal>
+            <SectionH2>You don't have to take our word for it.</SectionH2>
+            <div className="grid md:grid-cols-3 gap-3.5 mt-[26px]">
+              <Card3 title="Findings you can read"><p className="text-text-muted text-[14.5px]">Each finding has a severity and points at the exact file, line or manifest entry.</p></Card3>
+              <Card3 title="Results you can verify"><p className="text-text-muted text-[14.5px]">Every result is signed with Ed25519. Anyone can check it offline against our public keys.</p></Card3>
+              <Card3 title="Limits we state"><p className="text-text-muted text-[14.5px]">A check reads code, dependencies, advisories and tool definitions. It can miss things, so the report says what it couldn't read.</p></Card3>
+            </div>
+          </Reveal>
+          <Reveal>
+            <CertifiedBand row={examples?.safe ?? null} />
+          </Reveal>
+          <Reveal>
+            <BuiltInTheOpen className="mt-[30px]" />
+          </Reveal>
+        </div>
+      </section>
+
+      {/* 5 · CLOSING BAND */}
+      <section className={SECTION_CLASS}>
+        <div className="max-w-[1080px] mx-auto px-6">
+          <Reveal>
+            <CtaBand
+              title="Check the next tool before you connect it."
+              line="Free. No account. Every answer is signed."
+              primary={{ label: 'Check a tool', to: rp('/rebrand/check') }}
+              secondary={{ label: 'Get AgentAvow', to: rp('/rebrand/get') }}
+            />
+          </Reveal>
+        </div>
       </section>
     </div>
   )
