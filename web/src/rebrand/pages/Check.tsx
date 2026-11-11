@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link, useLocation, useSearchParams, Navigate } 
 import { rp } from '../basePath'
 import { unsupportedRepoHost, unsupportedRepoHostMessage } from '../lib/unsupportedHost'
 import { endpointFromCheckPath } from '../lib/endpointPath'
+import { ERC8004_CHAINS, looksLikeErc8004, parseErc8004 } from '../lib/erc8004'
 import { NoticeText } from '../components/NoticeText'
 import ImageScanDepth from '../components/ImageScanDepth'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -203,7 +204,7 @@ function CategoryFindings({ categoryScores, findings, maxFindings = 15, emptyMes
   )
 }
 
-const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'crates:serde', 'hf:openai-community/gpt2', 'mcp:https://…', 'a2a:https://…', 'a repo, package, model, MCP server, or A2A agent card']
+const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'crates:serde', 'hf:openai-community/gpt2', 'mcp:https://…', 'a2a:https://…', 'erc8004:base:1234', 'a repo, package, model, MCP server, or A2A agent card']
 
 /** "Watch this tool" — the PRIMARY action. Full-width gradient CTA.
  * Works across every surface: pass the coordinate as stored server-side
@@ -796,6 +797,10 @@ function Hero() {
     // A repo host we know but can't read yet: say so instead of scanning the same-named GitHub repo.
     const host = unsupportedRepoHost(v)
     if (host) { setNotice(unsupportedRepoHostMessage(host)); return }
+    // ERC-8004 agent on chain: `erc8004:base:1234`.
+    const erc = parseErc8004(v)
+    if (erc) { navigate(rp(`/rebrand/check/erc8004/${erc.chain}/${erc.agentId}`)); return }
+    if (looksLikeErc8004(v)) { setNotice('ERC-8004 agents: erc8004:<chain>:<agent id>, with chain ethereum, base or bnb (e.g. erc8004:base:1234)'); return }
     // Live MCP server: `mcp:https://…`.
     const mcp = v.match(/^mcp\s*:\s*(https?:\/\/.+)$/i)
     if (mcp) { navigate(rp('/rebrand/check/mcp') + '?endpoint=' + encodeURIComponent(mcp[1].trim())); return }
@@ -862,6 +867,7 @@ function Hero() {
       <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight">Is this AI tool <span className="gradient-text-bio">safe</span> to connect?</h1>
       <p className="mt-4 text-text-muted max-w-[46ch] mx-auto">Paste anything your agent connects to. We'll tell you — in plain English — whether it's safe, and prove it with a signed score.</p>
       <p className="mt-2 text-[13px] text-text-muted max-w-[56ch] mx-auto">Paste any A2A Agent Card URL for an answer, findings and a signed attestation, including whether the card&apos;s own signature verifies.</p>
+      <p className="mt-1 text-[13px] text-text-muted max-w-[56ch] mx-auto">Check any ERC-8004 agent on Ethereum, Base or BNB Chain: we read its registration and answer for every MCP server and A2A agent it lists. Enter <span className="font-mono text-text">erc8004:base:1234</span> (chain, then agent id).</p>
       <form onSubmit={(e) => { e.preventDefault(); go() }} className="glass mt-7 mx-auto max-w-[560px] flex gap-2.5 rounded-2xl p-2 pl-4 shadow-lg shadow-primary/10">
         <input value={value} onChange={(e) => setValue(e.target.value)} placeholder={value ? '' : hint}
           className="flex-1 min-w-0 bg-transparent outline-none font-mono text-[15px] text-text placeholder:text-text-muted" />
@@ -1519,6 +1525,191 @@ function skillDescription(d?: string): string | undefined {
 
 /** A wallet address resolves to the agent it is bound to, and that agent's linked
  * repo; we send the visitor to that repo's result. */
+interface Erc8004Tool {
+  name: string; endpoint: string; kind: 'mcp' | 'a2a' | 'github' | string
+  state: 'done' | 'checking' | 'not_checked' | string
+  why_not_checked?: string | null; decision?: string | null; decision_reason?: string | null
+  trust_score?: number | null
+}
+interface Erc8004Response {
+  agent: {
+    chain: string; chain_id: number; agent_id: number; owner: string; agent_wallet?: string | null
+    registration_uri: string; registration_sha256?: string | null; block?: number | null
+    name: string; description: string; active?: boolean | null; x402_support?: boolean | null
+  }
+  tools: Erc8004Tool[]
+  other_services: Array<{ name: string; endpoint: string }>
+  file_findings: Array<{ severity: string; name: string; category: string; where: string }>
+  registration_error?: string | null
+  headline: { decision: string; reason: string; coverage_note?: string; certified?: boolean }
+  coverage_gaps: Record<string, unknown>
+}
+
+async function fetchErc8004(chain: string, agentId: string, force = false): Promise<Erc8004Response> {
+  return (await publicApi.get<Erc8004Response>(
+    `/public/scan/erc8004/${encodeURIComponent(chain)}/${encodeURIComponent(agentId)}${force ? '?force=true' : ''}`)).data
+}
+
+const ERC_ANSWER = {
+  safe: ['✓', 'text-success', 'border-success/30'],
+  review: ['!', 'text-warning', 'border-warning/40'],
+  do_not_connect: ['✕', 'text-danger', 'border-danger/50'],
+} as const
+
+/** A listed tool's own page on the check site (its answer is signed there). */
+function erc8004ToolHref(t: Erc8004Tool): string | null {
+  if (!/^https:\/\//i.test(t.endpoint)) return null
+  if (t.kind === 'mcp') return rp('/rebrand/check/mcp') + '?endpoint=' + encodeURIComponent(t.endpoint)
+  if (t.kind === 'a2a') return rp('/rebrand/check/a2a') + '?card=' + encodeURIComponent(t.endpoint)
+  return null
+}
+
+/** An ERC-8004 agent read from chain: the headline is about the tools its registration
+ * lists (Safe only when every one was checked and reads Safe; never Certified), then each
+ * tool's own answer. On-chain identity is shown and never scored. */
+function Erc8004Result({ chain, agentId }: { chain: string; agentId: string }) {
+  const key = ['rebrand-erc8004', chain, agentId]
+  const [polls, setPolls] = useState(0)
+  const { data, isLoading, isError, error, dataUpdatedAt } = useQuery({
+    queryKey: key,
+    queryFn: () => fetchErc8004(chain, agentId),
+    retry: 0,
+    enabled: !!ERC8004_CHAINS[chain],
+    // Tools not cached yet are checked in the background: re-read until they land.
+    refetchInterval: (q) => (q.state.data?.tools.some((t) => t.state === 'checking') && polls < 12 ? 10_000 : false),
+  })
+  useEffect(() => { if (dataUpdatedAt) setPolls((n) => n + 1) }, [dataUpdatedAt])
+  const qc = useQueryClient()
+  const re = useMutation({ mutationFn: () => fetchErc8004(chain, agentId, true), onSuccess: (d) => { setPolls(0); qc.setQueryData(key, d) } })
+  useResultView(!!data)
+  const chainLabel = ERC8004_CHAINS[chain] || chain
+  const path = `/check/erc8004/${chain}/${agentId}`
+  if (!ERC8004_CHAINS[chain]) return <Erc8004CouldntCheck chain={chain} agentId={agentId} detail="Supported chains: ethereum, base, bnb." />
+  if (isLoading) return <ScanningLoader owner={`ERC-8004 agent on ${chainLabel}`} repo={`#${agentId}`} />
+  if (isError || !data) return <Erc8004CouldntCheck chain={chain} agentId={agentId} detail={errorDetail(error)} />
+  const a = data.agent
+  const h = data.headline
+  const d = (h.decision in ERC_ANSWER ? h.decision : 'review') as keyof typeof ERC_ANSWER
+  const [icon, fg, border] = ERC_ANSWER[d]
+  const phrase = decisionPhrase(d).phrase
+  const name = a.name || `ERC-8004 agent #${a.agent_id}`
+  const checking = data.tools.some((t) => t.state === 'checking')
+  const reason = h.reason ? h.reason.charAt(0).toUpperCase() + h.reason.slice(1) + '.' : ''
+  const desc = `${phrase}: ${h.reason}. AgentAvow read this ERC-8004 agent on ${chainLabel} and answered for each tool it lists.`
+  const rows: Array<[string, string | null | undefined]> = [
+    ['Chain', `${chainLabel} (chain id ${a.chain_id})`],
+    ['Agent id', `#${a.agent_id}`],
+    ['Owner', a.owner],
+    ['Agent wallet', a.agent_wallet || 'none set'],
+    ['Registration file', a.registration_uri ? (a.registration_uri.startsWith('data:') ? 'inline data: URI' : a.registration_uri) : 'none'],
+    ['File sha256', a.registration_sha256],
+    ['Read at block', a.block != null ? String(a.block) : null],
+    ['Marks itself active', a.active == null ? null : a.active ? 'yes' : 'no'],
+  ]
+  return (
+    <div className="max-w-[860px] mx-auto px-6 py-14" data-result-kind="erc8004">
+      <SEOHead title={`Is ${name} safe? ${phrase}`} description={desc.length > 160 ? desc.slice(0, 157) + '…' : desc} path={path} />
+      <ResultTitle eyebrow={['ERC-8004 agent', chainLabel, `#${a.agent_id}`]} name={name}
+        recheck={{ run: () => re.mutate(), pending: re.isPending, error: re.isError }}
+        chips={<span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">ERC-8004 agent</span>}
+        intro={a.description ? <p className="mt-2 text-[13.5px] text-text-muted max-w-[68ch] [overflow-wrap:anywhere]">{a.description}</p> : undefined} />
+      <Reveal>
+        <div className={`mt-6 glass rounded-2xl border ${border} px-6 py-6`} data-decision={d} data-certified="no" data-testid="answer-card">
+          <div className={`flex items-center gap-2.5 text-[22px] sm:text-[26px] font-extrabold tracking-tight leading-tight ${fg}`}><span aria-hidden="true">{icon}</span><span>{phrase}</span></div>
+          <p className="mt-2 text-[14.5px] text-text-muted max-w-[68ch]">{reason}{h.coverage_note ? <> <span className="font-mono text-[12.5px]">({h.coverage_note})</span></> : null}</p>
+          <p className="mt-3 text-[12.5px] text-text-muted max-w-[68ch]">This answer is about the tools the agent lists: Safe only when every one was checked and reads Safe. Each tool&apos;s answer is signed on its own page. The agent&apos;s on-chain identity is shown below and is not part of any score. <Link to={rp('/rebrand/docs/erc8004-agents')} className="text-primary-light hover:text-primary">How this works</Link></p>
+        </div>
+      </Reveal>
+
+      <Section id="tools" title={`Tools it lists (${data.tools.length})`} sub={checking ? 'Some tools are being checked now; this page updates when they finish.' : 'MCP servers and A2A agents from its registration file, each with its own answer.'}>
+        {data.tools.length === 0
+          ? <EmptyPanel title="Tools">The registration lists no MCP server or A2A agent we can check.</EmptyPanel>
+          : <Reveal>
+              <div className="mt-4 glass rounded-2xl p-6 flex flex-col divide-y divide-border" data-testid="erc8004-tools">
+                {data.tools.map((t, i) => {
+                  const href = t.state === 'done' ? erc8004ToolHref(t) : null
+                  const p = t.decision ? decisionPhrase(t.decision) : null
+                  const cls = t.decision === 'safe' ? 'text-success' : t.decision === 'do_not_connect' ? 'text-danger' : 'text-warning'
+                  const body = (
+                    <>
+                      <span className="min-w-0">
+                        <span className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-[13.5px] [overflow-wrap:anywhere]">{t.name || t.kind}</span>
+                          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-surface border border-border text-text-muted">{t.kind === 'mcp' ? 'MCP server' : t.kind === 'a2a' ? 'A2A agent' : t.kind}</span>
+                        </span>
+                        <span className="block font-mono text-[11.5px] text-text-muted break-all">{t.endpoint || '(no endpoint)'}</span>
+                      </span>
+                      <span className="shrink-0 text-right max-w-[45%]">
+                        {p
+                          ? <><span className={`text-[12.5px] font-semibold ${cls}`}>{p.phrase}</span>{typeof t.trust_score === 'number' && <span className="block font-mono text-[11px] text-text-muted">{t.trust_score}/100</span>}</>
+                          : <span className="text-[12px] text-text-muted">{t.state === 'checking' ? 'Checking…' : 'Not checked'}{t.why_not_checked && t.state !== 'checking' ? <span className="block text-[11px]">{t.why_not_checked}</span> : null}</span>}
+                      </span>
+                    </>
+                  )
+                  return href
+                    ? <Link key={i} to={href} className="flex items-start justify-between gap-3 py-2.5 hover:bg-surface/60 rounded-lg px-2 -mx-2">{body}</Link>
+                    : <div key={i} className="flex items-start justify-between gap-3 py-2.5">{body}</div>
+                })}
+              </div>
+            </Reveal>}
+        {data.file_findings.length > 0 && (
+          <Reveal>
+            <div className="mt-4 glass rounded-2xl p-6">
+              <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Registration file findings</h3>
+              <ul className="mt-2 flex flex-col gap-1.5 text-[13px]">
+                {data.file_findings.map((f, i) => (
+                  <li key={i} className="[overflow-wrap:anywhere]"><span className="font-mono text-[11px] uppercase text-text-muted mr-2">{f.severity}</span>{f.name}</li>
+                ))}
+              </ul>
+            </div>
+          </Reveal>
+        )}
+      </Section>
+
+      <Section id="identity" title="On-chain identity" sub="Read from the ERC-8004 identity registry. Shown for reference; it is not an input to any answer or score.">
+        <Reveal>
+          <div className="mt-4 rounded-xl border border-border/60 p-5 flex flex-col gap-2 text-[13px]">
+            {rows.filter(([, v]) => v).map(([k, v]) => (
+              <div key={k} className="flex justify-between gap-3"><span className="text-text-muted shrink-0">{k}</span><span className="font-mono text-[12px] break-all text-right min-w-0">{v}</span></div>
+            ))}
+            {data.registration_error && <div className="text-[12.5px] text-warning">Registration file: {data.registration_error}</div>}
+          </div>
+        </Reveal>
+        {data.other_services.length > 0 && (
+          <Reveal>
+            <div className="mt-4 rounded-xl border border-border/60 p-5">
+              <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Other services it lists (not tools)</h3>
+              <div className="mt-2 flex flex-col gap-1.5">
+                {data.other_services.map((s, i) => <div key={i} className="font-mono text-[12px] break-all"><span className="text-text">{s.name || 'service'}</span>{s.endpoint ? <span className="text-text-muted"> · {s.endpoint}</span> : null}</div>)}
+              </div>
+            </div>
+          </Reveal>
+        )}
+        <p className="mt-4 text-[12.5px] text-text-muted break-all">API: <span className="font-mono">GET /api/v1/public/scan/erc8004/{chain}/{a.agent_id}</span></p>
+      </Section>
+    </div>
+  )
+}
+
+/** An ERC-8004 agent we could not read: not minted on that chain, chain unreachable. */
+function Erc8004CouldntCheck({ chain, agentId, detail }: { chain: string; agentId: string; detail: string }) {
+  const chainLabel = ERC8004_CHAINS[chain] || chain
+  return (
+    <div className="max-w-[860px] mx-auto px-6 py-14" data-result-kind="erc8004" data-state="couldnt-check">
+      <SEOHead title={`ERC-8004 agent #${agentId} on ${chainLabel}: we couldn't read it`} description={`AgentAvow couldn't read ERC-8004 agent #${agentId} on ${chainLabel}, so there is no answer for it yet.`} path={`/check/erc8004/${chain}/${agentId}`} noindex />
+      <ResultTitle eyebrow={['ERC-8004 agent', chainLabel, `#${agentId}`, 'not readable']} checked="just now" name={`agent #${agentId}`} />
+      <Reveal>
+        <div className="mt-6 glass rounded-2xl border border-warning/40 px-6 py-6" data-testid="answer-card">
+          <div className="flex items-center gap-2.5 text-[22px] sm:text-[26px] font-extrabold tracking-tight text-warning"><span aria-hidden="true">!</span><span>We couldn&apos;t read that agent</span></div>
+          <p className="mt-2 text-[14.5px] text-text-muted max-w-[68ch]">Enter <span className="font-mono text-text">erc8004:&lt;chain&gt;:&lt;agent id&gt;</span>, with chain <span className="font-mono">ethereum</span>, <span className="font-mono">base</span> or <span className="font-mono">bnb</span>. There is no answer for it.</p>
+          {detail && <p className="mt-2 font-mono text-[11.5px] text-text-muted/80 break-words">{detail}</p>}
+        </div>
+      </Reveal>
+      <Link to={rp('/rebrand/check')} className="mt-6 inline-block text-primary-light hover:text-primary font-semibold">← Check something else</Link>
+    </div>
+  )
+}
+
 function WalletResult({ addr }: { addr: string }) {
   const navigate = useNavigate()
   const chain = /^0x/i.test(addr) ? 'ethereum' : 'solana'
@@ -2246,6 +2437,10 @@ export default function RebrandCheck() {
     const ep = sp.get('endpoint')
     if (!ep) return <Hero />
     return <McpResult endpoint={ep} />
+  }
+  // ERC-8004 agent route (/check/erc8004/:chain/:agentId).
+  if (location.pathname.includes('/check/erc8004/') && params.chain && params.agentId) {
+    return <Erc8004Result chain={params.chain.toLowerCase()} agentId={params.agentId} />
   }
   // Wallet route (/check/wallet/:addr): resolve to the linked tool, then its result.
   if (location.pathname.includes('/check/wallet/') && params.addr) {

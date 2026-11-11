@@ -121,6 +121,11 @@ class CatalogSandbox(BaseModel):
     timed_out: bool = False  # the run hit its time limit: partial, never "clean"
 
 
+class CatalogFinding(BaseModel):
+    severity: str
+    name: str
+
+
 class CatalogRow(BaseModel):
     surface: str  # x402 | mcp | npm | pypi
     name: str
@@ -152,6 +157,11 @@ class CatalogRow(BaseModel):
     # Scored from the public Bazaar listing (src/scanner/x402_scan.py); never the code.
     price_usd: str | None = None
     testnet_only: bool | None = None
+    # Medium / low counts and the top findings (severity + name) of a scored x402 row,
+    # so a listing-only result shows what it found below high. None on other surfaces.
+    medium: int | None = None
+    low: int | None = None
+    top_findings: list[CatalogFinding] | None = None
     # behavioral sandbox summary (npm/pypi/docker rows with a cached run; else None)
     sandbox: CatalogSandbox | None = None
     # The three-phrase headline (safe | review | do_not_connect) + its reason, decided
@@ -309,7 +319,11 @@ class CatalogSummary(BaseModel):
     repo_scans_with_critical: int
     repo_scans_with_high: int
     x402_endpoints_total: int
+    # Deprecated: endpoints whose old live probe saw an x402 header. Rows are now scored
+    # from their listing (no probe yet), so this reads 0; kept for existing callers.
     x402_compliant: int
+    # x402 listings scored from their public Bazaar listing (scan_x402.py --score).
+    x402_scored: int = 0
 
 
 class CatalogResponse(BaseModel):
@@ -514,6 +528,24 @@ def _raw_decision(raw: dict, score: int | None) -> dict[str, Any]:
     return {"decision": d, "decision_reason": reason if isinstance(reason, str) else None}
 
 
+def _int_or_none(v: Any) -> int | None:
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
+def _x402_top_findings(raw: dict) -> list[CatalogFinding]:
+    """The scorer's top findings (scan_x402.py --score), at most five, well-formed only."""
+    out: list[CatalogFinding] = []
+    for f in raw.get("top_findings") or []:
+        if not isinstance(f, dict):
+            continue
+        sev, name = f.get("severity"), f.get("name")
+        if isinstance(sev, str) and isinstance(name, str) and name.strip():
+            out.append(CatalogFinding(severity=sev, name=name[:200]))
+        if len(out) >= 5:
+            break
+    return out
+
+
 def _normalize_row(surface: str, raw: dict) -> CatalogRow:
     """Convert a per-surface raw record into the unified row shape."""
     if surface == "x402":
@@ -533,6 +565,9 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
             high=raw.get("high") if score is not None else None,
             price_usd=raw.get("price_usd") if isinstance(raw.get("price_usd"), str) else None,
             testnet_only=bool(raw.get("testnet_only")) if score is not None else None,
+            medium=_int_or_none(raw.get("medium")) if score is not None else None,
+            low=_int_or_none(raw.get("low")) if score is not None else None,
+            top_findings=_x402_top_findings(raw) if score is not None else None,
             scan_error=raw.get("error") if isinstance(raw.get("error"), str) else None,
             **_raw_decision(raw, score),
         )
@@ -711,6 +746,7 @@ def _build_catalog(rows: list[CatalogRow] | None = None) -> dict[str, Any]:
         repo_scans_with_high=repo_counts["high_only"],
         x402_endpoints_total=len(x402_rows),
         x402_compliant=x402_compliant,
+        x402_scored=sum(1 for r in x402_rows if r.trust_score is not None),
     )
     # Sorted score list for percentile lookups ("safer than X% of scanned tools").
     scores = sorted(r.trust_score for r in rows if r.trust_score is not None)

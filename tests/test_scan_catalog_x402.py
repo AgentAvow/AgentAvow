@@ -99,3 +99,26 @@ async def test_all_surfaces_safe_filter_has_no_x402(catalog):
                                 category=None, decision="safe", sort="default", limit=50,
                                 offset=0, db=None)
     assert all(r.surface != "x402" for r in resp.rows)
+
+
+def test_scored_row_carries_medium_low_and_top_findings():
+    r = _normalize_row("x402", _scored(
+        "https://e.example/x", medium=2, low=1,
+        top_findings=[{"severity": "medium", "name": "the listing names 2 different "
+                       "recipients on eip155:8453"},
+                      {"severity": "low", "name": "costs more than $1 per call"},
+                      {"severity": "low"}, "junk"]))
+    assert r.medium == 2 and r.low == 1
+    assert [(f.severity, f.name[:8]) for f in r.top_findings] == [
+        ("medium", "the list"), ("low", "costs mo")]
+
+
+def test_old_probe_row_has_no_finding_detail():
+    r = _normalize_row("x402", {"endpoint_url": "https://c.example", "http_status": 402})
+    assert r.medium is None and r.low is None and r.top_findings is None
+
+
+def test_summary_counts_scored_listings(catalog):
+    summary = m._CATALOG_CACHE["summary"] if isinstance(m._CATALOG_CACHE, dict) else \
+        m._CATALOG_CACHE.summary
+    assert summary.x402_scored == 2

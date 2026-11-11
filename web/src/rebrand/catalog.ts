@@ -20,7 +20,10 @@ export interface CatalogSummary {
   /** rows with a verdict; the honest "repos graded" count */
   repo_scans_scanned?: number
   repo_scans_skipped?: number
+  /** x402 listings read */
   x402_endpoints_total?: number
+  /** x402 listings scored from their listing (#312) */
+  x402_scored?: number
   x402_compliant?: number
 }
 
@@ -46,6 +49,10 @@ export interface CatalogRow {
   skipped?: string | null
   has_x402_header?: boolean | null
   http_status?: number | null
+  /** x402 rows scored from their listing: medium / low counts and the top findings. */
+  medium?: number | null
+  low?: number | null
+  top_findings?: { severity: string; name: string }[] | null
   /** Behavioral sandbox summary — only on npm/pypi/docker rows with a cached run. */
   sandbox?: CatalogSandbox | null
   /** The three-phrase headline (safe | review | do_not_connect) + reason; null when unscored. */

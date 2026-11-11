@@ -98,7 +98,7 @@ function sandboxMark(sb: CatalogSandbox | null | undefined): string | null {
 function statusChip(row: CatalogRow): { label: string; cls: string; title?: string } {
   if (row.skipped) return { label: 'skipped', cls: 'text-text-muted bg-surface-hover' }
   if (row.scan_error) return { label: 'fetch error', cls: 'text-warning bg-warning/15' }
-  if (row.surface === 'x402') {
+  if (row.surface === 'x402' && row.trust_score == null) {
     return row.has_x402_header
       ? { label: `x402 ✓${row.http_status ? ` · ${row.http_status}` : ''}`, cls: 'text-success bg-success/15' }
       : { label: `${row.http_status ?? '—'}`, cls: 'text-text-muted bg-surface-hover' }
@@ -113,10 +113,16 @@ function statusChip(row: CatalogRow): { label: string; cls: string; title?: stri
   return { label: 'unscored', cls: 'text-text-muted bg-surface-hover' }
 }
 
+const SEV_CLS: Record<string, string> = {
+  critical: 'text-danger', high: 'text-danger', medium: 'text-warning', low: 'text-text-muted', info: 'text-text-muted',
+}
+
 function findingsLine(row: CatalogRow): string | null {
   const parts: string[] = []
   if (row.critical) parts.push(`${row.critical}C`)
   if (row.high) parts.push(`${row.high}H`)
+  if (row.medium) parts.push(`${row.medium}M`)
+  if (row.low) parts.push(`${row.low}L`)
   if (!parts.length && row.findings_count) parts.push(`${row.findings_count} findings`)
   return parts.length ? parts.join(' · ') : null
 }
@@ -161,6 +167,7 @@ function ToolCard({ row }: { row: CatalogRow }) {
   const chip = statusChip(row)
   const fnd = findingsLine(row)
   const sbx = sandboxMark(row.sandbox)
+  const x402Scored = row.surface === 'x402' && row.trust_score != null
   return (
     // The whole card opens the report: the "See report" link is stretched over the
     // card with an ::after overlay (a real <a>, so cmd/middle-click and keyboard
@@ -197,6 +204,26 @@ function ToolCard({ row }: { row: CatalogRow }) {
           </span>
         )}
       </div>
+      {/* An x402 card is its whole result (no report page): its findings, mediums and
+          lows included, and the coverage note show on the card face, never collapsed. */}
+      {x402Scored ? (
+        <>
+          {row.top_findings && row.top_findings.length > 0 ? (
+            <ul className="mt-2 space-y-0.5 text-[12.5px] text-text-muted">
+              {row.top_findings.map((f, i) => (
+                <li key={`${i}:${f.name}`} className="flex gap-1.5 min-w-0">
+                  <span className={`font-mono text-[10px] uppercase tracking-wide shrink-0 pt-px ${SEV_CLS[f.severity] ?? 'text-text-muted'}`}>{f.severity}</span>
+                  <span className="min-w-0 break-words">{f.name}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-[12.5px] text-text-muted">Nothing found in the listing.</p>
+          )}
+          <p className="mt-1.5 text-[12px] text-text-muted/80">The endpoint&apos;s code isn&apos;t visible.</p>
+        </>
+      ) : (
+      <>
       <button
         type="button"
         aria-expanded={open}
@@ -209,6 +236,8 @@ function ToolCard({ row }: { row: CatalogRow }) {
         <ul className="mt-2 pl-4 list-disc text-[12.5px] text-text-muted space-y-1">
           {whyLines(row).map((w) => <li key={w}>{w}</li>)}
         </ul>
+      )}
+      </>
       )}
       {href && (
         <div className="mt-3">
@@ -543,6 +572,12 @@ export default function RebrandBrowse() {
             {q && <span> for “{q}” · <span className="text-primary-light">all surfaces</span></span>}
             {isFetching && <span className="text-primary-light"> · refreshing…</span>}
           </div>
+        )}
+        {surface === 'x402' && !q && (
+          <p className="text-[13px] text-text-muted mb-4">
+            Scored from each endpoint&apos;s public listing; the code behind it isn&apos;t visible.{' '}
+            <Link to={rp('/rebrand/docs/x402')} className="text-primary-light hover:underline">How we check x402 →</Link>
+          </p>
         )}
         {isError ? (
           <div className="glass rounded-xl p-8 text-center text-text-muted text-[14px]">Couldn't load the catalog right now. Try again in a moment.</div>

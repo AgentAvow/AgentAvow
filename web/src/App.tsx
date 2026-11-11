@@ -280,6 +280,7 @@ function AppRoutes() {
           <Route path="check/mcp" element={<RebrandCheck />} />
           <Route path="check/a2a" element={<RebrandCheck />} />
           <Route path="check/wallet/:addr" element={<RebrandCheck />} />
+          <Route path="check/erc8004/:chain/:agentId" element={<RebrandCheck />} />
           <Route path="check/skill/:owner/:repo" element={<RebrandCheck />} />
           <Route path="check/skill/:owner/:repo/*" element={<RebrandCheck />} />
           <Route path="check/pkg/:surface/*" element={<RebrandCheck />} />

@@ -165,7 +165,33 @@ async def _bg_budget_ok(request: Request | None) -> bool:
         return False
 
 
-async def _bg_check(kind: str, url: str) -> None:
+_TOOL_ERR_TTL = 3600
+
+
+def _short_reason(detail: str) -> str:
+    """A tool's own route error, as a short plain reason for the agent page."""
+    d = (detail or "").lower()
+    if "sign-in" in d or "oauth" in d:
+        return "it requires sign-in, so its tools aren't public"
+    if "agent card" in d:
+        return "no A2A agent card could be read there"
+    if "timed out" in d:
+        return "it did not answer in time"
+    return "it could not be reached or read"
+
+
+async def _remember_failure(key: str, reason: str) -> None:
+    """A failed check is remembered for an hour, so the agent page says why instead
+    of 'being checked now' forever (prod, 2026-11-11: an OAuth-only MCP server and a
+    URL with no card both read 'checking' indefinitely)."""
+    try:
+        from src import cache
+        await cache.set(f"erc8004:toolerr:{key}", reason, ttl=_TOOL_ERR_TTL)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def _bg_check(kind: str, url: str, key: str = "") -> None:
     global _bg_pending
     try:
         from src.api import public_scan_router as psr
@@ -177,8 +203,14 @@ async def _bg_check(kind: str, url: str) -> None:
                                                 probe=False, db=db)
                 else:
                     await psr.scan_a2a_endpoint(card=url, request=None, force=False, db=db)
+    except HTTPException as exc:
+        logger.info("erc8004 background %s check failed for %s", kind, url[:120])
+        if key:
+            await _remember_failure(key, _short_reason(str(exc.detail)))
     except Exception:  # noqa: BLE001 — best effort; the next lookup retries
         logger.info("erc8004 background %s check failed for %s", kind, url[:120])
+        if key:
+            await _remember_failure(key, _short_reason(""))
     finally:
         _bg_pending = max(0, _bg_pending - 1)
 
@@ -197,7 +229,7 @@ async def _schedule_check(kind: str, url: str, key: str) -> bool:
     except Exception:  # noqa: BLE001
         return False
     try:
-        asyncio.get_running_loop().create_task(_bg_check(kind, url))
+        asyncio.get_running_loop().create_task(_bg_check(kind, url, key))
         _bg_pending += 1
         return True
     except RuntimeError:
@@ -234,6 +266,14 @@ async def _answer_tools(services: list[dict], request: Request | None
             tool.state, tool.decision, tool.decision_reason = "done", d.decision, d.reason
             ts = cached.get("trust_score")
             tool.trust_score = ts if isinstance(ts, int) and not isinstance(ts, bool) else None
+            continue
+        try:
+            from src import cache
+            failed = await cache.get(f"erc8004:toolerr:{key}")
+        except Exception:  # noqa: BLE001
+            failed = None
+        if isinstance(failed, str) and failed:
+            tool.why_not_checked = failed
             continue
         if await _bg_budget_ok(request) and await _schedule_check(kind, url, key):
             tool.state, tool.why_not_checked = "checking", "being checked now"
