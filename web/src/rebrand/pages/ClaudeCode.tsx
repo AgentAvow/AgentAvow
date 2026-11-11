@@ -64,10 +64,31 @@ async function writeClipboard(text: string): Promise<boolean> {
   }
 }
 
+/** Select a line's text so the person can copy it by hand (in-app browsers, like
+ * Reddit's, often refuse clipboard writes). A manual copy is tracked by onCopy. */
+function selectLine(el: HTMLElement | null): void {
+  try {
+    if (!el) return
+    const range = document.createRange()
+    range.selectNodeContents(el)
+    const sel = window.getSelection()
+    sel?.removeAllRanges()
+    sel?.addRange(range)
+  } catch {
+    // Nothing to do: the text is still visible
+  }
+}
+
 function Install() {
   const [done, setDone] = useState<number | null>(null)
-  const copy = async (i: number) => {
-    if (!(await writeClipboard(PLUGIN_LINES[i]))) return
+  const [manual, setManual] = useState<number | null>(null)
+  const copy = async (i: number, code: HTMLElement | null) => {
+    if (!(await writeClipboard(PLUGIN_LINES[i]))) {
+      selectLine(code)
+      setManual(i)
+      return
+    }
+    setManual(null)
     copied()
     setDone(i)
     window.setTimeout(() => setDone((d) => (d === i ? null : d)), 1800)
@@ -77,10 +98,10 @@ function Install() {
       {PLUGIN_LINES.map((line, i) => (
         <div key={line} className={`flex items-center gap-2.5 py-2 pr-2 pl-2.5 rounded-[9px] ${i ? 'border-t border-border/50' : ''}`}>
           <span className="font-mono text-[11.5px] text-text-muted w-3.5 flex-none">{i + 1}</span>
-          <code className="flex-1 min-w-0 font-mono text-[14.5px] text-text [overflow-wrap:anywhere]">{line}</code>
+          <code id={`plugin-line-${i}`} className="flex-1 min-w-0 font-mono text-[14.5px] text-text [overflow-wrap:anywhere] select-all">{line}</code>
           <button
             type="button"
-            onClick={() => copy(i)}
+            onClick={() => copy(i, document.getElementById(`plugin-line-${i}`))}
             aria-label={`Copy line ${i + 1}`}
             className={`flex-none min-w-[76px] text-[13.5px] font-semibold px-[15px] py-2 rounded-[9px] ${done === i ? 'bg-surface-hover text-success' : 'text-white bg-gradient-to-r from-primary to-primary-dark'}`}
           >
@@ -88,6 +109,11 @@ function Install() {
           </button>
         </div>
       ))}
+      {manual !== null && (
+        <p role="status" className="px-2.5 pb-1.5 text-[12.5px] text-text-muted">
+          This browser blocked the copy button. The line is selected: press and hold (or Cmd/Ctrl+C) to copy it.
+        </p>
+      )}
     </div>
   )
 }
