@@ -1104,6 +1104,29 @@ async def _watch_behavioral_block(data: dict | None) -> dict | None:
     return block if isinstance(block, dict) and block.get("ran") else None
 
 
+async def _watch_decision_block(
+    surface: str, owner: str, repo: str, data: dict | None, b_block: dict | None,
+) -> dict | None:
+    """The sandbox block the public endpoint for this surface folds into the answer
+    (cache-only, a completed run only). A live MCP endpoint folds none (its opt-in
+    probe is advisory); a skill uses the repo's skill run, which the drift lookup
+    (``_watch_behavioral_block``) does not key on; every other surface uses that
+    lookup's block."""
+    surface = (surface or "github").lower()
+    if surface == "mcp":
+        return None
+    if surface != "openclaw":
+        return b_block
+    try:
+        from src.api.public_scan_router import _cached_behavioral_for
+        block = await _cached_behavioral_for({
+            **(data if isinstance(data, dict) else {}),
+            "repo_full_name": f"{owner}/{repo}", "surface_kind": "skill"})
+    except Exception:
+        return None
+    return block if isinstance(block, dict) and block.get("ran") else None
+
+
 def _behavioral_alert_payload(
     w, block: dict, new_score: int | None, package: dict | None = None,
 ) -> dict:
@@ -1140,17 +1163,32 @@ def _behavioral_alert_payload(
 
 def w_decision_phrase(d: dict) -> str:
     """"Review before you connect (one high finding: …)" for notification text."""
+    if not (d or {}).get("decision"):
+        # No answer this re-scan (see ``_watch_decision``): never guess one.
+        return "answer unavailable on this check, see the full report"
     from src.trust_tiers import headline
     return (f"{headline(d.get('decision'), certified=bool(d.get('certified')))}"
             f" ({d.get('decision_reason') or ''})")
 
 
+# The decision keys a watch alert carries when this re-scan produced no answer.
+_NO_DECISION = {"decision": None, "decision_final": False, "decision_reason": "",
+                "certified": False}
+
+
 def _watch_decision(data: dict | None, block: dict | None) -> dict:
     """The three-phrase decision fields for a watch alert, derived like the public scan:
     the sandbox block folded into the score first, then ``decide`` over the result.
-    Unsigned, additive keys: {decision, decision_final, decision_reason, certified}."""
+    Unsigned, additive keys: {decision, decision_final, decision_reason, certified}.
+
+    ``data`` must be the full static scan (``WatchScan.data``). Without a trust score
+    there is nothing to decide: the keys are present but null (no observation; the
+    stored baseline stays). Deciding anyway reads the missing score as 0 and answers
+    "review" for every tool."""
     from src.scanner.verdict import decide
     data = data if isinstance(data, dict) else {}
+    if data.get("trust_score") is None:
+        return dict(_NO_DECISION)
     try:
         from src.api.public_scan_router import _apply_behavioral_score
         applied = _apply_behavioral_score(data, block)
@@ -1172,8 +1210,34 @@ def _old_decision(w) -> dict:
             "certified": bool(getattr(w, "last_certified", None))}
 
 
-def _grade_change_payload(w, new_score, reason: str, triggers: list[tuple[str, str]],
-                          decision: dict) -> dict:
+def alert_triggers(dropped: bool, drift: bool, answer: AnswerChange) -> list[tuple[str, str]]:
+    """Every reason one re-scan alerts for, most important first, as
+    ``(trigger code, human reason)``. Shared by the watch loop and the GitHub App
+    private-repo re-scan (``src/jobs/app_scan.py``): one alert carries them all."""
+    triggers: list[tuple[str, str]] = []
+    if dropped:
+        triggers.append(("score_drop", "score dropped"))
+    if drift:
+        triggers.append(("definition_change", "signed definition changed"))
+    if answer.worse:
+        triggers.append(("answer_worse", "answer changed"))
+    if answer.certified_lost:
+        triggers.append(("certified_lost", "Certified mark removed"))
+    return triggers
+
+
+def alert_extra_reasons(triggers: list[tuple[str, str]]) -> str:
+    """The answer / Certified reasons after the first, as "; answer changed; ...", for
+    the notification body (the first reason is already in its lead sentence)."""
+    return "".join(
+        f"; {h}" for c, h in triggers[1:] if c in ("answer_worse", "certified_lost"))
+
+
+def grade_change_payload(
+    owner: str, repo: str, old_score, new_score, reason: str,
+    triggers: list[tuple[str, str]], decision: dict,
+    old_decision: str | None, old_certified: bool | None,
+) -> dict:
     """The ``agentavow.alert.grade_change`` webhook body. ``reason`` is the first
     trigger (unchanged from before ``triggers`` existed); ``triggers`` / ``reasons``
     list every one this re-scan fired for, and ``old_decision`` /
@@ -1181,17 +1245,25 @@ def _grade_change_payload(w, new_score, reason: str, triggers: list[tuple[str, s
     (null before one was stored). All additive."""
     return {
         "type": "agentavow.alert.grade_change",
-        "owner": w.owner,
-        "repo": w.repo,
-        "old_score": w.last_score,
+        "owner": owner,
+        "repo": repo,
+        "old_score": old_score,
         "new_score": new_score,
         "reason": reason,
         "triggers": [c for c, _ in triggers],
         "reasons": [h for _, h in triggers],
-        "old_decision": getattr(w, "last_decision", None),
-        "old_certified_mark": getattr(w, "last_certified", None),
+        "old_decision": old_decision,
+        "old_certified_mark": old_certified,
         **decision,
     }
+
+
+def _grade_change_payload(w, new_score, reason: str, triggers: list[tuple[str, str]],
+                          decision: dict) -> dict:
+    """``grade_change_payload`` for a ``ToolWatch``."""
+    return grade_change_payload(
+        w.owner, w.repo, w.last_score, new_score, reason, triggers, decision,
+        getattr(w, "last_decision", None), getattr(w, "last_certified", None))
 
 
 async def _watcher_hook(db, watcher_id):
@@ -1311,7 +1383,11 @@ async def _run_watch_rescan(limit: int = 200) -> None:
             # Behavioral drift — read-only against the public scan's cache; a watch
             # whose coordinate has no sandbox block keeps its baseline untouched.
             b_block = await _watch_behavioral_block(ws.data)
-            w_decision = _watch_decision(ws.data, b_block)
+            w_decision = (
+                ws.decision if getattr(ws, "decision", None) is not None
+                else _watch_decision(
+                    ws.data, await _watch_decision_block(w_surface, w.owner, w.repo,
+                                                         ws.data, b_block)))
             b_change, b_baseline = _behavioral_change(
                 getattr(w, "last_behavioral_digest", None), _behavioral_fingerprint(b_block),
             )
@@ -1342,21 +1418,11 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                 getattr(w, "last_decision", None), getattr(w, "last_certified", None))
             # Every reason this one re-scan alerts for, most important first. One
             # alert carries them all; ``reason`` stays the first, as before.
-            triggers: list[tuple[str, str]] = []
-            if dropped:
-                triggers.append(("score_drop", "score dropped"))
-            if drift:
-                triggers.append(("definition_change", "signed definition changed"))
-            if answer.worse:
-                triggers.append(("answer_worse", "answer changed"))
-            if answer.certified_lost:
-                triggers.append(("certified_lost", "Certified mark removed"))
+            triggers = alert_triggers(dropped, drift, answer)
             answer_alert = answer.worse or answer.certified_lost
             if triggers:
                 reason = triggers[0][1]
-                extra = "".join(
-                    f"; {h}" for c, h in triggers[1:]
-                    if c in ("answer_worse", "certified_lost"))
+                extra = alert_extra_reasons(triggers)
                 title = f"{w.owner}/{w.repo} — {reason}"
                 body = (
                     f"A tool you're watching changed: {reason}"
