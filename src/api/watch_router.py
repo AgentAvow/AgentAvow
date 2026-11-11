@@ -4,6 +4,7 @@ The re-scan + notification loop lives in src/jobs/scheduler.py (_watch_rescan_lo
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass, field
 
@@ -15,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.deps import get_current_entity
 from src.database import get_db
 from src.models import Entity, ToolWatch
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["watches"])
 
@@ -41,27 +44,63 @@ def _serialize(w: ToolWatch) -> dict:
 
 @dataclass
 class WatchScan:
-    """One re-scan of a watch target. ``data`` carries just the scan fields the
-    behavioral (sandbox) lookup keys on — package coordinate, declared scope, artifact
-    detail, env reads — plus the ``behavioral`` block itself when the scan path already
-    resolved it (the GitHub public_scan path does). Empty for surfaces with no sandbox
-    tier (mcp, openclaw)."""
+    """One re-scan of a watch target. ``data`` is the full static scan result, the
+    dict the public scan endpoint builds (``_scan_result_to_dict``: trust_score,
+    findings counts and items, metadata, coverage_gaps, supply_chain, certified …), so
+    the watch loop decides the answer over the same inputs ``/public/scan`` does. On
+    top of it sit the fields the behavioral (sandbox) lookup keys on (package
+    coordinate, declared scope, artifact detail, env reads) and, for GitHub, the
+    ``behavioral`` block the public scan resolved. Empty when the scan failed.
+
+    ``decision`` is set only when the answer could not be derived from ``data`` (a
+    GitHub scan whose static result was not readable from the cache): the public
+    response's own answer, or None when even that was provisional."""
 
     score: int | None
     digest: str | None
     data: dict = field(default_factory=dict)
+    decision: dict | None = None
     # Live MCP only: the unsigned icon fingerprint (src/scanner/mcp_icons.py) and the
     # icon findings of this scan, for the "icon changed" alert. None/[] elsewhere.
     icon_digest: str | None = None
     icon_findings: list = field(default_factory=list)
 
 
+def _full_scan_data(r) -> dict:
+    """The public scan endpoint's dict for a ScanResult: the answer's inputs. {} when
+    it cannot be built; the watch loop then records no answer this cycle (it never
+    decides one without a score), and the score and digest checks still run."""
+    try:
+        from src.api.public_scan_router import _scan_result_to_dict
+        return _scan_result_to_dict(r)
+    except Exception:
+        logger.warning("watch: scan result not shaped for the answer", exc_info=True)
+        return {}
+
+
 def _package_scan_data(surface: str, name: str, r) -> dict:
     return {
+        **_full_scan_data(r),
         "package_coordinate": {"surface": surface, "name": name},
         "declared_scope": getattr(r, "declared_scope", {}) or {},
         "artifact_scan": getattr(r, "artifact_scan", {}) or {},
         "env_reads": list(getattr(r, "env_reads", []) or []),
+    }
+
+
+def _response_decision(res) -> dict | None:
+    """The answer a public scan response leads with, shaped like the watch loop's
+    ``_watch_decision``. None while it is provisional (a sandbox run pending): a
+    pending run withholds the Certified mark, and a baseline taken then would read as
+    the mark coming off and back."""
+    d = getattr(res, "decision", None)
+    if not isinstance(d, str) or not getattr(res, "decision_final", False):
+        return None
+    return {
+        "decision": d,
+        "decision_final": True,
+        "decision_reason": getattr(res, "decision_reason", "") or "",
+        "certified": bool(getattr(res, "certified_mark", False)),
     }
 
 
@@ -97,6 +136,7 @@ async def scan_watch_target_detail(
             return WatchScan(
                 (None if r.error else r.trust_score),
                 (getattr(r, "tool_manifest_digest", None) or None),
+                {} if r.error else _full_scan_data(r),
                 icon_digest=None if r.error else (getattr(r, "icon_fingerprint", None) or None),
                 icon_findings=[] if r.error else [
                     {"severity": f.severity, "name": f.name, "where": f.file_path}
@@ -107,11 +147,23 @@ async def scan_watch_target_detail(
         if surface == "openclaw":
             from src.scanner.scan import scan_skill
             r = await scan_skill(owner, repo)
-            return WatchScan(None if r.error else r.trust_score, r.tool_manifest_digest or None)
+            return WatchScan(
+                None if r.error else r.trust_score, r.tool_manifest_digest or None,
+                {} if r.error else _full_scan_data(r),
+            )
         # default: github repo
         from src.api.public_scan_router import public_scan
         res = await public_scan(owner=owner, repo=repo, force=False, db=db)
+        # The response's trust_score already has the sandbox folded in; the answer is
+        # decided over the STATIC result (which public_scan just read or wrote in the
+        # cache) with the sandbox block folded in by the watch loop, as the endpoint does.
+        from src.api.public_scan_router import _get_cached
+        try:
+            static = await _get_cached(owner, repo)
+        except Exception:
+            static = None
         data = {
+            **(static if isinstance(static, dict) else {}),
             "package_coordinate": getattr(res, "package_coordinate", {}) or {},
             "declared_scope": getattr(res, "declared_scope", {}) or {},
             "artifact_scan": getattr(res, "surface_detail", {}) or {},
@@ -120,7 +172,10 @@ async def scan_watch_target_detail(
         behavioral = getattr(res, "behavioral", None)
         if isinstance(behavioral, dict):
             data["behavioral"] = behavioral
-        return WatchScan(res.trust_score, res.tool_manifest_digest, data)
+        decision = None
+        if not isinstance(static, dict):
+            decision = _response_decision(res)
+        return WatchScan(res.trust_score, res.tool_manifest_digest, data, decision=decision)
     except Exception:
         return WatchScan(None, None)
 
