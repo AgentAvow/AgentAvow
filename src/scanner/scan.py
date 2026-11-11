@@ -6202,7 +6202,10 @@ async def _run_supply_chain(
                 for _lp, _text in lockfiles.items():
                     if not _lp.lower().endswith("pnpm-lock.yaml"):
                         continue
-                    _imps = list(pnpm_v9_importers(_text))[:40]
+                    from src.scanner.lockfiles import yaml_documents
+                    _imps = list(dict.fromkeys(
+                        k for _doc in yaml_documents(_text)
+                        for k in pnpm_v9_importers(_doc)))[:40]
                     if len(_imps) < 2:
                         continue
                     _base = str(Path(_lp).parent)

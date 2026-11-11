@@ -186,3 +186,11 @@ snapshots:
                        {"a/pnpm-lock.yaml": PRIVATE})
     nxt = [d for d in deps if d.name == "next"]
     assert len(nxt) == 1 and nxt[0].dev is False
+
+
+def test_multi_document_lockfile_is_read_whole():
+    # pnpm 10 writes config dependencies as a first YAML document (vercel/ai, trpc).
+    first = "lockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    dependencies: {}\n"
+    text = "---\n" + first + "\n---\n" + LOCK
+    assert len(lf.yaml_documents(text)) == 2
+    assert {"left-pad@1.3.0", "next@15.5.25"} <= _prod(text)

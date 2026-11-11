@@ -587,6 +587,23 @@ def parse_lockfile(filename: str, text: str) -> list[Dep]:
         return []
 
 
+def yaml_documents(text: str) -> list[str]:
+    """The YAML documents in a file, split on ``---`` lines. pnpm 10 can write a small
+    first document (config dependencies) before the lockfile proper: reading only the
+    first document graded 15 of vercel/ai's 4,054 packages (2026-11-11)."""
+    docs, cur = [], []
+    for line in text.splitlines():
+        if line.rstrip() == "---":
+            if any(x.strip() for x in cur):
+                docs.append("\n".join(cur))
+            cur = []
+            continue
+        cur.append(line)
+    if any(x.strip() for x in cur):
+        docs.append("\n".join(cur))
+    return docs or [text]
+
+
 def parse_all(files: dict[str, str],
               private_importers: dict[str, set[str]] | None = None) -> list[Dep]:
     """Parse a ``{path: content}`` map into one de-duplicated Dep list.
@@ -605,7 +622,13 @@ def parse_all(files: dict[str, str],
     private_importers = private_importers or {}
     seen: dict[tuple[str, str, str], int] = {}
     out: list[Dep] = []
+    units: list[tuple[str, str]] = []
     for path, content in files.items():
+        if path.lower().endswith("pnpm-lock.yaml"):
+            units += [(path, doc) for doc in yaml_documents(content)]
+        else:
+            units.append((path, content))
+    for path, content in units:
         unshipped: set[str] = set()
         if path.lower().endswith("pnpm-lock.yaml") and re.search(
                 r"^snapshots:\s*$", content, re.M):
