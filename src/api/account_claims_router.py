@@ -206,6 +206,13 @@ async def _ensure_watch(
     App re-scans, so skip them. Best-effort: never fails the claim."""
     if is_private:
         return
+    from src.api.watch_router import WATCH_SURFACES
+    if surface not in WATCH_SURFACES:
+        # The same check POST /watches applies: a watch the re-scan loop cannot score
+        # is never created (it would fall back to a GitHub scan of owner/repo).
+        logger.info("auto-watch skipped: unsupported surface %s for %s/%s",
+                    surface, owner, repo)
+        return
     try:
         from src.models import ToolWatch
 

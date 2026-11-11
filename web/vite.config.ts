@@ -11,8 +11,8 @@ import tailwindcss from '@tailwindcss/vite'
 function cutoverHtmlPlugin(cutover: boolean) {
   const TITLE = 'AgentAvow — Verifiable trust for the tools your agents connect to'
   const DESC =
-    'Check any tool, MCP server, or package before your agent connects: Safe to connect, ' +
-    'Review before you connect, or Do not connect. Signed trust score, adoption score, verifiable offline.'
+    'Check a tool before your agent connects: Safe to connect, Review before you connect, ' +
+    'or Do not connect, with a signed trust score and an adoption score.'
   return {
     name: 'agentavow-cutover-html',
     transformIndexHtml(html: string) {

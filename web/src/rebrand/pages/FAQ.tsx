@@ -52,7 +52,7 @@ const SECTIONS: Section[] = [
   {
     title: 'Account & watching',
     items: [
-      { q: 'What does "watching" a tool do?', a: 'We re-scan the tools you watch and alert you — by email, in-app, or webhook — the moment a score drops or a signed definition changes. That\'s the rug-pull you\'d otherwise miss. Definition-change alerts cover GitHub repos, OpenClaw skills and live MCP servers; npm and PyPI packages alert on score. Once the sandbox has run a watched tool, a later run that turns up new behavioral findings (for example a leaked canary or a new undeclared host) sends an in-app and webhook alert too.' },
+      { q: 'What does "watching" a tool do?', a: 'We re-scan the tools you watch and alert you — by email, in-app, or webhook — when its score drops by more than 5 points, its answer gets worse (Safe to connect → Review before you connect → Do not connect), its Certified mark comes off, or its signed definition changes. That\'s the rug-pull you\'d otherwise miss. Definition-change alerts cover GitHub repos, OpenClaw skills and live MCP servers; npm and PyPI packages alert on score. Once the sandbox has run a watched tool, a later run that turns up new behavioral findings (for example a leaked canary or a new undeclared host) sends an in-app and webhook alert too.' },
       { q: 'How do I claim a tool I own?', a: 'Add a GitHub topic we give you to the repo to prove ownership. A verified claim (public repos) gives you continuous re-scans with change alerts, and control over how the tool appears in the catalog and search.' },
     ],
   },

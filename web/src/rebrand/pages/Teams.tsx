@@ -21,7 +21,7 @@ const CONTACT = 'hello@agentavow.com'
 
 const CAPABILITIES: { h: string; p: string; pre?: string }[] = [
   { h: 'Gate CI on the answer', p: 'Fail the build on Do not connect. Works on GitHub, GitLab, Bitbucket and Azure DevOps.', pre: '- uses: AgentAvow/AgentAvow/github-action@main\n  with:\n    fail_on: do_not_connect' },
-  { h: 'Get an alert when a tool changes', p: "Watch the tools you depend on. An HMAC-signed webhook fires when a score drops or a signed tool definition changes, the rug-pull you'd otherwise miss." },
+  { h: 'Get an alert when a tool changes', p: "Watch the tools you depend on. An HMAC-signed webhook fires when a score drops by more than 5 points, the answer gets worse, the Certified mark comes off or a signed tool definition changes, the rug-pull you'd otherwise miss." },
   { h: 'Verify every result offline', p: "Recompute a result byte for byte and check its Ed25519 signature against our public keys. Your auditors don't have to trust us." },
   { h: 'Scan private code', p: 'Pass a GitHub token for one scan (signed in) and we never store it. Or run the scanner in your own CI, where your code stays on your runner.' },
   { h: 'Use the API', p: 'The answer, the trust score, the findings and the Certified mark come back as JSON (adoption from its own endpoint), so a policy can require any of them.' },
@@ -86,7 +86,7 @@ export default function RebrandTeams() {
     <div>
       <SEOHead
         title="For teams: a signed safety check in front of agent tools"
-        description="Gate CI, agents and developers on one signed answer per tool: Safe to connect, Review before you connect, or Do not connect, with a trust score and an adoption score you can verify offline."
+        description="Gate CI and agents on one answer per tool: Safe to connect, Review before you connect, or Do not connect, over a signed trust score and an adoption score."
         path="/teams"
       />
       <div className="relative pt-14 pb-10">

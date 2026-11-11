@@ -135,3 +135,69 @@ def test_sitemap_has_no_redirected_or_unknown_urls() -> None:
         path = path or "/"
         assert path not in redirects, path
         assert _is_live_target(path) or path.startswith("/legal/"), path
+
+
+# Every sitemap URL must answer Googlebot with a 200 page it can index: not a redirect
+# (nginx or client-side), not noindex, not disallowed in robots.txt (2026-11-10).
+ROBOTS = (ROOT / "web" / "public" / "robots.txt").read_text()
+PRERENDER = (ROOT / "web" / "src" / "prerender-entry.tsx").read_text()
+
+
+def _sitemap_paths() -> list[str]:
+    return [p or "/" for p in re.findall(r"<loc>https://agentavow\.com([^<]*)</loc>", SITEMAP)]
+
+
+def _prerendered() -> set[str]:
+    block = re.search(r"const PAGES: Record<string, ReactNode> = \{(.*?)\n\}", PRERENDER, re.S)
+    assert block, "PAGES missing from prerender-entry.tsx"
+    return set(re.findall(r"^\s*'(/[^']*)':", block.group(1), re.M))
+
+
+def _disallowed(path: str) -> bool:
+    allows = re.findall(r"^Allow:\s*(\S+)", ROBOTS, re.M)
+    disallows = re.findall(r"^Disallow:\s*(\S+)", ROBOTS, re.M)
+    longest_allow = max((len(a) for a in allows if path.startswith(a)), default=-1)
+    longest_disallow = max((len(d) for d in disallows if path.startswith(d)), default=-1)
+    return longest_disallow > longest_allow
+
+
+def test_sitemap_urls_not_disallowed_in_robots_txt() -> None:
+    assert not [p for p in _sitemap_paths() if _disallowed(p)]
+
+
+def test_sitemap_urls_not_check_noindex() -> None:
+    assert not [p for p in _sitemap_paths() if _check_robots().search(p)]
+
+
+def test_sitemap_spa_urls_render_a_real_page() -> None:
+    # A page in the prerender list is a real page with its own title and canonical. A
+    # route that only redirects in the browser (like /claim) can't be in that list, so
+    # it can't be in the sitemap either. Docs and legal pages are server-rendered for
+    # crawlers by their own routers.
+    pages = _prerendered()
+    missing = [
+        p for p in _sitemap_paths()
+        if p != "/docs" and not p.startswith(("/docs/", "/legal/")) and p not in pages
+    ]
+    assert not missing
+
+
+def test_sitemap_every_url_has_a_lastmod() -> None:
+    urls = re.findall(r"<url>(.*?)</url>", SITEMAP, re.S)
+    assert urls
+    for u in urls:
+        m = re.search(r"<lastmod>(\d{4}-\d{2}-\d{2})</lastmod>", u)
+        assert m, u
+
+
+def test_sitemap_lists_both_reports_and_not_claim() -> None:
+    paths = _sitemap_paths()
+    assert "/state-of-agent-security-2026" in paths
+    assert "/state-of-agent-security-q3-2026" in paths
+    assert "/claim" not in paths
+    assert {"/state-of-agent-security-2026", "/state-of-agent-security-q3-2026"} <= _prerendered()
+
+
+def test_sitemap_has_no_duplicate_urls() -> None:
+    paths = _sitemap_paths()
+    assert len(paths) == len(set(paths))

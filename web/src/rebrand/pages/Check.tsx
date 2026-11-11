@@ -208,7 +208,18 @@ const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'cra
 /** "Watch this tool" — the PRIMARY action. Full-width gradient CTA.
  * Works across every surface: pass the coordinate as stored server-side
  * (github → owner/repo · npm/pypi → surface/pkg · mcp → mcp/url · openclaw → owner/repo). */
+// Surfaces POST /watches accepts (src/api/watch_router.py). Keep the two in step.
+const WATCHABLE_SURFACES = ['github', 'npm', 'pypi', 'docker', 'mcp', 'openclaw']
+const SURFACE_NAMES: Record<string, string> = { crates: 'crates.io packages', huggingface: 'Hugging Face models' }
+
 function WatchCTA({ surface = 'github', owner, repo }: { surface?: string; owner: string; repo: string }) {
+  if (!WATCHABLE_SURFACES.includes(surface)) {
+    return <p className="w-full text-[13px] text-text-muted">Watching isn&apos;t available for {SURFACE_NAMES[surface] ?? surface} yet.</p>
+  }
+  return <WatchButton surface={surface} owner={owner} repo={repo} />
+}
+
+function WatchButton({ surface, owner, repo }: { surface: string; owner: string; repo: string }) {
   const { user } = useAuth()
   const location = useLocation()
   const [clicked, setClicked] = useState(false)
@@ -231,11 +242,18 @@ function WatchCTA({ surface = 'github', owner, repo }: { surface?: string; owner
   const star = <svg viewBox="0 0 24 24" fill="currentColor" className="w-[16px] h-[16px] shrink-0"><path d="M12 2.5l2.9 6.1 6.6.9-4.8 4.6 1.2 6.6L12 18.6 6.1 21.3l1.2-6.6L2.5 9.5l6.6-.9z"/></svg>
   // Signed out: sign in, then come back to this result (with its query, e.g. ?endpoint=).
   if (!user) return <Link to={loginHref(here(location))} className={`${base} ${cta}`}>{star} Watch this tool</Link>
-  if (watching) return <div className={`${base} bg-success/10 text-success border border-success/40`}>✓ Watching — we'll alert you if the score drops</div>
+  if (watching) return <div className={`${base} bg-success/10 text-success border border-success/40`}>✓ Watching — we'll alert you if it changes for the worse</div>
   return (
-    <button onClick={() => mutation.mutate()} disabled={mutation.isPending} className={`${base} ${cta} disabled:opacity-70`}>
-      {star} {mutation.isPending ? 'Adding…' : 'Watch this tool'}
-    </button>
+    <div className="w-full">
+      <button onClick={() => mutation.mutate()} disabled={mutation.isPending} className={`${base} ${cta} disabled:opacity-70`}>
+        {star} {mutation.isPending ? 'Adding…' : 'Watch this tool'}
+      </button>
+      {mutation.isError && (
+        <p role="alert" className="mt-2 text-[12.5px] text-danger">
+          Couldn&apos;t add the watch{errorDetail(mutation.error) ? `: ${errorDetail(mutation.error)}` : '. Try again.'}
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -866,7 +884,7 @@ function Hero() {
   ]
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-20 text-center">
-      <SEOHead title="Check a tool" description="Is this tool safe for your agent to connect? Paste a GitHub repo, MCP server, npm/PyPI/crates package, Docker image, Hugging Face model or agent skill for Safe to connect, Review before you connect, or Do not connect, with a signed trust score." path="/check" />
+      <SEOHead title="Check a tool" description="Check a repo, MCP server, package or skill: Safe to connect, Review before you connect, or Do not connect, with a signed trust score and an adoption score." path="/check" />
       <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight">Is this AI tool <span className="gradient-text-bio">safe</span> to connect?</h1>
       <p className="mt-4 text-text-muted max-w-[46ch] mx-auto">Paste anything your agent connects to. We'll tell you — in plain English — whether it's safe, and prove it with a signed score.</p>
       <p className="mt-2 text-[13px] text-text-muted max-w-[56ch] mx-auto">Paste any A2A Agent Card URL for an answer, findings and a signed attestation, including whether the card&apos;s own signature verifies.</p>
