@@ -353,22 +353,6 @@ export function VerifyPanel({ scan: raw }: { scan: unknown }) {
   )
 }
 
-/** "Maintain this package?" — claim it via the registry proof on My Tools. */
-export function PackageClaim({ surface, name }: { surface: string; name: string }) {
-  if (!name || !['npm', 'pypi', 'crates'].includes(surface)) return null
-  return (
-    <Reveal>
-      <div className="mt-4 glass rounded-2xl p-6 flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h3 className="text-[15px] font-bold">Maintain this package?</h3>
-          <p className="text-text-muted text-[13.5px] mt-0.5">Claim it to get alerts when its result changes. Proof is a link to a GitHub repo you&apos;ve claimed, or a keyword you publish in a new version.</p>
-        </div>
-        <Link to={rp(`/rebrand/tools?coord=${encodeURIComponent(`${surface}:${name}`)}`)} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors shrink-0">Claim this package</Link>
-      </div>
-    </Reveal>
-  )
-}
-
 // ── Live MCP endpoint panels ─────────────────────────────────────────────────────────
 
 const ANN_KEYS: [string, string][] = [

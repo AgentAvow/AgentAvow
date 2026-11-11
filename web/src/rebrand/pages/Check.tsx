@@ -11,7 +11,7 @@ import { fetchPublicScan, fetchSkillCollectionLead, fetchBehavioralScan, fetchPa
 import type { PublicScanResponse } from '../../types/scan'
 import { getTrustTier, decisionOf, decisionPhrase, headline as decisionHeadline, coverageGapNotes } from '../../components/trust/gradeSystem'
 import { TrustPill } from '../components/TrustMark'
-import { ResultPage, ResultTitle, CertifiedChecklist, NextStepCards, Section, EmptyPanel, type ResultAdoption, type ResultRecheck, type ResultKind } from '../components/ResultPage'
+import { ResultPage, ResultTitle, CertifiedChecklist, NextSteps, Section, EmptyPanel, BTN_GHOST, type ResultAdoption, type ResultRecheck, type ResultKind } from '../components/ResultPage'
 import {
   mcpNameFromUrl, cursorInstall, vscodeInstall, gooseInstall, claudeCodeCmd,
   geminiCmd, codexCmd, claudeDesktopConfig, packageInstallCommands, skillInstallCommands,
@@ -27,7 +27,7 @@ import { useRotatingPlaceholder } from '../lib/hooks'
 import { summarize } from '../lib/summarize'
 import { oneTimeScanFor } from '../lib/oneTimeScan'
 import { here, loginHref } from '../lib/returnTo'
-import { CapabilitiesPanel, AdvisoriesPanel, McpToolList, PackageFacts, PackageClaim, VerifyPanel, McpWhatItCanDo, McpNotes, hasToolList, packageBadgeUrl } from '../components/ScanEvidence'
+import { CapabilitiesPanel, AdvisoriesPanel, McpToolList, PackageFacts, VerifyPanel, McpWhatItCanDo, McpNotes, hasToolList, packageBadgeUrl } from '../components/ScanEvidence'
 import type { AxiosError } from 'axios'
 
 /**
@@ -636,7 +636,7 @@ function BadgeTabs({ assets, unavailable }: { assets?: BadgeAssets; unavailable?
       <div className="mt-4 glass rounded-2xl p-6">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <h3 className="text-[15px] font-bold">Show this result in your README</h3>
-          <Link to={rp('/rebrand/badge')} className="font-mono text-[11px] text-primary-light hover:text-primary">badge builder →</Link>
+          <Link to={rp('/rebrand/for-developers') + '#badge'} className="font-mono text-[11px] text-primary-light hover:text-primary">badge builder →</Link>
         </div>
         <p className="mt-1 text-text-muted text-[13px] max-w-[60ch]">Hosted, always-current images that regenerate from the live signed result: they can&apos;t go stale or be faked. Free, no account.</p>
         <div className="mt-4 flex gap-1.5" role="tablist">
@@ -677,19 +677,10 @@ function BadgeTabs({ assets, unavailable }: { assets?: BadgeAssets; unavailable?
   )
 }
 
-/** A claim panel for surfaces claimed on My Tools (MCP endpoints, skills, …). */
-function ClaimPanel({ href, title = 'Is this your tool?', text }: { href: string | null; title?: string; text?: string }) {
-  return (
-    <Reveal>
-      <div id="claim" className="mt-4 glass rounded-2xl p-6 flex items-center justify-between gap-4 flex-wrap scroll-mt-24">
-        <div>
-          <h3 className="text-[15px] font-bold">{title}</h3>
-          <p className="text-text-muted text-[13.5px] mt-0.5 max-w-[56ch]">{text || 'Claim it to get alerts first, add a declared scope, and show a claimed badge.'}</p>
-        </div>
-        {href && <Link to={rp(href)} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors shrink-0">Claim this tool</Link>}
-      </div>
-    </Reveal>
-  )
+/** The claim link in Next steps, step 2 ("Is this yours?"), for surfaces claimed on My
+ * Tools (MCP endpoints, skills, packages). */
+function ClaimLink({ href, label = 'Claim this tool' }: { href: string; label?: string }) {
+  return <Link to={rp(href)} className={BTN_GHOST}>{label}</Link>
 }
 
 /** The panels every "What's inside" shares: capabilities, tools and blast radius,
@@ -720,9 +711,9 @@ function InsideCommon({ scan, kind, what }: { scan: PublicScanResponse; kind: Re
   )
 }
 
-/** Claim CTA that becomes an owned state for signed-in users who've claimed this repo.
- * Only queries claims when signed in — the anonymous check flow never fires it. */
-function OwnershipCTA({ owner, repo }: { owner: string; repo: string }) {
+/** Step 2's repo claim control; an owned state for signed-in users who've claimed this
+ * repo. Only queries claims when signed in, so the anonymous check flow never fires it. */
+function RepoClaimAction({ owner, repo }: { owner: string; repo: string }) {
   const { user } = useAuth()
   const { data: claimsData } = useQuery({
     queryKey: ['rebrand-claims'],
@@ -735,28 +726,13 @@ function OwnershipCTA({ owner, repo }: { owner: string; repo: string }) {
   )
   if (owned) {
     return (
-      <Reveal>
-        <div id="claim" className="scroll-mt-24 mt-4 glass rounded-2xl p-6 border-l-4 border-success/60 flex items-center justify-between gap-4 flex-wrap">
-          <div>
-            <h3 className="text-[15px] font-bold text-success">✓ You own this</h3>
-            <p className="text-text-muted text-[13.5px] mt-0.5">This tool is claimed under your account. Manage it, run re-scans, and control alerts.</p>
-          </div>
-          <Link to={rp("/rebrand/tools") + "#your-repos"} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shrink-0">Manage in My Tools →</Link>
-        </div>
-      </Reveal>
+      <>
+        <span className="text-[13.5px] font-bold text-success">✓ You own this</span>
+        <Link to={rp('/rebrand/tools') + '#your-repos'} className="inline-flex items-center text-[13px] font-semibold px-3.5 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark">Manage in My Tools →</Link>
+      </>
     )
   }
-  return (
-    <Reveal>
-      <div id="claim" className="scroll-mt-24 mt-4 glass rounded-2xl p-6 flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h3 className="text-[15px] font-bold">Own this tool?</h3>
-          <p className="text-text-muted text-[13.5px] mt-0.5">Claim it to scan it privately, get change alerts, and own how it appears on AgentAvow.</p>
-        </div>
-        <Link to={rp('/rebrand/tools') + '?coord=' + encodeURIComponent(`${owner}/${repo}`)} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors shrink-0">Claim this tool</Link>
-      </div>
-    </Reveal>
-  )
+  return <ClaimLink href={'/rebrand/tools?coord=' + encodeURIComponent(`${owner}/${repo}`)} />
 }
 
 /** A neutral provenance line: the published artifact matches its source. Shown on every
@@ -770,8 +746,9 @@ function ProvenanceChip() {
   )
 }
 
-/** Owner opt-in: publish a connected private repo's stored grade to public search. */
-function PublishStoredCTA({ owner, repo, score, published }: { owner: string; repo: string; score: number; published: boolean }) {
+/** Owner opt-in, in step 2: publish a connected private repo's stored result to
+ * public search. The only publish control on the page. */
+function PublishStoredAction({ owner, repo, score, published }: { owner: string; repo: string; score: number; published: boolean }) {
   const qc = useQueryClient()
   const publish = useMutation({
     mutationFn: async () => (await api.post(`/account/private-report/${owner}/${repo}/publish`)).data,
@@ -783,24 +760,21 @@ function PublishStoredCTA({ owner, repo, score, published }: { owner: string; re
     },
   })
   const done = published || publish.isSuccess
-  return (
-    <Reveal>
-      <div className="mt-4 glass rounded-2xl p-6 border-l-4 border-primary/50">
-        <h3 className="text-[15px] font-bold">Publish to search</h3>
-        <p className="text-text-muted text-[13.5px] mt-1 max-w-[62ch]">Private repos aren&apos;t listed in AgentAvow search. Publishing makes this score public and findable — your choice as the owner.</p>
-        {done ? (
-          <div id="share" className="scroll-mt-24">
-            <div className="mt-3 text-[13px] text-success">✓ Published — anyone can now find {owner}/{repo} in search. Share it:</div>
-            <div className="mt-2.5"><ShareRow label={`${owner}/${repo}`} score={score} /></div>
-          </div>
-        ) : (
-          <button onClick={() => publish.mutate()} disabled={publish.isPending}
-            className="mt-3 text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">
-            {publish.isPending ? 'Publishing…' : 'Publish to search'}</button>
-        )}
-        {publish.isError && <div className="mt-2 text-[12.5px] text-danger">Couldn&apos;t publish — try again.</div>}
+  if (done) {
+    return (
+      <div id="share" className="scroll-mt-24 w-full">
+        <div className="text-[13px] text-success">✓ Published: anyone can now find {owner}/{repo} in search. Share it:</div>
+        <div className="mt-2.5"><ShareRow label={`${owner}/${repo}`} score={score} /></div>
       </div>
-    </Reveal>
+    )
+  }
+  return (
+    <>
+      <button onClick={() => publish.mutate()} disabled={publish.isPending}
+        className="inline-flex items-center text-[13px] font-semibold px-3.5 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">
+        {publish.isPending ? 'Publishing…' : 'Publish to search'}</button>
+      {publish.isError && <span role="alert" className="text-[12.5px] text-danger">Couldn&apos;t publish. Try again.</span>}
+    </>
   )
 }
 
@@ -1422,17 +1396,52 @@ function LiveProbePanel({ b, pending, error, observedAt, onRun }: { b: Behaviora
  * true 1-click deeplinks (Cursor/VS Code/Goose) + copy commands; packages get the
  * install one-liners; skills get the clone command. The grade travels because
  * this lives on the signed score page. */
-function AddToAgent(props:
+type AddToAgentProps =
   | { kind: 'mcp'; url: string }
+  | { kind: 'a2a'; url: string }
   | { kind: 'package'; surface: string; name: string; isMcp?: boolean }
   | { kind: 'skill'; owner: string; repo: string; skillName?: string }
-  | { kind: 'repo'; owner: string; repo: string; isMcpServer?: boolean; pkg?: { surface: string; name: string; isMcp?: boolean } }) {
+  | { kind: 'repo'; owner: string; repo: string; isMcpServer?: boolean; pkg?: { surface: string; name: string; isMcp?: boolean } }
+
+const SURFACE_LABEL: Record<string, string> = { npm: 'npm', pypi: 'PyPI', crates: 'crates.io', docker: 'Docker', huggingface: 'Hugging Face' }
+
+/** The detected install path, shown on the collapsed step. */
+function installSummary(props: AddToAgentProps): string {
+  const pkgLine = (surface: string, name: string, isMcp?: boolean) => isMcp
+    ? `${SURFACE_LABEL[surface] ?? surface} · MCP server · one click for Cursor or VS Code`
+    : `${SURFACE_LABEL[surface] ?? surface} · ${packageInstallCommands(surface, name)[0]?.cmd ?? name}`
+  switch (props.kind) {
+    case 'mcp': return `MCP server · ${props.url} · one click for Cursor or VS Code`
+    case 'a2a': return `A2A agent card · ${props.url}`
+    case 'package': return pkgLine(props.surface, props.name, props.isMcp)
+    case 'skill': return `Agent Skill · ${(props.skillName && props.skillName.toLowerCase() !== props.repo.toLowerCase()
+      ? collectionSkillInstallCommands(props.owner, props.repo, props.skillName)
+      : skillInstallCommands(props.owner, props.repo))[0].cmd}`
+    case 'repo': return props.pkg ? pkgLine(props.pkg.surface, props.pkg.name, props.pkg.isMcp) : `GitHub repo · git clone https://github.com/${props.owner}/${props.repo}`
+  }
+}
+
+/** Next steps, step 4: "How to install this tool", collapsed to the detected path, with
+ * every client and command inside (the old "Add to your agent" panel). */
+function AddToAgent(props: AddToAgentProps) {
   const [more, setMore] = useState(false)
   const deeplinkBtn = DEEPLINK_BTN
   return (
-    <Reveal>
-      <div className="mt-4 glass rounded-2xl p-6 border-l-4 border-primary/50">
-        <h3 className="text-[15px] font-bold">Add to your agent</h3>
+    <details className="group" data-testid="install-step">
+      <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+        <span className="flex items-baseline justify-between gap-3">
+          <span className="text-[16px] font-bold tracking-tight">How to install this tool</span>
+          <span className="text-text-muted text-[12px] group-open:rotate-180 transition-transform" aria-hidden="true">▾</span>
+        </span>
+        <span className="mt-1 block font-mono text-[12px] text-text-muted [overflow-wrap:anywhere]">{installSummary(props)}</span>
+      </summary>
+      <div className="mt-3 pt-3 border-t border-border/50 min-w-0">
+        {props.kind === 'a2a' && (
+          <>
+            <p className="text-text-muted text-[13px] mt-1 max-w-[62ch]">Give your A2A client the agent card URL. Its tasks go to the interfaces the card lists.</p>
+            <div className="mt-3 flex flex-col gap-2"><CopyRow label="Agent card" cmd={props.url} /></div>
+          </>
+        )}
         {props.kind === 'mcp' && (() => {
           const t = { name: mcpNameFromUrl(props.url), url: props.url }
           return (
@@ -1494,12 +1503,8 @@ function AddToAgent(props:
             </div>
           </>
         ))}
-        <div className="mt-4 pt-4 border-t border-border/50 text-[12.5px] text-text-muted">
-          Want your agent to run this check itself, before it connects any tool?{' '}
-          <Link to={rp('/rebrand/how-it-works') + '#mcp-check'} className="text-primary-light hover:text-primary font-semibold">Add AgentAvow&apos;s MCP &rarr;</Link>
-        </div>
       </div>
-    </Reveal>
+    </details>
   )
 }
 
@@ -1652,6 +1657,10 @@ function SkillResult({ owner, repo, skill }: { owner: string; repo: string; skil
         install={!collection ? <AddToAgent kind="skill" owner={owner} repo={repo} skillName={sd?.skill_name} /> : undefined}
         watch={<WatchCTA surface="openclaw" owner={owner} repo={repo} />}
         badgeMarkdown={badge ? badgeMarkdownOf(badge) : undefined}
+        ownerStep={{
+          text: "Claim this skill's repo to get alerts first, add a declared scope, and show a claimed badge. Proof is a GitHub topic on the repo.",
+          actions: <ClaimLink href={`/rebrand/tools?coord=${encodeURIComponent(`skill:${owner}/${repo}`)}`} />,
+        }}
         keepWatching={{
           history: <FeedHistory path={driftPath} current={scan.trust_score} />,
           adoption: <AdoptionDetail data={adoptionData} />,
@@ -1678,11 +1687,8 @@ function SkillResult({ owner, repo, skill }: { owner: string; repo: string; skil
           </Reveal>
           <InsideCommon scan={scan} kind="skill" what="skill" />
         </>}
-        badgeClaimShare={<>
-          <BadgeTabs assets={badge} unavailable="A badge for a single skill isn't available yet. The repo's own badge shows its code scan, which can read differently from this skill's answer." />
-          <ClaimPanel href={`/rebrand/tools?coord=${encodeURIComponent(`skill:${owner}/${repo}`)}`} text="Claim this skill's repo to get alerts first, add a declared scope, and show a claimed badge. Proof is a GitHub topic on the repo." />
-          <SharePanel label={label} score={scan.trust_score} />
-        </>}
+        badges={<BadgeTabs assets={badge} unavailable="A badge for a single skill isn't available yet. The repo's own badge shows its code scan, which can read differently from this skill's answer." />}
+        sharePanel={<SharePanel label={label} score={scan.trust_score} />}
         proof={<VerifyPanel scan={scan} />}
         whatWeChecked={
           <div className="mt-4 rounded-xl border border-border/60 p-5">
@@ -1789,10 +1795,11 @@ function McpCouldntCheck({ endpoint, detail }: { endpoint: string; detail: strin
   const signIn = /sign-in|oauth|401|403|credential/i.test(detail)
   const host = mcpHostLabel(endpoint)
   const rows = [
-    { label: 'Reads Safe to connect at 81+', state: 'fail' as const, evidence: "No answer: the live tools couldn't be read" },
-    { label: 'Published package matches its source', state: 'fail' as const, evidence: 'A server checked by URL has no published package to match' },
-    { label: 'Every file read, nothing changed', state: 'fail' as const, evidence: "The live tool list couldn't be read" },
-    { label: 'Sandbox ran it, anyone can recompute', state: 'fail' as const, evidence: 'no signed result for this server' },
+    { label: 'Published package matches its source', state: 'fail' as const, evidence: 'A server checked by URL has no published package to match', keys: ['artifact_scanned', 'provenance_verified'] },
+    { label: 'Every file read, nothing changed', state: 'fail' as const, evidence: "The live tool list couldn't be read", keys: ['no_drift', 'full_coverage'] },
+    { label: 'No critical or high finding', state: 'fail' as const, evidence: 'Nothing was read, so nothing was checked', keys: ['no_critical_or_high'] },
+    { label: 'Sandbox ran it, anyone can recompute', state: 'fail' as const, evidence: 'no signed result for this server', keys: ['recompute_ready'] },
+    { label: 'Answer: Safe to connect at 81+', state: 'fail' as const, evidence: 'no answer', decides: true, note: "The live tools couldn't be read." },
   ]
   return (
     <div className="max-w-[860px] mx-auto px-6 py-14" data-result-kind="mcp" data-state="couldnt-check">
@@ -1819,7 +1826,7 @@ function McpCouldntCheck({ endpoint, detail }: { endpoint: string; detail: strin
         </Reveal>
       </Section>
       <Section id="next-steps" title="Next steps">
-        <NextStepCards oneTime />
+        <NextSteps installed={false} />
       </Section>
     </div>
   )
@@ -1892,6 +1899,10 @@ function McpResult({ endpoint }: { endpoint: string }) {
         install={<AddToAgent kind="mcp" url={endpoint} />}
         watch={<WatchCTA surface="mcp" owner="mcp" repo={endpoint} />}
         badgeMarkdown={badgeMarkdownOf(assets)}
+        ownerStep={{
+          text: 'Run this server? Claim it to get alerts first, add a declared scope, and show a claimed badge.',
+          actions: <ClaimLink href={`/rebrand/tools?coord=${encodeURIComponent(`mcp:${endpoint}`)}`} />,
+        }}
         keepWatching={{
           history: <FeedHistory path={driftPath} current={scan.trust_score} />,
           adoption: <AdoptionDetail data={adoptionData} />,
@@ -1902,11 +1913,8 @@ function McpResult({ endpoint }: { endpoint: string }) {
           <BehavioralPanel owner="mcp" repo={endpoint} probe={{ endpoint }} auto={(scan as { behavioral?: BehavioralData | null }).behavioral} />
           <InsideCommon scan={scan} kind="mcp" what="server" />
         </>}
-        badgeClaimShare={<>
-          <BadgeTabs assets={assets} />
-          <ClaimPanel href={`/rebrand/tools?coord=${encodeURIComponent(`mcp:${endpoint}`)}`} title="Run this server?" text="Claim it to get alerts first, add a declared scope, and show a claimed badge." />
-          <SharePanel label={mcpHostLabel(endpoint)} score={scan.trust_score} />
-        </>}
+        badges={<BadgeTabs assets={assets} />}
+        sharePanel={<SharePanel label={mcpHostLabel(endpoint)} score={scan.trust_score} />}
         proof={<VerifyPanel scan={scan} />}
         whatWeChecked={
           <div className="mt-4 rounded-xl border border-border/60 p-5">
@@ -1971,7 +1979,7 @@ function A2aCouldntCheck({ card, detail }: { card: string; detail: string }) {
         </div>
       </Reveal>
       <Section id="next-steps" title="Next steps">
-        <NextStepCards oneTime />
+        <NextSteps installed={false} />
       </Section>
     </div>
   )
@@ -2009,7 +2017,6 @@ function A2aResult({ card }: { card: string }) {
       <ResultPage
         scan={scan as unknown as Record<string, unknown> & { trust_score: number }}
         kind="a2a"
-        claim={false}
         eyebrow={['A2A agent card', host]}
         name={name}
         recheck={recheck}
@@ -2042,7 +2049,8 @@ function A2aResult({ card }: { card: string }) {
             : <EmptyPanel title="Skills it declares">The card declares no skills.</EmptyPanel>}
           <EmptyPanel title="Advisories">Doesn&apos;t apply: security advisories are published against packages, not agent cards.</EmptyPanel>
         </>}
-        badgeClaimShare={<SharePanel label={name} score={scan.trust_score} />}
+        install={<AddToAgent kind="a2a" url={sd.card_url || card} />}
+        sharePanel={<SharePanel label={name} score={scan.trust_score} />}
         proof={<VerifyPanel scan={scan} />}
         whatWeChecked={
           <div className="mt-4 rounded-xl border border-border/60 p-5">
@@ -2172,8 +2180,12 @@ function PackageResult({ surface, name, version }: { surface: string; name: stri
         adoption={adoptionFrom(adoptionData, 'No usage data: no downloads or outside adoption signals yet')}
         allFindings={<CategoryFindings categoryScores={(scan.category_scores || null) as Record<string, number> | null} findings={scan.findings} maxFindings={20} emptyMessage={coverageGapNotes(scan).length ? '✓ No risks found in what was read; see what we couldn’t check above.' : '✓ No risks found in the published package.'} />}
         install={<AddToAgent kind="package" surface={surface} name={name} isMcp={!!(scan as { surface_detail?: { is_mcp_server?: boolean } }).surface_detail?.is_mcp_server} />}
-        watch={<WatchCTA surface={surface} owner={surface} repo={name} />}
+        watch={WATCHABLE_SURFACES.includes(surface) ? <WatchCTA surface={surface} owner={surface} repo={name} /> : undefined}
         badgeMarkdown={badgeMarkdownOf(assets)}
+        ownerStep={claimable ? {
+          text: "Claim it to get alerts when its result changes. Proof is a link to a GitHub repo you've claimed, or a keyword you publish in a new version.",
+          actions: <ClaimLink href={`/rebrand/tools?coord=${encodeURIComponent(`${surface}:${name}`)}`} label="Claim this package" />,
+        } : undefined}
         keepWatching={{
           history: <FeedHistory path={driftPath} current={scan.trust_score} />,
           adoption: <AdoptionDetail data={adoptionData} />,
@@ -2185,14 +2197,11 @@ function PackageResult({ surface, name, version }: { surface: string; name: stri
           <PackageFacts scan={scan} surface={surface} />
           <InsideCommon scan={scan} kind="package" what="package" />
         </>}
-        badgeClaimShare={<>
+        badges={<>
           <BadgeTabs assets={assets} />
           {version && <p className="mt-2 px-1 text-[12px] text-text-muted">The badge, card and widget show the latest release&apos;s result, not this pinned version.</p>}
-          {claimable
-            ? <div id="claim" className="scroll-mt-24"><PackageClaim surface={surface} name={name} /></div>
-            : <ClaimPanel href={null} title="Maintain this package?" text={`Claiming a ${surface} package isn't available yet. Watch it to get an alert when its result changes.`} />}
-          <SharePanel label={`${surface}:${name}${version ? `@${version}` : ''}`} score={scan.trust_score} />
         </>}
+        sharePanel={<SharePanel label={`${surface}:${name}${version ? `@${version}` : ''}`} score={scan.trust_score} />}
         proof={<VerifyPanel scan={scan} />}
         whatWeChecked={
           <div className="mt-4 rounded-xl border border-border/60 p-5">
@@ -2364,6 +2373,7 @@ function Result({ owner, repo, privateResult, showCode = false }: {
             <Link to={rp(`/rebrand/tools?private=1&owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`)} className="text-[13.5px] font-semibold text-primary-light hover:text-primary">Scan it privately →</Link>
             <Link to={rp("/rebrand/browse")} className="text-[13.5px] font-semibold text-text-muted hover:text-text">Browse scored tools →</Link>
           </div>
+          <p className="mt-4 text-[13px] text-text-muted">Private repo? <Link to={rp('/rebrand/for-developers') + '#private'} className="font-semibold text-primary-light hover:text-primary">How to get a private repo checked or listed →</Link></p>
         </div>
       </div>
     )
@@ -2433,7 +2443,7 @@ function Result({ owner, repo, privateResult, showCode = false }: {
         eyebrow={[isPrivate ? 'Private GitHub repo' : 'GitHub repo', scan.repo || `${owner}/${repo}`]}
         name={`${owner}/${repo}`}
         privateScan={oneTimePrivate ? 'one-time' : storedPrivate ? 'stored' : undefined}
-        share={!isPrivate || (storedPrivate && published)}
+        shareAnchor={storedPrivate && published}
         recheck={isPrivate ? undefined : recheck}
         banner={<IncidentBanner scan={scan} />}
         chips={<>
@@ -2475,6 +2485,16 @@ function Result({ owner, repo, privateResult, showCode = false }: {
         install={install}
         watch={oneTimePrivate ? undefined : <WatchCTA owner={owner} repo={repo} />}
         badgeMarkdown={assets ? badgeMarkdownOf(assets) : undefined}
+        ownerStep={oneTimePrivate ? {
+          text: <>This is a one-time scan: nothing is stored or listed. For continuous scanning and change alerts, connect the GitHub App on your tools page, then publish the result if you want it listed.</>,
+          actions: <ClaimLink href="/rebrand/tools" label="Claim or publish it →" />,
+        } : storedPrivate ? {
+          text: <>Private repos aren&apos;t listed in AgentAvow search. Publishing makes this score public and findable: your choice as the owner.</>,
+          actions: <PublishStoredAction owner={owner} repo={repo} score={scan.trust_score} published={published} />,
+        } : {
+          text: 'Claim it to scan it privately, get change alerts, and own how it appears on AgentAvow.',
+          actions: <RepoClaimAction owner={owner} repo={repo} />,
+        }}
         keepWatching={{
           history: isPrivate ? undefined : <ScoreHistory history={adoptionData?.history ?? []} current={scan.trust_score} feedHref={`/api/v1${driftPath}`} />,
           adoption: isPrivate ? undefined : <AdoptionDetail data={adoptionScore} />,
@@ -2488,23 +2508,8 @@ function Result({ owner, repo, privateResult, showCode = false }: {
             : <BehavioralPanel owner={owner} repo={repo} surface={(scan as { package_coordinate?: { surface?: string } }).package_coordinate?.surface} auto={(scan as { behavioral?: BehavioralData | null }).behavioral} effect={(scan as { behavioral_score_effect?: ScoreEffect | null }).behavioral_score_effect} />}
           <InsideCommon scan={scan} kind="repo" what="repo" />
         </>}
-        badgeClaimShare={<>
-          <BadgeTabs assets={assets} unavailable="A private repo has no public badge until you publish it to search." />
-          {/* claim / ownership — a one-time scan is ephemeral (report only, nothing stored) */}
-          {oneTimePrivate ? (
-            <Reveal>
-              <div id="claim" className="mt-4 glass rounded-2xl p-6 border-l-4 border-warning/50 scroll-mt-24">
-                <h3 className="text-[15px] font-bold">This is a one-time scan</h3>
-                <p className="text-text-muted text-[13.5px] mt-1 max-w-[62ch]">Nothing is stored or listed. For continuous scanning + change alerts, connect the GitHub App on your <Link to={rp('/rebrand/tools')} className="text-primary-light hover:text-primary font-semibold">tools page</Link>.</p>
-              </div>
-            </Reveal>
-          ) : (
-            <OwnershipCTA owner={owner} repo={repo} />
-          )}
-          {/* a stored private repo publishes to search here; once listed it shows the share row */}
-          {storedPrivate && <PublishStoredCTA owner={owner} repo={repo} score={scan.trust_score} published={published} />}
-          {!isPrivate && <SharePanel label={`${owner}/${repo}`} score={scan.trust_score} />}
-        </>}
+        badges={oneTimePrivate ? undefined : <BadgeTabs assets={assets} unavailable="A private repo has no public badge until you publish it to search." />}
+        sharePanel={isPrivate ? undefined : <SharePanel label={`${owner}/${repo}`} score={scan.trust_score} />}
         proof={<VerifyPanel scan={scan} />}
         whatWeChecked={
           <div className="mt-4 rounded-xl border border-border/60 p-5">
