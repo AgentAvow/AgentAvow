@@ -26,8 +26,8 @@ def test_registration_v1_shape():
     assert DOC["name"] == "AgentAvow" and DOC["active"] is True
     assert DOC["x402Support"] is False
     assert "supportedTrust" not in DOC   # no on-chain trust claims
-    for r in DOC["registrations"]:       # empty until the mint, then exactly ours on Base
-        assert r["agentRegistry"] == REGISTRY and isinstance(r["agentId"], int)
+    # Minted 2026-11-11, tx 0xa91945e9…60f1f2 on Base: exactly ours.
+    assert DOC["registrations"] == [{"agentId": 1178486, "agentRegistry": REGISTRY}]
 
 
 def test_our_reader_sees_exactly_our_two_tools():
