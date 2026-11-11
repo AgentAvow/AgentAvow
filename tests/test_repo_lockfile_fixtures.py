@@ -5,7 +5,9 @@ artifacts with no lockfiles, so this is where repo-scan dependency counts are pi
 - pnpm workspaces: only what a shipped member reaches counts (zod 1,205 -> 0; astro's
   runtime deps stay shipped);
 - a multi-document pnpm lockfile is read whole (vercel/ai: 15 -> 780);
-- npm workspaces and yarn: unchanged (no-op)."""
+- npm workspaces: a member's own entry ("src/everything") is the project, not a
+  dependency (servers 101 -> 97); with no private member known, nothing else moves;
+- yarn: unchanged (no-op)."""
 from __future__ import annotations
 
 import gzip
@@ -34,10 +36,26 @@ def test_repo_production_dependencies(r):
         assert n not in names, n
 
 
-@pytest.mark.parametrize("r", [r for r in MANIFEST if r["lockfile"] != "pnpm-lock.yaml"],
+@pytest.mark.parametrize("r", [r for r in MANIFEST if r["lockfile"] == "yarn.lock"],
                          ids=lambda r: r["repo"])
-def test_npm_and_yarn_are_unchanged(r):
+def test_yarn_is_unchanged(r):
     assert r["prod_after"] == r["prod_before"]
+
+
+def test_npm_workspace_with_private_members():
+    import gzip
+    text = gzip.open(FX / "modelcontextprotocol_servers__package-lock.json.gz", "rt").read()
+    assert lf.npm_workspace_members(text) == [
+        "", "src/everything", "src/filesystem", "src/memory", "src/sequentialthinking"]
+    # a private root alone moves nothing (its tooling is already dev in npm's flags)
+    priv = {"package-lock.json": {""}}
+    assert len([d for d in lf.parse_all({"package-lock.json": text}, priv) if not d.dev]) == 97
+    # if src/everything were private too, only what the other three reach ships
+    priv = {"package-lock.json": {"", "src/everything"}}
+    prod = {d.name for d in lf.parse_all({"package-lock.json": text}, priv) if not d.dev}
+    assert prod == {"@isaacs/nonrecursive-glob-match", "@modelcontextprotocol/core",
+                    "@modelcontextprotocol/server", "balanced-match", "brace-expansion",
+                    "chalk", "diff", "minimatch", "zod"}
 
 
 def test_counts_only_go_down_except_the_multi_document_fix():
