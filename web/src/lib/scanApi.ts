@@ -20,10 +20,7 @@ export async function fetchPublicScan(
   repo: string,
   force = false,
 ): Promise<PublicScanResponse> {
-  const { data } = await publicApi.get<PublicScanResponse>(
-    `/public/scan/${owner}/${repo}${force ? '?force=true' : ''}`,
-  )
-  return data
+  return getScan(`/public/scan/${owner}/${repo}${force ? '?force=true' : ''}`)
 }
 
 /** Cache-only: is this GitHub repo a graded skill collection? Resolves to null
@@ -47,11 +44,7 @@ export async function fetchBehavioralScan(
   owner: string,
   repo: string,
 ): Promise<PublicScanResponse> {
-  const { data } = await publicApi.get<PublicScanResponse>(
-    `/public/scan/${owner}/${repo}?behavioral=true`,
-    { timeout: 150_000 },
-  )
-  return data
+  return getScan(`/public/scan/${owner}/${repo}?behavioral=true`, 150_000)
 }
 
 /** The package scan URL: `/public/scan/package/{surface}/{name}` plus any flags.
@@ -77,29 +70,30 @@ export async function fetchPackageBehavioral(
   name: string,
   version?: string,
 ): Promise<PublicScanResponse> {
-  return getPackageScan(packageScanUrl(surface, name, { behavioral: true, version }), 150_000)
+  return getScan(packageScanUrl(surface, name, { behavioral: true, version }), 150_000)
 }
 
-/** A first scan of an uncommon package can outlast one request: the API then answers
+/** A first scan can outlast one request (an uncommon package, a big repo, a slow MCP
+ * server): the package, repo, skill and MCP routes then answer
  * 202 `{state: "checking", retry_after}` and keeps scanning. Ask again (same flags: a
  * repeat while it runs joins that scan and costs nothing) until the result lands. */
-export const PACKAGE_CHECKING_MAX_MS = 240_000
+export const SCAN_CHECKING_MAX_MS = 240_000
 
 export class ScanStillCheckingError extends Error {
   constructor() {
-    super('The first check of this package is still running. Try again in a minute.')
+    super('The first check is still running. Try again in a minute.')
     this.name = 'ScanStillCheckingError'
   }
 }
 
-async function getPackageScan(url: string, timeout?: number): Promise<PublicScanResponse> {
+export async function getScan(url: string, timeout?: number): Promise<PublicScanResponse> {
   const started = Date.now()
   for (;;) {
     const res = await publicApi.get(url, timeout ? { timeout } : undefined)
     const body = res.data as { state?: string; retry_after?: number } | undefined
     if (res.status !== 202 && body?.state !== 'checking') return res.data as PublicScanResponse
     const waitMs = Math.min(Math.max(Number(body?.retry_after) || 15, 3), 30) * 1000
-    if (Date.now() - started + waitMs > PACKAGE_CHECKING_MAX_MS) throw new ScanStillCheckingError()
+    if (Date.now() - started + waitMs > SCAN_CHECKING_MAX_MS) throw new ScanStillCheckingError()
     await new Promise((r) => setTimeout(r, waitMs))
   }
 }
@@ -110,34 +104,24 @@ export async function fetchPackageScan(
   force = false,
   version?: string,
 ): Promise<PublicScanResponse> {
-  return getPackageScan(packageScanUrl(surface, name, { force, version }))
+  return getScan(packageScanUrl(surface, name, { force, version }))
 }
 
 /** Grade an OpenClaw / Agent Skill in a GitHub repo. */
 export async function fetchSkillScan(owner: string, repo: string, force = false, skill?: string): Promise<PublicScanResponse> {
   const sub = skill ? `/${skill.split('/').map(encodeURIComponent).join('/')}` : ''
-  const { data } = await publicApi.get<PublicScanResponse>(
-    `/public/scan/skill/${owner}/${repo}${sub}${force ? '?force=true' : ''}`,
-  )
-  return data
+  return getScan(`/public/scan/skill/${owner}/${repo}${sub}${force ? '?force=true' : ''}`)
 }
 
 /** Force a fresh behavioral sandbox run of a skill: it is cloned and its lifecycle
  * hooks and bundled scripts are run with canary credentials (~1–2 min). */
 export async function fetchSkillBehavioral(owner: string, repo: string): Promise<PublicScanResponse> {
-  const { data } = await publicApi.get<PublicScanResponse>(
-    `/public/scan/skill/${owner}/${repo}?behavioral=true`,
-    { timeout: 200_000 },
-  )
-  return data
+  return getScan(`/public/scan/skill/${owner}/${repo}?behavioral=true`, 200_000)
 }
 
 /** Grade a LIVE MCP server by its Streamable-HTTP endpoint URL. */
 export async function fetchMcpScan(endpoint: string, force = false): Promise<PublicScanResponse> {
-  const { data } = await publicApi.get<PublicScanResponse>(
-    `/public/scan/mcp?endpoint=${encodeURIComponent(endpoint)}${force ? '&force=true' : ''}`,
-  )
-  return data
+  return getScan(`/public/scan/mcp?endpoint=${encodeURIComponent(endpoint)}${force ? '&force=true' : ''}`)
 }
 
 /** Grade an A2A Agent Card by its URL (or the agent's base URL). */

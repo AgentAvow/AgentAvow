@@ -1794,7 +1794,7 @@ function repoBadgeAssets(owner: string, repo: string): BadgeAssets {
 
 function SkillResult({ owner, repo, skill }: { owner: string; repo: string; skill?: string }) {
   const key = ['rebrand-skill-scan', owner, repo, skill ?? '']
-  const { data: scan, isLoading, isError } = useQuery({
+  const { data: scan, isLoading, isError, error } = useQuery({
     queryKey: key,
     queryFn: () => fetchSkillScan(owner, repo, false, skill),
     retry: 0,
@@ -1804,6 +1804,7 @@ function SkillResult({ owner, repo, skill }: { owner: string; repo: string; skil
   const driftPath = `/public/drift/pkg/skill/${owner}/${repo}${skill ? `/${encPath(skill)}` : ''}`
   useResultView(!!scan)
   if (isLoading) return <ScanningLoader owner="skill" repo={`${owner}/${repo}${skill ? `/${skill}` : ''}`} />
+  if (isError && error instanceof ScanStillCheckingError) return <StillChecking what={`${owner}/${repo}${skill ? `/${skill}` : ''}`} />
   if (isError || !scan) {
     return (
       <div className="max-w-[560px] mx-auto px-6 py-24 text-center">
@@ -2040,6 +2041,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
   const driftPath = `/public/drift/mcp?endpoint=${encodeURIComponent(endpoint)}`
   useResultView(!!scan)
   if (isLoading) return <ScanningLoader owner="MCP server" repo={endpoint} />
+  if (isError && error instanceof ScanStillCheckingError) return <StillChecking what={mcpHostLabel(endpoint)} />
   if (isError || !scan) return <McpCouldntCheck endpoint={endpoint} detail={errorDetail(error)} />
   const t = getTrustTier(scan.trust_score)
   const f = scan.findings
@@ -2307,6 +2309,18 @@ function VersionPicker({ scanned, pinned }: { scanned?: string | null; pinned?: 
   )
 }
 
+/** A first scan still running after the page's polling window: honest wording, not an
+ * error (the scan keeps going server-side and the next load gets the cached answer). */
+function StillChecking({ what }: { what: string }) {
+  return (
+    <div className="max-w-[560px] mx-auto px-6 py-24 text-center">
+      <h1 className="text-2xl font-extrabold tracking-tight">Still checking {what}</h1>
+      <p className="mt-3 text-text-muted text-[14px]">This is the first check and it&apos;s taking a while. It keeps running on our side: reload this page in a minute for the answer.</p>
+      <Link to={rp('/rebrand/check')} className="mt-6 inline-block text-primary-light hover:text-primary font-semibold">← Scan something else</Link>
+    </div>
+  )
+}
+
 /** Native package score view (npm, PyPI, crates, Docker, Hugging Face) — the published
  * artifact, graded by coordinate. */
 function PackageResult({ surface, name, version }: { surface: string; name: string; version?: string }) {
@@ -2324,15 +2338,7 @@ function PackageResult({ surface, name, version }: { surface: string; name: stri
   useResultView(!!scan)
   const versionQs = version ? `?version=${encodeURIComponent(version)}` : ''
   if (isLoading) return <ScanningLoader owner={surface} repo={name} />
-  if (isError && error instanceof ScanStillCheckingError) {
-    return (
-      <div className="max-w-[560px] mx-auto px-6 py-24 text-center">
-        <h1 className="text-2xl font-extrabold tracking-tight">Still checking {surface}:{name}</h1>
-        <p className="mt-3 text-text-muted text-[14px]">This is the first check of this package and it&apos;s taking a while. It keeps running on our side: reload this page in a minute for the answer.</p>
-        <Link to={rp('/rebrand/check')} className="mt-6 inline-block text-primary-light hover:text-primary font-semibold">← Scan something else</Link>
-      </div>
-    )
-  }
+  if (isError && error instanceof ScanStillCheckingError) return <StillChecking what={`${surface}:${name}`} />
   if (isError || !scan) {
     return (
       <div className="max-w-[560px] mx-auto px-6 py-24 text-center">
@@ -2516,7 +2522,7 @@ function Result({ owner, repo, privateResult, showCode = false }: {
     enabled: checkCollection,
   })
   const scanKey = ['rebrand-scan', owner, repo]
-  const { data: fetched, isLoading } = useQuery({
+  const { data: fetched, isLoading, error: fetchError } = useQuery({
     queryKey: scanKey,
     queryFn: () => fetchPublicScan(owner, repo),
     retry: 0,
@@ -2572,6 +2578,7 @@ function Result({ owner, repo, privateResult, showCode = false }: {
   // Public scan came back empty — we may still be checking the owner's private report.
   if (publicMissing && !!user && prLoading) return <ScanningLoader owner={owner} repo={repo} />
 
+  if (!scan && fetchError instanceof ScanStillCheckingError) return <StillChecking what={`${owner}/${repo}`} />
   if (!scan) {
     return (
       <div className="max-w-[620px] mx-auto px-6 py-24 text-center">

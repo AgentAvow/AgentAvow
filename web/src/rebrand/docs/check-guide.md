@@ -42,7 +42,8 @@ remediation. In the [MCP connector](./mcp-connector.md), pin the same way inside
 
 ### A first scan that takes a while
 
-The first scan of an uncommon package can take a minute or more. The API waits up to 20 seconds
+The first scan of an uncommon package, a large repo, a skill collection or a slow MCP server can take
+a minute or more. The package, repo, skill and MCP-endpoint scan routes wait up to 20 seconds
 (`?wait=0` to `?wait=60` to change that), then answers **202** with
 `{"state": "checking", "retry_after": 15}` and a `Retry-After` header while the scan keeps running.
 Ask again after `retry_after` seconds: a repeat while it runs joins that scan (it does not start

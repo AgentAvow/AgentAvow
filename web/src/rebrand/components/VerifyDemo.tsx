@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { publicApi } from '../../lib/scanApi'
+import { getScan } from '../../lib/scanApi'
 
 /**
  * A REAL, live verification — not a mock. Pulls a signed attestation (EdDSA JWS)
@@ -32,7 +32,8 @@ export function VerifyDemo() {
 
   const { data: scan, isFetching } = useQuery({
     queryKey: ['verify-sample', target],
-    queryFn: async () => (await publicApi.get<{ jws: string; key_id: string; jwks_url: string }>(`/public/scan/${target}`)).data,
+    // getScan: a first scan may answer 202 checking; it polls until the signed result lands.
+    queryFn: async () => (await getScan(`/public/scan/${target}`)) as unknown as { jws: string; key_id: string; jwks_url: string },
     retry: 0,
   })
 
