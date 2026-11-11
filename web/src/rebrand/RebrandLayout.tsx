@@ -142,29 +142,41 @@ function AccountMenu() {
  */
 function Wordmark({ id = 'hdr' }: { id?: string }) {
   const reduce = useReducedMotion()
+  // Phones and tablets have no hover, and iOS Safari can draw the animated check
+  // half-finished (pathLength dash bug), so touch devices get the static mark.
+  // The animated version only mounts after load on a device that can hover.
+  const [canHover, setCanHover] = useState(false)
+  useEffect(() => {
+    try { setCanHover(window.matchMedia('(hover: hover) and (pointer: fine)').matches) } catch { /* static */ }
+  }, [])
+  const animate = canHover && !reduce
+  const ring = <circle cx="12" cy="12" r="9.3" stroke={`url(#av-g-${id})`} strokeWidth="1.7" />
+  const check = <path d="M8.6 12.2l2.3 2.3 4.6-4.9" stroke="var(--color-primary-light)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
   return (
     <motion.span
       className="group flex items-center gap-2 font-bold text-[19px] md:text-[17px] tracking-tight cursor-pointer"
       initial="rest"
-      whileHover="hover"
+      whileHover={animate ? 'hover' : undefined}
       animate="rest"
     >
       <svg viewBox="0 0 24 24" fill="none" className="w-7 h-7 md:w-6 md:h-6" aria-hidden="true">
-        {/* outer gradient ring — rotates on hover */}
-        <motion.circle
-          cx="12" cy="12" r="9.3" stroke={`url(#av-g-${id})`} strokeWidth="1.7"
-          style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
-          variants={reduce ? {} : { rest: { scale: 1 }, hover: { scale: [1, 1.09, 1] } }}
-          transition={{ duration: 0.5, ease: 'easeInOut' }}
-        />
+        {animate ? (
+          <motion.circle
+            cx="12" cy="12" r="9.3" stroke={`url(#av-g-${id})`} strokeWidth="1.7"
+            style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
+            variants={{ rest: { scale: 1 }, hover: { scale: [1, 1.09, 1] } }}
+            transition={{ duration: 0.5, ease: 'easeInOut' }}
+          />
+        ) : ring}
         <circle cx="12" cy="12" r="5.2" stroke="var(--color-primary-light)" strokeWidth="1.2" opacity="0.5" />
-        {/* checkmark — redraws on hover via dash offset */}
-        <motion.path
-          d="M8.6 12.2l2.3 2.3 4.6-4.9" stroke="var(--color-primary-light)" strokeWidth="2"
-          strokeLinecap="round" strokeLinejoin="round" pathLength={1}
-          variants={reduce ? {} : { rest: { pathLength: 1, opacity: 1 }, hover: { pathLength: [0, 1], opacity: 1 } }}
-          transition={{ duration: 0.5, ease: 'easeOut', delay: 0.15 }}
-        />
+        {animate ? (
+          <motion.path
+            d="M8.6 12.2l2.3 2.3 4.6-4.9" stroke="var(--color-primary-light)" strokeWidth="2"
+            strokeLinecap="round" strokeLinejoin="round" pathLength={1}
+            variants={{ rest: { pathLength: 1, opacity: 1 }, hover: { pathLength: [0, 1], opacity: 1 } }}
+            transition={{ duration: 0.5, ease: 'easeOut', delay: 0.15 }}
+          />
+        ) : check}
         <defs>
           <linearGradient id={`av-g-${id}`} x1="0" y1="0" x2="24" y2="24">
             <stop stopColor="#2DD4BF" />
@@ -297,10 +309,14 @@ function SiteFooter() {
           </div>
           <AppsLine className="mt-4" />
         </div>
-        {FOOTER.map(([heading, links]) => (
-          <div key={heading} className="min-w-0">
+        {/* Phones: two link columns side by side, then the last group full width in
+            two columns, so nothing stacks unevenly. Desktop: three columns. */}
+        {FOOTER.map(([heading, links], i) => (
+          <div key={heading} className={`min-w-0 ${i === FOOTER.length - 1 ? 'max-md:col-span-2' : ''}`}>
             <h2 className="font-mono text-[11px] tracking-[0.14em] uppercase text-text font-semibold mb-2">{heading}</h2>
-            {links.map(([label, to]) => <FooterAnchor key={label} label={label} to={to} />)}
+            <div className={i === FOOTER.length - 1 ? 'max-md:grid max-md:grid-cols-2 max-md:gap-x-6' : ''}>
+              {links.map(([label, to]) => <FooterAnchor key={label} label={label} to={to} />)}
+            </div>
           </div>
         ))}
       </div>
