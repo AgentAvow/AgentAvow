@@ -4305,7 +4305,7 @@ def _scan_content(
                     pipe_class = pipe_shell.classify_line(line, pattern, file_path)
                     if pipe_class == pipe_shell.DROP:
                         continue
-                    if pipe_class == pipe_shell.OFFICIAL:
+                    if pipe_class in (pipe_shell.OFFICIAL, pipe_shell.PINNED):
                         effective_severity = "high"
                     if _pipe_shown(idx, line, pattern):
                         # Shown, never run (round 2): help / error text of a shell
@@ -4322,9 +4322,7 @@ def _scan_content(
                             "defect", effective_severity,
                             name in _PAYLOAD_REMOTE_LOAD_NAMES)
                         shown.shown_pre = (  # type: ignore[attr-defined]
-                            pre_sev, pre_payload,
-                            pipe_shell.WHY_OFFICIAL
-                            if pipe_class == pipe_shell.OFFICIAL else "")
+                            pre_sev, pre_payload, pipe_shell.why(pipe_class))
                         findings.append(shown)
                         break
                 # Downgrade in test/doc/infra files like other groups
@@ -4458,8 +4456,7 @@ def _scan_content(
                     line_number=line_num,
                     snippet=stripped[:120],
                     payload=remote_payload,
-                    remediation=(pipe_shell.WHY_OFFICIAL
-                                 if pipe_class == pipe_shell.OFFICIAL else ""),
+                    remediation=pipe_shell.why(pipe_class),
                 )
                 if npx_pre is not None:
                     # What it would have been (not a dataclass field): repository,

@@ -478,6 +478,11 @@ CASES = [
     ("v_encoded_text_unread_mcp", _scan(86, 9, coverage={"surface": "mcp"}, coverage_gaps={
         "encoded_text_unread": 2}),
      "review", True, "encoded text the agent reads could not all be decoded"),
+    # ── a dev container's postCreateCommand (colinhacks/zod, 2026-11-11) ──────────
+    ("devcontainer_high", _scan(70, 120, [_f("high", "curl/wget piped to shell",
+                                             file_path=".devcontainer/devcontainer.json")],
+                                high=1),
+     "review", True, "one high finding in its dev container setup: curl/wget piped to shell"),
     # ── x402 endpoint, read from its Bazaar listing (src/scanner/x402_scan.py) ────
     ("x402_clean", _scan(74, 1, coverage={"surface": "x402"},
                          coverage_gaps={"x402_code_unread": True}),
