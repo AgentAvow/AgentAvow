@@ -25,8 +25,30 @@ import httpx
 IDENTITY_REGISTRY = "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432"
 CHAINS: dict[str, dict[str, Any]] = {
     "ethereum": {"chain_id": 1, "rpc_env": "ETH_RPC_URL", "identity": IDENTITY_REGISTRY,
-                 "label": "Ethereum"},
+                 "label": "Ethereum", "alchemy_host": "eth-mainnet"},
+    # Same registry address and code on Base and BNB Chain (verified 2026-11-11:
+    # eth_getCode identical, name() == "AgentIdentity").
+    "base": {"chain_id": 8453, "rpc_env": "BASE_RPC_URL", "identity": IDENTITY_REGISTRY,
+             "label": "Base", "alchemy_host": "base-mainnet"},
+    "bnb": {"chain_id": 56, "rpc_env": "BNB_RPC_URL", "identity": IDENTITY_REGISTRY,
+            "label": "BNB Chain", "alchemy_host": "bnb-mainnet"},
 }
+_ALCHEMY_RE = re.compile(r"^https://([a-z0-9-]+)\.g\.alchemy\.com/v2/([A-Za-z0-9_-]+)$")
+
+
+def rpc_url_for(chain: str, env: dict[str, str]) -> str | None:
+    """The chain's own RPC env var, else the same Alchemy key as ETH_RPC_URL on that
+    chain's Alchemy host (one key serves every network enabled on the app)."""
+    cfg = CHAINS.get(chain)
+    if cfg is None:
+        return None
+    own = (env.get(cfg["rpc_env"]) or "").strip()
+    if own:
+        return own
+    m = _ALCHEMY_RE.match((env.get("ETH_RPC_URL") or "").strip())
+    if m:
+        return f"https://{cfg['alchemy_host']}.g.alchemy.com/v2/{m.group(2)}"
+    return None
 
 REG_FILE_MAX_BYTES = 256 * 1024
 MAX_CHECKED_TOOLS = 10

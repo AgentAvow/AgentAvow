@@ -83,8 +83,7 @@ class AgentResponse(BaseModel):
 
 
 def _rpc_url(chain: str) -> str | None:
-    cfg = ea.CHAINS.get(chain)
-    return os.environ.get(cfg["rpc_env"]) if cfg else None
+    return ea.rpc_url_for(chain, dict(os.environ))
 
 
 def _ipfs_gateway() -> str:

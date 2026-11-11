@@ -81,9 +81,28 @@ async def test_unminted_agent_is_not_found():
         await ea.read_agent("ethereum", 5, "https://rpc.example", client=_FakeRpc(minted=False))
 
 
+def test_rpc_url_per_chain():
+    key = "https://eth-mainnet.g.alchemy.com/v2/abcDEF_123-x"
+    env = {"ETH_RPC_URL": key}
+    assert ea.rpc_url_for("ethereum", env) == key
+    assert ea.rpc_url_for("base", env) == "https://base-mainnet.g.alchemy.com/v2/abcDEF_123-x"
+    assert ea.rpc_url_for("bnb", env) == "https://bnb-mainnet.g.alchemy.com/v2/abcDEF_123-x"
+    assert ea.rpc_url_for("base", {**env, "BASE_RPC_URL": "https://b.example"}) == \
+        "https://b.example"
+    # a non-Alchemy Ethereum RPC is not reused for other chains
+    assert ea.rpc_url_for("base", {"ETH_RPC_URL": "https://rpc.example/eth"}) is None
+    assert ea.rpc_url_for("solana", env) is None
+
+
+async def test_base_and_bnb_read_with_their_chain_ids():
+    for chain, cid in (("base", 8453), ("bnb", 56)):
+        a = await ea.read_agent(chain, 7, "https://rpc.example", client=_FakeRpc())
+        assert a.chain == chain and a.chain_id == cid
+
+
 async def test_unknown_chain_or_no_rpc_is_unavailable():
     with pytest.raises(ea.ChainUnavailableError):
-        await ea.read_agent("base", 1, "https://rpc.example", client=_FakeRpc())
+        await ea.read_agent("solana", 1, "https://rpc.example", client=_FakeRpc())
     with pytest.raises(ea.ChainUnavailableError):
         await ea.read_agent("ethereum", 1, None, client=_FakeRpc())
 
