@@ -17,6 +17,7 @@ import { DECISIONS, TRUST_TIERS } from '../../components/trust/gradeSystem'
 import { rp } from '../basePath'
 import { Reveal } from '../components/motion'
 import StartHerePanel from './AdminStartHere'
+import CampaignPanel from './AdminCampaignPanel'
 import PostStudioTab from './AdminPostStudio'
 
 // ── shared types (loose — endpoints already validated server-side) ──────────
@@ -31,12 +32,13 @@ interface Metrics {
   attestations?: { issued_total?: number; verification_badges_active?: number }
   badges?: { readme_renders_window?: number; leaderboard?: { repo: string; renders: number }[] }
   catalog?: { by_surface?: Record<string, number>; by_category?: Record<string, number>; size_total?: number }
+  x402?: { listings?: number; scored?: number; testnet_hidden?: number; answers?: Record<string, number> }
   funnel?: { scanned?: number; watched?: number; claimed?: number; installs?: number }
-  mcp?: { calls_window?: number; callers_window?: number; ok_window?: number; errors_window?: number; safe_window?: number; needs_review_window?: number; by_tool?: Record<string, number>; by_surface?: Record<string, { calls?: number; callers?: number; errors?: number; safe?: number; needs_review?: number }> }
+  mcp?: { calls_window?: number; callers_window?: number; ok_window?: number; errors_window?: number; safe_window?: number; needs_review_window?: number; answers_window?: Record<string, number>; checks_window?: number; by_tool?: Record<string, number>; by_surface?: Record<string, { calls?: number; callers?: number; errors?: number; safe?: number; needs_review?: number; checks?: number; answer_safe?: number; answer_review?: number; answer_do_not_connect?: number }> }
   hook?: { scans_window?: number; machines_window?: number }
   private_repos?: { app_scans?: number; published_to_search?: number; app_installs_active?: number; onetime_scans_window?: number }
   alert_webhooks?: { active?: number }
-  traffic_quality?: Record<string, { total?: number; human?: number; agent?: number; automated?: number }>
+  traffic_quality?: Record<string, { total?: number; human?: number; agent?: number; agentavow?: number; automated?: number }>
   baseline?: { rules_changed_on?: string; rules?: string[] }
 }
 interface Draft { id: string; platform: string; content: string; topic: string | null; status: string; created_at: string; post_type?: string; llm_model?: string | null }
@@ -51,7 +53,6 @@ interface MktDash {
 interface Campaign { id: string; name: string; topic: string; platforms: string[]; status: string; start_date?: string }
 interface ReplyStats { status_counts?: Record<string, number>; posted_today?: number; active_targets?: number; queue_size?: number }
 interface Eval { engagement_per_post_7d?: number; engagement_per_post_30d?: number; trend_pct?: number | null; slop_pass_rate_7d?: number | null; reply_engagement_per_post_7d?: number; posts_7d?: number; by_platform?: { platform: string; eng_per_post: number; posts: number; total: number }[]; alerts?: { level: string; message: string; action?: string }[] }
-interface Conversions { platforms?: { platform: string; clicks: number; signups: number; cost_usd: number; cost_per_signup: number | null }[]; total_clicks?: number; total_signups?: number; total_cost_usd?: number }
 interface TargetPerf { targets?: { handle: string; platform: string; replies: number; avg_engagement: number; total_engagement: number }[] }
 interface ReplyRow { id: string; platform: string; post_uri?: string; reply_url?: string | null; draft_content?: string; drafted_at?: string | null; posted_at?: string | null; engagement_count?: number; urgency_score?: number; target?: { handle?: string | null; follower_count?: number } }
 const REPLY_TTL_H = 48
@@ -183,8 +184,6 @@ function WindowToggle({ win, setWin }: { win: Win; setWin: (w: Win) => void }) {
   )
 }
 
-interface Conversion { funnel?: { event_type: string; count: number; conversion_rate: number }[]; top_pages?: { page: string; count: number }[]; total_events?: number }
-const FUNNEL_LABEL: Record<string, string> = { guest_page_view: 'Page views', guest_cta_click: 'CTA clicks', register_start: 'Register start', register_complete: 'Registered', first_action: 'First action' }
 
 // ── Behavioral sandbox panel (GET /admin/metrics/behavioral) ────────────────
 interface Behavioral {
@@ -542,16 +541,10 @@ function MetricsTab() {
     queryKey: ['admin-dash-metrics', win],
     queryFn: async () => (await api.get('/admin/metrics', { params: { window: win } })).data,
   })
-  const traffic = useQuery<Conversion>({
-    queryKey: ['admin-dash-traffic'],
-    queryFn: async () => { try { return (await api.get('/analytics/conversion')).data } catch { return {} } },
-  })
   const flagged = useQuery<{ pct: number | null; flagged: number; scanned: number }>({
     queryKey: ['admin-dash-flagged'],
     queryFn: async () => { try { return (await api.get('/public/scan-catalog/flagged-stat')).data } catch { return { pct: null, flagged: 0, scanned: 0 } } },
   })
-  const tf = traffic.data?.funnel || []
-  const tmax = Math.max(...tf.map((r) => r.count), 1)
   const h = data?.headline || {}
   const s = data?.series || {}
   const f = data?.funnel || {}
@@ -565,6 +558,7 @@ function MetricsTab() {
   return (
     <>
       <StartHerePanel />
+      <CampaignPanel />
       <Section title="Product & adoption" note="Everything the product surfaces — the full set, not a slice." right={<WindowToggle win={win} setWin={setWin} />}>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           <Stat label="Repos scanned" value={fmt(h.repos_scanned)} sub={`${fmt(h.new_repos)} new`} series={s.repos_scanned} />
@@ -580,9 +574,9 @@ function MetricsTab() {
           <Stat label="Active watches" value={fmt(data?.watches?.active)} sub={`${fmt(data?.watches?.total)} all-time`} />
           <Stat label="Verified claims" value={fmt(data?.claims?.verified_total)} sub={`${fmt(data?.claims?.public)} public · ${fmt(data?.claims?.private)} private`} />
           <Stat label="Active badges" value={fmt(data?.attestations?.verification_badges_active)} />
-          <Stat label="MCP connector calls" value={fmt(h.mcp_calls)} sub={`${fmt(data?.mcp?.needs_review_window)} needs-review · ${fmt(data?.mcp?.errors_window)} err`} series={s.mcp_calls} />
+          <Stat label="MCP connector calls" value={fmt(h.mcp_calls)} sub={`${fmt(data?.mcp?.checks_window)} hand-run checks · ${fmt(data?.mcp?.errors_window)} err`} series={s.mcp_calls} />
           <Stat label="MCP distinct callers" value={fmt(h.mcp_callers)} sub="machines that invoked a tool · per-day" series={s.mcp_callers} />
-          <Stat label="Plugin hook scans" value={fmt(h.hook_scans)} sub={`${fmt(h.hook_machines)} machines · session-start hook`} series={s.hook_scans} />
+          <Stat label="Plugin hook scans" value={fmt(h.hook_scans)} sub={`${fmt(h.hook_machines)} machines · session-start + install-time hooks (install-time from Nov 11)`} series={s.hook_scans} />
           <Stat label="Private repo scans (GitHub App)" value={fmt(data?.private_repos?.app_scans)} sub={`${fmt(data?.private_repos?.app_installs_active)} installs · ${fmt(data?.private_repos?.published_to_search)} published`} />
           <Stat label="One-time private scans" value={fmt(data?.private_repos?.onetime_scans_window)} sub="token scans (window)" />
           <Stat label="Alert webhooks" value={fmt(data?.alert_webhooks?.active)} sub="active" />
@@ -595,32 +589,34 @@ function MetricsTab() {
         const calls = mcp.calls_window ?? 0
         const ok = mcp.ok_window ?? 0
         const err = mcp.errors_window ?? 0
-        const safe = mcp.safe_window ?? 0
-        const rev = mcp.needs_review_window ?? 0
+        const answers = mcp.answers_window || {}
         const errRate = calls ? Math.round((err * 100) / calls) : 0
-        const scans = safe + rev
-        const safePct = scans ? Math.round((safe * 100) / scans) : 0
-        const tools = Object.entries(mcp.by_tool || {}).sort((a, b) => b[1] - a[1])
+        const answered = DECISIONS.reduce((a, d) => a + (answers[d.value] ?? 0), 0)
+        // "unlisted" = calls to a tool name we do not serve; shown only when non-zero so
+        // the rows always add up to Total calls.
+        const tools = Object.entries(mcp.by_tool || {}).filter(([t, n]) => t !== 'unlisted' || n > 0).sort((a, b) => b[1] - a[1])
         const anyTool = tools.some(([, n]) => n > 0)
         // "other" is what the User-Agent bucketer could not place: in practice the MCP
         // crawlers and uptime monitors (mcpbeat, SentinelOracle, …), not people. Name it
         // so, and list it last so the real surfaces read first.
         const surfaceLabels: Record<string, string> = {
           claude: 'Claude Directory', chatgpt: 'ChatGPT', 'claude-code': 'Claude Code',
-          cursor: 'Cursor', vscode: 'VS Code', other: 'Crawlers / unknown',
+          cursor: 'Cursor', vscode: 'VS Code', codex: 'Codex', other: 'Crawlers / unknown',
         }
         const surfaces = Object.entries(mcp.by_surface || {})
           .map(([s, d]) => ({ s, label: surfaceLabels[s] || s, ...d, calls: d.calls ?? 0 }))
           .sort((a, b) => (a.s === 'other' ? 1 : b.s === 'other' ? -1 : b.calls - a.calls))
         const anySurface = surfaces.some((r) => r.calls > 0)
         return (
-          <Section title="MCP connector — usage by surface" note="Usage of the remote MCP server at agentavow.com/mcp across every place it's installed (Claude Directory, ChatGPT, the Claude Code plugin, Cursor, VS Code). Surface is derived from the request User-Agent and sums back to the total. Every surface is listed, so a zero means that channel has sent nothing yet. 'Crawlers / unknown' is the MCP directory crawlers and uptime monitors — not users.">
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-              <Stat label="Total calls" value={fmt(calls)} />
-              <Stat label="Ok" value={fmt(ok)} sub={`${errRate}% error rate`} />
+          <Section title="MCP connector — usage by surface" note="Usage of the remote MCP server at agentavow.com/mcp across every place it's installed (Claude Directory, ChatGPT, the Claude Code plugin, Cursor, VS Code, Codex). Surface is derived from the request User-Agent and sums back to the total. Every surface is listed, so a zero means that channel has sent nothing yet. 'Crawlers / unknown' is the MCP directory crawlers and uptime monitors — not users. The three answers are counted from Nov 11.">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              <Stat label="Total calls" value={fmt(calls)} sub={`${fmt(ok)} ok · ${errRate}% errors`} />
               <Stat label="Errors" value={fmt(err)} />
-              <Stat label="Safe verdicts" value={fmt(safe)} sub={scans ? `${safePct}% of scans` : undefined} />
-              <Stat label="Needs-review" value={fmt(rev)} />
+              {DECISIONS.map((d) => {
+                const n = answers[d.value] ?? 0
+                return <Stat key={d.value} label={d.phrase} value={fmt(n)} sub={answered ? `${Math.round((n * 100) / answered)}% of answers` : undefined} />
+              })}
+              <Stat label="Hand-run checks" value={fmt(mcp.checks_window)} sub="calls minus about_agentavow + owner machines" />
             </div>
             <div className="glass rounded-2xl p-5 mt-3">
               <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Calls by tool</div>
@@ -643,7 +639,7 @@ function MetricsTab() {
                 <div className="space-y-1">
                   <div className="flex justify-between text-[11px] font-mono uppercase tracking-wide text-text-muted/60 pb-1">
                     <span>Surface</span>
-                    <span className="flex gap-4"><span className="w-16 text-right">Calls</span><span className="w-16 text-right">Callers</span><span className="w-16 text-right">Errors</span><span className="w-20 text-right">Safe/Rev</span></span>
+                    <span className="flex gap-4"><span className="w-16 text-right">Calls</span><span className="w-16 text-right">Callers</span><span className="w-16 text-right">Errors</span><span className="w-28 text-right">Safe/Rev/No</span></span>
                   </div>
                   {surfaces.map((r) => (
                     <div key={r.s} className={`flex justify-between text-[12.5px] py-0.5${r.calls === 0 ? ' opacity-50' : ''}`}>
@@ -652,7 +648,7 @@ function MetricsTab() {
                         <span className="w-16 text-right">{fmt(r.calls)}</span>
                         <span className="w-16 text-right">{fmt(r.callers ?? 0)}</span>
                         <span className="w-16 text-right">{fmt(r.errors ?? 0)}</span>
-                        <span className="w-20 text-right">{fmt(r.safe ?? 0)}/{fmt(r.needs_review ?? 0)}</span>
+                        <span className="w-28 text-right">{fmt(r.answer_safe ?? 0)}/{fmt(r.answer_review ?? 0)}/{fmt(r.answer_do_not_connect ?? 0)}</span>
                       </span>
                     </div>
                   ))}
@@ -673,11 +669,13 @@ function MetricsTab() {
           { key: 'chatgpt', label: 'ChatGPT', color: '#e879f9', data: s[key('chatgpt')] },
           { key: 'cursor', label: 'Cursor', color: '#fbbf24', data: s[key('cursor')] },
           { key: 'vscode', label: 'VS Code', color: '#f87171', data: s[key('vscode')] },
+          { key: 'codex', label: 'Codex', color: '#a3e635', data: s[key('codex')] },
           { key: 'hook', label: trend === 'callers' ? 'Plugin hook (machines)' : 'Plugin hook (scans)', color: '#94a3b8', dashed: true, data: trend === 'callers' ? s.hook_machines : s.hook_scans },
         ]
         const callerLines: TrendLine[] = [
           { key: 'human', label: 'People (browser)', color: '#2dd4bf', data: s['scan_requests:human'] },
-          { key: 'agent', label: 'Agents (Claude, ChatGPT, plugin)', color: '#818cf8', data: s['scan_requests:agent'] },
+          { key: 'agent', label: 'Agents (Claude, ChatGPT, Cursor)', color: '#818cf8', data: s['scan_requests:agent'] },
+          { key: 'agentavow', label: 'AgentAvow clients (hooks, gates, SDKs)', color: '#e879f9', data: s['scan_requests:agentavow'] },
           { key: 'automated', label: 'Automated (crawlers, scripts)', color: '#94a3b8', dashed: true, data: s['scan_requests:automated'] },
           { key: 'badge', label: 'Badge fetches', color: '#fbbf24', data: s.badge_fetches },
         ]
@@ -708,17 +706,18 @@ function MetricsTab() {
 
       <BehavioralPanel win={win} />
 
-      <Section title="Who is calling — people, agents, automation" note="Public scan requests and badge fetches split by the caller's User-Agent (this window). 'Automated' is crawlers, uptime monitors and scripts — including our own — and is not usage. Honest usage = people + agents. Counting started when this split shipped, so the totals here can trail the older aggregate counters for the first window.">
+      <Section title="Who is calling — people, agents, our clients, automation" note="Public scan requests and badge fetches split by the caller's User-Agent (this window). 'AgentAvow clients' is our own plugin hooks, npm/Python gates and SDK adapters (their own row from Nov 11; before that the plugin hook counted as an agent and the rest as automated). The GitHub Action sends a bare curl User-Agent, so it still lands in 'automated'. 'Automated' is crawlers, uptime monitors and scripts and is not usage. Honest usage = people + agents + our clients.">
         <div className="grid md:grid-cols-2 gap-4">
           {([['scan_requests', 'Scan requests'], ['badge_fetches', 'Badge fetches']] as const).map(([key, title]) => {
             const q = data?.traffic_quality?.[key] || {}
             const total = q.total ?? 0
             const rows: [string, number, string][] = [
               ['People (browser)', q.human ?? 0, 'linear-gradient(90deg,#2dd4bf,#818cf8)'],
-              ['Agents (Claude, ChatGPT, plugin, README badges)', q.agent ?? 0, 'linear-gradient(90deg,#818cf8,#e879f9)'],
+              ['Agents (Claude, ChatGPT, Cursor, README badges)', q.agent ?? 0, 'linear-gradient(90deg,#818cf8,#e879f9)'],
+              ['AgentAvow clients (hooks, gates, SDKs)', q.agentavow ?? 0, 'linear-gradient(90deg,#e879f9,#f59e0b)'],
               ['Automated (crawlers, monitors, scripts)', q.automated ?? 0, 'linear-gradient(90deg,#64748b,#94a3b8)'],
             ]
-            const real = (q.human ?? 0) + (q.agent ?? 0)
+            const real = (q.human ?? 0) + (q.agent ?? 0) + (q.agentavow ?? 0)
             return (
               <div key={key} className="glass rounded-2xl p-5">
                 <div className="flex justify-between items-baseline mb-3">
@@ -770,29 +769,6 @@ function MetricsTab() {
         </div>
       </Section>
 
-      <Section title="Site traffic — sessions & drop-off" note="Anonymous page-view sessions through the signup funnel (the Cloudflare replacement — in one place, here).">
-        <div className="glass rounded-2xl p-6">
-          {tf.length ? (
-            <div className="flex flex-col gap-3">
-              {tf.map((r, i) => (
-                <div key={r.event_type}>
-                  <div className="flex justify-between text-[12.5px] mb-1"><span className="font-mono">{FUNNEL_LABEL[r.event_type] || r.event_type}</span><span className="tabular-nums text-text-muted">{fmt(r.count)}{i > 0 && <span className="ml-2 text-[11px]">({Math.round(r.conversion_rate)}%)</span>}</span></div>
-                  <div className="h-2.5 rounded-full bg-surface overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(r.count / tmax) * 100}%`, background: 'linear-gradient(90deg,#f59e0b,#e879f9)' }} /></div>
-                </div>
-              ))}
-              {!!traffic.data?.top_pages?.length && (
-                <div className="mt-2 pt-3 border-t border-border/40">
-                  <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-1.5">Top pages</div>
-                  {traffic.data.top_pages.slice(0, 8).map((p) => <div key={p.page} className="flex justify-between text-[12px] py-0.5"><span className="font-mono text-text-muted truncate">{p.page}</span><span className="tabular-nums text-text-muted/70 ml-3">{fmt(p.count)}</span></div>)}
-                </div>
-              )}
-            </div>
-          ) : (
-            <p className="text-[13px] text-text-muted">No session data yet — page-view tracking was just turned on for the live site. This funnel (views → CTA → register → first action, with drop-off %) fills in within a day.</p>
-          )}
-        </div>
-      </Section>
-
       <div className="grid md:grid-cols-2 gap-4">
         <Section title="Answer distribution" note="Live scanned corpus, all-time: the three-phrase answer each tool leads with, then the trust tiers underneath as detail.">
           <div className="glass rounded-2xl p-5 flex flex-col gap-2">
@@ -828,9 +804,18 @@ function MetricsTab() {
         <p className="mt-2 text-[11.5px] text-text-muted/70">Per-finding-category breakdown (which types are most common) needs category tallies stored on scan — staged.</p>
       </Section>
 
-      <Section title="Catalog by surface">
+      <Section title="Catalog by surface" note="Static launch corpus plus community scans. x402 listings are left out, as on the site; they have their own panel below.">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {Object.entries(surfaces).sort((a, b) => b[1] - a[1]).map(([k, v]) => <Stat key={k} label={k} value={fmt(v)} />)}
+          {Object.entries(surfaces).filter(([k]) => k !== 'x402').sort((a, b) => b[1] - a[1]).map(([k, v]) => <Stat key={k} label={k} value={fmt(v)} />)}
+        </div>
+      </Section>
+
+      <Section title="x402 listings" note="Paid x402 endpoints, scored from their public Bazaar listing alone (never the code). Kept out of every catalog total. The answer mix covers listings the site shows; testnet-only listings can't take real payment and are hidden from default views.">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <Stat label="Listings" value={fmt(data?.x402?.listings)} />
+          <Stat label="Scored" value={fmt(data?.x402?.scored)} />
+          {DECISIONS.map((d) => <Stat key={d.value} label={d.phrase} value={fmt(data?.x402?.answers?.[d.value])} />)}
+          <Stat label="Testnet (hidden)" value={fmt(data?.x402?.testnet_hidden)} />
         </div>
       </Section>
     </>
@@ -937,7 +922,6 @@ function MarketingTab() {
   const reply = useQuery<ReplyStats>({ queryKey: ['admin-mkt-reply'], queryFn: async () => (await api.get('/admin/engagement/stats')).data })
   const evalQ = useQuery<Eval>({ queryKey: ['admin-mkt-eval'], queryFn: async () => (await api.get('/admin/marketing/eval')).data })
   const slop = useQuery<{ proposals: { phrase: string; reason: string }[] }>({ queryKey: ['admin-mkt-slop'], queryFn: async () => (await api.get('/admin/marketing/slop-proposals')).data })
-  const conv = useQuery<Conversions>({ queryKey: ['admin-mkt-conversions'], queryFn: async () => { try { return (await api.get('/admin/marketing/conversions', { params: { days: 30 } })).data } catch { return {} } } })
   const targetPerf = useQuery<TargetPerf>({ queryKey: ['admin-mkt-target-perf'], queryFn: async () => { try { return (await api.get('/admin/engagement/target-performance')).data } catch { return {} } } })
   const slopAct = useMutation({ mutationFn: (b: { phrase: string; action: string }) => api.post('/admin/marketing/slop-proposals/action', b), onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-mkt-slop'] }) })
   // Queue 3: replies it's considering next (drafted). Feed: replies already sent.
@@ -990,28 +974,6 @@ function MarketingTab() {
           <Stat label="Reply engagement (7d)" value={fmt(evalQ.data?.reply_engagement_per_post_7d)} sub="per reply" />
           <Stat label="Posts measured (7d)" value={fmt(evalQ.data?.posts_7d)} />
         </div>
-      </Section>
-
-      <Section title="ROI — cost per signup" note="Marketing spend tied to actual signups (UTM-attributed, 30d). The honest 'is this worth it?' number.">
-        {conv.data?.platforms?.length ? (
-          <div className="glass rounded-2xl p-4 overflow-x-auto">
-            <table className="w-full text-[12.5px]">
-              <thead><tr className="text-text-muted/70 text-left font-mono"><th className="py-1 pr-3">platform</th><th className="py-1 pr-3 text-right">clicks</th><th className="py-1 pr-3 text-right">signups</th><th className="py-1 pr-3 text-right">cost</th><th className="py-1 text-right">cost / signup</th></tr></thead>
-              <tbody>
-                {conv.data.platforms.map((p) => (
-                  <tr key={p.platform} className="border-t border-border/40">
-                    <td className="py-1.5 pr-3 font-mono">{p.platform}</td>
-                    <td className="py-1.5 pr-3 tabular-nums text-right">{fmt(p.clicks)}</td>
-                    <td className="py-1.5 pr-3 tabular-nums text-right">{fmt(p.signups)}</td>
-                    <td className="py-1.5 pr-3 tabular-nums text-right text-text-muted">{usd(p.cost_usd)}</td>
-                    <td className="py-1.5 tabular-nums text-right">{p.cost_per_signup != null ? usd(p.cost_per_signup) : '—'}</td>
-                  </tr>
-                ))}
-                <tr className="border-t border-border/60 font-semibold"><td className="py-1.5 pr-3">total</td><td className="py-1.5 pr-3 tabular-nums text-right">{fmt(conv.data.total_clicks)}</td><td className="py-1.5 pr-3 tabular-nums text-right">{fmt(conv.data.total_signups)}</td><td className="py-1.5 pr-3 tabular-nums text-right">{usd(conv.data.total_cost_usd)}</td><td className="py-1.5 tabular-nums text-right">{conv.data.total_signups ? usd((conv.data.total_cost_usd || 0) / conv.data.total_signups) : '—'}</td></tr>
-              </tbody>
-            </table>
-          </div>
-        ) : <p className="text-text-muted text-[13px]">No attributed conversions yet (needs UTM clicks → signups).</p>}
       </Section>
 
       <Section title="Engagement by platform" note="Average engagement per post, by channel (30d) — which platforms earn their keep.">

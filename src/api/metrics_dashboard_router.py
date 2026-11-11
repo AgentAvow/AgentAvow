@@ -158,6 +158,27 @@ async def _daily_salt(r, day: str) -> str | None:
     return salt or None
 
 
+async def daily_salted_hash(value: str | None, length: int = 32) -> str | None:
+    """sha256(today's salt | value), truncated to ``length`` hex chars, or None when
+    there is no value or Redis (and so the salt) is unavailable. The same daily salt as
+    the HLLs below: it lives 48h in Redis only, so once it expires a stored hash can no
+    longer be tied to an IP, and hashes from different days cannot be joined. Used for
+    analytics_events.ip_hash, which must never fall back to the raw value."""
+    if not value:
+        return None
+    try:
+        from src.redis_client import get_redis
+
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        salt = await _daily_salt(get_redis(), day)
+        if not salt:
+            return None
+        raw = f"{salt}|{value}".encode("utf-8", "ignore")
+        return hashlib.sha256(raw).hexdigest()[:length]
+    except Exception:
+        return None
+
+
 async def record_human_visitor(client_ip: str | None, user_agent: str | None) -> None:
     """PFADD this human request's salted identity to today's HLL. Best-effort —
     never raises, and stores nothing that identifies the visitor (see above).
@@ -222,19 +243,23 @@ async def record_unique(name: str, client_ip: str | None, user_agent: str | None
         pass
 
 
-# The Claude Code plugin's session-start hook identifies itself as
-# ``agentavow-precheck/<version> (plugin|manual)``. Its scans go through the
-# public scan API and never touch the MCP tool counters; and most of what it
-# grades is already cached, so it is counted from the request middleware
-# (src/usage_scope) on EVERY scan request, not from the cache-miss path.
+# The Claude Code plugin's hooks identify themselves as
+# ``agentavow-precheck/<version> (plugin|manual)`` (session start) and
+# ``agentavow-preinstall/<version>`` (install time; ``agentavow-pre_install`` in
+# plugin 0.1.28). Their scans go through the public scan API and never touch the MCP
+# tool counters; and most of what they grade is already cached, so they are counted
+# from the request middleware (src/usage_scope) on EVERY scan request, not from the
+# cache-miss path. The nightly snapshot has counted both since 2026-10-14; this live
+# counter counts the install-time hook from 2026-11-11.
 HOOK_UA_PREFIX = "agentavow-precheck"
+HOOK_UA_PREFIXES = ("agentavow-precheck", "agentavow-preinstall", "agentavow-pre_install")
 HOOK_PATH_PREFIX = "/api/v1/public/scan"
 
 
 def is_hook_request(path: str | None, user_agent: str | None) -> bool:
     return bool(
         path and path.startswith(HOOK_PATH_PREFIX)
-        and (user_agent or "").strip().lower().startswith(HOOK_UA_PREFIX)
+        and (user_agent or "").strip().lower().startswith(HOOK_UA_PREFIXES)
     )
 
 
@@ -337,12 +362,34 @@ def metrics_baseline() -> dict:
             "Requests whose Host is a retired domain (" + ", ".join(sorted(LEGACY_HOSTS))
             + ") are not usage, whatever their status.",
             "Humans = a real browser User-Agent; agents = Claude, ChatGPT, Perplexity, "
-            "Cursor, VS Code, the plugin hook and README badge renders; everything else "
-            "(crawlers, monitors, scripts, vendor index bots) is automated.",
+            "Cursor, VS Code and README badge renders; AgentAvow clients = our plugin "
+            "hooks, gates and SDK adapters (own row from 2026-11-11); everything else "
+            "(crawlers, monitors, scripts) is automated.",
             "Unique humans = distinct sha256(daily random salt + IP + UA) per UTC day in "
             "a HyperLogLog; the salt lives 48h in Redis only, so days cannot be joined "
             "and a window is the sum of its days.",
         ],
+    }
+
+
+def _x402_summary(rows: list) -> dict:
+    """x402 listings on their own: how many there are, how many carry a score, the
+    answer mix over the scored listings the site shows (testnet-only ones excluded),
+    and how many scored listings are testnet-only and so hidden from the site's
+    default views. ``rows`` are the static catalog's x402 rows."""
+    scored = [r for r in rows if getattr(r, "trust_score", None) is not None]
+    answers = {d: 0 for d in _DECISION_ORDER}
+    for r in scored:
+        if getattr(r, "testnet_only", None):
+            continue
+        d = getattr(r, "decision", None)
+        if d in answers:
+            answers[d] += 1
+    return {
+        "listings": len(rows),
+        "scored": len(scored),
+        "answers": answers,
+        "testnet_hidden": sum(1 for r in scored if getattr(r, "testnet_only", None)),
     }
 
 
@@ -506,7 +553,7 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
     # --- MCP Directory connector usage (fail-open counters from src/bridges/mcp_streamable) ---
     mcp_tools = [
         "scan_repo", "scan_package", "scan_mcp_server", "verify_trust",
-        "check_interaction_safety", "lookup_identity", "get_trust_badge",
+        "check_interaction_safety", "lookup_identity", "get_trust_badge", "about_agentavow",
     ]
     mcp_calls_by_day = await _read_daily_counter("mcp:calls:total", day_strs)
     mcp_calls_window = sum(mcp_calls_by_day.values())
@@ -519,9 +566,19 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         t: sum((await _read_daily_counter(f"mcp:tool:{t}", day_strs)).values())
         for t in mcp_tools
     }
+    # Calls to a tool name we do not serve (or one retired) still count in the total;
+    # list them as their own row so the per-tool rows add up to "Total calls".
+    mcp_by_tool["unlisted"] = max(0, mcp_calls_window - sum(mcp_by_tool.values()))
+    # The three answers (Safe / Review / Do not connect), counted from 2026-11-11.
+    mcp_answers = {
+        a: sum((await _read_daily_counter(f"mcp:answer:{a}", day_strs)).values())
+        for a in _DECISION_ORDER
+    }
+    # Hand-run checks: tool calls minus about_agentavow and owner machines.
+    mcp_checks_by_day = await _read_daily_counter("mcp:checks", day_strs)
     # Per-surface attribution (from the request User-Agent, tagged in
     # src/bridges/mcp_streamable._bump_s). Surfaces sum back to the aggregate.
-    mcp_surfaces = ["claude", "chatgpt", "claude-code", "cursor", "vscode", "other"]
+    mcp_surfaces = ["claude", "chatgpt", "claude-code", "cursor", "vscode", "codex", "other"]
     # Per-day calls and distinct callers per surface (the trend lines). Callers come
     # from the salted per-day HLL fed by src/bridges/mcp_streamable._record_caller.
     mcp_calls_by_surface_day = {
@@ -555,6 +612,15 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
             "needs_review": sum(
                 (await _read_daily_counter(f"mcp:verdict:needs_review:{s}", day_strs)).values()
             ),
+            "checks": sum(
+                (await _read_daily_counter(f"mcp:checks:{s}", day_strs)).values()
+            ),
+            **{
+                f"answer_{a}": sum(
+                    (await _read_daily_counter(f"mcp:answer:{a}:{s}", day_strs)).values()
+                )
+                for a in _DECISION_ORDER
+            },
         }
         for s in mcp_surfaces
     }
@@ -606,16 +672,27 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         series[f"scan_requests:{c_name}"] = _align(scan_requests_by_class_day[c_name])
 
     # --- Surface breakdown: static launch corpus + live community scans ---
+    # x402 listings are scored from their public listing alone and live only under
+    # their own kind on the site (#296), so they are left out of every catalog total
+    # here too and reported on their own (``x402`` below).
     surface_breakdown: dict[str, int] = {}
     category_breakdown: dict[str, int] = {}
     catalog_static_total = 0
+    x402_block = _x402_summary([])
     try:
         from src.api.scan_catalog_router import _get_catalog
 
         cat = _get_catalog()
-        surface_breakdown = dict(cat["summary"].by_surface)
-        catalog_static_total = int(cat["summary"].total_scans)
-        category_breakdown = dict(cat.get("static_cats") or {})
+        static_rows = cat["rows"]
+        surface_breakdown = {
+            k: int(v) for k, v in cat["summary"].by_surface.items() if k != "x402"
+        }
+        non_x402 = [r for r in static_rows if r.surface != "x402"]
+        catalog_static_total = len(non_x402)
+        for r in non_x402:
+            key = r.category or "Library"
+            category_breakdown[key] = category_breakdown.get(key, 0) + 1
+        x402_block = _x402_summary([r for r in static_rows if r.surface == "x402"])
     except Exception:
         category_breakdown = {}
     surface_breakdown["community"] = int(unique_repos_total)
@@ -626,8 +703,9 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         "'repos scanned' counts distinct repos touched in the window; "
         "'scans (all-time)' sums per-repo scan_count.",
         "Live on-demand scans are GitHub repos (the 'community' surface). "
-        "Per-surface counts for x402/mcp/npm/pypi/openclaw come from the static "
-        "launch corpus (data/launch-scans/*.json).",
+        "Per-surface counts for mcp/npm/pypi/openclaw come from the static "
+        "launch corpus (data/launch-scans/*.json). x402 listings are left out of "
+        "every catalog total (as on the site) and reported on their own under 'x402'.",
         "Badge fetches and API-key calls are counted via best-effort Redis day "
         "counters added with this dashboard — they start at deploy time and have "
         "NO historical backfill. Zero can mean 'no traffic' or 'counter not yet "
@@ -725,6 +803,8 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
             "ok_window": int(max(0, mcp_calls_window - mcp_errors_window)),
             "safe_window": int(mcp_safe_window),
             "needs_review_window": int(mcp_review_window),
+            "answers_window": {a: int(n) for a, n in mcp_answers.items()},
+            "checks_window": int(sum(mcp_checks_by_day.values())),
             "by_tool": {t: int(n) for t, n in mcp_by_tool.items()},
             "by_surface": {
                 s: {k: int(v) for k, v in d.items()} for s, d in mcp_by_surface.items()
@@ -749,8 +829,9 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
             "community_scans": int(unique_repos_total),
             "static_corpus": int(catalog_static_total),
             "by_surface": surface_breakdown,
-            "by_category": category_breakdown,
+            "by_category": dict(sorted(category_breakdown.items(), key=lambda kv: -kv[1])),
         },
+        "x402": x402_block,
         # The Claude Code plugin's session-start hook: scans it ran + machines it ran on.
         "hook": {
             "scans_window": int(sum(hook_scans_by_day.values())),
@@ -1028,6 +1109,10 @@ _TRAFFIC_INT_COLUMNS = (
     "checked_machines", "checked_machines_excl_owner", "preinstall_reqs",
     "cc_session_starters", "cc_machines_7d", "checked_machines_7d",
     "d1_cohort", "d1_returned", "d7_cohort", "d7_returned",
+    "calls_cursor", "callers_cursor", "calls_vscode", "callers_vscode",
+    "calls_codex", "callers_codex",
+    "checks_claude", "checks_claude_code", "checks_chatgpt", "checks_cursor",
+    "checks_vscode", "checks_codex", "checks_other", "checks_total",
 )
 _TRAFFIC_NOTES = [
     "checked_machines_7d and cc_machines_7d are rolling 7-day counts of distinct machines, "
@@ -1054,7 +1139,11 @@ _TRAFFIC_NOTES = [
     "plugin's session-start hook; hook_machines_hll = the same from the salted HLL.",
     "calls_*/callers_* = real MCP tool invocations and distinct machines per surface (the "
     "same Redis counters as the MCP panel). owner_* and *_excl_owner strip IPs listed in "
-    "data/owner-ips.txt on the host (Kenne's test machines).",
+    "data/owner-ips.txt on the host (Kenne's test machines). Cursor, VS Code and Codex "
+    "columns start 2026-11-11.",
+    "checks_* = hand-run checks per surface: MCP tool calls minus about_agentavow and "
+    "minus calls from the IPs in METRICS_OWNER_IPS. Empty on days before the counter "
+    "existed (2026-11-11); the Start here card uses calls_* for those days.",
     "log_complete = 0 means the nginx log did not cover all 24 hours of that day (partial "
     "day or a log rotation gap); treat that row as a lower bound.",
     "cc_sessions = Claude Code session starts. Through 2026-10-19 it counted the one "

@@ -45,6 +45,9 @@ BACKEND_CONTAINER = "agentgraph-backend-1"
 SELF_IPS = {"98.94.217.37"}  # the prod host probing itself (catalog self-scan, evals)
 SEEN_WINDOW_DAYS = 30
 SURFACES = ("claude", "claude-code", "chatgpt", "other", "total")
+# Surfaces added 2026-11-11: Cursor and VS Code had live counters the snapshot never
+# copied, and Codex got its own surface the same day.
+EXTRA_SURFACES = ("cursor", "vscode", "codex")
 
 COLUMNS = [
     "day", "cc_machines", "cc_new_machines_30d", "cc_reqs", "cc_sessions",
@@ -69,6 +72,13 @@ COLUMNS = [
     "cc_machines_7d", "checked_machines_7d",
     # Retention: machines first seen 1 or 7 days ago, and how many came back on this day.
     "d1_cohort", "d1_returned", "d7_cohort", "d7_returned",
+    # Added 2026-11-11. calls_* for the three surfaces the snapshot did not copy, and
+    # checks_* = hand-run checks: tool calls minus about_agentavow and owner machines
+    # (settings.metrics_owner_ips), per surface. Empty on earlier days.
+    "calls_cursor", "callers_cursor", "calls_vscode", "callers_vscode",
+    "calls_codex", "callers_codex",
+    "checks_claude", "checks_claude_code", "checks_chatgpt", "checks_cursor",
+    "checks_vscode", "checks_codex", "checks_other", "checks_total",
 ]
 
 
@@ -98,7 +108,8 @@ day = sys.argv[1]
 async def main():
     r = get_redis()
     out = {}
-    for s in ("claude", "claude-code", "chatgpt", "other", "total"):
+    for s in ("claude", "claude-code", "chatgpt", "cursor", "vscode", "codex", "other",
+              "total"):
         # The aggregate keys carry no surface segment (mcp_streamable._bump_s bumps
         # "calls:total" and "calls:total:<surface>"), so "total" reads the bare key.
         sfx = "" if s == "total" else f"{s}:"
@@ -108,6 +119,14 @@ async def main():
             out[f"callers_{s}"] = await r.pfcount(f"ag:metrics:uniq:mcp:callers:{sfx}{day}")
         except Exception:
             out[f"callers_{s}"] = 0
+        # Hand-run checks (from 2026-11-11). A missing key on a day with calls means
+        # the counter did not exist yet: empty, not zero, so the dashboard falls back
+        # to calls for that day. No calls: zero either way.
+        v = await r.get(f"ag:metrics:mcp:checks:{sfx}{day}")
+        if v is not None:
+            out[f"checks_{s}"] = int(v)
+        else:
+            out[f"checks_{s}"] = 0 if not out[f"calls_{s}"] else None
     try:
         out["hook_machines_hll"] = await r.pfcount(f"ag:metrics:uniq:hook:machines:{day}")
     except Exception:
@@ -325,7 +344,7 @@ def snapshot(day: str, since_hours: int) -> dict:
     }
     # Redis names the surface "claude-code"; the CSV column is calls_claude_code.
     rc = _redis_counts(day)
-    row.update({k.replace("-", "_"): v for k, v in rc.items()
+    row.update({k.replace("-", "_"): ("" if v is None else v) for k, v in rc.items()
                 if k.replace("-", "_") in COLUMNS})
     row.update(_cc_sessions_fields(rc, day))
     for c in COLUMNS:
