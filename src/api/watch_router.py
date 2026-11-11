@@ -20,7 +20,8 @@ router = APIRouter(tags=["watches"])
 
 
 class WatchCreate(BaseModel):
-    # 'github' (owner/repo) · 'npm'/'pypi'/'docker' (owner=surface, repo=pkg) · 'mcp'
+    # 'github' (owner/repo) · 'npm'/'pypi'/'crates'/'huggingface'/'docker'
+    # (owner=surface, repo=pkg) · 'mcp'
     # (owner='mcp', repo=url) · 'openclaw' (owner/repo skill). Default github.
     surface: str = "github"
     owner: str
@@ -64,6 +65,14 @@ def _package_scan_data(surface: str, name: str, r) -> dict:
     }
 
 
+# Surfaces a watch can re-scan. Package surfaces go through scan_package (owner is the
+# surface, repo the package name); the rest have their own branch below. POST /watches
+# and the auto-watch on a verified claim (account_claims_router._ensure_watch) both
+# check this list.
+_PACKAGE_WATCH_SURFACES = ("npm", "pypi", "crates", "huggingface", "docker")
+WATCH_SURFACES = ("github", *_PACKAGE_WATCH_SURFACES, "mcp", "openclaw")
+
+
 async def scan_watch_target_detail(
     surface: str, owner: str, repo: str, db: AsyncSession,
 ) -> WatchScan:
@@ -71,7 +80,11 @@ async def scan_watch_target_detail(
     Fail-open (score None on error); the loop retries next cycle."""
     surface = (surface or "github").lower()
     try:
-        if surface in ("npm", "pypi", "docker"):
+        if surface not in WATCH_SURFACES:
+            # Never fall through to the GitHub scan: a crates claim once auto-watched
+            # with owner "crates" and read as the GitHub repo crates/<name>.
+            return WatchScan(None, None)
+        if surface in _PACKAGE_WATCH_SURFACES:
             from src.scanner.scan import scan_package
             r = await scan_package(surface, repo)
             return WatchScan(
@@ -129,7 +142,7 @@ async def add_watch(
 ) -> dict:
     watcher_id = current.id  # snapshot before any awaits that may shift the session
     surface = (body.surface or "github").strip().lower()
-    if surface not in ("github", "npm", "pypi", "docker", "mcp", "openclaw"):
+    if surface not in WATCH_SURFACES:
         raise HTTPException(status_code=400, detail="unsupported surface")
     owner = body.owner.strip().strip("/")
     repo = body.repo.strip().strip("/") if surface != "mcp" else body.repo.strip()
