@@ -325,7 +325,8 @@ class TestDatasets:
         "data/SKILL.md",
         "data/mcp.json",
         "data/server.py",                    # code is not a dataset
-        "data/install.sh",
+        # (data/install.sh: a hand-run helper script since 2026-11-10, high until the
+        # tree runs it: tests/test_helper_script_pipe_shell.py)
         "src/attacks.json",                  # not under a dataset dir
     ])
     def test_non_datasets_stay_critical(self, path):

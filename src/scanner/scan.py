@@ -2770,6 +2770,22 @@ def _is_installer_script(file_path: str) -> bool:
     return bool(_INSTALLER_STEM_RE.match(p.stem.lower()))
 
 
+# A shell helper the user runs by hand, shipped in the package (ultralytics
+# data/scripts/get_imagenet.sh, 2026-11-10): a pipe-to-shell there is Review, not Do not
+# connect, until the tree check finds something that runs it
+# (npm_scripts._restore_helper_scripts).
+_HELPER_SCRIPT_DIRS = frozenset({"data", "scripts", "script", "examples", "example",
+                                 "docs", "doc"})
+_HELPER_SCRIPT_EXTS = (".sh", ".bash", ".zsh", ".ps1")
+
+
+def _is_helper_script(file_path: str) -> bool:
+    p = Path(file_path)
+    if p.suffix.lower() not in _HELPER_SCRIPT_EXTS:
+        return False
+    return any(x.lower() in _HELPER_SCRIPT_DIRS for x in p.parts[:-1])
+
+
 def _is_unshipped_script(file_path: str) -> bool:
     """Infra/CI/release scripts and one-time installer scripts: never the runtime surface,
     so their findings are downgraded, weighted like tests, and never block."""
@@ -3310,6 +3326,43 @@ def _host_allowlist_entry(lines: list[str], idx: int, pattern: re.Pattern[str]) 
             # alias `const u = allowedHosts[0]`): it may be a destination after all.
             return set()
     return keys
+
+
+_STR_LIT = r"""(?:"[^"\\\n]*"|'[^'\\\n]*')"""
+# `host.endswith((".ngrok-free.dev", ".ngrok.io"))` / `h.endsWith('.ngrok.io')`: the
+# literal arguments of a suffix test (skyvern cli/core/unified_server.py, 2026-11-10).
+_SUFFIX_TEST_RE = re.compile(
+    r"""\.ends[wW]ith\s*\(\s*(?P<args>[(\[]?\s*""" + _STR_LIT
+    + r"""(?:\s*,\s*""" + _STR_LIT + r""")*\s*,?\s*[)\]]?)\s*[,)]""")
+# A tunnel host whose subdomain is an angle-bracket placeholder
+# (`wss://<ngrok-subdomain>.ngrok-free.app/...`, skyvern SKILL.md): `<` `>` can never be
+# part of a hostname, so nothing can be sent there. Tunnel hosts only: a shared
+# collector (webhook.site, requestbin, pipedream, oastify, ...) keeps its critical
+# whatever comes before it.
+_PLACEHOLDER_SUB_RE = re.compile(r"""<[\w\- ]{1,40}>\.$""")
+_TUNNEL_HOST_RE = re.compile(r"""^ngrok(?:-free)?\.(?:io|app|dev)$""", re.IGNORECASE)
+
+
+def _exfil_host_not_destination(line: str, pattern: re.Pattern[str]) -> bool:
+    """Every webhook/tunnel-host match on ``line`` is either a string argument of a
+    suffix test (``.endswith(...)`` / ``.endsWith(...)``: a comparison, not where
+    anything is sent) or a tunnel host behind an angle-bracket placeholder subdomain
+    (a host that cannot resolve). Anything else on the line keeps the finding."""
+    matches = list(pattern.finditer(line))
+    if not matches:
+        return False
+    spans = []
+    for sm in _SUFFIX_TEST_RE.finditer(line):
+        a, b = sm.span("args")
+        spans += [(a + lm.start(), a + lm.end())
+                  for lm in re.finditer(_STR_LIT, line[a:b])]
+    for m in matches:
+        in_suffix = any(a < m.start() and m.end() < b for a, b in spans)
+        placeholder = bool(_TUNNEL_HOST_RE.match(m.group(0))
+                           and _PLACEHOLDER_SUB_RE.search(line[:m.start()]))
+        if not (in_suffix or placeholder):
+            return False
+    return True
 
 
 # A bare hostname (or a single label: a TLD such as `'ac'`, an IDN label) as a whole
@@ -4163,6 +4216,15 @@ def _scan_content(
                         npm_scripts.mark_allowlist(f_low, severity, keys)
                         findings.append(f_low)
                         continue
+                    # A suffix test (`host.endswith(".ngrok.io")`) or a placeholder
+                    # tunnel subdomain (`wss://<sub>.ngrok-free.app`) names no
+                    # destination. Low, kept visible.
+                    if _exfil_host_not_destination(line, pattern):
+                        findings.append(Finding(
+                            category="exfiltration", name=name, severity="low",
+                            file_path=file_path, line_number=line_num,
+                            snippet=stripped[:120]))
+                        continue
                     # A bare host in a domain-list data file (the Public Suffix List)
                     # is data. Low, kept visible; see _domain_list_entry.
                     if _domain_list_entry(lines, idx):
@@ -4680,6 +4742,18 @@ def _scan_content(
                 f.severity = "high"
                 f.remediation = npm_scripts.DATASET_WHY
                 f._dataset_restore = "critical"  # type: ignore[attr-defined]
+
+    # A shell helper script the user runs by hand (data/, scripts/, examples/, docs/):
+    # its pipe-to-shell is high until the tree check finds an install hook, a consumer
+    # run string, or spawning code that names the file
+    # (npm_scripts._restore_helper_scripts, via restore_externally_invoked).
+    if _is_helper_script(file_path):
+        for f in findings:
+            if (f.kind == "defect" and f.severity == "critical"
+                    and f.name == pipe_shell.PIPE_TO_SHELL):
+                f.severity = "high"
+                f.remediation = npm_scripts.HELPER_SCRIPT_WHY
+                f._helper_restore = "critical"  # type: ignore[attr-defined]
 
     # Add remediation hints to all findings. A capability carries its description
     # (nothing to remediate — it's what the tool does), never the category hint.

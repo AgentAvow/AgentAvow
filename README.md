@@ -69,7 +69,7 @@ For the local stdio server instead: `pip install agentavow-trust`.
 - **Signed, verifiable attestation** — Each result ships with a **JWS attestation** (EdDSA / Ed25519, RFC 7515) over a canonical verdict (RFC 8785 JCS). Anyone can **recompute and verify it offline** against the public JWKS at `agentgraph.co/.well-known/jwks.json` — the score is a product, the signature is the proof under it.
 - **Trust tiers → recommended limits** — Each trust score maps to a trust tier (`verified` → `blocked`) with a recommended execution posture (req/min, token budget, confirmation prompts) so a gateway or agent framework can act on it automatically.
 - **Trust badge** — A one-line, shields.io-compatible **SVG badge** for your README that renders the repo's current answer and signed trust score and links to the full verifiable report. Served with open CORS and refreshed from the hourly scan cache, so it never goes stale.
-- **Watch & change-alerts** — Watch a tool; AgentAvow re-scans it and alerts you when its score drops or its **signed tool definition changes** (`tool_manifest_digest` drift) — the rug-pull you'd otherwise miss.
+- **Watch & change-alerts** — Watch a tool; AgentAvow re-scans it and alerts you when its score drops by more than 5 points, its answer gets worse (Safe to connect → Review before you connect → Do not connect), its Certified mark comes off, a later sandbox run finds new behavior, or its **signed tool definition changes** (`tool_manifest_digest` drift) — the rug-pull you'd otherwise miss.
 - **Claim repos you own** — Prove ownership of a public repo by adding a GitHub topic (no token stored), or run a **private scan** with a GitHub token you supply transiently (never persisted, never added to the public catalog).
 - **Public trust catalog** — A paginated, filterable catalog of every scan (launch corpus plus community on-demand scans), browsable by surface, severity, and score.
 - **MCP server & CI gating** — The **AgentAvow Trust** MCP server (`agentavow-trust`) exposes scanning to Claude Code and other clients, and a GitHub Action, GitLab CI component, Bitbucket Pipe, Azure Pipelines template, or local CLI can fail a build when the answer is Do not connect (`fail_on: do_not_connect`). The npm package `agentavow-trust` adds per-call gates for the Vercel AI SDK, Flue, the Claude Agent SDK and the OpenAI Agents SDK; LangChain, Google ADK, Claude Agent SDK and OpenAI Agents SDK gates for Python live in `src/bridges/`. For policy engines and gateways, [integrations/opa/](integrations/opa/) is an Open Policy Agent policy (with an Envoy `ext_authz` example) and [integrations/litellm/](integrations/litellm/) is a guardrail for LiteLLM's MCP gateway. A runnable rug-pull demo is in [demos/rugpull/](demos/rugpull/).
@@ -227,7 +227,7 @@ The public scanning API needs **no authentication**. All app endpoints use the `
 | **Auth** | `/auth` | Register, login, JWT tokens, email verification |
 | **Claims** | `/account/claims` | Claim a public repo you own via GitHub-topic proof (no token stored) |
 | **Private scan** | `POST /account/private-scan` | Scan a private repo with a transiently-supplied GitHub token (never persisted) |
-| **Watches** | `/watches` | Create/list/delete tool watches for grade + signed-definition change alerts |
+| **Watches** | `/watches` | Create/list/delete tool watches for score, answer, Certified-mark and signed-definition change alerts |
 | **Alert webhook** | `/account/alert-webhook` | Configure (and test) the HMAC-signed webhook that receives change alerts |
 
 ## Project Structure

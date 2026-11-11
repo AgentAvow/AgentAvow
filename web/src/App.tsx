@@ -133,6 +133,7 @@ const RebrandAccount = lazyWithReload(() => import('./rebrand/pages/Account'))
 const RebrandMyTools = lazyWithReload(() => import('./rebrand/pages/MyTools'))
 const RebrandHowItWorks = lazyWithReload(() => import('./rebrand/pages/HowItWorks'))
 const RebrandResearch = lazyWithReload(() => import('./rebrand/pages/Research'))
+const RebrandSoas2026 = lazyWithReload(() => import('./rebrand/pages/StateOfAgentSecurity2026'))
 const RebrandSoasQ3 = lazyWithReload(() => import('./rebrand/pages/StateOfAgentSecurityQ3'))
 const RebrandClaim = lazyWithReload(() => import('./rebrand/pages/Claim'))
 const RebrandFAQ = lazyWithReload(() => import('./rebrand/pages/FAQ'))
@@ -237,7 +238,7 @@ function AppRoutes() {
           {!CUTOVER && <Route path="/check/:owner/:repo" element={<Check />} />}
           <Route path="/scans" element={<Scans />} />
           <Route path="/x402" element={<X402Explorer />} />
-          <Route path="/state-of-agent-security-2026" element={<StateOfAgentSecurity2026 />} />
+          {!CUTOVER && <Route path="/state-of-agent-security-2026" element={<StateOfAgentSecurity2026 />} />}
           {!CUTOVER && <Route path="/research" element={<Research />} />}
           {/* Protected routes — require authentication */}
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
@@ -288,6 +289,7 @@ function AppRoutes() {
           <Route path="tools" element={<RebrandMyTools />} />
           <Route path="how-it-works" element={<RebrandHowItWorks />} />
           <Route path="research" element={<RebrandResearch />} />
+          <Route path="state-of-agent-security-2026" element={<RebrandSoas2026 />} />
           <Route path="state-of-agent-security-q3-2026" element={<RebrandSoasQ3 />} />
           <Route path="claim" element={<RebrandClaim />} />
           <Route path="faq" element={<RebrandFAQ />} />

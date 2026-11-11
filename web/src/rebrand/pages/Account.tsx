@@ -229,7 +229,7 @@ export default function RebrandAccount() {
           <div className="max-w-[60ch]">
             <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Watches &amp; alerts</span>
             <h1 className="mt-1 text-2xl md:text-3xl font-extrabold tracking-tight">Watch tools for changes</h1>
-            <p className="mt-2 text-text-muted text-[14px]">We re-scan the tools you watch and tell you when something changes — a <span className="text-text">score drops</span>, a <span className="text-text">signed definition changes</span>, or a tool you flagged gets <span className="text-text">safer</span> — so you always know where the tools your agents rely on stand.</p>
+            <p className="mt-2 text-text-muted text-[14px]">We re-scan the tools you watch and tell you when something changes — a <span className="text-text">score drops</span>, its <span className="text-text">answer gets worse</span>, the <span className="text-text">Certified mark comes off</span>, a <span className="text-text">signed definition changes</span>, the <span className="text-text">sandbox</span> finds new behavior, or a tool you flagged gets <span className="text-text">safer</span> — so you always know where the tools your agents rely on stand.</p>
           </div>
         </div>
       </Reveal>
@@ -260,7 +260,7 @@ export default function RebrandAccount() {
           <LoadError what="your watches" onRetry={() => void refetchWatches()} retrying={wRefetching} />
         ) : rows.length === 0 ? (
           <div className="glass rounded-2xl p-8 text-center">
-            <p className="text-text-muted text-[14px]">You're not watching any tools yet. Watch a tool and we'll re-scan it and alert you if its score drops or its signed definition changes.</p>
+            <p className="text-text-muted text-[14px]">You're not watching any tools yet. Watch a tool and we'll re-scan it and alert you if its score drops, its answer gets worse, its Certified mark comes off or its signed definition changes.</p>
             <Link to={rp("/rebrand/browse")} className="inline-block mt-4 text-[13.5px] font-semibold text-primary-light hover:text-primary">Browse scored tools →</Link>
           </div>
         ) : (

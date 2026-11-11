@@ -363,6 +363,27 @@ _SLUG_OK_RE = re.compile(r"^[\w.-]+/[\w.-]+$")
 
 
 _RANGE_NOTE_RE = re.compile(r"\([^()]*\)")
+# A range that names every version, stated plainly by the maintainer.
+_ALL_VERSIONS = frozenset({"*", "all", "all versions", "any", "any version"})
+_HYPHEN_RE = re.compile(r"^v?([0-9][0-9A-Za-z.+\-_]*?)\s+-\s+v?([0-9][0-9A-Za-z.+\-_]*)$")
+_X_RANGE_RE = re.compile(r"^v?(\d+)(?:\.(\d+))?\.[xX*]$")
+_BARE_VER_RE = re.compile(r"^\s*v?\d[0-9A-Za-z.+\-_]*\s*$")
+# Branch separators of an OR-ed range (`< 1.20.6; >= 2.0.0, < 2.3.0`, body-parser) and
+# of its patch list (`6.24.0: 7.24.0`, undici).
+_OR_RE = re.compile(r"\s*(?:;|\|\|)\s*")
+_PATCH_OR_RE = re.compile(r"\s*(?:;|\|\||:(?!//))\s*")
+# Suffixes that name a release, not a pre-release (`1.83.10-stable`, berriai/litellm),
+# and build metadata: compared on the release part. `-rc1` / `-beta` stay pre-releases.
+_RELEASE_SUFFIX_RE = re.compile(r"(?:[-.](?:stable|release|final|ga)|\+[0-9A-Za-z.\-]+)$",
+                                re.IGNORECASE)
+
+
+def _gh_ver(v: str) -> str:
+    v = str(v or "").strip()
+    prev = None
+    while prev != v:
+        prev, v = v, _RELEASE_SUFFIX_RE.sub("", v)
+    return v
 _SPACE_AND_RE = re.compile(r"\s+(?=(?:>=|<=|>|<|=))")
 _WILDCARD_RE = re.compile(r"^(\d+)\.(\d+)\.[?xX*]$|^(\d+)\.[?xX*](?:\.[?xX*])?$")
 
@@ -377,7 +398,19 @@ def _range_parts(rng: str) -> list[str]:
     rng = rng.replace("≤", "<=").replace("≥", ">=").replace("＜", "<").replace("＞", ">")
     rng = rng.replace("=<", "<=").replace("=>", ">=")
     rng = re.sub(r"\s+and\s+|\s*&&\s*", ",", rng, flags=re.IGNORECASE)
-    rng = _RANGE_NOTE_RE.sub(" ", rng)
+    rng = _RANGE_NOTE_RE.sub(" ", rng).strip()
+    if rng.lower() in _ALL_VERSIONS:
+        return [">= 0"]
+    hm = _HYPHEN_RE.match(rng)
+    if hm:  # `0.26.0 - 0.28.16`: inclusive at both ends (npm semver hyphen range)
+        return [">= " + hm.group(1), "<= " + hm.group(2)]
+    xm = _X_RANGE_RE.match(rng)
+    if xm:  # `2.x` / `2.3.x`: that line only
+        if xm.group(2) is None:
+            major = int(xm.group(1))
+            return [f">= {major}.0.0", f"< {major + 1}.0.0"]
+        major, minor = int(xm.group(1)), int(xm.group(2))
+        return [f">= {major}.{minor}.0", f"< {major}.{minor + 1}.0"]
     out = []
     for part in rng.split(","):
         out += [x for x in _SPACE_AND_RE.split(part.strip()) if x.strip()]
@@ -390,18 +423,25 @@ def gh_range_affects(rng, eco: str, version: str | None) -> bool | None:
     version cannot be parsed, so the caller never treats it as "not affected"."""
     if not isinstance(rng, str) or not rng.strip() or not version:
         return None
-    cur = _parse_version(eco, version)
+    cur = _parse_version(eco, _gh_ver(version))
     if cur is None:
         return None
     bounds = []
     parts = _range_parts(rng)
     if not parts:
         return None
+    # `7.0.0 < 7.24.0` (nodejs/undici): a bare version followed by an upper bound is
+    # the branch's floor.
+    for i in range(len(parts) - 1):
+        nxt = _CONSTRAINT_RE.match(parts[i + 1])
+        if (_BARE_VER_RE.match(parts[i]) and nxt
+                and (nxt.group(1) or "") in ("<", "<=")):
+            parts[i] = ">= " + parts[i].strip()
     for part in parts:
         m = _CONSTRAINT_RE.match(part)
         if not m:
             return None
-        bound = _parse_version(eco, m.group(2))
+        bound = _parse_version(eco, _gh_ver(m.group(2)))
         if bound is None:
             return None
         bounds.append((m.group(1) or "=", bound))
@@ -463,20 +503,35 @@ def gh_patched_on_line(vulns: list, eco: str, version: str | None) -> bool:
     or above it, as GitHub's global database reads the same advisory."""
     if not version:
         return False
+    version = _gh_ver(version)
     cur = _parse_version(eco, version)
-    line = _line(eco, version)
-    if cur is None or line is None:
+    if cur is None or _line(eco, version) is None:
         return False
+    fixes = []
     for v in vulns:
         raw = str((v or {}).get("patched_versions") or "").strip()
         for part in _range_parts(raw) if raw else []:
             part = part.strip().lstrip(">=").strip().lstrip("vV")
             if not part or not part[0].isdigit():
                 continue
+            part = _gh_ver(part)
             fix = _parse_version(eco, part)
-            if fix is not None and _line(eco, part) == line and cur >= fix:
-                return True
-    return False
+            if fix is not None and _line(eco, part) is not None:
+                fixes.append((part, fix))
+    # Several fixes on one major are per-minor branches (pydantic v1.8.2, v1.7.4,
+    # v1.6.2): match on major.minor, so 1.8.1 is not covered by 1.7.4.
+    majors = [_line(eco, p)[0] for p, _ in fixes]
+    fine = len(majors) != len(set(majors))
+
+    def line_of(ver: str):
+        ln = _line(eco, ver)
+        if ln is not None and fine and len(ln) == 1:
+            m = re.match(r"^v?(\d+)(?:\.(\d+))?", ver)
+            return (ln[0], int(m.group(2) or 0))
+        return ln
+
+    mine = line_of(version)
+    return any(line_of(p) == mine and cur >= f for p, f in fixes)
 
 
 def _open_ended(rng) -> bool:
@@ -492,15 +547,47 @@ def _open_ended(rng) -> bool:
 
 
 def gh_vuln_affects(v: dict, eco: str, version: str | None) -> bool | None:
-    """One ``vulnerabilities[]`` entry of a repository advisory against ``version``:
-    inside ``vulnerable_version_range`` and not inside ``patched_versions``. None when
-    it cannot be told: the range is unparsable, or the range is open-ended and the
-    patched value is present but unparsable."""
+    """One ``vulnerabilities[]`` entry of a repository advisory against ``version``.
+
+    An OR-ed range (``;`` / ``||``) is read branch by branch, each with its own patch
+    when the patch list has one entry per branch (undici ``6.24.0: 7.24.0``): affected
+    if any branch affects; None if a branch cannot be read and none affects."""
     rng = v.get("vulnerable_version_range")
+    raw_patch = v.get("patched_versions")
+    if isinstance(rng, str) and _OR_RE.search(rng):
+        branches = [b for b in _OR_RE.split(rng.strip()) if b]
+        pats = ([p for p in _PATCH_OR_RE.split(raw_patch.strip()) if p]
+                if isinstance(raw_patch, str) and raw_patch.strip() else [])
+        if len(pats) != len(branches):
+            pats = [raw_patch] * len(branches)
+        results = [_gh_branch_affects(b, p, eco, version) for b, p in zip(branches, pats)]
+        if any(r is True for r in results):
+            return True
+        return None if any(r is None for r in results) else False
+    return _gh_branch_affects(rng, raw_patch, eco, version)
+
+
+def _gh_branch_affects(rng, raw_patch, eco: str, version: str | None) -> bool | None:
+    """Inside ``rng`` and not inside ``raw_patch``. None when it cannot be told: the
+    range is unparsable; the range is open-ended and the patch is present but
+    unparsable; or the range names every version (``all``) with fixes listed only for
+    older release lines than ``version``'s (pydantic ``all`` / ``v1.8.2,v1.7.4,
+    v1.6.2`` says nothing about 2.x)."""
+    all_like = isinstance(rng, str) and _RANGE_NOTE_RE.sub(" ", rng).strip().lower() \
+        in _ALL_VERSIONS
+    if all_like and isinstance(raw_patch, str) and raw_patch.strip():
+        if gh_patched_on_line([{"patched_versions": raw_patch}], eco, version):
+            return False
+        lines = [_line(eco, _gh_ver(x.strip().lstrip(">=").strip().lstrip("vV")))
+                 for x in _range_parts(raw_patch)]
+        lines = [x for x in lines if x is not None]
+        mine = _line(eco, _gh_ver(version or ""))
+        if not lines or mine is None or mine > max(lines):
+            return None
+        return True
     r = gh_range_affects(rng, eco, version)
     if not r:
         return r
-    raw_patch = v.get("patched_versions")
     p = gh_patched_includes(raw_patch, eco, version)
     if p is True:
         return False
