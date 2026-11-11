@@ -263,7 +263,7 @@ type FooterLink = [label: string, to: string]
 
 const FOOTER: [heading: string, links: FooterLink[]][] = [
   ['Check', [['Browse', '/rebrand/browse'], ['Trust Index', '/rebrand/index'], ['Certified', '/rebrand/certified'], ['API sandbox', '/rebrand/sandbox']]],
-  ['Build', [['For developers', '/rebrand/for-developers'], ['Badges', '/rebrand/for-developers#badge'], ['Check a private repo', '/rebrand/for-developers#private'], ['List your tool', '/rebrand/submit'], ['Preflight', '/rebrand/preflight'], ['API', '/api/v1/redoc'], ['Verify keys', '/.well-known/jwks.json']]],
+  ['Build', [['For developers', '/rebrand/for-developers'], ['Badges', '/rebrand/for-developers#badge'], ['Check a private repo', '/rebrand/for-developers#private'], ['Preflight', '/rebrand/preflight'], ['API', '/api/v1/redoc'], ['Verify keys', '/.well-known/jwks.json']]],
   ['About', [['How it works', '/rebrand/how-it-works'], ['Research', '/rebrand/research'], ['FAQ', '/rebrand/faq'], ['Community', '/feed'], ['Feedback', 'https://github.com/AgentAvow/AgentAvow/issues/new'], ['Terms', '/rebrand/legal/terms'], ['Privacy', '/rebrand/legal/privacy']]],
 ]
 

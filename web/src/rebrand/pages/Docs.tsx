@@ -63,6 +63,8 @@ const MORE: [string, string][] = [
   ['CLI (local scan)', 'https://github.com/AgentAvow/AgentAvow/tree/main/src/scanner/local_scan.py'],
   ['GitHub Action', 'https://github.com/AgentAvow/AgentAvow/tree/main/github-action'],
   ['API reference', '/api/v1/redoc'],
+  // A static page (web/public/ext/…), not an app route: a plain link, same tab.
+  ['A2A trust-verdict extension', '/ext/trust-verdict/v1/'],
 ]
 
 const PROSE = [
@@ -130,6 +132,8 @@ export default function RebrandDocs() {
           {MORE.map(([label, href]) => (
             href.startsWith('/api') || href.startsWith('http')
               ? <a key={label} href={href} target="_blank" rel="noopener noreferrer" className="text-[13.5px] px-3 py-1.5 text-text-muted hover:text-primary-light">{label} ↗</a>
+              : href.startsWith('/ext/')
+              ? <a key={label} href={href} className="text-[13.5px] px-3 py-1.5 text-text-muted hover:text-primary-light">{label}</a>
               : <Link key={label} to={rp(href)} className="text-[13.5px] px-3 py-1.5 text-text-muted hover:text-primary-light">{label}</Link>
           ))}
         </nav>
