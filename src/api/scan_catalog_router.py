@@ -309,7 +309,11 @@ class CatalogSummary(BaseModel):
     repo_scans_with_critical: int
     repo_scans_with_high: int
     x402_endpoints_total: int
+    # Deprecated: endpoints whose old live probe saw an x402 header. Rows are now scored
+    # from their listing (no probe yet), so this reads 0; kept for existing callers.
     x402_compliant: int
+    # x402 listings scored from their public Bazaar listing (scan_x402.py --score).
+    x402_scored: int = 0
 
 
 class CatalogResponse(BaseModel):
@@ -711,6 +715,7 @@ def _build_catalog(rows: list[CatalogRow] | None = None) -> dict[str, Any]:
         repo_scans_with_high=repo_counts["high_only"],
         x402_endpoints_total=len(x402_rows),
         x402_compliant=x402_compliant,
+        x402_scored=sum(1 for r in x402_rows if r.trust_score is not None),
     )
     # Sorted score list for percentile lookups ("safer than X% of scanned tools").
     scores = sorted(r.trust_score for r in rows if r.trust_score is not None)

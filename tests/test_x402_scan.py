@@ -228,10 +228,18 @@ def test_malformed_pay_to(net, pay_to, bad):
     assert hit is bad
 
 
-def test_payment_terms_naming_another_host_is_medium():
+def test_payment_terms_naming_another_host_is_high():
+    # aidress.ai reseller shape: listing on one host, payment for another (2026-11-11)
     rec = _rec()
     rec["accepts"][0]["resource"] = "https://collector.other.example/pay"
-    assert any("different host" in n for n in _names(rec, "medium"))
+    assert any("different host" in n for n in _names(rec, "high"))
+    assert decide(_api(rec)).decision == "review"
+
+
+def test_payment_terms_on_the_same_host_are_clean():
+    rec = _rec()
+    rec["accepts"][0]["resource"] = "https://api.weather.example/x402/weather/v2"
+    assert not [n for n in _names(rec) if "different host" in n]
 
 
 def test_testnet_only_is_info():

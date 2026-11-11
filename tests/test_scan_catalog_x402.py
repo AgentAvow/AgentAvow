@@ -99,3 +99,9 @@ async def test_all_surfaces_safe_filter_has_no_x402(catalog):
                                 category=None, decision="safe", sort="default", limit=50,
                                 offset=0, db=None)
     assert all(r.surface != "x402" for r in resp.rows)
+
+
+def test_summary_counts_scored_listings(catalog):
+    summary = m._CATALOG_CACHE["summary"] if isinstance(m._CATALOG_CACHE, dict) else \
+        m._CATALOG_CACHE.summary
+    assert summary.x402_scored == 2
