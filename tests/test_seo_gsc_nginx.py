@@ -47,7 +47,16 @@ def _spa_route_patterns() -> list[re.Pattern[str]]:
     return [re.compile(m) for m in re.findall(r"~(\S+) 1;", block.group(1))]
 
 
+def _is_static_public(path: str) -> bool:
+    """A static file nginx serves straight from web/public (a spec page or a PDF)."""
+    public = ROOT / "web" / "public"
+    rel = path.strip("/")
+    return bool(rel) and ((public / rel).is_file() or (public / rel / "index.html").is_file())
+
+
 def _is_live_target(path: str) -> bool:
+    if _is_static_public(path):
+        return True
     if path.startswith("/docs/"):
         return path.removeprefix("/docs/") in _doc_slugs()
     return any(p.search(path) for p in _spa_route_patterns())
@@ -178,6 +187,7 @@ def test_sitemap_spa_urls_render_a_real_page() -> None:
     missing = [
         p for p in _sitemap_paths()
         if p != "/docs" and not p.startswith(("/docs/", "/legal/")) and p not in pages
+        and not _is_static_public(p)
     ]
     assert not missing
 
