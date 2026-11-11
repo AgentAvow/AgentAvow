@@ -1,6 +1,8 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { buildLlmsFull } from './scripts/llms-full.ts'
 
 /**
  * At cutover (VITE_CUTOVER=true) rewrite the static index.html branding
@@ -32,13 +34,29 @@ function cutoverHtmlPlugin(cutover: boolean) {
   }
 }
 
+/** Emit /llms-full.txt (scripts/llms-full.ts) with the client bundle, never the SSR one. */
+function llmsFullPlugin() {
+  let ssr = false
+  return {
+    name: 'agentavow-llms-full',
+    apply: 'build' as const,
+    configResolved(config: { build: { ssr: unknown } }) {
+      ssr = Boolean(config.build.ssr)
+    },
+    generateBundle(this: { emitFile: (file: { type: 'asset'; fileName: string; source: string }) => string }) {
+      if (ssr) return
+      this.emitFile({ type: 'asset', fileName: 'llms-full.txt', source: buildLlmsFull(fileURLToPath(new URL('.', import.meta.url))) })
+    },
+  }
+}
+
 export default defineConfig(({ mode, isSsrBuild }) => {
   const backendPort = mode === 'staging' ? 8001 : 8000
   const env = loadEnv(mode, process.cwd(), '')
   const cutover = env.VITE_CUTOVER === 'true'
 
   return {
-    plugins: [react(), tailwindcss(), cutoverHtmlPlugin(cutover)],
+    plugins: [react(), tailwindcss(), cutoverHtmlPlugin(cutover), llmsFullPlugin()],
     // The prerender bundle (web/scripts/prerender.mjs) carries its dependencies, so
     // Node never has to resolve their ESM/CJS entry points at build time.
     ssr: { noExternal: true },

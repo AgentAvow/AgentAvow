@@ -106,12 +106,30 @@ COLUMNS = [
     # web/public as a static file, so only the access log sees them), and the distinct
     # IPs fetching it. Answered requests only (200 / 304).
     "a2a_card_fetches", "a2a_card_fetchers",
+    # Added with plugin 0.1.37 (2026-11). The plugin's bundled connector calls
+    # /mcp?via=plugin, so Claude Code machines connected through the plugin are told
+    # apart from ones that added the connector by hand (no tag). Machines on older
+    # plugin versions send no tag either until they update. checked_machines_plugin =
+    # those plugin machines that also sent a check that day.
+    "cc_machines_plugin", "checked_machines_plugin",
 ]
 
 # Our A2A Agent Card: the A2A 1.0 path, and the pre-0.3 path some clients still try first.
 A2A_CARD_PATHS = ("/.well-known/agent-card.json", "/.well-known/agent.json")
 
 ENTRYPOINT_GROUPS = ("desktop", "cli", "sdk", "cloud", "other")
+
+
+def is_plugin_connector_request(request: str) -> bool:
+    """True for a POST to /mcp carrying the plugin's ``via=plugin`` tag (``request`` is
+    nginx's "METHOD path PROTO" line)."""
+    parts = request.split()
+    if len(parts) < 2 or parts[0] != "POST":
+        return False
+    path, _, query = parts[1].partition("?")
+    if path.rstrip("/") != "/mcp":
+        return False
+    return "via=plugin" in query.split("&")
 
 
 def is_card_request(request: str) -> bool:
@@ -340,6 +358,7 @@ def snapshot(day: str, since_hours: int) -> dict:
     tool_gate_ips: set[str] = set()
     card_ips: set[str] = set()
     pre_ips: set[str] = set()
+    plugin_ips: set[str] = set()
     hook_versions: dict[str, int] = defaultdict(int)
     n = defaultdict(int)
     hours_seen: set[int] = set()
@@ -361,6 +380,8 @@ def snapshot(day: str, since_hours: int) -> dict:
         if "POST /mcp" in req and ua.startswith("claude-code/"):
             cc_ips.add(ip)
             ep_ips[entrypoint_group(ua)].add(ip)
+            if is_plugin_connector_request(req):
+                plugin_ips.add(ip)
             n["cc_reqs"] += 1
             if st == 400:
                 n["cc_sessions"] += 1
@@ -438,6 +459,8 @@ def snapshot(day: str, since_hours: int) -> dict:
     for g in ENTRYPOINT_GROUPS:
         activation[f"cc_machines_{g}"] = len(ep_ips[g] - owner)
         activation[f"checked_machines_{g}"] = len((ep_ips[g] & (hook_ips | pre_ips)) - owner)
+    activation["cc_machines_plugin"] = len(plugin_ips - owner)
+    activation["checked_machines_plugin"] = len((plugin_ips & (hook_ips | pre_ips)) - owner)
     os.makedirs(DATA, exist_ok=True)
     with open(SEEN_PATH, "w") as fh:
         json.dump(seen, fh)

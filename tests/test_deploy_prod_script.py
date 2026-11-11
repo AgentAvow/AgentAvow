@@ -47,3 +47,15 @@ wait_until Never never 1 || echo NEVER_TIMEOUT
     out = subprocess.run(["bash", "-c", prog], capture_output=True, text=True, check=True).stdout
     assert "LATE_OK" in out
     assert "NEVER_TIMEOUT" in out
+
+
+def test_nginx_config_is_tested_before_anything_restarts():
+    """A config nginx rejects must never reach the live container. The deploy runs
+    `nginx -t` in a throwaway container right after the checkout, before the backend
+    is rebuilt or recreated, and fails there so the running site stays untouched."""
+    src = SCRIPT.read_text()
+    assert "run --rm --no-deps -T nginx nginx -t" in src
+    gate = src.index("nginx_config_ok || fail")
+    assert src.index("git pull --ff-only origin") < gate
+    assert gate < src.index("# --- Step 3: Build backend ---")
+    assert gate < src.index("docker-compose -f ${COMPOSE_FILE} up -d\"")

@@ -189,6 +189,10 @@ class ArtifactFetchResult:
     # The maintainer's own end-of-life signal: npm `deprecated` on the resolved version,
     # PyPI `yanked` (+ reason) or the 'Development Status :: 7 - Inactive' classifier.
     deprecation: str | None = None
+    # PyPI only: the maintainer yanked this release (a broken build, usually; see
+    # ``yank_is_security``). Reported as its own finding, not as deprecation.
+    yanked: bool = False
+    yanked_reason: str | None = None
     published_at: str | None = None  # ISO date the resolved version was published
     # The INSTALLED surface, when it differs from the scanned tree: for a PyPI sdist
     # this is the wheel's file list (what `pip install` actually puts on disk). None =
@@ -868,11 +872,13 @@ def _wheel_candidates(urls: list[dict], *, fits_only: bool = True,
     whose listed size is over :data:`MAX_DOWNLOAD_BYTES` (an unknown size counts as
     fitting; the download cap still applies)."""
     out = []
+    # A release yanked as a whole is still what a pinned install gets: read it.
+    all_yanked = bool(urls) and all(isinstance(u, dict) and u.get("yanked") for u in urls)
     for u in urls or []:
         if not isinstance(u, dict) or u.get("packagetype") != "bdist_wheel":
             continue
         url = u.get("url")
-        if not url or u.get("yanked"):
+        if not url or (u.get("yanked") and not all_yanked):
             continue
         size = _pypi_size(u)
         if fits_only and size > MAX_DOWNLOAD_BYTES:
@@ -1028,6 +1034,9 @@ def pypi_result_from_archive(
         # PEP 740 Trusted Publisher identity is compared against for Certified.
         packaged_manifest=_pypi_declared_manifest(meta),
         deprecation=_pypi_deprecation(meta),
+        yanked=bool((meta.get("info") or {}).get("yanked")),
+        yanked_reason=(str((meta.get("info") or {}).get("yanked_reason") or "").strip()[:280]
+                       or None),
         published_at=_pypi_published(meta, url),
         installed_paths=installed_paths,
     )
@@ -1057,12 +1066,10 @@ def _npm_deprecation(vdata: dict) -> str | None:
 
 
 def _pypi_deprecation(meta: dict) -> str | None:
-    """PyPI has no 'deprecated' flag: a yanked release, or the maintainer's own
-    'Development Status :: 7 - Inactive' classifier, is the equivalent signal."""
+    """PyPI has no 'deprecated' flag: the maintainer's own 'Development Status :: 7 -
+    Inactive' classifier is the equivalent signal. A yanked release is not one (usually
+    a broken build): it is reported separately (``yanked``)."""
     info = (meta or {}).get("info") or {}
-    if info.get("yanked"):
-        reason = str(info.get("yanked_reason") or "").strip()
-        return f"release yanked: {reason[:280]}" if reason else "release yanked by its maintainer"
     classifiers = info.get("classifiers") or []
     if any(str(c).strip() == "Development Status :: 7 - Inactive" for c in classifiers):
         return "marked inactive by its maintainer (Development Status :: 7 - Inactive)"
@@ -1551,4 +1558,53 @@ async def fetch_docker_artifact(
         )
     finally:
         if owns:
+            await client.aclose()
+
+
+_SECURITY_YANK_RE = re.compile(
+    r"secur|malic|malware|compromis|backdoor|vulnerab|exploit|credential|CVE-|GHSA-",
+    re.IGNORECASE)
+
+
+def yank_is_security(reason: str | None) -> bool:
+    """True when the maintainer's yank reason says it was a security event."""
+    return bool(reason and _SECURITY_YANK_RE.search(reason))
+
+
+def is_version_missing_error(eco: str, message: str) -> bool:
+    """True for the fetch error a version the registry no longer serves produces (npm:
+    ``npm version not found``; PyPI: a 404 on the per-version JSON)."""
+    m = message or ""
+    if eco == "npm":
+        return m.startswith("npm version not found:")
+    if eco == "pypi":
+        return m.startswith("not found: ") and "/pypi/" in m and m.rstrip("/").endswith("/json")
+    return False
+
+
+async def probe_removed_version(eco: str, name: str, version: str, *,
+                                client: httpx.AsyncClient | None = None) -> dict | None:
+    """Is ``name`` a real package whose ``version`` the registry no longer serves?
+
+    Returns ``{"published_before": bool}`` (npm's ``time`` map still lists a version
+    that was published and then unpublished; PyPI keeps no trace, so False there), or
+    None when the package itself can't be read (then it isn't 'removed', just unknown)."""
+    own = client is None
+    client = client or httpx.AsyncClient(timeout=_HTTP_TIMEOUT)
+    try:
+        if eco == "npm":
+            doc = await _get_json(f"{NPM_REGISTRY}/{name}", client)
+            if version in (doc.get("versions") or {}):
+                return None
+            return {"published_before": version in (doc.get("time") or {})}
+        if eco == "pypi":
+            doc = await _get_json(PYPI_JSON.format(name=name), client)
+            if version in (doc.get("releases") or {}):
+                return None
+            return {"published_before": False}
+        return None
+    except (ArtifactFetchError, httpx.HTTPError, ValueError):
+        return None
+    finally:
+        if own:
             await client.aclose()

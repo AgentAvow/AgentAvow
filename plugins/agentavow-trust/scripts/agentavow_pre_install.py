@@ -22,6 +22,10 @@ not connect" — then the 0-100 score (" · Certified" when the tool carries the
                        one gets.
   • anything else   -> silent, exit 0 (fail-open). A hook bug can never block a command.
 
+A step that writes or runs anything naming the per-call gate's allow list
+(~/.cache/agentavow/allowed-servers.txt) always asks the person first: only they may
+allow a server that reads Do not connect.
+
 The graded server is written to the same cache the session-start hook reads, so it is
 not reported a second time at the next session start. Reuses the precheck's target
 resolution and scan code (same file, same directory) so the two never disagree.
@@ -37,7 +41,7 @@ import sys
 import time
 import urllib.error
 
-__version__ = "0.1.36"
+__version__ = "0.1.37"
 
 TIMEOUT = 12  # seconds per scan: an install is rare, so a slower fresh scan is fine
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -426,6 +430,36 @@ def _line(t: dict, r: dict | None, pc) -> str:
             f"Report: {_report_url(t, pc)}")
 
 
+ALLOW_FILE_NAME = "allowed-servers.txt"  # the per-call gate's allow list (same name there)
+
+
+def _touches_allow_list(payload: dict) -> bool:
+    """Whether Claude is about to write or run something that names the per-call gate's
+    allow list. Only the person may allow a Do not connect server, so such a step is
+    always put to them, whatever Claude's own permissions say."""
+    inp = payload.get("tool_input")
+    if not isinstance(inp, dict):
+        return False
+    tool = str(payload.get("tool_name") or "")
+    if tool == "Bash":
+        text = str(inp.get("command") or "")
+    elif tool in ("Write", "Edit", "MultiEdit"):
+        text = str(inp.get("file_path") or "")
+    else:
+        return False
+    low = text.lower()
+    return ALLOW_FILE_NAME in low or ("allowed-servers" in low and "agentavow" in low)
+
+
+def _ask_about_allow_list() -> None:
+    reason = ("AgentAvow: this changes the list of servers you have allowed past a Do not "
+              "connect answer (~/.cache/agentavow/allowed-servers.txt). Only approve it if "
+              "you reviewed that server yourself and asked for this.")
+    print(json.dumps({"systemMessage": reason, "hookSpecificOutput": {
+        "hookEventName": "PreToolUse", "permissionDecision": "ask",
+        "permissionDecisionReason": reason}}))
+
+
 def main() -> None:
     try:
         payload = json.load(sys.stdin)
@@ -433,6 +467,12 @@ def main() -> None:
         return
     if not isinstance(payload, dict) or payload.get("hook_event_name") not in (None, "PreToolUse"):
         return
+    try:
+        if _touches_allow_list(payload):
+            _ask_about_allow_list()
+            return
+    except Exception:
+        pass
     try:
         pc = _precheck()
         pc.UA_PRODUCT = "agentavow-preinstall"  # count install-time checks separately

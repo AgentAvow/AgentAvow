@@ -68,11 +68,24 @@ def _version_key(v: str) -> tuple:
     return tuple(parts)
 
 
+def _is_date_version(v: str) -> bool:
+    """A date-numbered release: its first part is a year (2025.9.24, 2026.8.31)."""
+    head = str(v).lstrip("v").split(".", 1)[0]
+    return len(head) == 4 and head.isdigit() and 1990 <= int(head) <= 2100
+
+
 def _highest_fix(advisories: list[dict]) -> str | None:
     """The release that fixes ALL the listed advisories = the highest ``fixed_in``
-    (Kenne, 2026-10-19: an own advisory reads Review and names the fixed version)."""
+    (Kenne, 2026-10-19: an own advisory reads Review and names the fixed version).
+    When the fixes mix date-numbered releases (2026.8.31) with ordinary ones (2.0.1),
+    names none: a year sorts above any 2.x, so "the highest" would point users of one
+    release line at the other line (server-everything, GHSA-mvf5-2qqv-rg3c)."""
     fixes = [str(a.get("fixed_in")) for a in advisories if a.get("fixed_in")]
-    return max(fixes, key=_version_key) if fixes else None
+    if not fixes:
+        return None
+    if len({_is_date_version(f) for f in fixes}) > 1:
+        return None
+    return max(fixes, key=_version_key)
 
 
 def is_advisory_block(b: dict) -> bool:
@@ -353,6 +366,7 @@ WHERE_TOOLS = " in its tool definitions"
 WHERE_DEPENDENCY = " in a dependency"
 WHERE_CARD = " in its agent card"
 WHERE_LISTING = " in its listing"  # an x402 endpoint's Bazaar listing
+WHERE_LIVE_PAYMENT = " in its live payment request"  # x402 phase 2: the live 402 reply
 WHERE_DEVCONTAINER = " in its dev container setup"
 
 # Files an agent is handed as instructions (mirrors src.scanner.package_context).
@@ -393,6 +407,8 @@ def finding_where(i: dict) -> str:
         return WHERE_TOOLS
     if path.startswith("card:"):
         return WHERE_CARD
+    if path.startswith("x402:live"):
+        return WHERE_LIVE_PAYMENT
     if path.startswith("x402:"):
         return WHERE_LISTING
     parts = [p for p in path.split("/") if p]

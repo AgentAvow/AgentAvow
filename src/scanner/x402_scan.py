@@ -23,8 +23,7 @@ from urllib.parse import urlsplit
 
 X402_SURFACE = "x402"
 X402_CODE_UNREAD_GAP = "x402_code_unread"
-X402_USER_AGENT = ("AgentAvow-x402-check/1.0 (+https://agentavow.com/docs/x402; "
-                   "security@agentavow.com)")
+# The phase-2 live check's user agent lives in src/scanner/x402_live.py (USER_AGENT).
 BAZAAR_RESOURCES_URL = "https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources"
 
 # Raw finding category for the payment-term checks (maps to the data_handling axis).
@@ -393,8 +392,10 @@ def analyze_x402_listing(rec: dict) -> X402ScanResult:
     return res
 
 
-def scan_result_from_listing(rec: dict):
-    """A signed-shape ``ScanResult`` for one listing (no network)."""
+def scan_result_from_listing(rec: dict, live: dict | None = None):
+    """A signed-shape ``ScanResult`` for one listing (no network). ``live`` is that
+    endpoint's phase-2 reply (``x402_live.read_reply``) when a live check ran: its
+    findings join the listing's and ``artifact_scan.live_check`` records it."""
     from src.scanner.coverage import SCAN_DEPTH_ARTIFACT_LIVE, build_coverage
     from src.scanner.scan import (
         ScanResult,
@@ -404,6 +405,12 @@ def scan_result_from_listing(rec: dict):
     )
 
     x = analyze_x402_listing(rec)
+    live_record = None
+    if isinstance(live, dict):
+        from src.scanner.x402_live import live_findings
+        extra, live_record = live_findings(rec, live)
+        live_record["checked_at"] = live.get("checked_at")
+        x.findings.extend(extra)
     result = ScanResult(repo=f"x402:{x.resource}", stars=0, description="",
                         framework="x402")
     result.findings = x.findings
@@ -419,6 +426,8 @@ def scan_result_from_listing(rec: dict):
         "capabilities": x.capabilities,
         "last_updated": rec.get("lastUpdated") or rec.get("last_updated"),
     }
+    if live_record is not None:
+        result.artifact_scan["live_check"] = live_record
     result.coverage = build_coverage(
         surface=X402_SURFACE, scan_depth=SCAN_DEPTH_ARTIFACT_LIVE, live_observed=False)
     result.coverage_gaps = dict(x.coverage_gaps)
