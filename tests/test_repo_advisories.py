@@ -104,7 +104,8 @@ def test_withdrawn_and_draft_advisories_are_ignored():
 
 def test_unparsed_range_is_recorded_not_scored():
     odd = {**EVERYTHING, "vulnerabilities": [
-        {"package": {"ecosystem": "npm", "name": PKG}, "vulnerable_version_range": "1.x"}]}
+        {"package": {"ecosystem": "npm", "name": PKG},
+         "vulnerable_version_range": "All version prior and including to 1.5"}]}
     out = summarize_repo_advisories([odd], "npm", PKG, "1.4.0")
     assert out[0]["affects_scanned_version"] is False and out[0]["range_unparsed"] is True
     assert scanmod._own_advisory_findings(PKG, "1.4.0", out) == []

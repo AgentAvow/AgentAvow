@@ -106,6 +106,15 @@ async def test_ensure_watch_skips_private_without_touching_db():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["gitlab", "rubygems", "x402"])
+async def test_ensure_watch_skips_unsupported_surface_without_touching_db(surface):
+    # The same surface check as POST /watches: db=None proves no watch row is made.
+    await cr._ensure_watch(
+        db=None, entity_id="e", surface=surface, owner=surface, repo="r", is_private=False,
+    )
+
+
+@pytest.mark.asyncio
 async def test_no_grant_when_repo_not_owned(monkeypatch):
     async def fake_declared(surface, name):
         return "facebook/react"

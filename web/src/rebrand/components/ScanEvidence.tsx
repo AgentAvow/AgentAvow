@@ -214,7 +214,7 @@ export function McpToolList({ scan: raw }: { scan: unknown }) {
     <Reveal>
       <div className="mt-4 glass rounded-2xl p-6">
         <h3 className={H3}>Tools it serves ({rows.length})</h3>
-        <p className="mt-1.5 text-[13px] text-text-muted max-w-[64ch]">{TOOL_NOTE[source]}{' '}{source === 'live' && <a className="underline" href="/docs/verify-attestations">How to recompute it</a>}</p>
+        <p className="mt-1.5 text-[13px] text-text-muted max-w-[64ch]">{TOOL_NOTE[source]}{' '}{source === 'live' && <a className="underline" href={rp('/rebrand/docs/verify-attestations')}>How to recompute it</a>}</p>
         {rows.length > 0 && annotated === 0 && <p className="mt-1.5 text-[12px] text-text-muted/80 max-w-[64ch]">None of these tools declares safety annotations (read-only, destructive), so an agent can&apos;t tell from the definitions which ones change things.</p>}
         <ul className="mt-3 divide-y divide-border/50">
           {rows.map((t) => (
@@ -347,7 +347,7 @@ export function VerifyPanel({ scan: raw }: { scan: unknown }) {
           <div className="text-[12px] text-text-muted">2 · With <span className="font-mono">scan.jws</span> next to it, check the signature (<span className="font-mono">pip install cryptography</span>):</div>
           <CodeLine text={VERIFY_PY} />
         </div>
-        <a href="/docs/verify-attestations" className="mt-3 inline-block text-[13px] font-semibold text-primary-light hover:text-primary">Verify in Python or JavaScript, step by step →</a>
+        <a href={rp('/rebrand/docs/verify-attestations')} className="mt-3 inline-block text-[13px] font-semibold text-primary-light hover:text-primary">Verify in Python or JavaScript, step by step →</a>
       </div>
     </Reveal>
   )

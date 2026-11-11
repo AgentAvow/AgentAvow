@@ -132,7 +132,7 @@ _PRIVACY_CLAUSES: list[tuple[str, str]] = [
      'Meta about visits to that page so we can measure our ads.'),
     ('7. Sharing',
      'We share data only with service providers that run parts of the service '
-     'for us (Amazon Web Services for hosting and email, Resend for email '
+     'for us (Amazon Web Services for hosting, Resend for email '
      'delivery, Sentry for error tracking, Cloudflare for website analytics, '
      'Meta Platforms for measuring our ads on /claude-code only (section 5), '
      'and Google or GitHub only if you choose to sign in with them), and when the law requires '
@@ -155,8 +155,8 @@ _PRIVACY_CLAUSES: list[tuple[str, str]] = [
 
 _TERMS_CLAUSES: list[tuple[str, str]] = [
     ("1. Acceptance of Terms",
-     'By accessing or using AgentAvow (the "Service"), you agree to be bound by these '
-     "Terms of Service. If you do not agree, do not use the Service."),
+     'Effective October 9, 2026. By accessing or using AgentAvow (the "Service"), you '
+     "agree to be bound by these Terms of Service. If you do not agree, do not use the Service."),
     ("2. The Service",
      "AgentAvow scans tools, MCP servers, and packages and produces a signed, verifiable "
      "safety score. Checking is free and requires no account. An account is needed only "

@@ -26,6 +26,7 @@ import HowItWorks from './rebrand/pages/HowItWorks'
 import Preflight from './rebrand/pages/Preflight'
 import Research from './rebrand/pages/Research'
 import Sandbox from './rebrand/pages/Sandbox'
+import StateOfAgentSecurity2026 from './rebrand/pages/StateOfAgentSecurity2026'
 import StateOfAgentSecurityQ3 from './rebrand/pages/StateOfAgentSecurityQ3'
 import Submit from './rebrand/pages/Submit'
 import Teams from './rebrand/pages/Teams'
@@ -38,6 +39,7 @@ import TrustIndex from './rebrand/pages/TrustIndex'
 const PAGES: Record<string, ReactNode> = {
   '/': <Home />,
   '/faq': <FAQ />,
+  '/state-of-agent-security-2026': <StateOfAgentSecurity2026 />,
   '/state-of-agent-security-q3-2026': <StateOfAgentSecurityQ3 />,
   '/research': <Research />,
   '/how-it-works': <HowItWorks />,
