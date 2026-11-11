@@ -99,8 +99,12 @@ async def _load_agent(chain: str, agent_id: int, force: bool) -> tuple[dict, boo
         hit = await cache.get(key)
         if isinstance(hit, dict):
             return hit, True
+    rpc = _rpc_url(chain)
+    if not rpc:
+        raise HTTPException(503, "On-chain lookups aren't enabled yet on this server.",
+                            headers={"Retry-After": "3600"})
     try:
-        onchain = await ea.read_agent(chain, agent_id, _rpc_url(chain))
+        onchain = await ea.read_agent(chain, agent_id, rpc)
     except ea.AgentNotFoundError:
         raise HTTPException(404, f"No agent #{agent_id} on {ea.CHAINS[chain]['label']}.")
     except ea.ChainUnavailableError:

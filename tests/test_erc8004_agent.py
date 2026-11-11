@@ -359,3 +359,18 @@ async def test_agent_read_is_cached(route):
     assert "erc8004:agent:ethereum:33256" in route["store"]
     resp = await route["r"].scan_erc8004_agent("ethereum", 33256, _Req(), force=False)
     assert resp.cached is True
+
+
+async def test_no_rpc_key_says_lookups_are_not_enabled(monkeypatch):
+    from fastapi import HTTPException
+
+    from src.api import erc8004_router as r
+
+    async def none(k):
+        return None
+    monkeypatch.setattr("src.cache.get", none)
+    monkeypatch.delenv("ETH_RPC_URL", raising=False)
+    with pytest.raises(HTTPException) as e:
+        await r.scan_erc8004_agent("ethereum", 1, _Req(), force=False)
+    assert e.value.status_code == 503
+    assert "aren't enabled yet" in e.value.detail
