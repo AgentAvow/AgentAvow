@@ -212,6 +212,14 @@ CARD_SIGNATURE_UNVERIFIED_REASON = "the agent card's signature could not be veri
 # seen, whatever the skill count.
 A2A_CLEAN_REASON = "agent card clean; agent code not inspected"
 A2A_FOUND_REASON = "no critical or high findings in its agent card"
+# An x402 endpoint read from its public Bazaar listing (src/scanner/x402_scan.py): the
+# reason says what was read, so a Safe never reads as an audit of the backend (design
+# review 2026-11-11).
+# The "code isn't visible" clause is the x402_code_unread coverage note, so it shows on
+# every x402 result (Safe reason suffix, and the coverage notes on Review results).
+X402_CLEAN_REASON = "nothing found in the listing"
+X402_FOUND_REASON = "no critical or high findings in the listing"
+X402_CODE_UNREAD_NOTE = "the endpoint's code isn't visible"
 
 # A hardcoded credential shipped in a tool (category ``secret``, e.g. an AWS key in
 # yt-dlp's extractors) exposes the vendor whose key leaked, not the person installing
@@ -344,6 +352,7 @@ WHERE_AGENTS = " in instructions it gives agents"
 WHERE_TOOLS = " in its tool definitions"
 WHERE_DEPENDENCY = " in a dependency"
 WHERE_CARD = " in its agent card"
+WHERE_LISTING = " in its listing"  # an x402 endpoint's Bazaar listing
 
 # Files an agent is handed as instructions (mirrors src.scanner.package_context).
 _AGENT_FILE_NAMES = frozenset({
@@ -383,6 +392,8 @@ def finding_where(i: dict) -> str:
         return WHERE_TOOLS
     if path.startswith("card:"):
         return WHERE_CARD
+    if path.startswith("x402:"):
+        return WHERE_LISTING
     parts = [p for p in path.split("/") if p]
     name = parts[-1] if parts else ""
     # A deciding finding in package.json sits in its scripts: a maintainer-only script
@@ -478,6 +489,9 @@ def coverage_gap_notes(data: dict) -> list[str]:
     if not isinstance(g, dict):
         return []
     notes: list[str] = []
+    # An x402 endpoint: only its public listing was read. First, on every x402 result.
+    if g.get("x402_code_unread") is True:
+        notes.append(X402_CODE_UNREAD_NOTE)
     # What an agent is handed to read comes first: these are the cheap ways to hide
     # an instruction from the scan.
     n = _int(g.get("oversized_agent_files"))
@@ -768,6 +782,8 @@ def decide(data: dict) -> Decision:
         return safe(f"no critical or high findings in its code (dependencies: {deps} {noun})")
     if _surface_is(data, "a2a"):
         return safe(A2A_FOUND_REASON if found else A2A_CLEAN_REASON)
+    if _surface_is(data, "x402"):
+        return safe(X402_FOUND_REASON if found else X402_CLEAN_REASON)
     # Thin coverage (0 <= files < 8, nothing found) reads Safe and says so in the reason
     # (Kenne, 2026-10-08, #19). The 74 / 82 evidence cap on the score still shows it.
     # Zero files (a metapackage whose code ships in a dependency, an image read only to
@@ -842,6 +858,9 @@ def cheap_coverage_gap(data: dict) -> bool:
     if _int(g.get("bytecode_unread")) > 0:
         return True
     if _int(g.get("skills_ungraded")) > 0:
+        return True
+    # An x402 endpoint: only its listing was read, never the code behind it.
+    if g.get("x402_code_unread") is True:
         return True
     # A published advisory names this package and we could not tell if it covers
     # this version: never Certified on that.

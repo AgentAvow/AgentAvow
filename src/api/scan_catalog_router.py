@@ -149,6 +149,9 @@ class CatalogRow(BaseModel):
     # x402-specific
     has_x402_header: bool | None = None
     http_status: int | None = None
+    # Scored from the public Bazaar listing (src/scanner/x402_scan.py); never the code.
+    price_usd: str | None = None
+    testnet_only: bool | None = None
     # behavioral sandbox summary (npm/pypi/docker rows with a cached run; else None)
     sandbox: CatalogSandbox | None = None
     # The three-phrase headline (safe | review | do_not_connect) + its reason, decided
@@ -515,12 +518,23 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
     """Convert a per-surface raw record into the unified row shape."""
     if surface == "x402":
         url = raw.get("endpoint_url", "")
+        score = raw.get("trust_score")
+        score = score if isinstance(score, int) and not isinstance(score, bool) else None
         return CatalogRow(
             surface="x402",
             name=url,
             endpoint_url=url,
             has_x402_header=raw.get("has_x402_header"),
             http_status=raw.get("http_status"),
+            # A row scored from its listing (scan_x402.py --score) carries a score and
+            # the answer decide() gave over the full result; an old probe row has none.
+            trust_score=score,
+            critical=raw.get("critical") if score is not None else None,
+            high=raw.get("high") if score is not None else None,
+            price_usd=raw.get("price_usd") if isinstance(raw.get("price_usd"), str) else None,
+            testnet_only=bool(raw.get("testnet_only")) if score is not None else None,
+            scan_error=raw.get("error") if isinstance(raw.get("error"), str) else None,
+            **_raw_decision(raw, score),
         )
     if surface == "openclaw":
         # OpenClaw uses different field names — `repo` for owner/name,
@@ -1018,6 +1032,16 @@ async def _catalog_view(
         filtered = community  # the 'community' tab = every on-demand scan, any surface
     elif surface:
         filtered = [r for r in filtered if r.surface == surface]
+    else:
+        # x402 endpoints are scored from their listing alone: they live only under
+        # their own kind (surface=x402), never in an all-surfaces list or its counts,
+        # or ~33k listing-only Safe rows would change what Safe means across the
+        # catalog (design review 2026-11-11).
+        filtered = [r for r in filtered if r.surface != "x402"]
+    if not q:
+        # A testnet-only x402 listing cannot take real payment: out of the default
+        # views, still findable by name (design review 2026-11-11).
+        filtered = [r for r in filtered if not (r.surface == "x402" and r.testnet_only)]
     if category:
         filtered = [r for r in filtered if r.category == category]
     if q:

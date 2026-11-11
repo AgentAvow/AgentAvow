@@ -6008,6 +6008,8 @@ def _calculate_category_scores(result: ScanResult) -> dict[str, int]:
         # A2A Agent Card detectors (src/scanner/a2a_scan.py).
         "insecure_transport": "data_handling",
         "endpoint_origin": "data_handling",
+        # x402 payment terms (src/scanner/x402_scan.py): who gets paid, on what network.
+        "payment_terms": "data_handling",
         "auth_scheme": "secret_hygiene",
         "card_signature": "code_safety",
     }

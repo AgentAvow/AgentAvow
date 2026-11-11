@@ -478,6 +478,32 @@ CASES = [
     ("v_encoded_text_unread_mcp", _scan(86, 9, coverage={"surface": "mcp"}, coverage_gaps={
         "encoded_text_unread": 2}),
      "review", True, "encoded text the agent reads could not all be decoded"),
+    # ── x402 endpoint, read from its Bazaar listing (src/scanner/x402_scan.py) ────
+    ("x402_clean", _scan(74, 1, coverage={"surface": "x402"},
+                         coverage_gaps={"x402_code_unread": True}),
+     "safe", True, "nothing found in the listing; the endpoint's code isn't visible"),
+    ("x402_low_price_found", _scan(74, 1, [_f("low", "costs more than $1 per call",
+                                              category="payment_terms",
+                                              file_path="x402:payment-terms")],
+                                   coverage={"surface": "x402"},
+                                   coverage_gaps={"x402_code_unread": True}),
+     "safe", True, "nothing found in the listing; the endpoint's code isn't visible"),
+    ("x402_medium_found", _scan(70, 1, [_f("medium", "the listing names more than one"
+                                           " recipient (2 payTo addresses)",
+                                           category="payment_terms",
+                                           file_path="x402:payment-terms")],
+                                coverage={"surface": "x402"},
+                                coverage_gaps={"x402_code_unread": True}),
+     "safe", True, "no critical or high findings in the listing; the endpoint's code"
+                   " isn't visible"),
+    ("x402_http_high", _scan(60, 1, [_f("high", "the paid endpoint uses plain http://"
+                                        " (http://api.example/x)",
+                                        category="insecure_transport",
+                                        file_path="x402:listing")],
+                             high=1, coverage={"surface": "x402"},
+                             coverage_gaps={"x402_code_unread": True}),
+     "review", True, "one high finding in its listing: the paid endpoint uses plain"
+                     " http:// (http://api.example/x)"),
     # ── A2A Agent Card (src/scanner/a2a_scan.py; files = skills) ─────────────────
     ("a2a_clean_thin", _scan(74, 2, coverage={"surface": "a2a"}),
      "safe", True, "agent card clean; agent code not inspected"),
@@ -681,6 +707,10 @@ MARK_CASES = [
      False, "sandbox_pending"),
     ("pinned_version_no_sandbox", _scan(92, 340, certified=CERTIFIED, coverage_gaps={
         "sandbox_not_observed": "other_version"}), False, "coverage_gaps"),
+    # An x402 endpoint: only its listing was read (design review 2026-11-11).
+    ("x402_listing_only", _scan(92, 340, certified=CERTIFIED, coverage={"surface": "x402"},
+                                coverage_gaps={"x402_code_unread": True}),
+     False, "coverage_gaps"),
     # ── a sandbox that never started the tool, for ANY start reason, takes the mark off
     # (Kenne, 2026-11-07). The values are what _sandbox_gap writes (plain words).
     *[(f"never_started_{why.replace(' ', '_')}", _scan(92, 340, certified=CERTIFIED,
