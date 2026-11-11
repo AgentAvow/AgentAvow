@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import { Link } from 'react-router-dom'
 import { rp } from '../basePath'
 import { trackListing } from '../lib/listings'
@@ -35,15 +35,25 @@ function PathAction({ link }: { link: PathLink }) {
   )
 }
 
+// The remembered pick, read as an external store: null on the server and in the
+// prerendered HTML, the saved key once the page runs in a browser.
+const PICK_EVENT = 'agentavow-path-pick'
+function subscribePick(cb: () => void): () => void {
+  window.addEventListener('storage', cb)
+  window.addEventListener(PICK_EVENT, cb)
+  return () => { window.removeEventListener('storage', cb); window.removeEventListener(PICK_EVENT, cb) }
+}
+
 export function AgentAvowChooser({ dnc = false }: { dnc?: boolean }) {
-  const [pick, setPick] = useState(AGENTAVOW_PATHS[0].key)
-  const [remembered, setRemembered] = useState(false)
+  const saved = useSyncExternalStore(subscribePick, readPathPick, () => null)
+  const [chosen, setChosen] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  useEffect(() => {
-    const saved = readPathPick()
-    if (saved) { setPick(saved); setRemembered(true) }
-  }, [])
-  const choose = (key: string) => { setPick(key); setRemembered(true); setCopied(false); savePathPick(key) }
+  const pick = chosen ?? saved ?? AGENTAVOW_PATHS[0].key
+  const remembered = !!(chosen ?? saved)
+  const choose = (key: string) => {
+    setChosen(key); setCopied(false); savePathPick(key)
+    try { window.dispatchEvent(new Event(PICK_EVENT)) } catch { /* old browser */ }
+  }
   const p = AGENTAVOW_PATHS.find((x) => x.key === pick) ?? AGENTAVOW_PATHS[0]
   const copy = () => {
     if (!p.snippet) return
