@@ -17,6 +17,7 @@ import autoScanClaudeCode from '../docs/auto-scan-claude-code.md?raw'
 import mcpConnector from '../docs/mcp-connector.md?raw'
 import behavioralSandbox from '../docs/behavioral-sandbox.md?raw'
 import x402Doc from '../docs/x402.md?raw'
+import erc8004Agents from '../docs/erc8004-agents.md?raw'
 
 /**
  * Rebrand docs PREVIEW — renders the staged trust-first docs (web/src/rebrand/docs/*.md)
@@ -47,6 +48,8 @@ const DOCS = [
     blurb: 'Have Claude Code check every new tool’s trust score automatically — via the plugin, a CLAUDE.md rule, or a SessionStart hook.' },
   { slug: 'x402', title: 'How we check x402', body: x402Doc,
     blurb: 'How x402 paid endpoints are scored from their public listing: what we read, the checks, what a result means, the user agent, opt-out and limits.' },
+  { slug: 'erc8004-agents', title: 'ERC-8004 agents', body: erc8004Agents,
+    blurb: 'Check an ERC-8004 agent on Ethereum, Base or BNB Chain: what we read from its registration, how its answer is set, the API, and the limits.' },
 ]
 
 /** Plain text of a react-markdown heading's children, for its id. */

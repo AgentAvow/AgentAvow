@@ -178,7 +178,7 @@ export default function RebrandTeams() {
             </div>
             <div className="glass rounded-2xl border border-border/60 p-[22px] flex flex-col gap-[9px]">
               <h3 className="text-[19px] font-bold">A2A</h3>
-              <p className="text-text-muted text-[14.5px]">Paste any A2A Agent Card URL for an answer, findings and a signed attestation, including whether the card&apos;s own signature verifies.</p>
+              <p className="text-text-muted text-[14.5px]">Grades A2A agent cards (interfaces, auth, skill text, signature) and on-chain ERC-8004 agents on Ethereum, Base and BNB Chain by the tools they list. Signed, recomputable verdicts; the card&apos;s own digest is in the signature.</p>
               <a href="/ext/trust-verdict/v1/" className="mt-auto text-[13.5px] font-semibold text-primary-light hover:underline">Extension spec →</a>
             </div>
             <div className="glass rounded-2xl border border-border/60 p-[22px] flex flex-col gap-[9px]">

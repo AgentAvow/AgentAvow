@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { rp } from '../basePath'
 import { unsupportedRepoHost, unsupportedRepoHostMessage } from '../lib/unsupportedHost'
+import { parseErc8004 } from '../lib/erc8004'
 import { NoticeText } from '../components/NoticeText'
 import { motion, useReducedMotion } from 'framer-motion'
 import { useQuery } from '@tanstack/react-query'
@@ -246,6 +247,9 @@ export default function RebrandHome() {
     // A repo host we know but can't read yet: say so instead of scanning the same-named GitHub repo.
     const host = unsupportedRepoHost(v)
     if (host) { setNotice(unsupportedRepoHostMessage(host)); return }
+    // ERC-8004 agent on chain: `erc8004:base:1234`.
+    const erc = parseErc8004(v)
+    if (erc) { navigate(rp(`/rebrand/check/erc8004/${erc.chain}/${erc.agentId}`)); return }
     // Live MCP server: `mcp:https://…`.
     const mcp = v.match(/^mcp\s*:\s*(https?:\/\/.+)$/i)
     if (mcp) { navigate(rp('/rebrand/check/mcp') + '?endpoint=' + encodeURIComponent(mcp[1].trim())); return }

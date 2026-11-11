@@ -116,3 +116,9 @@ def test_scored_row_carries_medium_low_and_top_findings():
 def test_old_probe_row_has_no_finding_detail():
     r = _normalize_row("x402", {"endpoint_url": "https://c.example", "http_status": 402})
     assert r.medium is None and r.low is None and r.top_findings is None
+
+
+def test_summary_counts_scored_listings(catalog):
+    summary = m._CATALOG_CACHE["summary"] if isinstance(m._CATALOG_CACHE, dict) else \
+        m._CATALOG_CACHE.summary
+    assert summary.x402_scored == 2

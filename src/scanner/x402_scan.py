@@ -315,12 +315,16 @@ def _terms_findings(rec: dict, res: X402ScanResult) -> list:
         a_res = str(a.get("resource") or "").strip()
         a_host = (urlsplit(a_res).hostname or "").lower() if a_res else ""
         if a_host and host and a_host != host:
+            # The payee-swap shape: the listing an agent reads names one host, the
+            # resource it pays for names another (api.aidress.ai listings paying for
+            # api.printmoneylab.com, 2026-11-11). High (Review): the agent should know
+            # who it really pays, even when a reseller is legitimate.
             out.append(_finding(
                 "endpoint_origin",
                 f"the payment terms name a different host ({a_host}) than the listing "
-                f"({host})", "medium", _WHERE_TERMS,
-                "An agent pays for one host and calls another. If intended, say so in "
-                "the description."))
+                f"({host})", "high", _WHERE_TERMS,
+                "An agent calls one host and pays for a resource on another. If this is "
+                "a reseller or proxy, say so in the description and name the provider."))
 
     # Networks and price.
     nets = sorted({network_id(a.get("network")) for a in accepts if a.get("network")})

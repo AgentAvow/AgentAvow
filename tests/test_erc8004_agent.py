@@ -394,3 +394,53 @@ async def test_no_rpc_key_says_lookups_are_not_enabled(monkeypatch):
         await r.scan_erc8004_agent("ethereum", 1, _Req(), force=False)
     assert e.value.status_code == 503
     assert "aren't enabled yet" in e.value.detail
+
+
+async def test_a_failed_check_says_why_instead_of_checking_forever(route):
+    from src.api import erc8004_router as r
+    url, key, _api = r._tool_identity("a2a", "https://api.normies.art/agents/agent-card/6574")
+    route["store"][f"erc8004:toolerr:{key}"] = "no A2A agent card could be read there"
+    resp = await route["r"].scan_erc8004_agent("ethereum", 33256, _Req(), force=False)
+    (tool,) = resp.tools
+    assert tool.state == "not_checked"
+    assert tool.why_not_checked == "no A2A agent card could be read there"
+    assert not route["scheduled"]
+
+
+@pytest.mark.parametrize("detail,reason", [
+    ("Scan error: This MCP server requires sign-in (OAuth), so its tool list isn't public",
+     "it requires sign-in, so its tools aren't public"),
+    ("Scan error: Could not read an A2A Agent Card there.", "no A2A agent card could be read there"),
+    ("MCP handshake timed out — please retry shortly.", "it did not answer in time"),
+    ("Scan error: something else", "it could not be reached or read"),
+])
+def test_short_reasons(detail, reason):
+    from src.api import erc8004_router as r
+    assert r._short_reason(detail) == reason
+
+
+async def test_background_failure_is_remembered(monkeypatch):
+    from fastapi import HTTPException
+
+    from src.api import erc8004_router as r
+    from src.api import public_scan_router as psr
+    store = {}
+
+    async def cset(k, v, ttl=None):
+        store[k] = (v, ttl)
+    monkeypatch.setattr("src.cache.set", cset)
+
+    async def boom(**kw):
+        raise HTTPException(422, "Scan error: This MCP server requires sign-in (OAuth)")
+    monkeypatch.setattr(psr, "scan_mcp_endpoint", boom)
+
+    class _S:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, *a):
+            return False
+    monkeypatch.setattr("src.database.async_session", lambda: _S())
+    await r._bg_check("mcp", "https://m.example/mcp", "mcp_abc")
+    assert store["erc8004:toolerr:mcp_abc"] == ("it requires sign-in, so its tools aren't public",
+                                                3600)
