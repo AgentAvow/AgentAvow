@@ -113,7 +113,7 @@ export default function RebrandClaudeCode() {
     <div className="relative">
       <SEOHead
         title="Claude Code plugin: check MCP servers and packages automatically"
-        description="Install the AgentAvow plugin and Claude Code checks your MCP servers and packages before your agent uses them: Safe to connect, Review before you connect, or Do not connect, with the reason."
+        description="The AgentAvow plugin has Claude Code check MCP servers and packages before use: Safe to connect, Review before you connect, or Do not connect, with the reason."
         path="/claude-code"
       />
 

@@ -112,7 +112,7 @@ export default function RebrandCertified() {
     <div className="max-w-[820px] mx-auto px-6 py-16">
       <SEOHead
         title="Certified — the earned mark beside Safe to connect"
-        description="Certified is a public conjunctive gate above the trust score: every check must pass, no averaging. See exactly why a tool does or doesn't earn it, and which ones have."
+        description="Certified is a public gate above the trust score: every check must pass, no averaging. See why a tool does or doesn't earn it, and which tools have."
         path="/certified"
       />
       <Reveal>

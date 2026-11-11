@@ -80,7 +80,7 @@ export default function RebrandGet() {
     <div>
       <SEOHead
         title="Install for Claude Code, Claude, ChatGPT, Cursor, VS Code, Gemini CLI and CI"
-        description="Every way to install AgentAvow: the Claude Code plugin, the Claude connector, the ChatGPT app, Cursor, VS Code, Gemini CLI, npm and PyPI, and CI on GitHub, GitLab, Bitbucket and Azure DevOps."
+        description="Install AgentAvow: Claude Code, Claude connector, ChatGPT, Cursor, VS Code, Gemini CLI, npm, PyPI, and CI on GitHub, GitLab, Bitbucket and Azure DevOps."
         path="/get"
       />
       <div className="relative pt-14 pb-[34px]">

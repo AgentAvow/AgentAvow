@@ -281,7 +281,7 @@ export default function RebrandHome() {
     <div>
       <SEOHead
         title="Is this AI tool safe to connect?"
-        description="Paste a link to any app, connector or package and get a clear answer: Safe to connect, Review before you connect, or Do not connect, with a signed trust score and an adoption score."
+        description="Is this AI tool safe to connect? Get Safe to connect, Review before you connect, or Do not connect, with a signed trust score and an adoption score."
         path="/"
       />
 

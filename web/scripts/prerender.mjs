@@ -34,6 +34,8 @@ const API_ORIGIN = (process.env.PRERENDER_API_ORIGIN || 'https://agentavow.com')
 const API_TIMEOUT_MS = 6_000
 const RENDER_DEADLINE_MS = 180_000
 const MIN_WORDS = 100
+// Bing flags descriptions outside 25-160 characters; 50 keeps them worth reading.
+const DESCRIPTION_CHARS = [50, 160]
 const SITE = 'https://agentavow.com'
 // #root and its loading spinner. The shell keeps its scripts in the head.
 const SHELL_BODY = /<div id="root">[\s\S]*<\/body>/
@@ -52,6 +54,11 @@ function finish() {
 
 const attr = (tag, name) => tag.match(new RegExp(`\\s${name}="([^"]*)"`))?.[1]
 const tagKey = (tag) => attr(tag, 'name') ?? attr(tag, 'property')
+/** Attribute text as a reader sees it: React escapes quotes and ampersands. */
+const decode = (text) => text
+  .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+  .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(Number(dec)))
+  .replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
 
 /**
  * React writes a page's <title>, <meta> and <link> ahead of its first element when
@@ -114,6 +121,11 @@ function check(route, page) {
   const canonical = `${SITE}${route}`
   if (!page.title) faults.push('no title')
   if (!description) faults.push('no description')
+  else {
+    const chars = [...decode(attr(description, 'content') ?? '')].length
+    const [min, max] = DESCRIPTION_CHARS
+    if (chars < min || chars > max) faults.push(`description is ${chars} characters, not ${min}-${max}`)
+  }
   if (attr(page.canonical ?? '', 'href') !== canonical) faults.push(`canonical is not ${canonical}`)
   if ((page.body.match(/<h1[\s>]/g) ?? []).length !== 1) faults.push('not exactly one H1')
   if (words < MIN_WORDS) faults.push(`only ${words} words`)
