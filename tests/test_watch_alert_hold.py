@@ -113,13 +113,21 @@ async def test_app_scan_honours_the_hold(monkeypatch):
     monkeypatch.setattr("src.api.notification_router.create_notification", _notify)
     monkeypatch.setattr("src.jobs.watch_alert_hold.score_alerts_held", _held)
     args = (None, uuid.uuid4(), "o", "r", "o/r")
-    assert await app_scan._maybe_notify(*args, 90, 70, {}, {}) == 0
-    assert await app_scan._maybe_notify(*args, 50, 72, {}, {}) == 0
-    assert await app_scan._maybe_notify(
+
+    async def fired(*a, **kw) -> int:
+        # _maybe_notify returns (alerts fired, AnswerChange baseline).
+        return (await app_scan._maybe_notify(*a, **kw))[0]
+
+    assert await fired(*args, 90, 70, {}, {}) == 0
+    assert await fired(*args, 50, 72, {}, {}) == 0
+    assert await fired(
         *args, 90, 70, {"tool_manifest_digest": "a"}, {"tool_manifest_digest": "b"}) == 1
     assert notes == ["watch_alert"]
+    # An answer that got worse is held too (a re-score moves answers like scores).
+    assert await fired(*args, 70, 70, {}, {"trust_score": 30},
+                       last_decision="safe", last_certified=False) == 0
     held["v"] = False
-    assert await app_scan._maybe_notify(*args, 90, 70, {}, {}) == 1
+    assert await fired(*args, 90, 70, {}, {}) == 1
 
 
 async def test_hold_round_trip_in_redis():
