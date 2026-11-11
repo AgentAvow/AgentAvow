@@ -38,6 +38,11 @@ DATA = os.path.join(REPO, "data")
 CSV_PATH = os.path.join(DATA, "anthropic-traffic.csv")
 SEEN_PATH = os.path.join(DATA, "anthropic-traffic-seen.json")
 CHECKED_PATH = os.path.join(DATA, "anthropic-traffic-checked.json")
+# {hash: first day the hook checked something on it}, kept 45 days (from 2026-11-12).
+FIRST_CHECKED_PATH = os.path.join(DATA, "anthropic-traffic-first-checked.json")
+# {hash: last day it connected from Anthropic's cloud (a remote* entrypoint)}, 30 days.
+CLOUD_PATH = os.path.join(DATA, "anthropic-traffic-cloud.json")
+FIRST_CHECKED_WINDOW_DAYS = 45
 SALT_PATH = os.path.join(DATA, ".anthropic-traffic-salt")
 OWNER_PATH = os.path.join(DATA, "owner-ips.txt")
 NGINX_CONTAINER = "agentgraph-nginx-1"
@@ -79,7 +84,39 @@ COLUMNS = [
     "calls_codex", "callers_codex",
     "checks_claude", "checks_claude_code", "checks_chatgpt", "checks_cursor",
     "checks_vscode", "checks_codex", "checks_other", "checks_total",
+    # Added with PR 2 (2026-11). Claude Code machines and checked machines that day by
+    # the entrypoint in the claude-code/<v> (<entrypoint>, ...) User-Agent: desktop,
+    # cli (terminal and IDE extensions), sdk, cloud (Anthropic-hosted remote sessions)
+    # and other. A machine using two entrypoints that day counts in both.
+    "cc_machines_desktop", "cc_machines_cli", "cc_machines_sdk", "cc_machines_cloud",
+    "cc_machines_other",
+    "checked_machines_desktop", "checked_machines_cli", "checked_machines_sdk",
+    "checked_machines_cloud", "checked_machines_other",
+    # The 7-day counts with machines seen on a cloud entrypoint in the last 30 days
+    # taken out: the honest "protected machines" (cloud egress IPs are shared).
+    "cc_machines_7d_excl_cloud", "checked_machines_7d_excl_cloud",
+    # New machines that see a verdict: first seen today and checked today; and of the
+    # D7 cohort (first seen 7 days ago), how many were checked within 6 days of it.
+    "new_checked_same_day", "d7_cohort_checked",
 ]
+
+ENTRYPOINT_GROUPS = ("desktop", "cli", "sdk", "cloud", "other")
+
+
+def entrypoint_group(ua: str) -> str:
+    """Group a claude-code/<v> (<entrypoint>, ...) User-Agent by its entrypoint."""
+    inner = ua.split("(", 1)[1] if "(" in ua else ""
+    ep = inner.split(",", 1)[0].split(")", 1)[0].strip().lower()
+    if ep.startswith("remote"):
+        return "cloud"
+    if ep in ("claude-desktop", "local-agent") or ep.startswith("desktop"):
+        return "desktop"
+    if ep.startswith("sdk"):
+        return "sdk"
+    if ep == "cli" or ep.startswith("claude-vscode") or ep.startswith("claude-jetbrains") \
+            or "ide" in ep:
+        return "cli"
+    return "other"
 
 
 # The session-start counter went live mid-day on 2026-10-21 (prod 24acd935); its first
@@ -214,6 +251,47 @@ def _reach_fields(seen: dict[str, list[str]], checked_last: dict[str, str],
     return fields
 
 
+def _load_json(path: str) -> dict:
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _rolling(entries: dict, day: str, window_days: int) -> dict:
+    """Keep {hash: YYYY-MM-DD} entries no older than ``window_days`` before ``day``."""
+    cutoff = (datetime.strptime(day, "%Y-%m-%d") - timedelta(days=window_days)).strftime(
+        "%Y-%m-%d")
+    return {h: d for h, d in entries.items() if isinstance(d, str) and d >= cutoff}
+
+
+def _activation_fields(seen: dict[str, list[str]], checked_last: dict[str, str],
+                       first_checked: dict[str, str], cloud: set[str], today: set[str],
+                       checked_today: set[str], day: str, owner: set[str]) -> dict:
+    """Cloud-excluded 7-day counts and the share of new machines that see a verdict."""
+    date = datetime.strptime(day, "%Y-%m-%d")
+
+    def ago(n: int) -> str:
+        return (date - timedelta(days=n)).strftime("%Y-%m-%d")
+
+    start = ago(6)
+    skip = owner | cloud
+    cohort = {h for h, v in seen.items() if v[0] == ago(7) and h not in owner}
+    return {
+        "cc_machines_7d_excl_cloud": sum(
+            1 for h, v in seen.items() if v[1] >= start and h not in skip),
+        "checked_machines_7d_excl_cloud": sum(
+            1 for h, v in checked_last.items() if v >= start and h not in skip),
+        "new_checked_same_day": len(
+            {h for h in today if seen.get(h, [None])[0] == day and h not in owner}
+            & checked_today),
+        "d7_cohort_checked": sum(
+            1 for h in cohort if h in first_checked and first_checked[h] <= ago(1)),
+    }
+
+
 def _load_checked() -> dict:
     try:
         with open(CHECKED_PATH) as fh:
@@ -235,6 +313,7 @@ def snapshot(day: str, since_hours: int) -> dict:
     owner = _owner_ips()
     salt = _salt()
     cc_ips: set[str] = set()
+    ep_ips: dict[str, set[str]] = {g: set() for g in ENTRYPOINT_GROUPS}
     hook_ips: set[str] = set()
     cai_ips: set[str] = set()
     gate_ips: set[str] = set()
@@ -259,6 +338,7 @@ def snapshot(day: str, since_hours: int) -> dict:
         is_owner = ip in owner
         if "POST /mcp" in req and ua.startswith("claude-code/"):
             cc_ips.add(ip)
+            ep_ips[entrypoint_group(ua)].add(ip)
             n["cc_reqs"] += 1
             if st == 400:
                 n["cc_sessions"] += 1
@@ -315,13 +395,30 @@ def snapshot(day: str, since_hours: int) -> dict:
     for ip in hook_ips | pre_ips:
         h = machine(ip)
         checked_last[h] = max(checked_last.get(h, day), day)
-    reach = _reach_fields(seen, checked_last, {machine(ip) for ip in cc_ips}, day,
-                          {machine(ip) for ip in owner})
+    owner_h = {machine(ip) for ip in owner}
+    today_h = {machine(ip) for ip in cc_ips}
+    checked_today_h = {machine(ip) for ip in hook_ips | pre_ips}
+    reach = _reach_fields(seen, checked_last, today_h, day, owner_h)
+    cloud = _rolling(_load_json(CLOUD_PATH), day, SEEN_WINDOW_DAYS)
+    for ip in ep_ips["cloud"]:
+        cloud[machine(ip)] = day
+    first_checked = _rolling(_load_json(FIRST_CHECKED_PATH), day, FIRST_CHECKED_WINDOW_DAYS)
+    for h in checked_today_h:
+        first_checked[h] = min(first_checked.get(h, day), day)
+    activation = _activation_fields(
+        seen, checked_last, first_checked, set(cloud), today_h, checked_today_h, day, owner_h)
+    for g in ENTRYPOINT_GROUPS:
+        activation[f"cc_machines_{g}"] = len(ep_ips[g] - owner)
+        activation[f"checked_machines_{g}"] = len((ep_ips[g] & (hook_ips | pre_ips)) - owner)
     os.makedirs(DATA, exist_ok=True)
     with open(SEEN_PATH, "w") as fh:
         json.dump(seen, fh)
     with open(CHECKED_PATH, "w") as fh:
         json.dump(checked_last, fh)
+    with open(CLOUD_PATH, "w") as fh:
+        json.dump(cloud, fh)
+    with open(FIRST_CHECKED_PATH, "w") as fh:
+        json.dump(first_checked, fh)
 
     row = {
         "day": day,
@@ -341,6 +438,7 @@ def snapshot(day: str, since_hours: int) -> dict:
         "preinstall_reqs": n["preinstall_reqs"],
         "log_complete": int(bool(hours_seen) and min(hours_seen) == 0 and max(hours_seen) == 23),
         **reach,
+        **activation,
     }
     # Redis names the surface "claude-code"; the CSV column is calls_claude_code.
     rc = _redis_counts(day)
