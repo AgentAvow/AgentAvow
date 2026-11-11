@@ -10,6 +10,10 @@ https://agentavow.com/<key>.txt, served from web/public/<key>.txt.
 --changed-only  ping only URLs whose <lastmod> differs from the last successful ping
                 (kept in --state). With no state yet, every URL is sent.
 
+--result PATH   also write the outcome as JSON (when, outcome, URLs submitted, HTTP
+                status) for scripts/deploy-prod.sh to store on prod, where the admin
+                dashboard shows the last runs (src/indexnow_record.py).
+
 This never fails a deploy: every outcome, including errors, is one line of output and
 exit status 0.
 """
@@ -22,6 +26,7 @@ import sys
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -82,12 +87,20 @@ def post(payload: dict) -> int:
         return response.status
 
 
-def run(argv: list[str] | None = None) -> str:
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--changed-only", action="store_true")
     parser.add_argument("--state", type=Path, default=DEFAULT_STATE)
     parser.add_argument("--dry-run", action="store_true", help="print the payload, send nothing")
-    args = parser.parse_args(argv)
+    parser.add_argument("--result", type=Path, help="write the outcome here as JSON")
+    return parser
+
+
+def run(argv: list[str] | None = None, result: dict | None = None) -> str:
+    """Ping and return the one output line. ``result``, when given, is filled with the
+    outcome, the URLs submitted and the HTTP status."""
+    result = {} if result is None else result
+    args = _parser().parse_args(argv)
 
     key = find_key()
     current = read_sitemap(SITEMAP.read_text())
@@ -96,27 +109,41 @@ def run(argv: list[str] | None = None) -> str:
         previous = json.loads(args.state.read_text())
     urls = changed(current, previous) if args.changed_only else list(current)
     if not urls:
+        result.update(outcome="nothing_changed", submitted=0)
         return "indexnow: no changed URLs, nothing sent"
     payload = build_payload(key, urls)
     if args.dry_run:
         return f"indexnow: dry run, would send {json.dumps(payload)}"
 
+    result["submitted"] = len(urls)
     status = post(payload)
+    result["status"] = status
     # 200 OK and 202 Accepted (key not yet verified) both mean the URLs were taken.
     if status in (200, 202):
+        result["outcome"] = "sent"
         args.state.parent.mkdir(parents=True, exist_ok=True)
         args.state.write_text(json.dumps(current, indent=1))
         return f"indexnow: sent {len(urls)} URL(s), HTTP {status}"
+    result["outcome"] = "not_confirmed"
     return f"indexnow: HTTP {status}, {len(urls)} URL(s) not confirmed"
 
 
 def main(argv: list[str] | None = None) -> int:
+    result: dict = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     try:
-        line = run(argv)
+        line = run(argv, result)
     except urllib.error.HTTPError as err:
+        result.update(outcome="http_error", status=err.code)
         line = f"indexnow: HTTP {err.code} ({err.reason}), skipped"
     except Exception as err:  # noqa: BLE001 - a ping must never fail the deploy
+        result["outcome"] = "skipped"
         line = f"indexnow: skipped ({type(err).__name__}: {err})"
+    try:
+        path = _parser().parse_known_args(argv)[0].result
+        if path and "outcome" in result:  # a dry run has nothing to record
+            path.write_text(json.dumps(result))
+    except Exception:  # noqa: BLE001, S110 - the record is best-effort, like the ping
+        pass
     print(" ".join(line.split()))
     return 0
 

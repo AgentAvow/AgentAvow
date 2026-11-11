@@ -186,6 +186,18 @@ export function trackPluginCommandCopy(): void {
   }
 }
 
+/** The pages that report their own actions (page views come from the layout's guest_page_view). */
+export type ActionArea = 'browse' | 'trust_index' | 'certified' | 'preflight' | 'dev'
+
+/**
+ * A main action on one of the catalog / developer pages, sent as `page_action` with intent
+ * `<area>:<action>` (the server checks the shape). Never pass what someone typed: a search or
+ * a checked target stays out of analytics.
+ */
+export function trackPageAction(area: ActionArea, action: string): void {
+  trackEvent('page_action', currentPath(), `${area}:${action}`)
+}
+
 /** The CTA a link to one of our assistant listings counts as, if it is one. */
 export function listingCta(href: string): CtaDestination | null {
   if (href.startsWith('https://claude.ai/directory/connectors/agentavow')) return 'add_claude'

@@ -10,6 +10,7 @@ import { RevealStagger } from '../components/motion'
 import { useAnswerMix, type AnswerMix } from '../lib/answerMix'
 import { PageHeader } from '../components/PageBits'
 import SEOHead from '../../components/SEOHead'
+import { trackPageAction } from '../../lib/analytics'
 
 /**
  * The "Yelp" browse catalog — LIVE from /public/scan-catalog.
@@ -227,7 +228,7 @@ function ToolCard({ row }: { row: CatalogRow }) {
       <button
         type="button"
         aria-expanded={open}
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(!open) }}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (!open) trackPageAction('browse', 'why_score'); setOpen(!open) }}
         className="relative z-10 mt-3 text-[12.5px] text-primary-light hover:text-primary"
       >
         {open ? 'Hide' : 'Why this score'} {open ? '▴' : '▾'}
@@ -241,13 +242,19 @@ function ToolCard({ row }: { row: CatalogRow }) {
       )}
       {href && (
         <div className="mt-3">
-          <Link to={href} className="text-[12.5px] font-semibold text-primary-light hover:text-primary focus-visible:outline-none after:absolute after:inset-0 after:rounded-xl after:content-['']">
+          <Link to={href} onClick={() => trackPageAction('browse', 'open_tool')} className="text-[12.5px] font-semibold text-primary-light hover:text-primary focus-visible:outline-none after:absolute after:inset-0 after:rounded-xl after:content-['']">
             {row.trust_score != null ? 'See report & install →' : 'View →'}
           </Link>
         </div>
       )}
     </div>
   )
+}
+
+/** The page_action each Browse URL parameter counts as when it is set (see patch). */
+const BROWSE_ACTION: Record<string, string> = {
+  q: 'search', surface: 'filter_kind', dec: 'filter_answer', grade: 'filter_score',
+  sev: 'filter_findings', cat: 'filter_category', sort: 'sort',
 }
 
 /** Pill look for the one filter row: teal outline when selected. */
@@ -282,6 +289,7 @@ function CatalogGraphic({ mix, decision, certifiedOn, onDecision, onCertified, r
   // The whole panel opens the Trust Index; its own filters and links keep working.
   const openIndex = (e: { target: EventTarget }) => {
     if ((e.target as HTMLElement).closest('a,button')) return
+    trackPageAction('browse', 'open_index')
     navigate(rp('/rebrand/index'))
   }
   return (
@@ -332,13 +340,13 @@ function CatalogGraphic({ mix, decision, certifiedOn, onDecision, onCertified, r
                   return (
                     <span key={`${it.surface}:${it.name}`}>
                       {i > 0 && ' · '}
-                      {it.href ? <Link to={it.href} className="hover:text-text">{label}</Link> : label}
+                      {it.href ? <Link to={it.href} onClick={() => trackPageAction('browse', 'open_recent')} className="hover:text-text">{label}</Link> : label}
                     </span>
                   )
                 })
               : '—'}
           </span>
-          <Link to={rp('/rebrand/index')} className="mt-0.5 text-[12.5px] font-semibold text-primary-light hover:text-primary">See the full Trust Index →</Link>
+          <Link to={rp('/rebrand/index')} onClick={() => trackPageAction('browse', 'open_index')} className="mt-0.5 text-[12.5px] font-semibold text-primary-light hover:text-primary">See the full Trust Index →</Link>
         </div>
       </div>
     </div>
@@ -371,6 +379,9 @@ export default function RebrandBrowse() {
   // history entries — one Back from a tool returns to the last filtered Browse view.
   // Any change other than `page` resets to page 0.
   const patch = (changes: Record<string, string>, opts?: { push?: boolean }) => {
+    // Count the search or filter that was set (never the search text); clearing one is not counted.
+    const key = Object.keys(changes).find((k) => k !== 'page')
+    if (key && changes[key] && BROWSE_ACTION[key]) trackPageAction('browse', BROWSE_ACTION[key])
     const next = new URLSearchParams(sp)
     if (!('page' in changes)) next.delete('page')
     for (const [k, v] of Object.entries(changes)) {

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, literal_column, select
+from sqlalchemy import and_, case, func, literal_column, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,6 +51,19 @@ ALLOWED_EVENT_TYPES = {
     "cta_click",
     "badge_copied",
     "contact_submit",
+    "page_action",
+}
+
+# A page_action carries `<area>:<action>` in `intent` (web/src/lib/analytics.ts,
+# trackPageAction): the main actions on the catalog and developer pages.
+PAGE_ACTION_AREAS = ("browse", "trust_index", "certified", "preflight", "dev")
+_PAGE_ACTION_RE = re.compile(r"^(?:" + "|".join(PAGE_ACTION_AREAS) + r"):[a-z0-9_]{1,32}$")
+
+# The pages whose views and actions the page-actions view reports, by area. The live site
+# serves them at the root; before cutover they sit under /rebrand.
+PAGE_ACTION_PATHS = {
+    "/browse": "browse", "/index": "trust_index", "/certified": "certified",
+    "/preflight": "preflight", "/for-developers": "dev",
 }
 
 # A cta_click carries its destination in `intent`.
@@ -61,6 +75,11 @@ UTM_MAX_LENGTH = 200
 CAMPAIGN_EVENT_TYPES = {
     "lp_view", "check_submit", "result_view", "cta_click", "badge_copied", "contact_submit",
 }
+
+# A session counts as paid when its first-touch tags say so. The same sets the site uses
+# for the bare paid landing layout (web/src/rebrand/RebrandLayout.tsx, isPaidArrival).
+PAID_MEDIUMS = ("paid-social", "paid", "cpc", "ppc", "display")
+PAID_SOURCES = ("reddit", "meta", "facebook", "instagram")
 
 FUNNEL_ORDER = [
     "guest_page_view",
@@ -105,6 +124,17 @@ class ConversionSummary(BaseModel):
 class DailyConversion(BaseModel):
     period_days: int
     daily: list[dict]
+    # Per day: distinct sessions that landed (lp_view) and that copied the plugin command,
+    # each also split out for sessions whose first touch was paid (see _paid_first_touch).
+    landing: list[dict] = Field(default_factory=list)
+
+
+class PageActivity(BaseModel):
+    """Distinct sessions per area: page views, and each main action on the page."""
+
+    period_days: int
+    views: dict[str, int]
+    actions: dict[str, int]
 
 
 class UtmFunnelStep(BaseModel):
@@ -207,6 +237,11 @@ async def track_event(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Invalid destination. Must be one of: {', '.join(sorted(CTA_DESTINATIONS))}",
+        )
+    if body.event_type == "page_action" and not _PAGE_ACTION_RE.match(body.intent or ""):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid page action. Must be '<area>:<action>' for a known area.",
         )
 
     event = AnalyticsEvent(
@@ -388,7 +423,59 @@ async def get_daily_conversion(
         for date, counts in sorted(daily_map.items())
     ]
 
-    return DailyConversion(period_days=days, daily=daily)
+    return DailyConversion(
+        period_days=days, daily=daily, landing=await _daily_landing(db, cutoff, day_col),
+    )
+
+
+def _paid_first_touch():
+    """True when the session's first-touch tags mark a paid arrival; NULL (not paid) when
+    the session has no first touch."""
+    return or_(
+        func.lower(AnalyticsFirstTouch.utm_medium).in_(PAID_MEDIUMS),
+        func.lower(AnalyticsFirstTouch.utm_source).in_(PAID_SOURCES),
+    )
+
+
+async def _daily_landing(db: AsyncSession, cutoff: datetime, day_col) -> list[dict]:
+    """Per UTC day: distinct sessions with lp_view and with a copy_plugin_cmd click, total
+    and paid. One row per day that had either, oldest first."""
+    step = case((AnalyticsEvent.event_type == "lp_view", "lp_view"), else_="copy_plugin_cmd")
+    paid = func.coalesce(_paid_first_touch(), False)
+    rows = await db.execute(
+        select(
+            day_col.label("day"), step.label("step"), paid.label("paid"),
+            func.count(func.distinct(AnalyticsEvent.session_id)),
+        )
+        .select_from(AnalyticsEvent)
+        .outerjoin(
+            AnalyticsFirstTouch, AnalyticsFirstTouch.session_id == AnalyticsEvent.session_id,
+        )
+        .where(
+            AnalyticsEvent.created_at >= cutoff,
+            _NOT_BOT,
+            or_(
+                AnalyticsEvent.event_type == "lp_view",
+                and_(
+                    AnalyticsEvent.event_type == "cta_click",
+                    AnalyticsEvent.intent == "copy_plugin_cmd",
+                ),
+            ),
+        )
+        # By position: the CASE and the paid test carry bound parameters, which Postgres
+        # would not match between the select list and a repeated GROUP BY expression.
+        .group_by(literal_column("1"), literal_column("2"), literal_column("3"))
+    )
+    by_day: dict[str, dict[str, int]] = {}
+    for day, step_name, is_paid, count in rows.all():
+        counts = by_day.setdefault(
+            day.isoformat()[:10],
+            {"lp_view": 0, "lp_view_paid": 0, "copy_plugin_cmd": 0, "copy_plugin_cmd_paid": 0},
+        )
+        counts[step_name] += count
+        if is_paid:
+            counts[f"{step_name}_paid"] += count
+    return [{"date": d, **c} for d, c in sorted(by_day.items())]
 
 
 @router.get(
@@ -539,6 +626,50 @@ async def campaign_rows(db: AsyncSession, days: int) -> list[CampaignRow]:
         setattr(row, step, getattr(row, step) + count)
 
     return sorted(rows.values(), key=lambda row: row.sessions, reverse=True)
+
+
+@router.get(
+    "/page-actions",
+    response_model=PageActivity,
+    dependencies=[Depends(rate_limit_reads)],
+)
+async def get_page_actions(
+    days: int = Query(30, ge=1, le=90),
+    current_entity: Entity = Depends(get_current_entity),
+    db: AsyncSession = Depends(get_db),
+):
+    """Browse, Trust Index, Certified, Preflight and For developers: sessions that viewed
+    each page (guest_page_view) and that took each main action (page_action, by intent).
+    Bots left out. Admin only."""
+    require_admin(current_entity)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    sessions = func.count(func.distinct(AnalyticsEvent.session_id))
+    pages = list(PAGE_ACTION_PATHS) + [f"/rebrand{p}" for p in PAGE_ACTION_PATHS]
+
+    views = dict.fromkeys(PAGE_ACTION_AREAS, 0)
+    rows = await db.execute(
+        select(AnalyticsEvent.page, sessions)
+        .where(
+            AnalyticsEvent.created_at >= cutoff, _NOT_BOT,
+            AnalyticsEvent.event_type == "guest_page_view",
+            AnalyticsEvent.page.in_(pages),
+        )
+        .group_by(AnalyticsEvent.page)
+    )
+    for page, count in rows.all():
+        views[PAGE_ACTION_PATHS[page.removeprefix("/rebrand")]] += count
+
+    rows = await db.execute(
+        select(AnalyticsEvent.intent, sessions)
+        .where(
+            AnalyticsEvent.created_at >= cutoff, _NOT_BOT,
+            AnalyticsEvent.event_type == "page_action",
+        )
+        .group_by(AnalyticsEvent.intent)
+        .order_by(sessions.desc())
+    )
+    actions = {intent: count for intent, count in rows.all() if intent}
+    return PageActivity(period_days=days, views=views, actions=actions)
 
 
 # --- Interaction Analytics ---

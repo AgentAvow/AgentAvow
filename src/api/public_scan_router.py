@@ -4318,8 +4318,12 @@ async def scan_adoption_surface(
     return out
 
 
+# The clients a one-click install deeplink opens. Each has its own counter, and each
+# also bumps "install_click" so the total keeps its meaning across the change.
+INSTALL_CLIENTS = ("cursor", "vscode", "goose")
+
 _BEACON_EVENTS = {
-    "install_click", "install_cursor", "install_vscode", "install_goose",
+    "install_click", *(f"install_{c}" for c in INSTALL_CLIENTS),
     "install_copy", "badge_copy",
 }
 
@@ -4332,6 +4336,8 @@ async def metric_beacon(event: str) -> dict:
         try:
             from src.api.metrics_dashboard_router import bump_metric
             await bump_metric(event)
+            if event.removeprefix("install_") in INSTALL_CLIENTS:
+                await bump_metric("install_click")
         except Exception:
             pass
     return {"ok": True}
