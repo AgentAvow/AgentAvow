@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Helmet } from 'react-helmet-async'
 import { rp } from './basePath'
@@ -139,9 +139,12 @@ function AccountMenu() {
 
 /**
  * Animated wordmark — on hover the outer ring sweeps and the checkmark redraws.
- * `id` keeps the gradient/def ids unique between the header and footer instances.
+ * useId keeps the gradient id unique per instance (header, footer).
  */
-function Wordmark({ id = 'hdr' }: { id?: string }) {
+function Wordmark() {
+  // A per-instance gradient id, plus a teal fallback paint, so a failed gradient
+  // reference can never leave only the small inner ring on a phone.
+  const id = useId().replace(/[^a-zA-Z0-9_-]/g, '')
   const reduce = useReducedMotion()
   // Phones and tablets have no hover, and iOS Safari can draw the animated check
   // half-finished (pathLength dash bug), so touch devices get the static mark.
@@ -151,7 +154,7 @@ function Wordmark({ id = 'hdr' }: { id?: string }) {
     try { setCanHover(window.matchMedia('(hover: hover) and (pointer: fine)').matches) } catch { /* static */ }
   }, [])
   const animate = canHover && !reduce
-  const ring = <circle cx="12" cy="12" r="9.3" stroke={`url(#av-g-${id})`} strokeWidth="1.7" />
+  const ring = <circle cx="12" cy="12" r="9.3" stroke={`url(#av-g-${id}) #2DD4BF`} strokeWidth="1.7" />
   const check = <path d="M8.6 12.2l2.3 2.3 4.6-4.9" stroke="var(--color-primary-light)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
   return (
     <motion.span
@@ -160,10 +163,10 @@ function Wordmark({ id = 'hdr' }: { id?: string }) {
       whileHover={animate ? 'hover' : undefined}
       animate="rest"
     >
-      <svg viewBox="0 0 24 24" fill="none" className="w-7 h-7 md:w-6 md:h-6" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" className="shrink-0 w-7 h-7 md:w-6 md:h-6" aria-hidden="true">
         {animate ? (
           <motion.circle
-            cx="12" cy="12" r="9.3" stroke={`url(#av-g-${id})`} strokeWidth="1.7"
+            cx="12" cy="12" r="9.3" stroke={`url(#av-g-${id}) #2DD4BF`} strokeWidth="1.7"
             style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
             variants={{ rest: { scale: 1 }, hover: { scale: [1, 1.09, 1] } }}
             transition={{ duration: 0.5, ease: 'easeInOut' }}
@@ -275,8 +278,8 @@ const SOCIAL: [string, string, string][] = [
 type FooterLink = [label: string, to: string]
 
 const FOOTER: [heading: string, links: FooterLink[]][] = [
-  ['Check', [['Browse', '/rebrand/browse'], ['Trust Index', '/rebrand/index'], ['Certified', '/rebrand/certified'], ['API sandbox', '/rebrand/sandbox']]],
-  ['Build', [['For developers', '/rebrand/for-developers'], ['Badges', '/rebrand/for-developers#badge'], ['Check a private repo', '/rebrand/for-developers#private'], ['Preflight', '/rebrand/preflight'], ['API', '/api/v1/redoc'], ['Verify keys', '/.well-known/jwks.json']]],
+  ['Explore', [['Browse', '/rebrand/browse'], ['Trust Index', '/rebrand/index'], ['Certified', '/rebrand/certified'], ['API sandbox', '/rebrand/sandbox']]],
+  ['Build', [['For developers', '/rebrand/for-developers'], ['Badges', '/rebrand/for-developers#badge'], ['Check a private repo', '/rebrand/for-developers#private'], ['Preflight', '/rebrand/preflight'], ['API', '/api/v1/redoc'], ['Verify a result', '/rebrand/docs/verify-attestations'], ['Verify keys', '/.well-known/jwks.json']]],
   ['About', [['How it works', '/rebrand/how-it-works'], ['Research', '/rebrand/research'], ['FAQ', '/rebrand/faq'], ['Community', '/feed'], ['Feedback', 'https://github.com/AgentAvow/AgentAvow/issues/new'], ['Terms', '/rebrand/legal/terms'], ['Privacy', '/rebrand/legal/privacy']]],
 ]
 
@@ -297,7 +300,7 @@ function SiteFooter() {
     <footer className="relative z-10 bg-background border-t border-border/60 mt-8">
       <div className="max-w-[1080px] mx-auto px-6 py-10 grid gap-8 grid-cols-2 md:grid-cols-[minmax(0,1.6fr)_repeat(3,minmax(0,1fr))]">
         <div className="col-span-2 md:col-span-1 min-w-0">
-          <Link to={rp('/rebrand')} aria-label="AgentAvow home" className="inline-block"><Wordmark id="ftr" /></Link>
+          <Link to={rp('/rebrand')} aria-label="AgentAvow home" className="inline-block"><Wordmark /></Link>
           <p className="mt-3 font-mono text-[12px] text-text-muted/70">
             A trust score you can verify · © {new Date().getFullYear()} AgentAvow
           </p>

@@ -234,7 +234,7 @@ export default function RebrandTrustIndex() {
       <PageHeader
         eyebrow="Trust Index"
         title={<>The state of <span className="gradient-text-bio">agent tool</span> safety.</>}
-        lede={<>An independent, <b className="font-medium text-text">signed</b> index of the tools, MCP servers, and packages AI agents connect to — checked from the outside, no repo access, verifiable offline. Not the agent you build; the things it trusts.</>}
+        lede={<>An independent index of <b className="font-medium text-text">signed answers</b> for the tools, MCP servers, and packages AI agents connect to — checked from the outside, no repo access, verifiable offline. Not the agent you build; the things it trusts.</>}
       />
       <div className="relative z-[2] max-w-[1080px] mx-auto px-6 pb-[60px]">
       {/* how the catalog reads: the answer mix and the counts under it, all live */}

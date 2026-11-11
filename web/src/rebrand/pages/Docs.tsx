@@ -116,10 +116,38 @@ export default function RebrandDocs() {
     else window.scrollTo({ top: 0 })
   }, [doc.slug, hash])
 
+  const moreLinks = (
+    <>
+      <Eyebrow className="!text-text-muted mt-6 mb-2">More</Eyebrow>
+      <nav className="flex flex-col gap-1">
+        {MORE.map(([label, href]) => (
+          href.startsWith('/api') || href.startsWith('http')
+            ? <a key={label} href={href} target="_blank" rel="noopener noreferrer" className="text-[13.5px] px-3 py-1.5 text-text-muted hover:text-primary-light">{label} ↗</a>
+            : href.startsWith('/ext/')
+            ? <a key={label} href={href} className="text-[13.5px] px-3 py-1.5 text-text-muted hover:text-primary-light">{label}</a>
+            : <Link key={label} to={rp(href)} className="text-[13.5px] px-3 py-1.5 text-text-muted hover:text-primary-light">{label}</Link>
+        ))}
+      </nav>
+    </>
+  )
+
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-14 grid md:grid-cols-[220px_1fr] gap-10">
       <SEOHead title={`${doc.title} · Docs`} description={doc.blurb} path={`/docs/${doc.slug}`} />
-      <aside className="md:sticky md:top-[86px] self-start">
+      {/* Phones: one compact picker instead of a stack of nine buttons above the doc. */}
+      <div className="md:hidden">
+        <Eyebrow className="mb-2">Docs</Eyebrow>
+        <label className="sr-only" htmlFor="doc-picker">Choose a doc</label>
+        <select
+          id="doc-picker"
+          value={active}
+          onChange={(e) => setActive(e.target.value)}
+          className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-[15px] text-text"
+        >
+          {DOCS.map((d) => <option key={d.slug} value={d.slug}>{d.title}</option>)}
+        </select>
+      </div>
+      <aside className="hidden md:block md:sticky md:top-[86px] self-start">
         <Eyebrow className="mb-3">Docs</Eyebrow>
         <nav className="flex flex-col gap-1">
           {DOCS.map((d) => (
@@ -134,16 +162,7 @@ export default function RebrandDocs() {
             </button>
           ))}
         </nav>
-        <Eyebrow className="!text-text-muted mt-6 mb-2">More</Eyebrow>
-        <nav className="flex flex-col gap-1">
-          {MORE.map(([label, href]) => (
-            href.startsWith('/api') || href.startsWith('http')
-              ? <a key={label} href={href} target="_blank" rel="noopener noreferrer" className="text-[13.5px] px-3 py-1.5 text-text-muted hover:text-primary-light">{label} ↗</a>
-              : href.startsWith('/ext/')
-              ? <a key={label} href={href} className="text-[13.5px] px-3 py-1.5 text-text-muted hover:text-primary-light">{label}</a>
-              : <Link key={label} to={rp(href)} className="text-[13.5px] px-3 py-1.5 text-text-muted hover:text-primary-light">{label}</Link>
-          ))}
-        </nav>
+        {moreLinks}
       </aside>
 
       <article onCopy={trackPluginCommandCopy} className={`min-w-0 ${PROSE}`}>
@@ -171,6 +190,7 @@ export default function RebrandDocs() {
           },
         }}>{doc.body}</Markdown>
       </article>
+      <div className="md:hidden border-t border-border/60 pt-4">{moreLinks}</div>
     </div>
   )
 }

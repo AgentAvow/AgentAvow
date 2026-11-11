@@ -841,7 +841,7 @@ async def publish_private_report(
     _: None = Depends(rate_limit_writes),
 ):
     """Owner opt-in: publish a connected private repo's stored grade to the public
-    catalog + search. Unlike the one-time /private-scan/publish (which re-scans
+    catalog + search. Unlike a one-time token check (which keeps nothing and re-scans
     with a token), this publishes the ALREADY-STORED App scan result — no token
     needed. Makes the repo's grade + name public; the owner's explicit choice."""
     row = (
@@ -948,53 +948,3 @@ async def private_scan(
     except Exception:
         pass
     return {"repo": full_name, "private": True, **data}
-
-
-@router.post("/private-scan/publish")
-async def publish_private_scan(
-    body: PrivateScanRequest,
-    entity: Entity = Depends(get_current_entity),
-    db: AsyncSession = Depends(get_db),
-    _: None = Depends(rate_limit_scans),
-):
-    """Owner-gated opt-in: publish a private repo's grade to the public catalog + search.
-
-    Private scans (POST /account/private-scan) deliberately never reach the public
-    catalog. This endpoint lets the repo owner choose to make a private repo's grade
-    public and searchable. The supplied GitHub ``token`` proving read access to the
-    repo IS the authorization — a private repo can't be topic-claimed (our PAT can't
-    read its topics), so access-via-token is the ownership proof.
-
-    Re-scans the repo with the token (transient — never stored or logged, matching the
-    private_scan guarantees), then upserts the result into CommunityScan so it appears
-    in the browse catalog and global search. On scan failure / no access → 502/404.
-    """
-    if not _valid_repo(body.owner, body.repo):
-        raise HTTPException(status_code=400, detail="Invalid owner/repo")
-    full_name = f"{body.owner}/{body.repo}"
-    try:
-        from src.api.public_scan_router import (
-            _capture_community_scan,
-            _grade_from_score,
-            _scan_result_to_dict,
-        )
-        from src.scanner.scan import scan_repo
-
-        result = await scan_repo(full_name, token=body.token)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Scan failed: {e}") from e
-    if result.error:
-        raise HTTPException(
-            status_code=404 if "not found" in (result.error or "").lower() else 502,
-            detail=f"Scan error: {result.error}",
-        )
-    data = _scan_result_to_dict(result)
-    # Upsert into CommunityScan — the SAME upsert public_scan_router uses — so the
-    # owner-published grade grows the catalog + search dataset (latest scan wins).
-    await _capture_community_scan(body.owner, body.repo, data, db)
-    return {
-        "published": True,
-        "full_name": full_name,
-        "trust_score": data["trust_score"],
-        "grade": _grade_from_score(data["trust_score"]),
-    }
