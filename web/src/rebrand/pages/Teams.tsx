@@ -37,7 +37,7 @@ const STANDARDS: [string, React.ReactNode][] = [
   ['MCP Registry', <>Our own server is listed in the <a href="https://registry.modelcontextprotocol.io/v0/servers?search=agentavow" target="_blank" rel="noopener noreferrer" className="text-primary-light hover:underline">official MCP Registry</a>.</>],
 ]
 
-const X402_FALLBACK = 26302
+const X402_FALLBACK = 33067
 
 const h2 = 'text-[clamp(25px,3.4vw,33px)] font-bold tracking-tight leading-tight'
 const section = 'relative z-[2] py-[60px] border-t border-border/60'
@@ -77,10 +77,11 @@ function TalkForm() {
 export default function RebrandTeams() {
   const { data: x402 } = useQuery({
     queryKey: ['rebrand-catalog', 'teams-x402'],
-    queryFn: async () => (await api.get<{ summary?: { x402_endpoints_total?: number } }>('/public/scan-catalog', { params: { limit: 1 } })).data,
+    queryFn: async () => (await api.get<{ summary?: { x402_scored?: number; x402_endpoints_total?: number } }>('/public/scan-catalog', { params: { limit: 1 } })).data,
     staleTime: 3_600_000,
   })
-  const x402Total = x402?.summary?.x402_endpoints_total ?? X402_FALLBACK
+  // Listings scored (summary.x402_scored, #312); before that field ships, listings read.
+  const x402Total = x402?.summary?.x402_scored || x402?.summary?.x402_endpoints_total || X402_FALLBACK
 
   return (
     <div>
@@ -182,7 +183,8 @@ export default function RebrandTeams() {
             </div>
             <div className="glass rounded-2xl border border-border/60 p-[22px] flex flex-col gap-[9px]">
               <h3 className="text-[19px] font-bold">x402</h3>
-              <p className="text-text-muted text-[14.5px]"><span className="tabular-nums">{x402Total.toLocaleString('en-US')}</span> x402 payment endpoints indexed, and a wallet address resolves to the tool it&apos;s linked to.</p>
+              <p className="text-text-muted text-[14.5px]"><span className="tabular-nums">{x402Total.toLocaleString('en-US')}</span> x402 paid endpoints scored from their public listings (the endpoint&apos;s code isn&apos;t visible), and a wallet address resolves to the tool it&apos;s linked to.</p>
+              <Link to={rp('/rebrand/docs/x402')} className="mt-auto text-[13.5px] font-semibold text-primary-light hover:underline">How we check x402 →</Link>
             </div>
           </div>
         </div>
