@@ -17,10 +17,24 @@ async def client(db):
 
     app.dependency_overrides[get_db] = override_get_db
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    # A real browser string: the funnel leaves out events whose UA class is "bot",
+    # and httpx's default ("python-httpx/…") is one.
+    async with AsyncClient(
+        transport=transport, base_url="http://test", headers={"User-Agent": BROWSER_UA},
+    ) as ac:
         yield ac
     app.dependency_overrides.clear()
 
+
+BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+BOT_UA = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+HEADLESS_UA = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "HeadlessChrome/131.0.0.0 Safari/537.36"
+)
 
 REGISTER_URL = "/api/v1/auth/register"
 LOGIN_URL = "/api/v1/auth/login"
@@ -316,10 +330,11 @@ def test_track_event_uses_its_own_rate_limit_bucket():
 # --- First-party tracking events and first touch ---
 
 
-async def _send(client: AsyncClient, event_type: str, session_id: str, **extra):
+async def _send(client: AsyncClient, event_type: str, session_id: str, ua: str | None = None,
+                **extra):
     return await client.post(f"{ANALYTICS_URL}/event", json={
         "event_type": event_type, "session_id": session_id, "page": "/", **extra,
-    })
+    }, headers={"User-Agent": ua} if ua else None)
 
 
 def _utm(campaign: str = "2026-11-test-dev") -> dict:
@@ -448,3 +463,120 @@ async def test_campaign_view_is_admin_only(client: AsyncClient):
     token, _ = await _setup_user(client, USER)
     resp = await client.get(f"{ANALYTICS_URL}/attribution/campaigns", headers=_auth(token))
     assert resp.status_code == 403
+
+
+# --- Bots, IP hashing (t30) ---
+
+
+async def _event(db, session_id: str):
+    from sqlalchemy import select
+
+    from src.models import AnalyticsEvent
+
+    return (await db.execute(
+        select(AnalyticsEvent).where(AnalyticsEvent.session_id == session_id)
+    )).scalars().first()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ua,expected", [
+    (BROWSER_UA, "browser"), (BOT_UA, "bot"), (HEADLESS_UA, "bot"), ("", "unknown"),
+])
+async def test_event_stores_a_coarse_ua_class_not_the_ua(client: AsyncClient, db, ua, expected):
+    sid = str(uuid.uuid4())
+    resp = await _send(client, "lp_view", sid, ua=ua or " ")
+    assert resp.status_code == 200
+    ev = await _event(db, sid)
+    assert ev.ua_class == expected
+    # The UA string itself is stored nowhere on the row.
+    stored = " ".join(str(v) for v in (ev.page, ev.intent, ev.referrer, ev.extra_metadata))
+    assert "Googlebot" not in stored and "Chrome/131" not in stored
+
+
+@pytest.mark.asyncio
+async def test_event_stores_a_salted_ip_hash_not_the_ip(client: AsyncClient, db, monkeypatch):
+    from src.api import metrics_dashboard_router as md
+
+    async def fake_hash(value, length=32):
+        return f"h:{value}"[:length] if value else None
+
+    monkeypatch.setattr(md, "daily_salted_hash", fake_hash)
+    sid = str(uuid.uuid4())
+    await _send(client, "lp_view", sid)
+    ev = await _event(db, sid)
+    assert ev.ip_address is None
+    assert ev.ip_hash == "h:127.0.0.1"
+
+
+@pytest.mark.asyncio
+async def test_no_raw_ip_when_the_salt_is_unavailable(client: AsyncClient, db, monkeypatch):
+    from src.api import metrics_dashboard_router as md
+
+    async def no_salt(value, length=32):
+        return None
+
+    monkeypatch.setattr(md, "daily_salted_hash", no_salt)
+    sid = str(uuid.uuid4())
+    await _send(client, "lp_view", sid)
+    ev = await _event(db, sid)
+    assert ev.ip_address is None and ev.ip_hash is None
+
+
+@pytest.mark.asyncio
+async def test_daily_salted_hash_is_stable_within_a_day_and_never_the_raw_value():
+    from src.api.metrics_dashboard_router import daily_salted_hash
+
+    a = await daily_salted_hash("203.0.113.9")
+    b = await daily_salted_hash("203.0.113.9")
+    if a is None:  # no Redis in this environment: the hash is withheld, never the IP
+        assert b is None
+        return
+    assert a == b and len(a) == 32 and "203.0.113.9" not in a
+    assert a != await daily_salted_hash("203.0.113.10")
+    assert await daily_salted_hash(None) is None
+
+
+@pytest.mark.asyncio
+async def test_bots_are_left_out_of_the_campaign_funnel(client: AsyncClient, db):
+    token, entity_id = await _setup_user(client, ADMIN)
+    await _make_admin(db, entity_id)
+    person = str(uuid.uuid4())
+    await _send(client, "lp_view", person, metadata=_utm())
+    await _send(client, "cta_click", person, intent="copy_plugin_cmd")
+    for ua in (BOT_UA, HEADLESS_UA):
+        crawler = str(uuid.uuid4())
+        await _send(client, "lp_view", crawler, ua=ua, metadata=_utm())
+        await _send(client, "cta_click", crawler, ua=ua, intent="copy_plugin_cmd")
+
+    rows = (await client.get(
+        f"{ANALYTICS_URL}/attribution/campaigns", headers=_auth(token))).json()["campaigns"]
+    assert len(rows) == 1
+    assert (rows[0]["sessions"], rows[0]["lp_view"], rows[0]["copy_plugin_cmd"]) == (1, 1, 1)
+
+    from sqlalchemy import func, select
+
+    from src.models import AnalyticsEvent
+
+    all_events = await db.scalar(select(func.count()).select_from(AnalyticsEvent))
+    bots = await db.scalar(select(func.count()).select_from(AnalyticsEvent).where(
+        AnalyticsEvent.ua_class == "bot"))
+    assert bots == 4
+    conv = (await client.get(f"{ANALYTICS_URL}/conversion", headers=_auth(token))).json()
+    assert conv["total_events"] == all_events - bots
+
+
+@pytest.mark.asyncio
+async def test_events_without_a_class_still_count(client: AsyncClient, db):
+    """Rows written before t30 have no ua_class; the funnel keeps them."""
+    from src.models import AnalyticsEvent, AnalyticsFirstTouch
+
+    token, entity_id = await _setup_user(client, ADMIN)
+    await _make_admin(db, entity_id)
+    sid = str(uuid.uuid4())
+    db.add(AnalyticsFirstTouch(session_id=sid, utm_campaign="old", landing_page="/"))
+    db.add(AnalyticsEvent(event_type="lp_view", session_id=sid, page="/",
+                          ip_address="198.51.100.1"))
+    await db.flush()
+    rows = (await client.get(
+        f"{ANALYTICS_URL}/attribution/campaigns", headers=_auth(token))).json()["campaigns"]
+    assert [r["lp_view"] for r in rows if r["campaign"] == "old"] == [1]

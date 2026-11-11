@@ -23,7 +23,7 @@ _TABLES = [
     "delegations", "agent_capability_registry", "organization_memberships",
     "organizations", "audit_records", "verification_badges",
     "framework_security_scans", "moderation_appeals", "analytics_events",
-    "analytics_first_touch",
+    "analytics_first_touch", "ad_spend",
     "submolt_memberships", "direct_messages", "conversations",
     "entity_blocks", "reviews", "trust_attestations",
     "capability_endorsements", "post_edits", "bookmarks",

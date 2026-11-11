@@ -15,6 +15,25 @@ from src.models import AnalyticsEvent, AnalyticsFirstTouch, Entity, InteractionE
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
+# Every funnel read leaves out events whose User-Agent class is "bot" (crawlers,
+# pre-renderers, headless browsers). Events from before t30 have no class and count.
+_NOT_BOT = AnalyticsEvent.ua_class.is_distinct_from("bot")
+
+
+async def request_privacy_fields(request: Request) -> dict:
+    """What an analytics row keeps about the request: a daily-salted hash of the
+    client IP (never the IP itself) and a coarse UA class (never the UA)."""
+    from src.api.metrics_dashboard_router import daily_salted_hash
+    from src.api.rate_limit import _get_client_ip
+    from src.traffic_class import analytics_ua_class
+
+    ip = _get_client_ip(request)
+    return {
+        "ip_address": None,
+        "ip_hash": await daily_salted_hash(ip if ip and ip != "unknown" else None),
+        "ua_class": analytics_ua_class(request.headers.get("user-agent")),
+    }
+
 ALLOWED_EVENT_TYPES = {
     "guest_page_view",
     "guest_cta_click",
@@ -176,7 +195,7 @@ async def track_event(
         intent=body.intent,
         referrer=body.referrer,
         extra_metadata=body.metadata or {},
-        ip_address=request.client.host if request.client else None,
+        **(await request_privacy_fields(request)),
     )
     db.add(event)
     await db.flush()
@@ -214,7 +233,7 @@ async def newsletter_signup(
         intent="subscribe",
         referrer=request.headers.get("referer"),
         extra_metadata={"email": body.email, "source": body.source},
-        ip_address=request.client.host if request.client else None,
+        **(await request_privacy_fields(request)),
     )
     db.add(event)
     await db.flush()
@@ -245,7 +264,7 @@ async def get_conversion_funnel(
             AnalyticsEvent.event_type,
             func.count().label("count"),
         )
-        .where(AnalyticsEvent.created_at >= cutoff)
+        .where(AnalyticsEvent.created_at >= cutoff, _NOT_BOT)
         .group_by(AnalyticsEvent.event_type)
     )
     type_counts = {row[0]: row[1] for row in type_counts_result.all()}
@@ -271,7 +290,7 @@ async def get_conversion_funnel(
             AnalyticsEvent.page,
             func.count().label("count"),
         )
-        .where(AnalyticsEvent.created_at >= cutoff)
+        .where(AnalyticsEvent.created_at >= cutoff, _NOT_BOT)
         .group_by(AnalyticsEvent.page)
         .order_by(func.count().desc())
         .limit(10)
@@ -287,6 +306,7 @@ async def get_conversion_funnel(
         .where(
             AnalyticsEvent.created_at >= cutoff,
             AnalyticsEvent.intent.isnot(None),
+            _NOT_BOT,
         )
         .group_by(AnalyticsEvent.intent)
         .order_by(func.count().desc())
@@ -329,7 +349,7 @@ async def get_daily_conversion(
             AnalyticsEvent.event_type,
             func.count().label("count"),
         )
-        .where(AnalyticsEvent.created_at >= cutoff)
+        .where(AnalyticsEvent.created_at >= cutoff, _NOT_BOT)
         .group_by(day_col, AnalyticsEvent.event_type)
         .order_by(day_col)
     )
@@ -377,6 +397,7 @@ async def get_attribution(
         )
         .where(
             AnalyticsEvent.created_at >= cutoff,
+            _NOT_BOT,
             AnalyticsEvent.extra_metadata["utm_source"] != literal_column("'null'"),
             AnalyticsEvent.extra_metadata.has_key("utm_source"),
         )
@@ -405,7 +426,7 @@ async def get_attribution(
     # Count total unattributed events
     total_all = await db.scalar(
         select(func.count()).select_from(AnalyticsEvent).where(
-            AnalyticsEvent.created_at >= cutoff,
+            AnalyticsEvent.created_at >= cutoff, _NOT_BOT,
         )
     ) or 0
     total_unattributed = total_all - total_attributed
@@ -451,10 +472,15 @@ async def get_campaign_attribution(
     """Funnel per campaign, by each session's first touch. Admin only.
 
     Each number is distinct sessions active in the window, so a return visit counts toward
-    the campaign that first brought the session in.
+    the campaign that first brought the session in. Events classed as bots are left out.
     """
     require_admin(current_entity)
+    return CampaignAttribution(period_days=days, campaigns=await campaign_rows(db, days))
 
+
+async def campaign_rows(db: AsyncSession, days: int) -> list[CampaignRow]:
+    """Per-campaign funnel rows (see ``get_campaign_attribution``), largest first.
+    Shared with the admin cost-per-action view."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     tags = (
         AnalyticsFirstTouch.utm_source,
@@ -467,6 +493,7 @@ async def get_campaign_attribution(
     joined_in_window = (
         AnalyticsEvent.created_at >= cutoff,
         AnalyticsEvent.session_id == AnalyticsFirstTouch.session_id,
+        _NOT_BOT,
     )
 
     rows: dict[tuple, CampaignRow] = {}
@@ -490,10 +517,7 @@ async def get_campaign_attribution(
         # Sum across intents: badge_copied has one row per format.
         setattr(row, step, getattr(row, step) + count)
 
-    return CampaignAttribution(
-        period_days=days,
-        campaigns=sorted(rows.values(), key=lambda row: row.sessions, reverse=True),
-    )
+    return sorted(rows.values(), key=lambda row: row.sessions, reverse=True)
 
 
 # --- Interaction Analytics ---

@@ -100,12 +100,14 @@ async def register(
 
     # Record conversion analytics event linking session to new entity
     if session_id:
+        from src.api.analytics_router import request_privacy_fields
+
         db.add(AnalyticsEvent(
             event_type="register_complete",
             session_id=session_id,
             page="/register",
             entity_id=entity.id,
-            ip_address=request.client.host if request.client else None,
+            **(await request_privacy_fields(request)),
         ))
         await db.flush()
 

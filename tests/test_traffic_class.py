@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.traffic_class import CLIENT_CLASSES, classify_user_agent
+from src.traffic_class import CLIENT_CLASSES, analytics_ua_class, classify_user_agent
 
 HUMAN = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -56,9 +56,19 @@ AGENT = [
     "+https://openai.com/bot",
     "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Perplexity-User/1.0; "
     "+https://perplexity.ai/perplexitybot)",
+    "github-camo (1ff761db)",
+]
+
+# Our own clients: real use, but their own row (not a person, not a third-party agent).
+AGENTAVOW = [
     "agentavow-precheck/0.1.4 (plugin)",
     "agentavow-precheck",
-    "github-camo (1ff761db)",
+    "agentavow-preinstall/0.1.34 (plugin)",
+    "agentavow-pre_install/0.1.28 (plugin)",
+    "agentavow-gate/0.1.34 (plugin)",
+    "agentavow-tool-gate/0.4.2 (js)",
+    "agentavow-tool-gate/0.6.5 (python)",
+    "agentavow-trust/0.6.5 (langchain)",
 ]
 
 AUTOMATED = [
@@ -200,13 +210,23 @@ def test_agent_clients_are_agents(ua):
     assert classify_user_agent(ua) == "agent"
 
 
+@pytest.mark.parametrize("ua", AGENTAVOW)
+def test_our_own_clients_have_their_own_class(ua):
+    assert classify_user_agent(ua) == "agentavow"
+
+
 @pytest.mark.parametrize("ua", AUTOMATED)
 def test_crawlers_monitors_and_scripts_are_automated(ua):
     assert classify_user_agent(ua) == "automated"
 
 
+def test_health_probe_is_not_a_client():
+    # Our own uptime probe is monitoring, not use of the product.
+    assert classify_user_agent("agentavow-mcp-health/1.0") == "automated"
+
+
 def test_every_result_is_a_known_class():
-    for ua in HUMAN + AGENT + AUTOMATED:
+    for ua in HUMAN + AGENT + AGENTAVOW + AUTOMATED:
         assert classify_user_agent(ua) in CLIENT_CLASSES
 
 
@@ -254,3 +274,28 @@ async def test_bump_metric_by_client_bumps_aggregate_and_class(monkeypatch):
         "scan_request", "scan_request:client:automated",
         "badge_fetch", "badge_fetch:client:agent",
     ]
+
+
+@pytest.mark.parametrize("ua", HUMAN)
+def test_analytics_class_browser(ua):
+    assert analytics_ua_class(ua) == "browser"
+
+
+@pytest.mark.parametrize("ua", [
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "HeadlessChrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+    "Mozilla/5.0 (Linux; Android 11; moto g power (2022)) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Mobile Safari/537.36 Chrome-Lighthouse",
+    "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131 Safari/537.36 "
+    "Prerender (+https://github.com/prerender/prerender)",
+    "python-requests/2.32.3",
+    "curl/8.7.1",
+])
+def test_analytics_class_bot(ua):
+    assert analytics_ua_class(ua) == "bot"
+
+
+@pytest.mark.parametrize("ua", [None, "", "   ", "Claude-User", "agentavow-precheck/0.1.4"])
+def test_analytics_class_unknown(ua):
+    assert analytics_ua_class(ua) == "unknown"

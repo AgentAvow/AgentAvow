@@ -15,6 +15,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -1316,7 +1317,16 @@ class AnalyticsEvent(Base):
         UUID(as_uuid=True), ForeignKey("entities.id", ondelete="SET NULL"), nullable=True
     )
     extra_metadata = Column(JSONB, default=dict)  # arbitrary event data
+    # Raw client IP: written only by events before 2026-11-11 (t30). New events leave
+    # it empty and store ``ip_hash`` instead.
     ip_address = Column(String(45), nullable=True)
+    # sha256(daily random salt | client IP)[:32]. The salt lives 48h in Redis only
+    # (the same salt as the metrics HLLs), so a hash cannot be reversed or joined
+    # across days once the salt is gone. Null when Redis was unavailable.
+    ip_hash = Column(String(32), nullable=True)
+    # Coarse User-Agent class, never the UA itself: bot | browser | unknown
+    # (src.traffic_class.analytics_ua_class). Null on events before t30.
+    ua_class = Column(String(16), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
@@ -1339,6 +1349,36 @@ class AnalyticsFirstTouch(Base):
     utm_term = Column(String(200), nullable=True)
     landing_page = Column(String(200), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AdSpend(Base):
+    """Paid-campaign spend per UTC day, entered by the admin (or pasted from a Reddit
+    Ads CSV). One row per (day, utm_campaign, utm_content); the admin dashboard divides
+    it by the campaign funnel to show cost per lp_view and per copy_plugin_cmd."""
+
+    __tablename__ = "ad_spend"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    day = Column(Date, nullable=False)
+    utm_source = Column(String(200), nullable=True)
+    utm_campaign = Column(String(200), nullable=False)
+    # Empty string (not NULL) for campaign-level spend, so the unique key holds.
+    utm_content = Column(String(200), nullable=False, default="", server_default="")
+    spend_usd = Column(Numeric(12, 2), nullable=False)
+    impressions = Column(Integer, nullable=True)
+    clicks = Column(Integer, nullable=True)
+    source = Column(String(16), nullable=False, default="manual", server_default="manual")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "day", "utm_campaign", "utm_content", name="uq_ad_spend_day_campaign_content",
+        ),
+        Index("ix_ad_spend_day", "day"),
+    )
 
 
 class ModerationAppeal(Base):
