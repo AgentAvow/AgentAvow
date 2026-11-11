@@ -225,6 +225,170 @@ def _pnpm_v9_dev_only_names(text: str) -> set[str]:
     return dev - prod
 
 
+_PNPM_KEY_RE = re.compile(r"^\s*(['\"]?)(.+?)\1:\s*(.*)$")
+
+
+def _pnpm_nv(key: str) -> str | None:
+    """``name@version`` from a v9 snapshot key or a dependency reference, peer
+    suffix dropped (``next@15.5.25(react@19.0.0)`` -> ``next@15.5.25``)."""
+    key = key.strip().strip("'\"").lstrip("/").split("(")[0]
+    if "@" not in key[1:]:
+        return None
+    at = key.rfind("@")
+    name, ver = key[:at], key[at + 1:]
+    return f"{name}@{_clean_version(ver)}" if name and ver else None
+
+
+def pnpm_v9_importers(text: str) -> dict[str, dict[str, set[str]]]:
+    """``{importer path: {"prod": {name@ver}, "dev": {name@ver}, "links": {path}}}``
+    from a v9 ``importers:`` block (``optionalDependencies`` count as prod). A prod
+    ``link:`` to another workspace member is recorded in ``links`` as that member's
+    importer path; ``file:`` deps are skipped. Empty on any other shape."""
+    import posixpath
+    out: dict[str, dict[str, set[str]]] = {}
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines) and not re.match(r"^importers:\s*$", lines[i]):
+        i += 1
+    cur: str | None = None
+    group: str | None = None
+    dep: str | None = None
+    for line in lines[i + 1:]:
+        if line and not line[0].isspace():
+            break
+        if not line.strip():
+            continue
+        ind = len(line) - len(line.lstrip())
+        m = _PNPM_KEY_RE.match(line)
+        if not m:
+            continue
+        key, val = m.group(2).strip(), m.group(3).strip()
+        if ind == 2:
+            cur, group, dep = key, None, None
+            out.setdefault(cur, {"prod": set(), "dev": set(), "links": set()})
+        elif ind == 4 and cur is not None:
+            group = ("dev" if key == "devDependencies" else
+                     "prod" if key in ("dependencies", "optionalDependencies") else None)
+            dep = None
+        elif ind == 6 and group:
+            dep = key
+        elif ind == 8 and group and dep and key == "version":
+            v = val.strip("'\"")
+            if v.startswith("link:"):
+                if group == "prod":
+                    tgt = posixpath.normpath(posixpath.join(
+                        "" if cur == "." else cur, v[len("link:"):]))
+                    out[cur]["links"].add("." if tgt in ("", ".") else tgt)
+                continue
+            if v.startswith("file:"):
+                continue  # a local tarball/dir: not a registry package
+            # npm alias: the version names the real package (`types-react@19.0.0`)
+            nv = _pnpm_nv(v) if "@" in v.split("(")[0][1:] else _pnpm_nv(f"{dep}@{v}")
+            if nv:
+                out[cur][group].add(nv)
+    return out
+
+
+def pnpm_v9_edges(text: str) -> dict[str, set[str]]:
+    """``{name@ver: {name@ver of each dependency}}`` from the v9 ``snapshots:``
+    block (dependencies + optionalDependencies)."""
+    edges: dict[str, set[str]] = {}
+    in_snap = False
+    cur: str | None = None
+    in_deps = False
+    for line in text.splitlines():
+        if re.match(r"^snapshots:\s*$", line):
+            in_snap = True
+            continue
+        if not in_snap:
+            continue
+        if line and not line[0].isspace():
+            break
+        if not line.strip():
+            continue
+        ind = len(line) - len(line.lstrip())
+        m = _PNPM_KEY_RE.match(line)
+        if not m:
+            continue
+        key, val = m.group(2).strip(), m.group(3).strip()
+        if ind == 2:
+            cur = _pnpm_nv(key)
+            in_deps = False
+            if cur:
+                edges.setdefault(cur, set())
+        elif ind == 4:
+            in_deps = key in ("dependencies", "optionalDependencies")
+        elif ind == 6 and in_deps and cur and val:
+            v = val.strip("'\"")
+            if v.startswith(("link:", "file:")):
+                continue
+            nv = _pnpm_nv(v) if "@" in v.split("(")[0][1:] else _pnpm_nv(f"{key}@{v}")
+            if nv:
+                edges[cur].add(nv)
+    return edges
+
+
+def _reach(roots: set[str], edges: dict[str, set[str]]) -> set[str]:
+    seen: set[str] = set()
+    stack = list(roots)
+    while stack:
+        n = stack.pop()
+        if n in seen:
+            continue
+        seen.add(n)
+        stack.extend(edges.get(n, ()))
+    return seen
+
+
+def pnpm_v9_unshipped(text: str, private_importers: set[str]) -> set[str] | None:
+    """``name@ver`` NOT reachable from any shipped importer's production deps, or
+    None when the lockfile cannot be read that way (then nothing changes).
+
+    Shipped importers are the public ones (``private_importers`` excluded); when every
+    importer is private (an app, not a library), all of them count as shipped, since
+    their deps are what its users run. Reachability follows ``snapshots``
+    (dependencies + optionalDependencies), so the transitive deps of dev tools are
+    unshipped too (the follow-up ``_pnpm_v9_dev_only_names`` documents).
+
+    Fail-safe: None when there is no importer or no snapshot graph, or when a
+    shipped importer's direct prod dep is missing from the graph (an unreadable
+    shape must never hide a production vulnerability)."""
+    imps = pnpm_v9_importers(text)
+    edges = pnpm_v9_edges(text)
+    if not imps or not edges:
+        return None
+    shipped_imps = {k for k in imps if k not in private_importers} or set(imps)
+    # A member a shipped member links to as a prod dep ships with it, private or not.
+    todo = list(shipped_imps)
+    while todo:
+        for tgt in imps.get(todo.pop(), {}).get("links", ()):
+            if tgt in imps and tgt not in shipped_imps:
+                shipped_imps.add(tgt)
+                todo.append(tgt)
+    roots = set().union(*(imps[k]["prod"] for k in shipped_imps))
+    if any(r not in edges for r in roots):
+        return None
+    return set(edges) - _reach(roots, edges)
+
+
+def pnpm_private_only(text: str, private_importers: set[str]) -> set[str]:
+    """``name@ver`` pulled in ONLY by private workspace members: reachable from a
+    private importer's production deps and NOT from any public importer's
+    production deps. Empty unless the lockfile is a workspace with at least one
+    public importer (a single private app's deps are exactly what its users run)."""
+    imps = pnpm_v9_importers(text)
+    if len(imps) < 2 or not private_importers:
+        return set()
+    public = [k for k in imps if k not in private_importers]
+    private = [k for k in imps if k in private_importers]
+    if not public or not private:
+        return set()
+    edges = pnpm_v9_edges(text)
+    shipped = _reach(set().union(*(imps[k]["prod"] for k in public)), edges)
+    unshipped = _reach(set().union(*(imps[k]["prod"] for k in private)), edges)
+    return unshipped - shipped
+
+
 def parse_pnpm_lock(text: str) -> list[Dep]:
     """pnpm ``pnpm-lock.yaml`` — keys like ``/name/1.2.3`` or ``/name@1.2.3``.
 
@@ -423,23 +587,47 @@ def parse_lockfile(filename: str, text: str) -> list[Dep]:
         return []
 
 
-def parse_all(files: dict[str, str]) -> list[Dep]:
+def parse_all(files: dict[str, str],
+              private_importers: dict[str, set[str]] | None = None) -> list[Dep]:
     """Parse a ``{path: content}`` map into one de-duplicated Dep list.
 
     De-duped on ``(ecosystem, name, version)`` and capped at ``_MAX_DEPS`` so a
     giant monorepo lockfile can't blow up the downstream OSV batch.
+
+    pnpm v9 lockfiles: a package not reachable from a shipped importer's production
+    deps is marked dev (``pnpm_v9_unshipped``): dev tools' transitive deps, and what
+    only ``private_importers`` (per lockfile path: members whose package.json is
+    ``"private": true``) pull in, e.g. colinhacks/zod's private docs site
+    (2026-11-11). When one lockfile ships a package another marks dev, the shipped
+    (production) entry wins.
     """
-    seen: set[tuple[str, str, str]] = set()
+    from dataclasses import replace
+    private_importers = private_importers or {}
+    seen: dict[tuple[str, str, str], int] = {}
     out: list[Dep] = []
     for path, content in files.items():
+        unshipped: set[str] = set()
+        if path.lower().endswith("pnpm-lock.yaml") and re.search(
+                r"^snapshots:\s*$", content, re.M):
+            try:
+                unshipped = pnpm_v9_unshipped(content, private_importers.get(path) or set()) \
+                    or set()
+            except Exception:  # noqa: BLE001 — fail safe: deps keep production weight
+                unshipped = set()
         for dep in parse_lockfile(path, content):
             if not dep.name or not dep.version:
                 continue
+            if unshipped and not dep.dev and f"{dep.name}@{dep.version}" in unshipped:
+                dep = replace(dep, dev=True)
             key = (dep.ecosystem, dep.name, dep.version)
             if key in seen:
+                prev = seen[key]
+                if out[prev].dev and not dep.dev:
+                    out[prev] = dep
                 continue
-            seen.add(key)
+            seen[key] = len(out)
             out.append(dep)
             if len(out) >= _MAX_DEPS:
                 return out
+    return out
     return out

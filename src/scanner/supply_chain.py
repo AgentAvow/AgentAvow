@@ -521,6 +521,7 @@ async def analyze_supply_chain(
     use_depsdev: bool = True,
     use_scorecard: bool = True,
     client: httpx.AsyncClient | None = None,
+    private_importers: dict[str, set[str]] | None = None,
 ) -> SupplyChainResult:
     """Run the full supply-chain pipeline. **Fail-open** on any error.
 
@@ -551,7 +552,9 @@ async def analyze_supply_chain(
     # package, so a vuln in one must not lower the trust grade (this is what
     # tanked zero-runtime-dep libraries like lodash to F on their dev/test deps).
     # Grade production dependencies only.
-    all_deps = parse_all(lockfiles)
+    # A monorepo's private workspace members (a docs site, examples) are never
+    # published: what only they pull in is graded like a dev dependency.
+    all_deps = parse_all(lockfiles, private_importers)
     deps = [d for d in all_deps if not d.dev]
     result.deps_total = len(deps)
     result.deps_dev_excluded = len(all_deps) - len(deps)
