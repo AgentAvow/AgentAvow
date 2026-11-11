@@ -13,7 +13,8 @@ Runs multiple jobs on the same interval (default 6 hours):
 10. Marketing metrics refresh
 11. Marketing watchdog checks
 12. Marketing recap to feed (Monday + Thursday)
-13. Expired token cleanup — email verifications + password reset tokens (daily)
+13. Expired token cleanup — email verifications + password reset tokens, and raw
+    IPs on analytics events older than 30 days (daily)
 14. Reply Guy monitor — check reply targets for new posts
 15. Reply Guy drafter — generate LLM reply drafts for new opportunities
 16. Bluesky starter pack refresh — recreate starter pack every 30 days
@@ -420,6 +421,14 @@ async def _scheduler_loop(interval: int = SCHEDULER_INTERVAL) -> None:
                             ),
                             {"cutoff": _cutoff},
                         )
+                        # 4. Clear raw IPs on analytics events older than 30 days
+                        # (rows from before t30; new rows store only ip_hash).
+                        from src.jobs.analytics_ip_expiry import expire_raw_analytics_ips
+
+                        ip_total = await expire_raw_analytics_ips(session, _now)
+                        if ip_total:
+                            logger.info(
+                                "Analytics cleanup: cleared %d raw IPs", ip_total)
                         ev_total = r1.rowcount + r2.rowcount
                         prt_total = r3.rowcount
                         total = ev_total + prt_total
