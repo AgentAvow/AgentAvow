@@ -134,7 +134,8 @@ def test_bounded_range_with_an_unreadable_patch_still_reads_the_range():
     assert a["affects_scanned_version"] is True
 
 
-@pytest.mark.parametrize("rng", ["1.x || 2.x", ">= banana", "all"])
+@pytest.mark.parametrize("rng", [">= banana", "All version prior and including to 8.0.0",
+                                 "<= 2.6 and later", "see advisory"])
 def test_unreadable_range_is_unparsed(rng):
     a = _one(_adv("GHSA-odd0-0000-0002", "p", (rng, "9.0.0")), "p", "1.0.0")
     assert a["affects_scanned_version"] is False and a["range_unparsed"] is True
