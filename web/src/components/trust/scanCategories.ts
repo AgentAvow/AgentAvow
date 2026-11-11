@@ -233,6 +233,14 @@ export const SCAN_CATEGORIES: Record<string, CategoryInfo> = {
     family: 'data_handling',
     detection: 'network_endpoints',
   },
+  payment_terms: {
+    key: 'payment_terms',
+    label: 'Payment Terms',
+    icon: '💳',
+    description: 'An x402 listing\'s payment terms: who gets paid, on which network, and how much.',
+    family: 'data_handling',
+    detection: 'network_endpoints',
+  },
   auth_scheme: {
     key: 'auth_scheme',
     label: 'Weak Auth Scheme',
