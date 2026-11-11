@@ -247,8 +247,32 @@ def _is_official(url: str) -> bool:
                for vhost, prefix in VENDOR_INSTALLERS)
 
 
+# Shell command separators. Only the command after the last one feeds the pipe.
+_CMD_SEP_RE = re.compile(r";|&&|\|\||\n")
+
+
+def _last_command_start(line: str, start: int, end: int) -> int:
+    """Where the command that feeds the final ``|`` starts. ``a; curl X | bash`` pipes
+    only ``curl X``, so a match that begins at an earlier curl / wget and crosses a
+    command separator is read from the curl / wget after the last separator (gradio's
+    minified ApiDocs: `curl --version` ... ; ... `curl -LsSf https://hf.co/... | bash`).
+    With no separator in between, e.g. two literals that join into one command
+    (`curl https://x` + ` | bash`), the start is unchanged: still the conservative read."""
+    matched = line[start:end]
+    pipe = matched.rfind("|")
+    if pipe <= 0:
+        return start
+    pre = matched[:pipe]
+    seps = list(_CMD_SEP_RE.finditer(pre))
+    if not seps:
+        return start
+    tool = _TOOL_RE.search(pre, seps[-1].end())
+    return start + tool.start() if tool else start
+
+
 def classify_match(line: str, start: int, end: int, file_path: str) -> str:
     """Classify one pipe-to-shell match: DROP, OFFICIAL or CRITICAL."""
+    start = _last_command_start(line, start, end)
     target = _target(line, start, end)
     matched = line[start:end]
     urls = _URL_RE.findall(target)
