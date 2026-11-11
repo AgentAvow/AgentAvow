@@ -353,6 +353,7 @@ WHERE_TOOLS = " in its tool definitions"
 WHERE_DEPENDENCY = " in a dependency"
 WHERE_CARD = " in its agent card"
 WHERE_LISTING = " in its listing"  # an x402 endpoint's Bazaar listing
+WHERE_LIVE_PAYMENT = " in its live payment request"  # x402 phase 2: the live 402 reply
 WHERE_DEVCONTAINER = " in its dev container setup"
 
 # Files an agent is handed as instructions (mirrors src.scanner.package_context).
@@ -393,6 +394,8 @@ def finding_where(i: dict) -> str:
         return WHERE_TOOLS
     if path.startswith("card:"):
         return WHERE_CARD
+    if path.startswith("x402:live"):
+        return WHERE_LIVE_PAYMENT
     if path.startswith("x402:"):
         return WHERE_LISTING
     parts = [p for p in path.split("/") if p]

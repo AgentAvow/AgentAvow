@@ -94,13 +94,18 @@ def discover() -> list[dict]:
     return targets
 
 
-def score_one(target: dict) -> dict:
-    """One catalog row from the listing alone (src/scanner/x402_scan.py). Pure."""
+def _rec(target: dict) -> dict:
+    return target.get("raw") if isinstance(target.get("raw"), dict) else target
+
+
+def score_one(target: dict, live: dict | None = None) -> dict:
+    """One catalog row from the listing (src/scanner/x402_scan.py), plus the phase-2
+    live reply when one ran. Pure."""
     from src.scanner.verdict import decide
     from src.scanner.x402_scan import scan_result_from_listing
 
-    rec = target.get("raw") if isinstance(target.get("raw"), dict) else target
-    r = scan_result_from_listing(rec)
+    rec = _rec(target)
+    r = scan_result_from_listing(rec, live)
     sev: dict[str, int] = {}
     for f in r.findings:
         if getattr(f, "kind", "defect") != "capability":
@@ -128,18 +133,22 @@ def score_one(target: dict) -> dict:
         "networks": art.get("networks"), "pay_to": art.get("pay_to"),
         "price_usd": art.get("price_usd"), "testnet_only": art.get("testnet_only"),
         "last_updated": art.get("last_updated"),
-        "scanned_from": "listing",
+        "scanned_from": "listing+live" if art.get("live_check") else "listing",
+        **({"live_check": art["live_check"]} if art.get("live_check") else {}),
     }
 
 
-def score_all(targets: list[dict]) -> dict:
-    """Score every target; return the results file payload with a summary."""
+def score_all(targets: list[dict], live: dict[str, dict] | None = None) -> dict:
+    """Score every target; return the results file payload with a summary. ``live``
+    maps a resource URL to its phase-2 reply."""
     import collections
 
+    live = live or {}
     results = []
     for t in targets:
         try:
-            results.append(score_one(t))
+            url = str(_rec(t).get("resource") or _rec(t).get("endpoint_url") or "")
+            results.append(score_one(t, live.get(url)))
         except Exception as exc:  # noqa: BLE001 — one bad record never stops the run
             results.append({"endpoint_url": t.get("endpoint_url"),
                             "error": f"{type(exc).__name__}"})
@@ -156,7 +165,42 @@ def score_all(targets: list[dict]) -> dict:
         "testnet_only": sum(1 for r in results if r.get("testnet_only")),
         "top_rules_medium_plus": rules.most_common(25),
     }
+    if live:
+        states = collections.Counter(v.get("state") for v in live.values())
+        summary["live"] = {"checked": len(live), "states": dict(states),
+                           "matches": sum(1 for r in results
+                                          if (r.get("live_check") or {}).get("matches"))}
     return {"results": results, "summary": summary}
+
+
+def run_live(targets: list[dict], run_index: int | None) -> dict[str, dict]:
+    """Phase 2: the approved live check over eligible listings. Writes a run log next to
+    the results (per host: requests sent, why it was skipped)."""
+    import asyncio
+    import datetime
+
+    from src.scanner import x402_live as xl
+    from src.ssrf import ssrf_safe_async_client
+
+    if run_index is None:
+        run_index = datetime.date.today().isocalendar()[1]
+    the_plan = xl.plan([_rec(t) for t in targets], run_index)
+    n = sum(len(v) for v in the_plan.values())
+    print(f"[x402 live] {n} endpoints on {len(the_plan)} hosts (run index {run_index}); "
+          f"UA {xl.USER_AGENT!r}")
+
+    async def go():
+        async with ssrf_safe_async_client(follow_redirects=False) as client:
+            return await xl.run_live_checks(the_plan, xl.make_fetch(client))
+    report = asyncio.run(go())
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    for v in report.results.values():
+        v["checked_at"] = now
+    log = {"checked_at": now, "run_index": run_index, "user_agent": xl.USER_AGENT,
+           "hosts": {h: vars(lg) for h, lg in report.hosts.items()}}
+    _common.write_json_atomic(RESULTS_PATH.parent / "x402-live-run.json", log)
+    print(f"[x402 live] {sum(lg.sent for lg in report.hosts.values())} requests sent")
+    return report.results
 
 
 def scan_one(target: dict) -> dict:
@@ -199,7 +243,16 @@ def main() -> int:
                         help="with --score: use the saved listing, fetch nothing")
     parser.add_argument("--out", default=None,
                         help="with --score: write results here instead of the catalog file")
+    parser.add_argument("--live", action="store_true",
+                        help="with --score: phase 2, one unpaid GET per eligible endpoint "
+                             "(src/scanner/x402_live.py limits). Run only as approved: "
+                             "weekly, one-off container, nice 19")
+    parser.add_argument("--run-index", type=int, default=None,
+                        help="with --live: rotation index for hosts over 50 endpoints "
+                             "(default: ISO week number)")
     args = parser.parse_args()
+    if args.live and not args.score:
+        parser.error("--live needs --score")
 
     if args.score and args.offline:
         targets = (_common.read_json(TARGETS_PATH, default={}) or {}).get("targets") or []
@@ -209,7 +262,10 @@ def main() -> int:
         _common.write_json_atomic(TARGETS_PATH, {"targets": targets, "count": len(targets)})
 
     if args.score:
-        payload = score_all(targets)
+        live = None
+        if args.live:
+            live = run_live(targets, args.run_index)
+        payload = score_all(targets, live)
         out = Path(args.out) if args.out else RESULTS_PATH
         _common.write_json_atomic(out, payload)
         import json
