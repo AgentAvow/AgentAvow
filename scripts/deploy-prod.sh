@@ -109,6 +109,18 @@ site_ok() {
   remote "curl -sk --max-time 3 -H 'Host: agentavow.com' https://localhost/health | grep -q '\"status\":\"ok\"'" > /dev/null 2>&1
 }
 
+# Test the new nginx.conf in a throwaway container (same compose network and mounts).
+# Runs right after the checkout, before anything is rebuilt or restarted: a config
+# nginx rejects would otherwise take the site down at the nginx restart, and by then
+# the backend has been recreated, so stopping late still leaves 502s.
+nginx_config_ok() {
+  local out rc
+  out=$(remote "cd ~/${PROJECT_DIR} && ${LOAD_ENV} && docker-compose -f ${COMPOSE_FILE} run --rm --no-deps -T nginx nginx -t" 2>&1)
+  rc=$?
+  echo "$out" | tail -2 | sed 's/^/    /'
+  return $rc
+}
+
 restart_nginx() {
   remote "cd ~/${PROJECT_DIR} && ${LOAD_ENV} && docker-compose -f ${COMPOSE_FILE} restart nginx" 2>&1 | while IFS= read -r line; do
     echo "    $line"
@@ -187,6 +199,12 @@ else
   else
     ok "deploy-prod.sh matches ${DEPLOY_BRANCH}"
   fi
+fi
+
+# Gate: the new nginx.conf must pass `nginx -t` before anything is restarted.
+if ! $DRY_RUN; then
+  nginx_config_ok || fail "nginx -t rejected the new nginx.conf. Nothing was rebuilt or restarted; the running site is untouched. Fix the config and redeploy."
+  ok "nginx.conf passes nginx -t"
 fi
 
 # --- Step 3: Build backend ---
