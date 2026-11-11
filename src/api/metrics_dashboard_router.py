@@ -1163,6 +1163,7 @@ _TRAFFIC_INT_COLUMNS = (
     "cc_machines_7d_excl_cloud", "checked_machines_7d_excl_cloud",
     "new_checked_same_day", "d7_cohort_checked",
     "tool_gate_machines", "tool_gate_reqs", "a2a_card_fetches", "a2a_card_fetchers",
+    "cc_machines_plugin", "checked_machines_plugin",
 )
 _TRAFFIC_NOTES = [
     "checked_machines_7d and cc_machines_7d are rolling 7-day counts of distinct machines, "

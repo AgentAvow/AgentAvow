@@ -492,3 +492,72 @@ def test_call_url_strips_userinfo_and_fragment_but_keeps_the_query(gate):
 def test_gate_never_raises_out_of_main(gate, monkeypatch, capsys):
     monkeypatch.setattr(gate, "decide", lambda *a: 1 / 0)
     assert _run(gate, monkeypatch, capsys, _call()) == {}
+
+
+# ── the person's per-server allow list (0.1.37) ──────────────────────────────
+
+
+def _dnc(**extra):
+    return _record(score=30, tier="minimal", decision="do_not_connect",
+                   decision_reason="one critical finding", **extra)
+
+
+def test_refusal_says_exactly_how_to_allow_that_one_server(gate, monkeypatch, capsys):
+    gate.CACHE.write_text(json.dumps({"srv": _dnc()}))
+    decision, reason = _decision(_run(gate, monkeypatch, capsys, _call()))
+    assert decision == "deny"
+    assert reason.startswith("AgentAvow: Do not connect — one critical finding.")
+    assert f"allowed-servers.txt: srv {URL}\n" in reason
+    assert "the user (not Claude)" in reason and "Do not edit that file yourself" in reason
+
+
+def test_allow_file_is_shown_with_a_tilde(gate, monkeypatch, tmp_path):
+    monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+    assert gate._shown_path(tmp_path / ".cache" / "agentavow" / "allowed-servers.txt") == (
+        "~/.cache/agentavow/allowed-servers.txt")
+    real = _load(GATE)
+    assert real.allow_file() == real.CACHE.with_name("allowed-servers.txt")
+
+
+def test_allowed_server_runs_with_one_note_per_session(gate, monkeypatch, capsys):
+    gate.CACHE.write_text(json.dumps({"srv": _dnc()}))
+    gate.allow_file().write_text(f"# reviewed it on 11-11\nsrv {URL}   # my note\n")
+    first = _run(gate, monkeypatch, capsys, _call())
+    assert _decision(first)[0] is None
+    assert "reads Do not connect; its tools run because you allowed it" in first["systemMessage"]
+    assert _run(gate, monkeypatch, capsys, _call()) == {}  # noted once this session
+    assert "systemMessage" in _run(gate, monkeypatch, capsys, _call(session="s2"))
+
+
+@pytest.mark.parametrize("line", [
+    "srv",                                # name only: not bound to what was graded
+    f"other {URL}",                       # another server's line
+    "srv https://elsewhere.example/mcp",  # the line is for a different URL
+    "* *", f"* {URL}", "srv *",           # no wildcards, no allow-everything
+    f"SRV {URL}",                         # exact names only
+    f"srv {URL} extra",
+    f"# srv {URL}",
+])
+def test_only_an_exact_line_for_this_server_allows_it(gate, monkeypatch, capsys, line):
+    gate.CACHE.write_text(json.dumps({"srv": _dnc()}))
+    gate.allow_file().write_text(line + "\n")
+    assert _decision(_run(gate, monkeypatch, capsys, _call()))[0] == "deny"
+
+
+def test_allowing_one_server_leaves_the_others_denied(gate, monkeypatch, capsys):
+    other = "https://two.example/mcp"
+    gate.CACHE.write_text(json.dumps({"srv": _dnc(), "two": _dnc(id=other, url=other)}))
+    gate.allow_file().write_text(f"srv {URL}\n")
+    assert _decision(_run(gate, monkeypatch, capsys, _call("two")))[0] == "deny"
+    assert _decision(_run(gate, monkeypatch, capsys, _call("srv")))[0] is None
+
+
+def test_an_allowed_server_still_asks_when_a_definition_changed(
+        gate, monkeypatch, capsys, fake_server):
+    gate.CACHE.write_text(json.dumps({"srv": _dnc()}))
+    gate.allow_file().write_text(f"srv {URL}\n")
+    _wire(gate, monkeypatch, fake_server)
+    _FakeMCP.tools = [{"name": "ask", "description": "now does something else"}]
+    out = _run(gate, monkeypatch, capsys, _call())
+    assert _decision(out)[0] == "ask"
+    assert "systemMessage" not in out  # one JSON object: the ask, not the allow note
