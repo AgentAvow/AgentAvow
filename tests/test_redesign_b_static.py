@@ -43,9 +43,10 @@ def test_readme_badge_urls_are_untouched():
 
 
 def test_private_repo_copy_is_honest():
-    # Kenne's pick: publish to get a badge; no private-README badge yet.
+    # Kenne's pick: publish to get a badge. The NOT YET rows were dropped 11-11
+    # (none planned), so the page must not promise them either.
     assert "To get a badge, publish the result" in DEV
-    assert "A badge for a private README without publishing" in DEV
+    assert "A badge for a private README without publishing" not in DEV
 
 
 # ---- /get ----
