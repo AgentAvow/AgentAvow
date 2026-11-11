@@ -33,6 +33,8 @@ interface Metrics {
   badges?: { readme_renders_window?: number; leaderboard?: { repo: string; renders: number }[] }
   catalog?: { by_surface?: Record<string, number>; by_category?: Record<string, number>; size_total?: number }
   x402?: { listings?: number; scored?: number; testnet_hidden?: number; answers?: Record<string, number> }
+  scan_kinds?: { checks?: Record<string, number>; renders?: Record<string, number>; other?: Record<string, number> }
+  watch_alerts?: Record<string, { public?: number; private?: number }>
   funnel?: { scanned?: number; watched?: number; claimed?: number; installs?: number }
   mcp?: { calls_window?: number; callers_window?: number; ok_window?: number; errors_window?: number; safe_window?: number; needs_review_window?: number; answers_window?: Record<string, number>; checks_window?: number; by_tool?: Record<string, number>; by_surface?: Record<string, { calls?: number; callers?: number; errors?: number; safe?: number; needs_review?: number; checks?: number; answer_safe?: number; answer_review?: number; answer_do_not_connect?: number }> }
   hook?: { scans_window?: number; machines_window?: number }
@@ -449,6 +451,181 @@ interface TrafficRow {
 }
 interface Traffic { days?: string[]; rows?: TrafficRow[]; series?: Record<string, (number | null)[]>; latest?: TrafficRow | null; covered_days?: number; notes?: string[] }
 
+// ── Scan requests by kind (GET /admin/metrics → scan_kinds) ─────────────────
+const KIND_LABEL: Record<string, string> = {
+  repo: 'GitHub repo', package: 'Package (npm, PyPI, …)', mcp: 'MCP server', skill: 'Skill', a2a: 'A2A agent card',
+  erc8004: 'ERC-8004 agent', wallet: 'Wallet', submit: 'Submit a tool', x402: 'x402 (catalog lookups)',
+  badge: 'Badge SVG', card: 'Card SVG', og: 'OG image', verdict_json: 'verdict.json',
+  preflight: 'Preflight runs', drift_feed: 'Drift feed reads', registry_snippet: 'Registry snippet', catalog: 'Catalog / Browse', read: 'History, checks, adoption', beacon: 'Beacons',
+}
+
+function ScanKindsPanel({ data }: { data?: Metrics }) {
+  const k = data?.scan_kinds || {}
+  return (
+    <Section title="Scan requests by kind" note="Answered public scan-API requests (this window), by what was asked: checks per kind, with README badge / card / OG renders and other reads split out. Preflight runs and drift-feed reads are counted here too. Counted from the PR 2 deploy; 'Public scan requests by caller type' above still mixes all of them.">
+      <div className="grid md:grid-cols-3 gap-3">
+        <BarList title="Checks" rows={k.checks || {}} labels={KIND_LABEL} empty="No checks counted yet." gradient="linear-gradient(90deg,#2dd4bf,#818cf8)" />
+        <BarList title="Renders" rows={k.renders || {}} labels={KIND_LABEL} empty="No renders counted yet." gradient="linear-gradient(90deg,#fbbf24,#f59e0b)" />
+        <BarList title="Other (Preflight, feeds, catalog)" rows={k.other || {}} labels={KIND_LABEL} empty="Nothing counted yet." gradient="linear-gradient(90deg,#64748b,#94a3b8)" />
+      </div>
+    </Section>
+  )
+}
+
+// ── Watch alerts by trigger (GET /admin/metrics → watch_alerts) ─────────────
+const ALERT_LABEL: Record<string, string> = {
+  answer_worse: 'Answer got worse', certified_lost: 'Certified lost', score_drop: 'Score dropped', definition_change: 'Signed definition changed',
+  sandbox_change: 'Sandbox behavior changed', icon_change: 'Icons changed', good_news: 'Good news', held: 'Held (planned re-score)',
+}
+const ALERT_COLOR: Record<string, string> = {
+  answer_worse: '#f87171', certified_lost: '#fb923c', score_drop: '#fbbf24', definition_change: '#e879f9',
+  sandbox_change: '#818cf8', icon_change: '#94a3b8', good_news: '#22c55e', held: '#64748b',
+}
+
+function WatchAlertsPanel({ data }: { data?: Metrics }) {
+  const a = data?.watch_alerts || {}
+  const s = data?.series || {}
+  const codes = Object.keys(ALERT_LABEL)
+  const lines: TrendLine[] = codes.map((c) => ({ key: c, label: ALERT_LABEL[c], color: ALERT_COLOR[c], dashed: c === 'held', data: s[`watch_alert:${c}`] }))
+  return (
+    <Section title="Watch alerts by trigger" note="One count per trigger per alert (an alert can carry several), public watches vs private repos connected through the GitHub App, this window. The series starts with the PR 2 deploy, after the #292 reset: the first re-scan cycle after t28 re-seeds answers silently, so alerts before it are not counted. 'Held' = a move absorbed while watch_alert_hold was on.">
+      <div className="glass rounded-2xl p-5 overflow-x-auto">
+        <table className="w-full text-[12.5px]">
+          <thead><tr className="text-left font-mono text-[11px] uppercase tracking-wide text-text-muted/70"><th className="py-1 pr-3">Trigger</th><th className="py-1 pr-3 text-right">Public</th><th className="py-1 pr-3 text-right">Private</th><th className="py-1 text-right">Total</th></tr></thead>
+          <tbody>
+            {codes.map((c) => {
+              const pub = a[c]?.public ?? 0, priv = a[c]?.private ?? 0
+              return (
+                <tr key={c} className={`border-t border-border/40${pub + priv === 0 ? ' opacity-50' : ''}`}>
+                  <td className="py-1.5 pr-3"><span className="inline-block w-2 h-2 rounded-full mr-2" style={{ background: ALERT_COLOR[c] }} />{ALERT_LABEL[c]}</td>
+                  <td className="py-1.5 pr-3 tabular-nums text-right">{fmt(pub)}</td>
+                  <td className="py-1.5 pr-3 tabular-nums text-right">{fmt(priv)}</td>
+                  <td className="py-1.5 tabular-nums text-right font-semibold">{fmt(pub + priv)}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="glass rounded-2xl p-5 mt-3">
+        <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Alerts per day · series starts after the #292 reset</div>
+        <TrendChart days={data?.days} lines={lines} empty="No watch alerts counted in this window yet." />
+      </div>
+    </Section>
+  )
+}
+
+// ── Growth: Certified + answer mix, activation by entrypoint, downloads, referrals ──
+interface Growth {
+  days?: string[]
+  catalog_daily?: Record<string, Record<string, number>>
+  catalog_now?: Record<string, number> | null
+  downloads_daily?: Record<string, Record<string, number>>
+  downloads_latest?: Record<string, number> | null
+  referrals?: { search?: Record<string, number>; ai?: Record<string, number>; other_top?: Record<string, number>; search_total?: number; ai_total?: number; other_total?: number }
+}
+type GrowthTrafficRow = Record<string, number | string | null | undefined>
+const EP_LABEL: Record<string, string> = { desktop: 'Desktop app', cli: 'CLI + IDE extensions', sdk: 'Agent SDK', cloud: 'Anthropic cloud (remote)', other: 'Other / unknown' }
+
+function GrowthPanel() {
+  const [days, setDays] = useState<30 | 90>(30)
+  const { data } = useQuery<Growth>({
+    queryKey: ['admin-dash-growth', days],
+    queryFn: async () => { try { return (await api.get('/admin/metrics/growth', { params: { days } })).data } catch { return {} } },
+  })
+  const traffic = useQuery<{ rows?: GrowthTrafficRow[] }>({
+    queryKey: ['admin-dash-claude-traffic', 14],
+    queryFn: async () => { try { return (await api.get('/admin/metrics/traffic', { params: { days: 14 } })).data } catch { return {} } },
+  })
+  const g = data || {}
+  const dayList = g.days || []
+  const cat = g.catalog_daily || {}
+  const catLines: TrendLine[] = [
+    { key: 'certified', label: 'Certified', color: '#22c55e', data: dayList.map((d) => cat[d]?.certified ?? 0) },
+    ...DECISIONS.map((d) => ({ key: d.value, label: d.phrase, color: d.color, dashed: true, data: dayList.map((day) => cat[day]?.[d.value] ?? 0) })),
+  ]
+  const dl = g.downloads_daily || {}
+  const dlLines: TrendLine[] = [
+    { key: 'npm', label: 'npm · last 7 days', color: '#f87171', data: dayList.map((d) => dl[d]?.npm_week ?? 0) },
+    { key: 'pypi', label: 'PyPI · last 7 days', color: '#818cf8', data: dayList.map((d) => dl[d]?.pypi_week ?? 0) },
+  ]
+  const week = (traffic.data?.rows || []).slice(-7)
+  const tsum = (col: string) => week.reduce((a, r) => a + (typeof r[col] === 'number' ? (r[col] as number) : 0), 0)
+  const hasEp = week.some((r) => r.cc_machines_cli != null)
+  const newSeen = tsum('cc_new_machines_30d')
+  const newChecked = tsum('new_checked_same_day')
+  const d7Cohort = tsum('d7_cohort'), d7Checked = tsum('d7_cohort_checked')
+  const now = g.catalog_now
+  const ref = g.referrals || {}
+  const toggle = (
+    <div className="flex gap-1 font-mono text-[12px]">
+      {([30, 90] as const).map((d) => (
+        <button key={d} onClick={() => setDays(d)} className={`px-2.5 py-1 rounded-lg transition-colors ${days === d ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>{d}d</button>
+      ))}
+    </div>
+  )
+  return (
+    <Section title="Growth — Certified, activation, downloads, search" note="Daily series kept by the 6-hour job from the PR 2 deploy on (days before it are blank, not zero). x402 is excluded from the catalog mix, as on the site." right={toggle}>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <Stat label="Certified (now)" value={now ? fmt(now.certified) : '—'} sub={now ? `of ${fmt(now.total)} tools` : undefined} />
+        {DECISIONS.map((d) => <Stat key={d.value} label={d.phrase} value={now ? fmt(now[d.value]) : '—'} sub={now && now.total ? `${Math.round(((now[d.value] ?? 0) * 100) / now.total)}%` : undefined} />)}
+        <Stat label="npm downloads (7d)" value={g.downloads_latest?.npm_week != null ? fmt(g.downloads_latest.npm_week) : '—'} sub="agentavow-trust" />
+        <Stat label="PyPI downloads (7d)" value={g.downloads_latest?.pypi_week != null ? fmt(g.downloads_latest.pypi_week) : '—'} sub={g.downloads_latest?.pypi_month != null ? `${fmt(g.downloads_latest.pypi_month)} last 30 days` : 'agentavow-trust'} />
+      </div>
+      <div className="grid md:grid-cols-2 gap-3 mt-3">
+        <div className="glass rounded-2xl p-5">
+          <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Certified and the answer mix · per day (x402 excluded)</div>
+          <TrendChart days={dayList} lines={catLines} empty="No daily catalog rows yet. The 6-hour job writes the first one after deploy." />
+        </div>
+        <div className="glass rounded-2xl p-5">
+          <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Registry downloads · weekly total, sampled daily</div>
+          <TrendChart days={dayList} lines={dlLines} empty="No download counts yet. The 6-hour job fetches them from npm and pypistats." />
+        </div>
+      </div>
+      <div className="grid md:grid-cols-2 gap-3 mt-3">
+        <div className="glass rounded-2xl p-5">
+          <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Claude Code activation by entrypoint · last 7 snapshot days</div>
+          {hasEp ? (
+            <table className="w-full text-[12.5px]">
+              <thead><tr className="text-left font-mono text-[11px] uppercase tracking-wide text-text-muted/70"><th className="py-1 pr-3">Entrypoint</th><th className="py-1 pr-3 text-right">Machine-days connecting</th><th className="py-1 pr-3 text-right">Checked</th><th className="py-1 text-right">Share</th></tr></thead>
+              <tbody>
+                {Object.keys(EP_LABEL).map((ep) => {
+                  const c = tsum(`cc_machines_${ep}`), k = tsum(`checked_machines_${ep}`)
+                  return (
+                    <tr key={ep} className={`border-t border-border/40${c === 0 ? ' opacity-50' : ''}`}>
+                      <td className="py-1.5 pr-3">{EP_LABEL[ep]}</td>
+                      <td className="py-1.5 pr-3 tabular-nums text-right">{fmt(c)}</td>
+                      <td className="py-1.5 pr-3 tabular-nums text-right">{fmt(k)}</td>
+                      <td className="py-1.5 tabular-nums text-right">{c ? `${Math.round((k * 100) / c)}%` : '—'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          ) : <p className="text-[12.5px] text-text-muted/70">No entrypoint columns yet: the nightly snapshot adds them from the PR 2 deploy.</p>}
+          <p className="mt-3 text-[12.5px]">
+            New machines that saw a verdict on day one: <span className="font-semibold tabular-nums">{newSeen ? `${Math.round((newChecked * 100) / newSeen)}%` : '—'}</span> <span className="text-text-muted">({fmt(newChecked)} of {fmt(newSeen)})</span>
+            {' · '}within their first week: <span className="font-semibold tabular-nums">{d7Cohort && week.some((r) => r.d7_cohort_checked != null) ? `${Math.round((d7Checked * 100) / d7Cohort)}%` : '—'}</span> <span className="text-text-muted">(D7 cohort, complete 7 days after deploy)</span>
+          </p>
+          <p className="mt-1 text-[11px] text-text-muted/60">Daily distinct machines summed over the days (a machine on two days counts twice; on two entrypoints, in both). Owner machines excluded.</p>
+        </div>
+        <div className="glass rounded-2xl p-5">
+          <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Landing sessions by referrer · last {days} days</div>
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            <Stat label="Search" value={fmt(ref.search_total)} />
+            <Stat label="AI assistants" value={fmt(ref.ai_total)} />
+            <Stat label="Other sites" value={fmt(ref.other_total)} />
+          </div>
+          <BarList title="Search engines" rows={ref.search || {}} labels={{}} empty="No search referrals yet (counted from the PR 2 deploy)." gradient="linear-gradient(90deg,#2dd4bf,#818cf8)" />
+          {Object.keys(ref.ai || {}).length > 0 && <div className="mt-3"><BarList title="AI assistants" rows={ref.ai || {}} labels={{}} empty="" gradient="linear-gradient(90deg,#818cf8,#e879f9)" /></div>}
+          {Object.keys(ref.other_top || {}).length > 0 && <div className="mt-3"><BarList title="Top other sites" rows={ref.other_top || {}} labels={{}} empty="" gradient="linear-gradient(90deg,#64748b,#94a3b8)" /></div>}
+          <p className="mt-2 text-[11px] text-text-muted/60">Only the referrer's host is stored, never its path or search terms. Direct visits and visits from our own pages carry no referrer. Search Console and Bing Webmaster stay manual.</p>
+        </div>
+      </div>
+    </Section>
+  )
+}
+
 function ClaudeTrafficPanel() {
   const [days, setDays] = useState<14 | 30 | 90>(14)
   const [mode, setMode] = useState<'machines' | 'calls'>('machines')
@@ -703,6 +880,12 @@ function MetricsTab() {
       })()}
 
       <ClaudeTrafficPanel />
+
+      <ScanKindsPanel data={data} />
+
+      <WatchAlertsPanel data={data} />
+
+      <GrowthPanel />
 
       <BehavioralPanel win={win} />
 

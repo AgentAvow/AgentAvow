@@ -13,7 +13,8 @@ Runs multiple jobs on the same interval (default 6 hours):
 10. Marketing metrics refresh
 11. Marketing watchdog checks
 12. Marketing recap to feed (Monday + Thursday)
-13. Expired token cleanup — email verifications + password reset tokens (daily)
+13. Expired token cleanup — email verifications + password reset tokens, and raw
+    IPs on analytics events older than 30 days (daily)
 14. Reply Guy monitor — check reply targets for new posts
 15. Reply Guy drafter — generate LLM reply drafts for new opportunities
 16. Bluesky starter pack refresh — recreate starter pack every 30 days
@@ -155,6 +156,16 @@ async def _scheduler_loop(interval: int = SCHEDULER_INTERVAL) -> None:
                         logger.debug("Provisional expiry: nothing to expire")
         except Exception:
             logger.exception("Scheduled provisional expiry failed")
+
+        # Job 2b: Daily admin metrics (catalog answer mix + Certified, x402 excluded;
+        # npm / PyPI downloads). Rewrites today's hash; see src/jobs/metrics_daily.
+        try:
+            async with async_session() as session:
+                from src.jobs.metrics_daily import run_metrics_daily
+
+                await run_metrics_daily(session)
+        except Exception:
+            logger.exception("Daily admin metrics failed")
 
         # Job 3: External reputation sync (linked accounts)
         try:
@@ -420,6 +431,14 @@ async def _scheduler_loop(interval: int = SCHEDULER_INTERVAL) -> None:
                             ),
                             {"cutoff": _cutoff},
                         )
+                        # 4. Clear raw IPs on analytics events older than 30 days
+                        # (rows from before t30; new rows store only ip_hash).
+                        from src.jobs.analytics_ip_expiry import expire_raw_analytics_ips
+
+                        ip_total = await expire_raw_analytics_ips(session, _now)
+                        if ip_total:
+                            logger.info(
+                                "Analytics cleanup: cleared %d raw IPs", ip_total)
                         ev_total = r1.rowcount + r2.rowcount
                         prt_total = r3.rowcount
                         total = ev_total + prt_total
@@ -1226,6 +1245,27 @@ def alert_triggers(dropped: bool, drift: bool, answer: AnswerChange) -> list[tup
     return triggers
 
 
+# Watch alert counters for the admin dashboard: one per trigger per alert, split by
+# public watches (tool_watches) and private repos (GitHub App). Counting starts with
+# the first re-scan cycle after the t28 reset (#292); earlier alerts are not counted.
+ALERT_TRIGGER_CODES = (
+    "answer_worse", "certified_lost", "score_drop", "definition_change",
+    "sandbox_change", "icon_change", "good_news", "held",
+)
+
+
+async def count_watch_alert(codes: list[str] | tuple[str, ...], scope: str) -> None:
+    """Bump ``watch_alert:<code>:<scope>`` (scope = public | private) for each code.
+    Best-effort: never raises, so counting can never stop an alert."""
+    try:
+        from src.api.metrics_dashboard_router import bump_metric
+
+        for code in codes:
+            await bump_metric(f"watch_alert:{code}:{scope}")
+    except Exception:
+        logger.debug("watch alert counter failed", exc_info=True)
+
+
 def alert_extra_reasons(triggers: list[tuple[str, str]]) -> str:
     """The answer / Certified reasons after the first, as "; answer changed; ...", for
     the notification body (the first reason is already in its lead sentence)."""
@@ -1414,6 +1454,7 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                 held_count += 1
                 dropped = improved = False
                 answer.absorb()
+                await count_watch_alert(["held"], "public")
             old_phrase = _answer_phrase(
                 getattr(w, "last_decision", None), getattr(w, "last_certified", None))
             # Every reason this one re-scan alerts for, most important first. One
@@ -1421,6 +1462,7 @@ async def _run_watch_rescan(limit: int = 200) -> None:
             triggers = alert_triggers(dropped, drift, answer)
             answer_alert = answer.worse or answer.certified_lost
             if triggers:
+                await count_watch_alert([c for c, _ in triggers], "public")
                 reason = triggers[0][1]
                 extra = alert_extra_reasons(triggers)
                 title = f"{w.owner}/{w.repo} — {reason}"
@@ -1468,6 +1510,7 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                 # Good news — a watched tool got safer. A lighter, positive nudge
                 # (also a reason to bring the watcher back to the site): in-app and
                 # email, never the webhook.
+                await count_watch_alert(["good_news"], "public")
                 answer_up = answer.better or answer.certified_gained
                 if improved:
                     title = f"{w.owner}/{w.repo} — score improved 🎉"
@@ -1509,6 +1552,7 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                 rules = _behavioral_rules(b_block)
                 hosts = sorted({str(h) for h in (b_block.get("unexpected_egress") or [])})
                 what = ", ".join(rules[:3] + hosts[:3]) or "runtime behavior"
+                await count_watch_alert(["sandbox_change"], "public")
                 title = f"{w.owner}/{w.repo} — sandbox behavior changed"
                 body = (
                     f"A tool you're watching behaves differently in the sandbox: {what}. "
@@ -1536,6 +1580,7 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                     logger.debug(
                         "behavioral webhook delivery failed for %s/%s", w.owner, w.repo)
             if icon_changed:
+                await count_watch_alert(["icon_change"], "public")
                 await _icon_change_alert(
                     db, w, new_score, getattr(w, "last_icon_digest", None), ws, w_decision)
             if b_change == "improved":

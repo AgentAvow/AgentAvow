@@ -200,3 +200,30 @@ def test_older_response_without_decision_falls_back_to_the_rule(tmp_path):
     crit = {"trust_score": 40, "findings": {"critical": 1, "high": 0, "medium": 0, "total": 1}}
     p = _run(tmp_path, crit)
     assert p.returncode == 1 and "Do not connect" in p.stdout + p.stderr
+
+
+def test_scan_call_sends_the_agentavow_action_user_agent(tmp_path):
+    """The call to agentavow.com identifies itself as agentavow-action/<version>, the
+    prefix src/traffic_class.py counts as our own client, not as anonymous curl."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    log = tmp_path / "curl-args.txt"
+    fixture = tmp_path / "resp.json"
+    fixture.write_text(json.dumps(_resp()))
+    curl = bindir / "curl"
+    curl.write_text(
+        "#!/usr/bin/env bash\n"
+        f"printf '%s\\n' \"$@\" >> '{log}'\n"
+        "out=''\nwhile [ $# -gt 0 ]; do case \"$1\" in -o) out=\"$2\"; shift;; esac; shift; done\n"
+        f"[ -n \"$out\" ] && cp '{fixture}' \"$out\"\n"
+        "printf 200\n")
+    curl.chmod(curl.stat().st_mode | stat.S_IEXEC)
+    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}",
+           "REPO_OWNER": "acme", "REPO_NAME": "tool", "COMMENT_ON_PR": "false",
+           "GITHUB_STEP_SUMMARY": str(tmp_path / "summary.md")}
+    subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True, timeout=60)
+    args = log.read_text().splitlines()
+    i = args.index("-A")
+    assert args[i + 1].startswith("agentavow-action/")
+    assert args[i + 1] != "agentavow-action/"
+    assert any(a.startswith("https://agentavow.com/") for a in args)
