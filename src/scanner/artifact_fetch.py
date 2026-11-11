@@ -108,7 +108,7 @@ _HF_UNSAFE_WEIGHT_EXT = frozenset({
 _HF_SAFE_WEIGHT_EXT = frozenset({
     ".safetensors", ".gguf", ".onnx", ".tflite", ".mlmodel",
 })
-# Text files worth downloading for the 12-category engine (model card, configs,
+# Text files worth downloading for the 14-category engine (model card, configs,
 # custom modeling code). Weight blobs are never fetched.
 _HF_TEXT_EXT = frozenset({
     ".md", ".txt", ".py", ".json", ".yaml", ".yml", ".toml", ".cfg", ".ini",
@@ -1170,7 +1170,7 @@ async def fetch_huggingface_artifact(
 
     Unlike npm/PyPI/crates there is no single downloadable tarball — the repo is
     git+LFS-backed. We pull the recursive file tree, download only the small text
-    files (model card, configs, custom ``modeling_*.py`` code) for the 12-category
+    files (model card, configs, custom ``modeling_*.py`` code) for the 14-category
     engine, and record the FORMAT of every weight file without downloading it: a
     model shipping pickle-backed weights (``.bin``/``.pt``/``.ckpt``…) executes
     arbitrary code on load, which is the load-time analogue of an install hook.

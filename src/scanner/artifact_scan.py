@@ -1,6 +1,6 @@
 """Phase 2 — scan the PUBLISHED artifact + detect repo↔artifact drift.
 
-Runs the SAME 12-category static engine (:func:`src.scanner.scan._scan_content`)
+Runs the SAME 14-category static engine (:func:`src.scanner.scan._scan_content`)
 over the unpacked artifact tree, adds the artifact-only attack surface that
 repo-only scanning is structurally blind to:
 
@@ -571,7 +571,7 @@ def detect_pypi_install_exec(source: str, file_path: str) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Scan the unpacked tree with the existing 12-category engine
+# Scan the unpacked tree with the existing 14-category engine
 # ---------------------------------------------------------------------------
 
 # A file named as a private key whose whole content is 32 bytes of hex. The name is
@@ -633,7 +633,7 @@ def _shipped_key_file_findings(fetched: ArtifactFetchResult, skip, allowlist) ->
 def scan_artifact_files(
     fetched: ArtifactFetchResult, oversized_out: list | None = None,
 ) -> tuple[list, int, bool]:
-    """Run the 12-category engine + install-hook detectors over the unpacked tree.
+    """Run the 14-category engine + install-hook detectors over the unpacked tree.
 
     Returns ``(findings, files_scanned, has_install_hook)``. Pass ``oversized_out`` to
     collect the paths of source files the engine did not read because their text is
@@ -766,7 +766,7 @@ def scan_artifact_files(
                 ))
             continue
 
-        # The 12-category static engine over every scannable source file, test / doc /
+        # The 14-category static engine over every scannable source file, test / doc /
         # example code included: a tests/ dir in a published artifact is installed next
         # to the runtime code, which can import it (`from evilpkg.tests import go`).
         # Those files are read for payloads only: payload-shaped findings (download+exec,

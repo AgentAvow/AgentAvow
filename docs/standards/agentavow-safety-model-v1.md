@@ -30,24 +30,32 @@ axis) and not a correctness or quality rating.
 
 ## 2. Detection categories
 
-A scan runs **12 detection categories**. Each finding carries a `category`, a `severity`
-(`critical` | `high` | `medium` | `low` | `info`), and a location (`file_path[:line]` or a
-manifest entry). The categories:
+A scan runs **14 detection categories**: 13 static ones that read the code, and runtime
+robustness, which only the behavioral sandbox produces. Each finding carries a raw
+`category` key, a `severity` (`critical` | `high` | `medium` | `low` | `info`), and a
+location (`file_path[:line]` or a manifest entry). Every raw key rolls up into exactly one
+detection category; the canonical list and mapping is `src/scanner/categories.py`. The
+categories:
 
-| Category | What it detects |
-|---|---|
-| Secret hygiene | Exposed API keys, tokens, credentials |
-| Code safety (unsafe exec) | Shell-outs, `eval`, dynamic code paths |
-| Obfuscation | Hidden / deliberately unreadable payloads |
-| Dynamic / remote load | Code fetched and executed at runtime |
-| Hidden unicode | Bidi / homoglyph / zero-width tricks |
-| Prompt injection | Surfaces where input can hijack the agent |
-| Insecure deserialization | Unsafe `pickle`/`yaml`/`marshal`-style loads |
-| Data handling / exfiltration | Where data goes; calls to external hosts |
-| Toxic flow | Untrusted-input → sensitive-sink chains |
-| Filesystem access | Unscoped file read/write |
-| Dependency health | Known-vulnerable / malicious dependencies (OSV/deps.dev) |
-| Artifact drift | Published bytes diverging from source (injected files, install hooks) |
+| # | Detection category | What it detects | Raw `category` keys |
+|---|---|---|---|
+| 1 | Secrets | API keys, tokens, passwords or private keys written into the code or config | `secret` |
+| 2 | Code execution | Shell or eval execution of input, unsafe deserialization, git configs that run commands on ordinary git operations | `unsafe_exec`, `insecure_deserialization`, `git_autorun` |
+| 3 | Obfuscation | Encoded, packed or bytecode-only code; invisible or bidi Unicode that hides text from a reviewer | `obfuscation`, `hidden_unicode` |
+| 4 | Prompt injection | Instruction-override or hidden-directive text in tool descriptions, metadata, skill prose or tool results | `prompt_injection` |
+| 5 | Remote code load (rug-pull) | Code, config or tool definitions fetched from a mutable remote source that can change after approval | `dynamic_remote_load` |
+| 6 | Data exfiltration | Credentials or local data sent to an outbound endpoint | `exfiltration` |
+| 7 | Toxic flow (lethal trifecta) | Private-data access, untrusted input and an outbound send combined in one tool | `toxic_flow`, `lethal_trifecta` |
+| 8 | Network endpoints | Unchecked caller-supplied URLs (SSRF), plain-HTTP or private-address endpoints, cross-site endpoints, weak or missing auth | `ssrf`, `insecure_transport`, `endpoint_origin`, `auth_scheme`, `data_handling` |
+| 9 | Filesystem access | Unsandboxed reads and writes, path traversal, recursive deletes | `fs_access` |
+| 10 | Dependencies | Known-vulnerable dependencies (OSV/deps.dev), advisories against the package itself, deprecated or yanked releases | `dependency`, `known_vulnerability`, `maintenance` |
+| 11 | Install hooks | Scripts that run on install or around a skill's invocation without being called | `install_hook`, `skill_hook` |
+| 12 | Tool definition | Risky input schemas, annotations that misstate what a tool does, skill permission grants that differ from the shipped code | `schema_risk`, `annotation_lie`, `skill_capability` |
+| 13 | Artifact integrity | A published package that differs from its source repo; agent cards whose signature does not verify | `artifact_drift`, `card_signature` |
+| 14 | Runtime robustness (sandbox only) | A tool call that crashes the server, or a read-only tool that fails on a read | `robustness` |
+
+The detection categories are a grouping for people. Scoring (§3 onward), the five
+`category_scores` sub-scores and the answer read the raw `category` key, not the group.
 
 ## 3. Severity weights
 

@@ -353,7 +353,7 @@ function ScanResultView({ owner, repo }: { owner: string; repo: string }) {
       const catScores = data.category_scores || {}
       const items = findings.items ?? []
 
-      // Per-family finding counts (map the 12 threat categories into the 5 sub-score axes)
+      // Per-family finding counts (map the raw finding categories into the 5 sub-score axes)
       const familyCounts: Partial<Record<ScoreFamily, number>> = {}
       Object.entries(findings.categories ?? {}).forEach(([key, count]) => {
         const fam = getCategoryInfo(key).family

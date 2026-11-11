@@ -1,6 +1,6 @@
 """Detection data and prebuilt web bundles inside a published npm / PyPI package.
 
-The 12-category engine matches text. Two kinds of file in a published package carry
+The 14-category engine matches text. Two kinds of file in a published package carry
 text that matches a code-execution or prompt-injection pattern without the package
 running it or aiming it at an agent:
 

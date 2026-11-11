@@ -1,4 +1,4 @@
-"""Local, offline scan — the same 12-category static engine and scoring the hosted
+"""Local, offline scan — the same 14-category static engine and scoring the hosted
 service runs, but over a checked-out working tree instead of the GitHub API.
 
 This is the engine behind ``agentavow scan <path>``, the in-runner GitHub Action
@@ -7,7 +7,7 @@ This is the engine behind ``agentavow scan <path>``, the in-runner GitHub Action
 trust score + findings WITHOUT sending any code to AgentAvow. The score is
 recomputable and matches a hosted scan of the same tree for the static portion.
 
-What's identical to a hosted scan: file selection, the 12 detection categories,
+What's identical to a hosted scan: file selection, the 14 detection categories,
 suppression/allowlist, MCP/media context discounting, dependency findings, and
 the trust-score / certified computation — all imported from ``scan.py``, not
 re-implemented, so scores can't drift. What's absent (hosted-only, network
@@ -275,7 +275,7 @@ def scan_local(root: str | Path, *, name: str | None = None) -> ScanResult:
         gaps["over_file_cap"] = result.total_scannable_files - len(scan_files)
         gaps["file_cap"] = _MAX_FILES_PER_REPO
 
-    # --- per-file static analysis (the 12 categories) ---
+    # --- per-file static analysis (the 14 detection categories) ---
     allowlist = _load_allowlist()
     local_texts: dict[str, str] = {}
     for it in scan_files:

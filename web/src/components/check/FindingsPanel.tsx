@@ -89,7 +89,7 @@ export default function FindingsPanel({
 
   const displayFindings = showAllFindings ? sortedFindings : sortedFindings.slice(0, 5)
 
-  // Group findings by threat category (the 12-category granularity) for an
+  // Group findings by threat category (the raw finding-category granularity, under the 14 detection categories) for an
   // at-a-glance "what kind of threats" summary — e.g. Rug-Pull ×9, Prompt Injection ×2.
   const threatGroups = Object.entries(
     findings.reduce<Record<string, number>>((acc, f) => {

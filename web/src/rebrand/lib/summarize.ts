@@ -80,9 +80,9 @@ export function summarize(s: ScanLike, repo: string): PlainSummary {
   // paragraph says so instead of reading as a clean bill for the whole tool.
   const gaps = coverageGapNotes(s)
   if (verdict === 'safe' && total === 0 && gaps.length) {
-    paragraph = `We scanned ${short} across 12 safety categories and found nothing blocking in what we read. Not everything was read (${gaps.join('; ')}), so this covers the files we checked, not the whole tool.`
+    paragraph = `We scanned ${short} across 14 detection categories and found nothing blocking in what we read. Not everything was read (${gaps.join('; ')}), so this covers the files we checked, not the whole tool.`
   } else if (verdict === 'safe' && total === 0) {
-    paragraph = `We scanned ${short} across 12 safety categories and found nothing blocking. It carries a signed, verifiable score — safe to connect to your agent.`
+    paragraph = `We scanned ${short} across 14 detection categories and found nothing blocking. It carries a signed, verifiable score — safe to connect to your agent.`
   } else if (verdict === 'safe' && gaps.length) {
     paragraph = `${short} has no critical or high findings in what we read. We noted ${total} minor thing${total === 1 ? '' : 's'}, listed below for context. Not everything was read (${gaps.join('; ')}), so this covers the files we checked, not the whole tool.`
   } else if (verdict === 'safe') {
@@ -93,7 +93,7 @@ export function summarize(s: ScanLike, repo: string): PlainSummary {
     paragraph = `Do not connect ${short}: ${reason}. ${crit ? `The critical finding${crit === 1 ? ' is' : 's are'} listed below with the file and line.` : 'The details below say what was found.'}`
   }
 
-  const facts: string[] = ['Scanned across 12 safety categories', 'Result is signed (Ed25519) and verifiable offline']
+  const facts: string[] = ['Scanned across 14 detection categories', 'Result is signed (Ed25519) and verifiable offline']
   const read = s.metadata?.files_scanned
   const of = s.metadata?.files_total
   if (read) {

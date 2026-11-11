@@ -314,7 +314,7 @@ async def test_scan_published_artifact_detects_drift_and_hook():
     cats = {f.category for f in res.findings}
     assert "install_hook" in cats     # npm postinstall lifecycle hook
     assert "artifact_drift" in cats    # injected file + hook drift
-    # the injected file's eval is caught by the reused 12-category engine
+    # the injected file's eval is caught by the reused 14-category engine
     assert any(f.category in ("unsafe_exec", "dynamic_remote_load") for f in res.findings)
 
 

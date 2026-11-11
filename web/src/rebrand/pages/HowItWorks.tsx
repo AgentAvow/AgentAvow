@@ -13,20 +13,27 @@ const AA_MCP = { name: 'agentavow-trust', command: 'uvx', args: ['agentavow-trus
 /**
  * How it works — the transparency page. Explains the aggregate-over-signed-evidence
  * score ("Rotten Tomatoes for agent trust"), offline verification (the home for
- * Verify), the 12 categories, and the open standards / partner interop work. On a
+ * Verify), the 14 detection categories, and the open standards / partner interop work. On a
  * trust product, publishing the methodology is the point — not something to hide.
  */
 
+// The 14 detection categories, canonical names and one-liners from
+// src/scanner/categories.py (keep in step with it).
 const CATEGORIES = [
-  ['Secret hygiene', 'Exposed API keys, tokens, and credentials in the code.'],
-  ['Code safety', 'Unsafe execution — shell-outs, eval, dynamic code paths.'],
-  ['Data handling', 'Where your data goes and how it\'s treated.'],
-  ['Filesystem access', 'What files it can read and write, and whether that\'s scoped.'],
-  ['Network & exfiltration', 'Calls out to external hosts that could leak data.'],
-  ['Lethal trifecta', 'The exfiltration setup: a tool (or a server’s tools together) that can read private data + reach the internet + take actions. Any one is fine; all three is how data walks out. We flag it as a blocking critical.'],
-  ['Prompt injection', 'Surfaces where a malicious input could hijack the agent.'],
-  ['Obfuscation', 'Hidden or deliberately unreadable payloads.'],
-  ['Dependency health', 'Outdated or known-vulnerable dependencies.'],
+  ['Secrets', 'API keys, tokens, passwords or private keys written into the code or config.'],
+  ['Code execution', 'Shell or eval execution of input, unsafe deserialization, and git configs that run commands on ordinary git operations.'],
+  ['Obfuscation', 'Encoded, packed or bytecode-only code, and invisible or bidi Unicode that hides text from a human reviewer.'],
+  ['Prompt injection', 'Instruction-override or hidden-directive text in tool descriptions, metadata, skill prose or tool results, aimed at the model that reads it.'],
+  ['Remote code load (rug-pull)', 'Code, config or tool definitions fetched from a mutable remote source that can change after you approved the tool.'],
+  ['Data exfiltration', 'Credentials or local data sent to an outbound endpoint.'],
+  ['Toxic flow (lethal trifecta)', 'Private-data access, untrusted input and an outbound send combined in one tool (or a server’s tools together): the prompt-injection-to-exfiltration chain. We flag it as a blocking critical.'],
+  ['Network endpoints', 'Caller-supplied URLs fetched unchecked (SSRF), plain-HTTP or private-address endpoints, cross-site endpoints, and weak or missing auth schemes.'],
+  ['Filesystem access', 'Unsandboxed reads and writes, path traversal, and recursive deletes.'],
+  ['Dependencies', 'Dependencies with known vulnerabilities, published advisories against the package itself, and deprecated or yanked releases.'],
+  ['Install hooks', 'Scripts that run on install or around a skill’s invocation without being called (npm pre/postinstall, skill hook manifests).'],
+  ['Tool definition', 'Risky input schemas, annotations that misstate what a tool does, and skill permission grants that differ from what the shipped code does.'],
+  ['Artifact integrity', 'A published package that differs from its source repo, and agent cards whose signature does not verify.'],
+  ['Runtime robustness (sandbox only)', 'A tool call that crashes the server or a read-only tool that fails on a read, seen only when the behavioral sandbox runs the tool.'],
 ]
 
 const STANDARDS = [
@@ -166,7 +173,7 @@ agentavow scan . --fail-on do_not_connect`}</pre>
       {/* categories */}
       <Reveal>
         <h2 className="mt-12 text-xl font-bold">What we check</h2>
-        <p className="mt-1.5 text-text-muted text-[14px] max-w-[62ch]">The engine runs <strong className="text-text">12 detection categories</strong> — a score page shows the ones that applied to that surface. The main ones:</p>
+        <p className="mt-1.5 text-text-muted text-[14px] max-w-[62ch]">The engine runs <strong className="text-text">14 detection categories</strong> — a score page shows the ones that applied to that surface. The first 13 read the code; the last needs the behavioral sandbox to run the tool.</p>
       </Reveal>
       <RevealStagger className="grid sm:grid-cols-2 gap-2.5 mt-4" stagger={0.03}>
         {CATEGORIES.map(([h, p]) => (

@@ -28,7 +28,7 @@ _SEV = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
 
 def _exfil(path, text):
     """(worst severity, findings) of this rule's defects for one script (the
-    12-category engine's own per-line rules are out of scope here)."""
+    14-category engine's own per-line rules are out of scope here)."""
     r = analyze_skill({"SKILL.md": _MD, path: text})
     fs = [f for f in r.findings if f.category == "exfiltration"
           and f.name.startswith("Bundled script")
