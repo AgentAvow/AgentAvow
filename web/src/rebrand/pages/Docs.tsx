@@ -16,6 +16,7 @@ import verifyAttestations from '../docs/verify-attestations.md?raw'
 import autoScanClaudeCode from '../docs/auto-scan-claude-code.md?raw'
 import mcpConnector from '../docs/mcp-connector.md?raw'
 import behavioralSandbox from '../docs/behavioral-sandbox.md?raw'
+import x402Doc from '../docs/x402.md?raw'
 
 /**
  * Rebrand docs PREVIEW — renders the staged trust-first docs (web/src/rebrand/docs/*.md)
@@ -44,6 +45,8 @@ const DOCS = [
     blurb: 'Connect the AgentAvow MCP server to Claude, ChatGPT, Cursor, or VS Code and check any tool’s trust score before your agent connects to it.' },
   { slug: 'auto-scan-claude-code', title: 'Auto-scan in Claude Code', body: autoScanClaudeCode,
     blurb: 'Have Claude Code check every new tool’s trust score automatically — via the plugin, a CLAUDE.md rule, or a SessionStart hook.' },
+  { slug: 'x402', title: 'How we check x402', body: x402Doc,
+    blurb: 'How x402 paid endpoints are scored from their public listing: what we read, the checks, what a result means, the user agent, opt-out and limits.' },
 ]
 
 /** Plain text of a react-markdown heading's children, for its id. */

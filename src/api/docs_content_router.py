@@ -37,6 +37,7 @@ DOCS: list[tuple[str, str]] = [
     ("verify-attestations", "Verify an attestation"),
     ("mcp-connector", "MCP connector"),
     ("auto-scan-claude-code", "Auto-scan in Claude Code"),
+    ("x402", "How we check x402"),
 ]
 _TITLES = dict(DOCS)
 _SLUGS = [s for s, _ in DOCS]
