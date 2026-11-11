@@ -208,3 +208,51 @@ def test_snapshot_redis_program_reads_checks_and_leaves_pre_counter_days_empty(m
     assert out["checks_total"] == 7 and out["checks_claude-code"] == 4
     assert out["checks_cursor"] is None
     assert out["checks_vscode"] == 0 and out["calls_codex"] == 0
+
+
+@pytest.mark.parametrize("ua,group", [
+    ("claude-code/2.1.287 (cli)", "cli"),
+    ("claude-code/2.1.286 (claude-vscode, agent-sdk/0.3.286)", "cli"),
+    ("claude-code/2.1.284 (claude-desktop, agent-sdk/0.3.284)", "desktop"),
+    ("claude-code/2.1.286 (local-agent, agent-sdk/0.3.286)", "desktop"),
+    ("claude-code/2.1.285 (sdk-cli)", "sdk"),
+    ("claude-code/2.1.280 (sdk-ts, agent-sdk/0.3.280)", "sdk"),
+    ("claude-code/2.1.290 (remote, agent-sdk/0.3.290)", "cloud"),
+    ("claude-code/2.1.290 (remote-agent)", "cloud"),
+    ("claude-code/2.1.290", "other"),
+    ("claude-code/2.1.290 (something-new)", "other"),
+])
+def test_snapshot_entrypoint_groups(ua, group):
+    assert _snapshot_module().entrypoint_group(ua) == group
+
+
+def test_activation_fields_drop_cloud_and_count_new_machines_that_see_a_verdict():
+    snap = _snapshot_module()
+    day = "2026-11-20"
+    seen = {
+        "laptop": ["2026-11-01", day],
+        "cloudbox": ["2026-11-01", day],
+        "new_checked": [day, day],
+        "new_unchecked": [day, day],
+        "d7_checked": ["2026-11-13", "2026-11-14"],
+        "d7_late": ["2026-11-13", "2026-11-13"],
+        "d7_never": ["2026-11-13", "2026-11-13"],
+        "owner": [day, day],
+    }
+    checked_last = {"laptop": day, "cloudbox": day, "new_checked": day, "owner": day}
+    first_checked = {"d7_checked": "2026-11-15", "d7_late": day, "new_checked": day,
+                     "owner": day}
+    out = snap._activation_fields(
+        seen, checked_last, first_checked, {"cloudbox"},
+        {"laptop", "cloudbox", "new_checked", "new_unchecked", "owner"},
+        {"laptop", "cloudbox", "new_checked", "owner"}, day, {"owner"})
+    assert out["cc_machines_7d_excl_cloud"] == 4  # laptop, the two new, d7_checked (11-14)
+    assert out["checked_machines_7d_excl_cloud"] == 2  # laptop, new_checked
+    assert out["new_checked_same_day"] == 1
+    assert out["d7_cohort_checked"] == 1  # checked on 11-15; 11-20 is too late
+
+
+def test_rolling_drops_old_entries():
+    snap = _snapshot_module()
+    assert snap._rolling({"a": "2026-10-01", "b": "2026-11-19", "c": 3}, "2026-11-20", 30) == {
+        "b": "2026-11-19"}

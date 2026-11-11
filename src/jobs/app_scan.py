@@ -315,6 +315,9 @@ async def _maybe_notify(
         if await score_alerts_held():
             dropped = improved = False
             answer.absorb()
+            from src.jobs.scheduler import count_watch_alert
+
+            await count_watch_alert(["held"], "private")
 
     old_digest = (old_json or {}).get("tool_manifest_digest") if old_json else None
     new_digest = (new_json or {}).get("tool_manifest_digest")
@@ -326,6 +329,9 @@ async def _maybe_notify(
     ref = full_name
     try:
         if triggers:
+            from src.jobs.scheduler import count_watch_alert
+
+            await count_watch_alert([c for c, _ in triggers], "private")
             reason = triggers[0][1]
             title = f"{owner}/{repo} — {reason}"
             body = (
@@ -353,6 +359,9 @@ async def _maybe_notify(
                 logger.debug("app_scan: webhook alert delivery failed for %s", full_name)
             return 1, answer
         if improved or answer.better or answer.certified_gained:
+            from src.jobs.scheduler import count_watch_alert
+
+            await count_watch_alert(["good_news"], "private")
             answer_up = answer.better or answer.certified_gained
             if improved:
                 title = f"{owner}/{repo} — score improved 🎉"
