@@ -74,7 +74,9 @@ DETECTION_CATEGORIES: tuple[DetectionCategory, ...] = (
         "network_endpoints", "Network and endpoint safety",
         "Caller-supplied URLs fetched unchecked (SSRF), plain-HTTP or private-address"
         " endpoints, cross-site endpoints, and weak or missing auth schemes.",
-        ("ssrf", "insecure_transport", "endpoint_origin", "auth_scheme", "data_handling"),
+        ("ssrf", "insecure_transport", "endpoint_origin", "auth_scheme", "data_handling",
+         # x402 payment terms (src/scanner/x402_scan.py): who gets paid, on what network.
+         "payment_terms"),
     ),
     DetectionCategory(
         "filesystem_access", "Filesystem access",

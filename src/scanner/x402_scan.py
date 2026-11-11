@@ -285,7 +285,7 @@ def _terms_findings(rec: dict, res: X402ScanResult) -> list:
         # (api.exa.ai: two Base wallets).
         net, v = max(same_net.items(), key=lambda kv: len(kv[1]))
         out.append(_finding(
-            PAYMENT_TERMS,
+            "payment_terms",
             f"the listing names {len(v)} different recipients on {net}",
             "medium", _WHERE_TERMS,
             "An agent paying on this network may be sent to either wallet. Use one "
@@ -298,7 +298,7 @@ def _terms_findings(rec: dict, res: X402ScanResult) -> list:
             fam, v = max(multi.items(), key=lambda kv: len(kv[1]))
             label = {"eip155": "EVM", "solana": "Solana"}.get(fam, fam)
             out.append(_finding(
-                PAYMENT_TERMS,
+                "payment_terms",
                 f"a different {label} recipient on each network ({len(v)} payTo addresses)",
                 "low", _WHERE_TERMS,
                 "Different chains pay different wallets. If they are not all yours, say "
@@ -308,7 +308,7 @@ def _terms_findings(rec: dict, res: X402ScanResult) -> list:
         pay_to = str(a.get("payTo") or "").strip()
         if pay_to and not _valid_pay_to(net, pay_to):
             out.append(_finding(
-                PAYMENT_TERMS, f"payTo is not a valid address for {net or 'its network'} "
+                "payment_terms", f"payTo is not a valid address for {net or 'its network'} "
                 f"({_clip(pay_to, 24)})", "medium", _WHERE_TERMS,
                 "A malformed recipient means a payment that fails or goes somewhere "
                 "unintended."))
@@ -328,7 +328,7 @@ def _terms_findings(rec: dict, res: X402ScanResult) -> list:
     if nets and all(n in TESTNETS for n in nets):
         res.testnet_only = True
         out.append(_finding(
-            PAYMENT_TERMS, "settles on a test network only (" + ", ".join(nets) + ")",
+            "payment_terms", "settles on a test network only (" + ", ".join(nets) + ")",
             "info", _WHERE_TERMS, "A test-network listing cannot take real payment."))
     prices: list[Decimal] = []
     for a in accepts:
@@ -349,11 +349,11 @@ def _terms_findings(rec: dict, res: X402ScanResult) -> list:
         res.price_usd = format(low.normalize(), "f")
         if low > PRICE_CEILING_USD:
             out.append(_finding(
-                PAYMENT_TERMS, "costs more than $1 per call", "low", _WHERE_TERMS,
+                "payment_terms", "costs more than $1 per call", "low", _WHERE_TERMS,
                 f"The cheapest listed option is ${res.price_usd} per call."))
     elif res.price_unconverted:
         out.append(_finding(
-            PAYMENT_TERMS, f"price in {res.price_unconverted[0]}, not converted", "info",
+            "payment_terms", f"price in {res.price_unconverted[0]}, not converted", "info",
             _WHERE_TERMS, "The asset is not a stablecoin we know, so no USD price is shown."))
     return out
 
