@@ -121,3 +121,10 @@ def test_copy_button_falls_back_to_a_manual_copy():
     assert body.index("return") < body.index("copied()")  # failure returns before tracking
     assert "onCopy={selectionCopied}" in src
     assert "press and hold" in src
+
+
+def test_ad_visitors_get_the_normal_header_and_footer():
+    """/claude-code keeps the site nav and footer for ad arrivals (Kenne, 2026-11-11)."""
+    src = (Path(__file__).resolve().parent.parent / "web" / "src" / "rebrand"
+           / "RebrandLayout.tsx").read_text()
+    assert "const BARE_PAGES = new Set<string>([])" in src

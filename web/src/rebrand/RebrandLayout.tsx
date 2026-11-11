@@ -328,8 +328,11 @@ function SiteFooter() {
   )
 }
 
-/** Paid landing pages: no nav and no footer for ad arrivals (see isPaidArrival); the logo links home. */
-const BARE_PAGES = new Set([rp('/rebrand/claude-code')])
+/** Paid landing pages that hide the nav and footer for ad arrivals (see isPaidArrival).
+ * Empty since 2026-11-11 (Kenne): Reddit developers look around before they act, so a
+ * page with no way to Browse, Docs or GitHub reads as a funnel. Ad attribution doesn't
+ * need it (first-touch UTMs follow the visitor), and the Meta Pixel stays /claude-code only. */
+const BARE_PAGES = new Set<string>([])
 
 /** A paid-ad arrival: the bare (one-goal) layout is only for visitors who came from an ad.
  * Everyone else (site links, search, direct) gets the normal nav and footer. */
