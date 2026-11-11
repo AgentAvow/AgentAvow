@@ -316,6 +316,8 @@ The body is JSON with a `type` that says what happened:
   | `certified_lost` | `Certified mark removed` | `old_certified_mark` was `true` and `certified` is now `false` |
 
   `reason` is the first entry of `reasons[]`, so a receiver written before `triggers[]` existed keeps working. Read `triggers[]` to act on a specific cause.
+
+  A private repo you connected through the GitHub App sends the same `grade_change`, with the same fields and triggers, when its scheduled re-scan finds one of these changes.
 - `agentavow.alert.behavioral_change` — a later [sandbox run](./behavioral-sandbox.md) added findings, leaked a canary or reached a new undeclared host. Carries the run's current state rather than a diff: `findings[]` (`rule`, `severity`, `name`), `unexpected_egress[]`, `canary_exfil[]`, `tools_exercised[]`, `plan`, `score`, the `package` the sandbox exercised, and the tool's answer now (`decision`, `decision_final`, `decision_reason`, `certified`).
 - `agentavow.alert.icon_change` — a watched MCP server now serves different `icons` on its tools or in its `serverInfo`. Icons are not part of the signed tool definition, so this is separate from `signed definition changed` and the grade and attestation are not what moved. Carries `{type, event, owner, repo, surface, score, reason, old_icon_fingerprint, new_icon_fingerprint, icon_findings[]}` (`severity`, `name`, `where` for the icon findings of the new scan) and the tool's answer now (`decision`, `decision_final`, `decision_reason`, `certified`).
 - `agentavow.alert.test` — what `POST …/test` sends, shaped like a grade change with a `message`.

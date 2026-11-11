@@ -10,9 +10,11 @@ install into something that actually DOES work:
   4. upsert an owner-scoped ``PrivateScanResult`` (never public/catalog),
   5. ensure a VERIFIED ``RepoClaim`` for each repo — the App install IS the
      ownership proof, so no topic/token dance is needed,
-  6. fire grade-change notifications the SAME way the watch re-scan loop does
-     (drop → ``watch_alert``, improvement → ``watch_good_news``, digest drift →
-     ``watch_alert``).
+  6. fire grade-change alerts with the SAME rules as the watch re-scan loop
+     (``src/jobs/scheduler.py``): a score drop, digest drift, a worse answer or a lost
+     Certified mark → one ``watch_alert`` plus the ``grade_change`` webhook carrying
+     every reason; a score rise, a better answer or a new Certified mark →
+     ``watch_good_news`` (in-app, no webhook).
 
 Fail-open throughout: a per-repo failure is swallowed so one bad repo can't sink
 the whole installation, and token/list failures return an empty summary rather
@@ -168,8 +170,11 @@ async def _scan_and_store(db, entity_id, owner: str, repo: str, full_name: str, 
 
     prev_score = existing.trust_score if existing is not None else None
     old_json = existing.result_json if existing is not None else None
+    last_decision = existing.last_decision if existing is not None else None
+    last_certified = existing.last_certified if existing is not None else None
 
     if existing is not None:
+        row = existing
         existing.prev_score = prev_score
         existing.trust_score = new_score
         existing.grade = grade
@@ -177,28 +182,33 @@ async def _scan_and_store(db, entity_id, owner: str, repo: str, full_name: str, 
         existing.source = "app"
         existing.scanned_at = safunc.now()
     else:
-        db.add(
-            PrivateScanResult(
-                entity_id=entity_id,
-                owner=owner,
-                repo=repo,
-                full_name=full_name,
-                trust_score=new_score,
-                grade=grade,
-                result_json=data,
-                prev_score=None,
-                source="app",
-            )
+        row = PrivateScanResult(
+            entity_id=entity_id,
+            owner=owner,
+            repo=repo,
+            full_name=full_name,
+            trust_score=new_score,
+            grade=grade,
+            result_json=data,
+            prev_score=None,
+            source="app",
         )
+        db.add(row)
     await db.flush()
 
     # --- Ensure a VERIFIED RepoClaim (the App install IS the ownership proof) -
     await _ensure_verified_claim(db, entity_id, owner, repo, full_name)
 
-    # --- Fire grade-change notifications (mirrors _run_watch_rescan) ----------
-    return await _maybe_notify(
-        db, entity_id, owner, repo, full_name, prev_score, new_score, old_json, data
+    # --- Fire grade-change alerts (same rules as _run_watch_rescan) -----------
+    fired, answer = await _maybe_notify(
+        db, entity_id, owner, repo, full_name, prev_score, new_score, old_json, data,
+        last_decision=last_decision, last_certified=last_certified,
     )
+    # The answer baseline moves every re-scan (a first scan seeds it silently).
+    row.last_decision = answer.decision_baseline
+    row.last_certified = answer.certified_baseline
+    await db.flush()
+    return fired
 
 
 async def _ensure_verified_claim(
@@ -257,11 +267,33 @@ async def _ensure_verified_claim(
 async def _maybe_notify(
     db, entity_id, owner: str, repo: str, full_name: str,
     prev_score, new_score, old_json, new_json,
-) -> int:
-    """Compare the new scan to the previous one and fire a notification for a
-    grade drop, improvement, or signed-definition (tool-manifest) drift — reusing
-    ``create_notification`` exactly like ``_run_watch_rescan``. Returns 0 or 1."""
+    last_decision: str | None = None, last_certified: bool | None = None,
+):
+    """Compare the new scan to the previous one and alert with the watch loop's rules
+    (``src/jobs/scheduler.py``): a score drop, signed-definition (tool-manifest) drift,
+    a worse answer or a lost Certified mark send ONE ``watch_alert`` naming every
+    reason, plus the ``grade_change`` webhook (``triggers[]``, ``reasons[]``,
+    ``old_decision``, ``old_certified_mark``) to the owner's alert webhook. A score
+    rise, a better answer or a newly earned mark send ``watch_good_news`` (in-app,
+    never the webhook).
+
+    Returns ``(alerts fired: 0 or 1, AnswerChange)``; the caller stores the
+    AnswerChange baseline. No stored answer yet (a first scan, or a row from before
+    the columns) sets the baseline silently.
+    """
+    from datetime import datetime, timezone
+
     from src.api.notification_router import create_notification
+    from src.jobs.scheduler import (
+        AnswerChange,
+        _answer_phrase,
+        _watch_decision,
+        _watcher_hook,
+        alert_extra_reasons,
+        alert_triggers,
+        grade_change_payload,
+        w_decision_phrase,
+    )
 
     dropped = (
         prev_score is not None and new_score is not None
@@ -271,48 +303,81 @@ async def _maybe_notify(
         prev_score is not None and new_score is not None
         and new_score > prev_score + _CHANGE_THRESHOLD
     )
+    # A private repo has no sandbox block: the answer is decide() over the scan.
+    decision = _watch_decision(new_json, None)
+    answer = AnswerChange(last_decision, last_certified, decision)
 
-    if dropped or improved:
+    if dropped or improved or answer.moved:
         # A planned catalog re-score holds back score-change alerts (the formula moved,
-        # not the repo). Definition drift below still alerts.
+        # not the repo), and answer moves with them. Definition drift below still alerts.
         from src.jobs.watch_alert_hold import score_alerts_held
 
         if await score_alerts_held():
             dropped = improved = False
+            answer.absorb()
 
     old_digest = (old_json or {}).get("tool_manifest_digest") if old_json else None
     new_digest = (new_json or {}).get("tool_manifest_digest")
     drift = bool(old_digest and new_digest and old_digest != new_digest)
 
+    old_phrase = _answer_phrase(last_decision, last_certified)
+    triggers = alert_triggers(dropped, drift, answer)
+    answer_alert = answer.worse or answer.certified_lost
     ref = full_name
     try:
-        if dropped or drift:
-            reason = "score dropped" if dropped else "signed definition changed"
+        if triggers:
+            reason = triggers[0][1]
             title = f"{owner}/{repo} — {reason}"
             body = (
                 f"A private repo you connected changed: {reason}"
                 + (f" ({prev_score} -> {new_score})" if dropped else "")
-                + ". Review it before your agents keep using it."
+                + alert_extra_reasons(triggers)
+                + (f" (was: {old_phrase})" if answer_alert else "")
+                + f". Now: {w_decision_phrase(decision)}."
+                + " Review it before your agents keep using it."
             )
             await create_notification(
                 db, entity_id, "watch_alert", title, body, reference_id=ref,
             )
-            return 1
-        if improved:
-            title = f"{owner}/{repo} — score improved 🎉"
-            body = (
-                f"Good news: a private repo you connected improved "
-                f"({prev_score} → {new_score}/100). See what changed."
-            )
+            # Webhook alert delivery, the same body as a watched tool's grade_change.
+            try:
+                hook = await _watcher_hook(db, entity_id)
+                if hook is not None:
+                    from src.api.account_webhook_router import deliver_to_hook
+
+                    hook.last_status = await deliver_to_hook(hook, grade_change_payload(
+                        owner, repo, prev_score, new_score, reason, triggers, decision,
+                        last_decision, last_certified))
+                    hook.last_delivery_at = datetime.now(timezone.utc)
+            except Exception:
+                logger.debug("app_scan: webhook alert delivery failed for %s", full_name)
+            return 1, answer
+        if improved or answer.better or answer.certified_gained:
+            answer_up = answer.better or answer.certified_gained
+            if improved:
+                title = f"{owner}/{repo} — score improved 🎉"
+                body = (
+                    f"Good news: a private repo you connected improved "
+                    f"({prev_score} → {new_score}/100). "
+                    + (f"Was: {old_phrase}. " if answer_up else "")
+                    + f"Now: {w_decision_phrase(decision)}."
+                )
+            else:
+                what = "answer improved" if answer.better else "earned the Certified mark"
+                title = f"{owner}/{repo} — {what} 🎉"
+                body = (
+                    f"Good news: a private repo you connected improved. Was: {old_phrase}. "
+                    f"Now: {w_decision_phrase(decision)}."
+                )
             await create_notification(
                 db, entity_id, "watch_good_news", title, body, reference_id=ref,
             )
-            return 1
+            return 1, answer
     except Exception:
         logger.warning(
             "app_scan: notification failed for %s", full_name, exc_info=True
         )
-    return 0
+    return 0, answer
 
 
 __all__ = ["scan_installation", "scan_one_repo"]

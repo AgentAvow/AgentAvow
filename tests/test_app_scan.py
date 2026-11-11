@@ -94,6 +94,15 @@ async def _ensure_tables():
             "ALTER TABLE private_scan_results "
             "ADD COLUMN IF NOT EXISTS published BOOLEAN NOT NULL DEFAULT false"
         ))
+        # The answer baseline (migration t29).
+        await conn.execute(text(
+            "ALTER TABLE private_scan_results "
+            "ADD COLUMN IF NOT EXISTS last_decision VARCHAR(32)"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE private_scan_results "
+            "ADD COLUMN IF NOT EXISTS last_certified BOOLEAN"
+        ))
     await engine.dispose()
 
 
@@ -256,6 +265,195 @@ async def test_scan_installation_first_scan_no_alert(db: AsyncSession, monkeypat
         select(RepoClaim).where(RepoClaim.entity_id == ent.id)
     )).scalar_one()
     assert claim.status == "verified"
+
+
+# ── answer / Certified alerts (same rules as the watch re-scan loop) ──────────
+
+
+async def _seed_private(db, ent, *, score, last_decision, last_certified,
+                        repo="ans") -> None:
+    db.add(PrivateScanResult(
+        entity_id=ent.id, owner="me", repo=repo, full_name=f"me/{repo}",
+        trust_score=score, grade="A", result_json={"trust_score": score}, source="app",
+        last_decision=last_decision, last_certified=last_certified,
+    ))
+    await db.flush()
+
+
+@pytest.fixture
+def alert_spy(monkeypatch):
+    """Records webhook deliveries and the re-score hold; no network, no Redis."""
+    state = {"delivered": [], "held": False}
+
+    async def _deliver(hook, payload):
+        state["delivered"].append(payload)
+        return 204
+
+    async def _held():
+        return state["held"]
+
+    monkeypatch.setattr("src.api.account_webhook_router.deliver_to_hook", _deliver)
+    monkeypatch.setattr("src.jobs.watch_alert_hold.score_alerts_held", _held)
+    return state
+
+
+async def _add_hook(db, ent):
+    from src.models import AlertWebhook
+
+    db.add(AlertWebhook(id=uuid.uuid4(), entity_id=ent.id,
+                        url="https://hooks.example/x", active=True))
+    await db.flush()
+
+
+async def _row(db, ent, repo="ans") -> PrivateScanResult:
+    return (await db.execute(select(PrivateScanResult).where(
+        PrivateScanResult.entity_id == ent.id, PrivateScanResult.repo == repo,
+    ))).scalar_one()
+
+
+async def _notes(db, ent) -> list[Notification]:
+    return list((await db.execute(
+        select(Notification).where(Notification.entity_id == ent.id)
+    )).scalars().all())
+
+
+@pytest.mark.asyncio
+async def test_private_first_scan_seeds_answer_silently(
+    db: AsyncSession, monkeypatch, alert_spy,
+):
+    ent = await _make_entity(db)
+    await _add_hook(db, ent)
+    _patch_gh(monkeypatch, [], _fake_scan_result(trust_score=88))
+    from src.jobs.app_scan import scan_one_repo
+
+    assert await scan_one_repo(db, "99101", ent.id, "me", "ans") == 0
+    row = await _row(db, ent)
+    assert (row.last_decision, row.last_certified) == ("safe", False)
+    assert await _notes(db, ent) == []
+    assert alert_spy["delivered"] == []
+
+
+@pytest.mark.asyncio
+async def test_private_legacy_row_seeds_answer_silently(
+    db: AsyncSession, monkeypatch, alert_spy,
+):
+    """A row from before the columns (NULL answer) sets the baseline, no alert."""
+    ent = await _make_entity(db)
+    await _seed_private(db, ent, score=40, last_decision=None, last_certified=None)
+    _patch_gh(monkeypatch, [], _fake_scan_result(trust_score=40))
+    from src.jobs.app_scan import scan_one_repo
+
+    assert await scan_one_repo(db, "99102", ent.id, "me", "ans") == 0
+    row = await _row(db, ent)
+    assert row.last_decision == "review"
+    assert await _notes(db, ent) == []
+
+
+@pytest.mark.asyncio
+async def test_private_one_combined_alert_and_webhook_fields(
+    db: AsyncSession, monkeypatch, alert_spy,
+):
+    """Score drop + worse answer + lost Certified mark: ONE alert naming them all and
+    one grade_change webhook with triggers / reasons / old_decision /
+    old_certified_mark, like a watched tool."""
+    ent = await _make_entity(db)
+    await _add_hook(db, ent)
+    await _seed_private(db, ent, score=90, last_decision="safe", last_certified=True)
+    _patch_gh(monkeypatch, [], _fake_scan_result(trust_score=50, critical=1))
+    from src.jobs.app_scan import scan_one_repo
+
+    assert await scan_one_repo(db, "99103", ent.id, "me", "ans") == 1
+    notes = await _notes(db, ent)
+    assert len(notes) == 1 and notes[0].kind == "watch_alert"
+    assert notes[0].title == "me/ans — score dropped"
+    assert "(90 -> 50); answer changed; Certified mark removed" in notes[0].body
+    assert "(was: Safe to connect · Certified)" in notes[0].body
+    assert "Now: Do not connect" in notes[0].body
+
+    assert len(alert_spy["delivered"]) == 1
+    p = alert_spy["delivered"][0]
+    assert p["type"] == "agentavow.alert.grade_change"
+    assert (p["owner"], p["repo"], p["old_score"], p["new_score"]) == ("me", "ans", 90, 50)
+    assert p["reason"] == "score dropped"
+    assert p["triggers"] == ["score_drop", "answer_worse", "certified_lost"]
+    assert p["reasons"] == ["score dropped", "answer changed", "Certified mark removed"]
+    assert p["old_decision"] == "safe"
+    assert p["old_certified_mark"] is True
+    assert p["decision"] == "do_not_connect" and p["certified"] is False
+
+    row = await _row(db, ent)
+    assert (row.last_decision, row.last_certified) == ("do_not_connect", False)
+
+
+@pytest.mark.asyncio
+async def test_private_answer_worse_alone_alerts(
+    db: AsyncSession, monkeypatch, alert_spy,
+):
+    """The score moves less than the band, but the answer goes safe -> review."""
+    ent = await _make_entity(db)
+    await _add_hook(db, ent)
+    await _seed_private(db, ent, score=42, last_decision="safe", last_certified=False)
+    _patch_gh(monkeypatch, [], _fake_scan_result(trust_score=40))
+    from src.jobs.app_scan import scan_one_repo
+
+    assert await scan_one_repo(db, "99104", ent.id, "me", "ans") == 1
+    notes = await _notes(db, ent)
+    assert [n.title for n in notes] == ["me/ans — answer changed"]
+    assert alert_spy["delivered"][0]["triggers"] == ["answer_worse"]
+    assert alert_spy["delivered"][0]["old_score"] == 42
+
+
+@pytest.mark.asyncio
+async def test_private_certified_lost_alone_alerts(
+    db: AsyncSession, monkeypatch, alert_spy,
+):
+    ent = await _make_entity(db)
+    await _seed_private(db, ent, score=88, last_decision="safe", last_certified=True)
+    _patch_gh(monkeypatch, [], _fake_scan_result(trust_score=88))
+    from src.jobs.app_scan import scan_one_repo
+
+    assert await scan_one_repo(db, "99105", ent.id, "me", "ans") == 1
+    notes = await _notes(db, ent)
+    assert [n.title for n in notes] == ["me/ans — Certified mark removed"]
+    assert alert_spy["delivered"] == []  # no hook configured: in-app only
+
+
+@pytest.mark.asyncio
+async def test_private_answer_better_is_good_news_no_webhook(
+    db: AsyncSession, monkeypatch, alert_spy,
+):
+    ent = await _make_entity(db)
+    await _add_hook(db, ent)
+    await _seed_private(db, ent, score=88, last_decision="review", last_certified=False)
+    _patch_gh(monkeypatch, [], _fake_scan_result(trust_score=88))
+    from src.jobs.app_scan import scan_one_repo
+
+    assert await scan_one_repo(db, "99106", ent.id, "me", "ans") == 1
+    notes = await _notes(db, ent)
+    assert len(notes) == 1 and notes[0].kind == "watch_good_news"
+    assert notes[0].title == "me/ans — answer improved 🎉"
+    assert "Was: Review before you connect" in notes[0].body
+    assert alert_spy["delivered"] == []
+    assert (await _row(db, ent)).last_decision == "safe"
+
+
+@pytest.mark.asyncio
+async def test_private_hold_absorbs_answer_move(
+    db: AsyncSession, monkeypatch, alert_spy,
+):
+    """A planned re-score holds answer moves like score moves; the baseline moves."""
+    alert_spy["held"] = True
+    ent = await _make_entity(db)
+    await _add_hook(db, ent)
+    await _seed_private(db, ent, score=90, last_decision="safe", last_certified=True)
+    _patch_gh(monkeypatch, [], _fake_scan_result(trust_score=50, critical=1))
+    from src.jobs.app_scan import scan_one_repo
+
+    assert await scan_one_repo(db, "99107", ent.id, "me", "ans") == 0
+    assert await _notes(db, ent) == []
+    assert alert_spy["delivered"] == []
+    row = await _row(db, ent)
+    assert (row.last_decision, row.last_certified) == ("do_not_connect", False)
 
 
 @pytest.mark.asyncio
