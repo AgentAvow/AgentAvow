@@ -1989,7 +1989,7 @@ function McpCouldntCheck({ endpoint, detail }: { endpoint: string; detail: strin
     { label: 'Published package matches its source', state: 'fail' as const, evidence: 'A server checked by URL has no published package to match', keys: ['artifact_scanned', 'provenance_verified'] },
     { label: 'Every file read, nothing changed', state: 'fail' as const, evidence: "The live tool list couldn't be read", keys: ['no_drift', 'full_coverage'] },
     { label: 'No critical or high finding', state: 'fail' as const, evidence: 'Nothing was read, so nothing was checked', keys: ['no_critical_or_high'] },
-    { label: 'Sandbox ran it, anyone can recompute', state: 'fail' as const, evidence: 'no signed result for this server', keys: ['recompute_ready'] },
+    { label: 'Sandbox result is in, anyone can recompute', state: 'fail' as const, evidence: 'no signed result for this server', keys: ['recompute_ready'] },
     { label: 'Answer: Safe to connect at 81+', state: 'fail' as const, evidence: 'no answer', decides: true, note: "The live tools couldn't be read." },
   ]
   return (
