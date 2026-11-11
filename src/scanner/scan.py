@@ -6190,8 +6190,52 @@ async def _run_supply_chain(
             except Exception:
                 root_coord = None
 
+            # Private workspace members of a pnpm monorepo (a docs site, examples):
+            # read each importer's package.json, at most 40 per lockfile. A member
+            # that cannot be read counts as public (fail safe: full weight).
+            private_importers: dict[str, set[str]] = {}
+            try:
+                from src.scanner.lockfiles import pnpm_v9_importers
+                for _lp, _text in lockfiles.items():
+                    if not _lp.lower().endswith("pnpm-lock.yaml"):
+                        continue
+                    from src.scanner.lockfiles import yaml_documents
+                    _imps = list(dict.fromkeys(
+                        k for _doc in yaml_documents(_text)
+                        for k in pnpm_v9_importers(_doc)))[:40]
+                    if len(_imps) < 2:
+                        continue
+                    _base = str(Path(_lp).parent)
+                    _base = "" if _base in (".", "") else _base + "/"
+                    _pj = {imp: f"{_base}{'' if imp == '.' else imp.strip('/') + '/'}"
+                                f"package.json" for imp in _imps}
+
+                    async def _fetch_pj(path: str) -> tuple[str, str]:
+                        try:
+                            async with sem:
+                                c = await asyncio.wait_for(
+                                    _fetch_file_content(owner, repo, path, token, ref=ref),
+                                    timeout=per_file_timeout)
+                            return path, c or ""
+                        except (asyncio.TimeoutError, Exception):
+                            return path, ""
+                    _texts = dict(await asyncio.gather(*(_fetch_pj(x) for x in _pj.values())))
+                    _priv = set()
+                    for imp, path in _pj.items():
+                        try:
+                            doc = json.loads(_texts.get(path) or "")
+                        except ValueError:
+                            continue
+                        if isinstance(doc, dict) and doc.get("private") is True:
+                            _priv.add(imp)
+                    if _priv:
+                        private_importers[_lp] = _priv
+            except Exception:
+                private_importers = {}
+
             sc = await analyze_supply_chain(
                 lockfiles,
+                private_importers=private_importers,
                 owner=owner,
                 repo=repo,
                 workflow_texts=workflow_texts,
