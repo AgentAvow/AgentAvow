@@ -17,7 +17,8 @@ export interface Listing {
 }
 
 export const LISTINGS: Listing[] = [
-  { name: 'Claude plugin directory', status: 'live', url: null, since: null, note: 'plugin v0.1.34' },
+  { name: 'Claude plugin directory', status: 'live', url: null, since: null, note: 'plugin v0.1.34; newer versions held until Anthropic Verified' },
+  { name: 'AgentAvow plugin marketplace (GitHub)', status: 'live', url: 'https://github.com/AgentAvow/AgentAvow/tree/main/plugins/agentavow-trust', since: '2026-11-11', note: 'plugin v0.1.37; /plugin marketplace add AgentAvow/AgentAvow' },
   { name: 'Claude.ai connector directory', status: 'live', url: 'https://claude.ai/directory/connectors/agentavow', since: null },
   { name: 'ChatGPT app', status: 'live', url: 'https://chatgpt.com/plugins/plugin_asdk_app_6ac830ccc2d48191ac27974dec7d8344', since: '2026-10-23', note: 'agentavow v1.1.2' },
   { name: 'Codex', status: 'live', url: null, since: '2026-11-10', note: 'same public plugin catalog as ChatGPT' },
@@ -29,12 +30,16 @@ export const LISTINGS: Listing[] = [
   { name: 'awesome-ai-catalogs', status: 'live', url: 'https://agent-card.github.io/awesome-ai-catalogs/', since: null },
   { name: 'GitLab CI/CD Catalog', status: 'live', url: 'https://gitlab.com/explore/catalog/agentavow/agentavow-scan', since: '2026-11-11' },
   { name: 'npm agentavow-trust', status: 'live', url: 'https://www.npmjs.com/package/agentavow-trust', since: null, note: '0.4.2' },
+  { name: 'ERC-8004 identity registry (Base)', status: 'live', url: 'https://basescan.org/nft/0x8004A169FB4a3325136EB29fA0ceB6D2e539a432/1178486', since: '2026-11-11', note: 'agent 1178486' },
+  { name: '8004scan', status: 'live', url: 'https://8004scan.io/agents/base/1178486', since: '2026-11-11', note: 'picked up from the chain' },
+  { name: "Quicknode's ERC-8004 explorer", status: 'live', url: null, since: '2026-11-11', note: 'picked up from the chain' },
   { name: 'PyPI agentavow-trust', status: 'live', url: 'https://pypi.org/project/agentavow-trust/', since: null, note: '0.6.5' },
 
   { name: 'Docker MCP Catalog', status: 'pending', url: 'https://github.com/docker/mcp-registry/pull/6763', since: '2026-11-08', note: 'PR #6763' },
   { name: 'Gemini CLI extensions gallery', status: 'pending', url: 'https://geminicli.com/extensions', since: null, note: 'gallery feed frozen since Oct 16' },
   { name: 'awesome-agent-skills-security', status: 'pending', url: 'https://github.com/LLMSecurity/awesome-agent-skills-security/pull/117', since: '2026-11-08', note: 'PR #117' },
   { name: 'awesome-claude-code', status: 'pending', url: 'https://github.com/hesreallyhim/awesome-claude-code/issues/3598', since: '2026-11-11', note: 'filed by Kenne' },
+  { name: 'awesome-erc8004', status: 'pending', url: 'https://github.com/sudeepb02/awesome-erc8004/pull/152', since: '2026-11-11', note: 'PR #152' },
   { name: 'OWASP GenAI landscape', status: 'pending', url: 'https://genai.owasp.org/solution-submission/', since: '2026-11-10' },
 ]
 
