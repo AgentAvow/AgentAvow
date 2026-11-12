@@ -833,14 +833,40 @@ def decide(data: dict) -> Decision:
         if _is_remote_mcp(data):
             return safe(THIN_REASON_REMOTE_MCP)
         return safe(THIN_REASON if files > 0 else THIN_REASON_NO_CODE)
+    # A critical / high that does not decide (tests, CI, docs, a file the artifact does
+    # not ship) is still listed with that severity: say where it is, so the reason never
+    # reads "no critical or high findings" beside a listed high. Wording only.
+    aside = _unshipped_phrase(items)
     if files > 0:
         n = f"{files:,}"
         unit = "file" if files == 1 else "files"
-        reason = (f"no critical or high findings in {n} {unit}" if found
-                  else f"nothing found in {n} {unit}")
+        if aside:
+            reason = (f"no critical or high findings in shipped code ({n} {unit}); "
+                      f"{aside} only in tests or other files it does not ship")
+        else:
+            reason = (f"no critical or high findings in {n} {unit}" if found
+                      else f"nothing found in {n} {unit}")
+    elif aside:
+        reason = (f"no critical or high findings in shipped code; "
+                  f"{aside} only in tests or other files it does not ship")
     else:
         reason = "no critical or high findings" if found else "nothing found"
     return safe(reason)
+
+
+def _unshipped_phrase(items: list) -> str:
+    """``1 critical and 2 high`` for listed first-party critical / high defects that do
+    not decide (not shipped, not installed); "" when there are none. Dependency
+    advisories and capabilities are not counted (they have their own wording)."""
+    counts = {"critical": 0, "high": 0}
+    for i in items:
+        s = str(i.get("severity") or "").lower()
+        if (s in counts and i.get("kind") != "capability"
+                and i.get("category") not in ("dependency", "known_vulnerability")
+                and not _is_blocking_item(i)):
+            counts[s] += 1
+    parts = [f"{n} {s}" for s, n in counts.items() if n]
+    return " and ".join(parts)
 
 
 # ── The Certified mark (display rule) ─────────────────────────────────────────────

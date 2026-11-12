@@ -15,6 +15,8 @@ this file carries none itself.
 """
 from __future__ import annotations
 
+import pytest
+
 from src.scanner.artifact_fetch import ArtifactFetchResult, _make_file
 from src.scanner.artifact_scan import scan_artifact_files
 from src.scanner.scan import _scan_content
@@ -304,3 +306,58 @@ def test_skill_md_heading_and_bullet_read_by_injection_rules():
     # Hidden Unicode in a SKILL.md bullet is not treated as a comment either.
     found = _hits(f"* step one{ZWSP}\n", "SKILL.md", "hidden_unicode")
     assert [f.name for f in found] == ["Zero-width / invisible character"]
+
+
+# ── G4: bidi controls confined to a string literal in test code ─────────────────────
+# A bidi control closed (PDF / PDI) inside one string literal reorders no code outside
+# it, so in test code it is test data: low, with the escape fix. An unterminated
+# override reorders the rest of the line (the stretched-string Trojan Source shape).
+
+PDF = chr(0x202C)
+BIDI = "Bidirectional control character (Trojan Source)"
+TEST_PATH = "pkg/tests/test_paths.py"
+
+
+def _bidi_line(body: str) -> str:
+    return ("def test_rejects_unprintable():\n"
+            f'    for rel in ("a.md", "{body}", "b/x.md"):\n'
+            "        assert safe_path(rel) is None\n")
+
+
+def _bidi(src: str, path: str) -> list:
+    return [f for f in _hits(src, path, "hidden_unicode") if f.name == BIDI]
+
+
+def test_unterminated_override_in_test_literal_stays_high():
+    hits = _bidi(_bidi_line(f"a{RLO}b.md"), TEST_PATH)
+    assert [f.severity for f in hits] == ["high"]
+    assert "\\u202e" in hits[0].remediation
+
+
+@pytest.mark.parametrize("body", [
+    f"a{RLO}b{PDF}.md", f"a{LRI}b{PDI}.md", f"{LRI}a{RLO}b{PDI}.md"])
+def test_closed_bidi_inside_test_literal_is_low(body):
+    from src.scanner.scan import BIDI_TEST_DATA_WHY
+    hits = _bidi(_bidi_line(body), TEST_PATH)
+    assert [(f.severity, f.remediation) for f in hits] == [("low", BIDI_TEST_DATA_WHY)]
+
+
+@pytest.mark.parametrize("path", ["pkg/paths.py", "src/app.py", "docs/guide.py"])
+def test_closed_bidi_outside_test_code_stays_high(path):
+    assert [f.severity for f in _bidi(_bidi_line(f"a{RLO}b{PDF}.md"), path)] == ["high"]
+
+
+@pytest.mark.parametrize("src", [
+    f'x = "a{RLO}b" {PDF}\n',                 # closed only after the quote
+    f'if role {RLO}== "admin":\n    pass\n',  # between tokens
+    f'x = "ok"  # {RLO}hidden{PDF}\n',        # trailing comment
+    f'x = """a{RLO}b{PDF}\n"""\n',            # string still open at end of line
+])
+def test_bidi_reaching_code_in_test_stays_high(src):
+    assert [f.severity for f in _bidi(src, TEST_PATH)] == ["high"]
+
+
+def test_single_bom_in_string_literal_not_flagged():
+    bom = chr(0xFEFF)
+    src = f'def f(t):\n    return "{bom}" if t.startswith("{bom}") else ""\n'
+    assert _hits(src, "pkg/text.py", "hidden_unicode") == []

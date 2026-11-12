@@ -112,7 +112,24 @@ CASES = [
      "safe", True, "nothing found in 30 files"),
     ("critical_in_tests_not_blocking", _scan(80, 30, [_f("critical", shipped=False,
                                                          file_path="tests/t.py")], crit=0),
-     "safe", True, "no critical or high findings in 30 files"),
+     "safe", True, "no critical or high findings in shipped code (30 files); 1 critical only "
+     "in tests or other files it does not ship"),
+    # A high in tests/ never decides, and the reason names it rather than saying "no
+    # critical or high findings" beside the listed high.
+    ("high_in_tests_named_in_reason", _scan(80, 48, [
+        _f("high", "Bidirectional control character (Trojan Source)", category="hidden_unicode",
+           shipped=False, file_path="tests/test_paths.py"),
+        _f("medium", "curl/wget piped to shell", shipped=False,
+           file_path="tests/test_grader.py")], high=0),
+     "safe", True, "no critical or high findings in shipped code (48 files); 1 high only in "
+     "tests or other files it does not ship"),
+    ("unshipped_mixed_no_files", {"trust_score": 80, "findings": {"items": [
+        _f("critical", "X", shipped=False, file_path="tests/a.py"),
+        _f("high", "Y", shipped=False, file_path="tests/b.py"),
+        _f("high", "Z", installed=False, file_path="Makefile"),
+        _f("high", "Spawns", kind="capability", shipped=False)]}},
+     "safe", True, "no critical or high findings in shipped code; 1 critical and 2 high only "
+     "in tests or other files it does not ship"),
     ("cloud_metadata_probe_low", _scan(90, 50, behavioral=_bev(
         [{"rule": "cloud_metadata_probe", "severity": "low", "name": "IMDS"}])),
      "safe", True, "nothing found in 50 files"),
@@ -188,7 +205,8 @@ CASES = [
     ("unshipped_critical_items_only", {"trust_score": 70, "findings": {"items": [_f(
         "critical", "curl/wget piped to shell", shipped=False, file_path="ci/build.sh")]},
         "metadata": {"files_scanned": 200}},
-     "safe", True, "no critical or high findings in 200 files"),
+     "safe", True, "no critical or high findings in shipped code (200 files); 1 critical only "
+     "in tests or other files it does not ship"),
     ("items_only_shape", {"trust_score": 70, "findings": {"items": [_f("high", "X")]}},
      "review", True, "one high finding in its code: X"),
     # ── do_not_connect ────────────────────────────────────────────────────────────
@@ -625,7 +643,8 @@ CASES = [
     ("secret_in_tests_not_blocking", _scan(80, 30, [_f(
         "critical", "AWS Access Key", category="secret", shipped=False,
         file_path="tests/t.py")], crit=0),
-     "safe", True, "no critical or high findings in 30 files"),
+     "safe", True, "no critical or high findings in shipped code (30 files); 1 critical only "
+     "in tests or other files it does not ship"),
     ("secret_high_keeps_high_reason", _scan(70, 200, [_f("high", "Generic token",
                                                          category="secret")], high=1),
      "review", True, "one high finding in its code: generic token"),
