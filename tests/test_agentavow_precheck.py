@@ -279,17 +279,18 @@ def test_unscannable_target_is_retried_after_the_retry_window(hook, monkeypatch,
     assert "Safe to connect — nothing found · AgentAvow 88/100" in out
 
 
-def test_transient_failure_is_not_cached(hook, monkeypatch, capsys):
+def test_offline_failure_is_silent_and_not_cached(hook, monkeypatch, capsys):
     calls = []
 
     def scan(t, force=False):
         calls.append(t["id"])
-        raise TimeoutError
+        raise urllib.error.URLError(OSError("nodename nor servname provided"))
 
     targets = [_mcp("a", "https://mcp.example.com/mcp")]
     assert _run(hook, monkeypatch, capsys, targets, scan) == ""
     assert _run(hook, monkeypatch, capsys, targets, scan) == ""
     assert len(calls) == 2
+    assert "a" not in json.loads(hook.CACHE.read_text())
 
 
 def test_same_coordinate_under_two_names_scans_once(hook, monkeypatch, capsys):
@@ -309,9 +310,13 @@ def test_run_stops_scanning_when_the_time_budget_is_spent(hook, monkeypatch, cap
     monkeypatch.setattr(hook, "BUDGET", -1)
     calls = []
     targets = [_mcp("a", "https://mcp.example.com/mcp")]
-    assert _run(hook, monkeypatch, capsys, targets,
-                lambda t, force=False: calls.append(t) or _ok(90, "safe", 0)) == ""
+    out = _run_raw(hook, monkeypatch, capsys, targets,
+                   lambda t, force=False: calls.append(t) or _ok(90, "safe", 0))
     assert calls == []
+    # Not asked this time, but said rather than silently skipped; asked at the next start.
+    assert "1 MCP server still being checked" in out["systemMessage"]
+    entry = json.loads(hook.CACHE.read_text())["a"]
+    assert entry["tries"] == 0 and "approved_at" not in entry
 
 
 @pytest.mark.parametrize("code,unscannable", [
@@ -638,3 +643,146 @@ def test_fallback_decision_reads_review_when_the_tool_list_was_not_fully_read(ga
                       "metadata": {"files_scanned": 3},
                       "coverage": {"surface": "mcp"}, "coverage_gaps": {gap: True}})
     assert (v["decision"], v["decision_reason"]) == ("review", reason)
+
+
+# --- A server whose scan has no answer within the time budget (sweep 2026-11-11, F2) ---
+
+def _pkg(name: str, pkg: str) -> dict:
+    return {"name": name, "kind": "package", "id": f"npm:{pkg}", "registry": "npm", "pkg": pkg}
+
+
+_DNC = {"decision": "do_not_connect", "decision_reason": "4 critical findings",
+        "tier": "blocked"}
+
+
+def test_slow_scan_is_still_being_checked_then_reported_next_session(
+        hook, monkeypatch, capsys):
+    """Run 1: deepwiki answers, claude-mem's first scan times out. It is named as still
+    being checked, not recorded as graded, and a later start reports its real answer
+    instead of 'nothing new'. The gate then denies it."""
+    slow = {"on": True}
+    calls = []
+
+    def scan(t, force=False, stored=False):
+        calls.append((t["id"], stored))
+        if t["id"] == "npm:claude-mem":
+            if slow["on"]:
+                raise TimeoutError
+            return _ok(0, "blocked", 4, **_DNC)
+        return _ok(92, "safe", 0)
+
+    targets = [_mcp("deepwiki", "https://mcp.deepwiki.com/mcp"), _pkg("mem", "claude-mem")]
+    first = _run_raw(hook, monkeypatch, capsys, targets, scan)
+    assert first["systemMessage"].startswith(
+        "AgentAvow pre-check: graded 1 MCP server — 1 Safe, 0 Review; "
+        "1 still being checked; its answer shows next session.")
+    ctx = first["hookSpecificOutput"]["additionalContext"]
+    assert "⏳ MCP 'mem' (npm:claude-mem): still being checked" in ctx
+    cache = json.loads(hook.CACHE.read_text())
+    assert "approved_at" not in cache["mem"] and cache["mem"]["tries"] == 1
+    assert ("npm:claude-mem", True) in calls  # asked for the stored grade after the timeout
+
+    # The gate treats a still-being-checked server as ungraded (fail-open, as before).
+    gate = _load(GATE_COPY)
+    monkeypatch.setattr(gate, "CACHE", hook.CACHE)  # never the real ~/.cache
+    monkeypatch.setattr(gate, "_server_config", lambda name: None)
+    for var in ("AGENTAVOW_GATE", "AGENTAVOW_GATE_DENY_BELOW"):
+        monkeypatch.delenv(var, raising=False)
+    payload ={"tool_name": "mcp__mem__search", "tool_input": {}, "session_id": "s1"}
+    assert gate.decide(payload, cache) is None
+
+    # Run 2: still slow. Reported again, never "nothing new".
+    second = _run_raw(hook, monkeypatch, capsys, targets, scan)
+    assert second["systemMessage"].startswith(
+        "AgentAvow pre-check: 1 MCP server still being checked; its answer shows next session.")
+    assert json.loads(hook.CACHE.read_text())["mem"]["tries"] == 2
+
+    # Run 3: the answer arrived. Reported with the real answer and recorded as graded.
+    slow["on"] = False
+    third = _run_raw(hook, monkeypatch, capsys, targets, scan)
+    assert "1 Don't connect" in third["systemMessage"]
+    assert "'mem' Do not connect" in third["systemMessage"]
+    cache = json.loads(hook.CACHE.read_text())
+    assert "approved_at" in cache["mem"]
+    decision = gate.decide(payload, cache)
+    assert decision is not None and decision[0] == "deny"
+
+    # Run 4: nothing new now.
+    assert _run(hook, monkeypatch, capsys, targets, scan) == ""
+
+
+def test_slow_package_scan_uses_the_stored_grade_when_there_is_one(hook, monkeypatch, capsys):
+    def scan(t, force=False, stored=False):
+        if not stored:
+            raise TimeoutError
+        return _ok(0, "blocked", 4, **_DNC)
+
+    out = _run_raw(hook, monkeypatch, capsys, [_pkg("mem", "claude-mem")], scan)
+    assert "'mem' Do not connect" in out["systemMessage"]
+    assert "approved_at" in json.loads(hook.CACHE.read_text())["mem"]
+
+
+@pytest.mark.parametrize("err", [
+    TimeoutError(), urllib.error.URLError(TimeoutError("timed out")),
+    urllib.error.HTTPError("https://x", 503, "unavailable", {}, None),
+    urllib.error.HTTPError("https://x", 429, "slow down", {}, None),
+])
+def test_slow_or_busy_api_counts_as_still_being_checked(hook, monkeypatch, capsys, err):
+    def scan(t, force=False, stored=False):
+        raise err
+
+    out = _run_raw(hook, monkeypatch, capsys, [_mcp("a", "https://mcp.example.com/mcp")], scan)
+    assert "still being checked" in out["systemMessage"]
+
+
+def test_queued_answer_counts_as_still_being_checked(hook, monkeypatch, capsys):
+    def scan(t, force=False, stored=False):
+        raise hook._QueuedError("queued")
+
+    out = _run_raw(hook, monkeypatch, capsys, [_pkg("mem", "claude-mem")], scan)
+    assert "still being checked" in out["systemMessage"]
+
+
+def test_still_checking_gives_up_after_max_tries_and_says_so_once(hook, monkeypatch, capsys):
+    def scan(t, force=False, stored=False):
+        raise TimeoutError
+
+    targets = [_mcp("a", "https://mcp.example.com/mcp")]
+    for _ in range(hook.PENDING_MAX_TRIES - 1):
+        out = _run_raw(hook, monkeypatch, capsys, targets, scan)
+        assert "still being checked" in out["systemMessage"]
+    last = _run_raw(hook, monkeypatch, capsys, targets, scan)
+    assert last["systemMessage"].startswith(
+        "AgentAvow pre-check: 1 MCP server not graded: check timed out.")
+    assert "not graded: check timed out" in last["hookSpecificOutput"]["additionalContext"]
+    entry = json.loads(hook.CACHE.read_text())["a"]
+    assert entry["reason"] == "check timed out" and "approved_at" not in entry
+    # Shown once: the next start shows the person nothing new.
+    assert _run(hook, monkeypatch, capsys, targets, scan) == ""
+
+
+def test_still_checking_gives_up_after_a_day(hook, monkeypatch, capsys):
+    def scan(t, force=False, stored=False):
+        raise TimeoutError
+
+    targets = [_mcp("a", "https://mcp.example.com/mcp")]
+    _run_raw(hook, monkeypatch, capsys, targets, scan)
+    cache = json.loads(hook.CACHE.read_text())
+    cache["a"]["pending_since"] -= hook.PENDING_MAX_AGE + 1
+    hook.CACHE.write_text(json.dumps(cache))
+    out = _run_raw(hook, monkeypatch, capsys, targets, scan)
+    assert "not graded: check timed out" in out["systemMessage"]
+
+
+def test_routine_recheck_that_times_out_keeps_the_old_grade_quietly(hook, monkeypatch, capsys):
+    targets = [_mcp("a", "https://mcp.example.com/mcp")]
+    _run(hook, monkeypatch, capsys, targets, lambda t, force=False: _ok(92, "safe", 0))
+    cache = json.loads(hook.CACHE.read_text())
+    cache["a"]["epoch"] = "old"
+    hook.CACHE.write_text(json.dumps(cache))
+
+    def slow(t, force=False, stored=False):
+        raise TimeoutError
+
+    assert _run(hook, monkeypatch, capsys, targets, slow) == ""
+    assert json.loads(hook.CACHE.read_text())["a"]["score"] == 92

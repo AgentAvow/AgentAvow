@@ -22,9 +22,11 @@ not connect" — then the 0-100 score (" · Certified" when the tool carries the
                        one gets.
   • anything else   -> silent, exit 0 (fail-open). A hook bug can never block a command.
 
-A step that writes or runs anything naming the per-call gate's allow list
-(~/.cache/agentavow/allowed-servers.txt) always asks the person first: only they may
-allow a server that reads Do not connect.
+A command that names AgentAvow's own folder (~/.cache/agentavow: the grades, the
+per-call gate's allow list and the key behind its confirmation codes), or a write into
+that folder, always asks the person first. That is a second line of defence: an allow
+line only counts with a code the gate shows the person alone, so a line Claude writes
+allows nothing however it reaches the file.
 
 The graded server is written to the same cache the session-start hook reads, so it is
 not reported a second time at the next session start. Reuses the precheck's target
@@ -34,6 +36,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import pathlib
 import re
 import shlex
@@ -41,7 +44,7 @@ import sys
 import time
 import urllib.error
 
-__version__ = "0.1.37"
+__version__ = "0.1.38"
 
 TIMEOUT = 12  # seconds per scan: an install is rare, so a slower fresh scan is fine
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -144,7 +147,61 @@ def _install_checks_enabled() -> bool:
     return os.environ.get(INSTALL_ENV, "").strip().lower() not in ("off", "0", "false", "no")
 
 
-_SEGMENTS = re.compile(r"&&|\|\||;|\n|\|")
+_SEGMENTS = re.compile(r"&&|\|\||;|\n|\||&")  # run after _strip_redirections
+
+
+def _strip_redirections(command: str) -> str:
+    """The command with every shell redirection removed, operator and target both
+    (``2>&1``, ``>/dev/null``, ``>file``, ``>>log``, ``&>out``, ``<in``, ``2>err``), so
+    ``pip install requests 2>&1`` is not read as a package named '2'. Quoted text is
+    left alone (``"requests>=2"`` is a version spec, not a redirection)."""
+    out: list[str] = []
+    i, n, quote = 0, len(command), ""
+    while i < n:
+        c = command[i]
+        if quote:
+            out.append(c)
+            if c == "\\" and quote == '"' and i + 1 < n:
+                out.append(command[i + 1])
+                i += 1
+            elif c == quote:
+                quote = ""
+            i += 1
+            continue
+        if c == "\\" and i + 1 < n:
+            out.append(command[i:i + 2])
+            i += 2
+            continue
+        if c in "'\"":
+            quote = c
+            out.append(c)
+            i += 1
+            continue
+        if c in "<>" or (c == "&" and command[i + 1:i + 2] == ">"):
+            j = len(out)
+            while j and out[j - 1].isdigit():
+                j -= 1
+            if j < len(out) and (j == 0 or out[j - 1].isspace()):
+                del out[j:]  # the file-descriptor number in front: the 2 of 2>
+            while i < n and command[i] in "<>&|":
+                i += 1  # the operator: > >> >& &> >| < << <&
+            while i < n and command[i] in " \t":
+                i += 1
+            target_quote = ""
+            while i < n and (target_quote or not command[i].isspace()):
+                ch = command[i]
+                if target_quote:
+                    target_quote = "" if ch == target_quote else target_quote
+                elif ch in "'\"":
+                    target_quote = ch
+                elif ch in ";|&\n":
+                    break  # the target ends where the next command starts
+                i += 1
+            out.append(" ")
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
 _ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _JS_VERBS = {"npm": {"install", "i", "add", "in"}, "pnpm": {"add", "install", "i"},
              "yarn": {"add"}, "bun": {"add", "install", "i"}}
@@ -213,7 +270,7 @@ def _package_installs(command: str, pc) -> list[tuple[str, str, str]]:
     file, local paths, git URLs and tarballs are not registry packages and are skipped."""
     out: list[tuple[str, str, str]] = []
     seen: set[tuple[str, str]] = set()
-    for seg in _SEGMENTS.split(command or ""):
+    for seg in _SEGMENTS.split(_strip_redirections(command or "")):
         try:
             argv = shlex.split(seg)
         except ValueError:
@@ -431,30 +488,84 @@ def _line(t: dict, r: dict | None, pc) -> str:
 
 
 ALLOW_FILE_NAME = "allowed-servers.txt"  # the per-call gate's allow list (same name there)
+ALLOW_KEY_NAME = "allow.key"             # the key its confirmation codes come from
 
 
-def _touches_allow_list(payload: dict) -> bool:
-    """Whether Claude is about to write or run something that names the per-call gate's
-    allow list. Only the person may allow a Do not connect server, so such a step is
-    always put to them, whatever Claude's own permissions say."""
+def _own_dir() -> pathlib.Path:
+    return pathlib.Path.home() / ".cache" / "agentavow"
+
+
+# A second line of defence only: an allow line Claude writes does not count anyway (it
+# lacks the code the gate shows the person alone). These catch the plain and the common
+# disguised spellings of AgentAvow's folder in a shell command, so reading the key or
+# changing the files is put to the person; no string match can catch every disguise.
+_NAMED_FILE = re.compile(r"allowed[-_]?servers|allow\.key|allow[-_]line")
+_STANDALONE = re.compile(r"(?<![\w.@-])agentavow(?![\w.-])")
+# The GitHub org and repo (AgentAvow/AgentAvow, github.com/AgentAvow/...), not the folder.
+_REPO_SLUG = re.compile(r"agentavow/agentavow|(?:github(?:usercontent)?|gitlab)\.com/+agentavow")
+_PATH_PART = re.compile(r"/agentavow(?![\w.-])")
+_CACHE_DIR = re.compile(r"\.cache\b|xdg_cache_home")
+_GLOB_AFTER_CACHE = re.compile(r"\.cache/+[^\s/]*[*?\[]")
+_CD_INTO = re.compile(r"\b(?:cd|pushd|chdir)\b[\s(]+[^;&|\n]*agentavow")
+
+
+def _shell_names_own_files(command: str) -> bool:
+    """Whether a shell command names AgentAvow's cache folder or one of its files, in
+    any of the spellings a person or a script would use: ~ / $HOME / ${HOME} /
+    expanduser, quotes or backslashes inside a word, path pieces joined in Python,
+    `cd` into the folder, a glob over ~/.cache. Our own repo and package names
+    (AgentAvow/AgentAvow, agentavow-trust, agentavow_precheck) do not count."""
+    s = re.sub(r"[\"'`\\]", "", command.lower())
+    if _NAMED_FILE.search(s):
+        return True
+    t = _REPO_SLUG.sub("", s)
+    if _PATH_PART.search(t):  # .../agentavow as a folder, however the rest is spelled
+        return True
+    standalone = bool(_STANDALONE.search(t))
+    if _CACHE_DIR.search(s) and (standalone or _GLOB_AFTER_CACHE.search(s)
+                                 or "allow" in s):
+        return True
+    return standalone and bool(_CD_INTO.search(s) or re.search(r"allow|scanned", s))
+
+
+def _path_in_own_dir(raw: str, cwd: object) -> bool:
+    """Whether a file path lands in AgentAvow's folder, symlinks resolved."""
+    if not raw:
+        return False
+    if _shell_names_own_files(raw):
+        return True
+    try:
+        base = pathlib.Path(str(cwd)) if isinstance(cwd, str) and cwd else pathlib.Path.cwd()
+        path = pathlib.Path(raw).expanduser()
+        path = path if path.is_absolute() else base / path
+        real = pathlib.Path(os.path.realpath(path))
+        own = pathlib.Path(os.path.realpath(_own_dir()))
+        return real == own or own in real.parents
+    except Exception:
+        return False
+
+
+def _touches_own_files(payload: dict) -> bool:
+    """Whether Claude is about to run something that names AgentAvow's own files, or to
+    write or edit a file in its folder. Only the person may allow a Do not connect
+    server, so such a step is always put to them, whatever Claude's own permissions say."""
     inp = payload.get("tool_input")
     if not isinstance(inp, dict):
         return False
     tool = str(payload.get("tool_name") or "")
     if tool == "Bash":
-        text = str(inp.get("command") or "")
-    elif tool in ("Write", "Edit", "MultiEdit"):
-        text = str(inp.get("file_path") or "")
-    else:
-        return False
-    low = text.lower()
-    return ALLOW_FILE_NAME in low or ("allowed-servers" in low and "agentavow" in low)
+        return _shell_names_own_files(str(inp.get("command") or ""))
+    if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
+        raw = inp.get("file_path") or inp.get("notebook_path") or ""
+        return _path_in_own_dir(str(raw), payload.get("cwd"))
+    return False
 
 
 def _ask_about_allow_list() -> None:
-    reason = ("AgentAvow: this changes the list of servers you have allowed past a Do not "
-              "connect answer (~/.cache/agentavow/allowed-servers.txt). Only approve it if "
-              "you reviewed that server yourself and asked for this.")
+    reason = ("AgentAvow: this reads or changes AgentAvow's own files (~/.cache/agentavow: "
+              "the grades, the list of servers you allowed past a Do not connect answer, "
+              "and the key behind its confirmation codes). Only approve it if you asked "
+              "for this yourself.")
     print(json.dumps({"systemMessage": reason, "hookSpecificOutput": {
         "hookEventName": "PreToolUse", "permissionDecision": "ask",
         "permissionDecisionReason": reason}}))
@@ -468,7 +579,7 @@ def main() -> None:
     if not isinstance(payload, dict) or payload.get("hook_event_name") not in (None, "PreToolUse"):
         return
     try:
-        if _touches_allow_list(payload):
+        if _touches_own_files(payload):
             _ask_about_allow_list()
             return
     except Exception:
