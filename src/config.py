@@ -421,6 +421,12 @@ class Settings(BaseSettings):
     # as data/owner-ips.txt on the prod host. Empty = nothing excluded.
     metrics_owner_ips: str = ""
 
+    # The hosted MCP connector's once-a-week "make this automatic" tip (install the
+    # Claude Code plugin), shown only to Claude Code callers that connected without the
+    # plugin (src/bridges/mcp_streamable._with_plugin_tip). Kill switch: env
+    # AGENTAVOW_PLUGIN_TIP=off (also false/0/no). Default on.
+    agentavow_plugin_tip: bool = True
+
     # MCP connector health alerting (src/jobs/mcp_health.py). On 2026-10-17..20 every
     # first request from current Claude clients got 400 "Unsupported protocol version"
     # and nothing alerted; these checks email the admin when /mcp breaks.
