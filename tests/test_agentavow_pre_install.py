@@ -641,3 +641,45 @@ def test_relative_cd_into_a_checkout_is_judged_by_the_working_directory(
 def test_the_cache_folder_under_any_spelling_still_asks(hook, monkeypatch, capsys, parent):
     mod, _ = hook
     _ask_reason(mod, monkeypatch, capsys, _bash(f"cat {parent}/agentavow/scanned.json"))
+
+
+# A plain-looking parent can be a symlink to the cache folder: the real path decides,
+# and a step that makes a link, or a relative path after a `cd`, is not ruled out.
+def _cache_with_alias(mod, monkeypatch, tmp_path):
+    cache = tmp_path / "home" / ".cache"
+    (cache / "agentavow").mkdir(parents=True)
+    monkeypatch.setattr(mod, "_own_dir", lambda: cache / "agentavow")
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "q").symlink_to(cache)
+    return cache, work
+
+
+def test_a_symlinked_parent_into_the_cache_folder_still_asks(hook, monkeypatch, capsys,
+                                                             tmp_path):
+    mod, _ = hook
+    _, work = _cache_with_alias(mod, monkeypatch, tmp_path)
+    _ask_reason(mod, monkeypatch, capsys,
+                _bash(f"echo x > {work}/q/agentavow/scanned.json"))
+    _ask_reason(mod, monkeypatch, capsys,
+                dict(_bash("cat q/agentavow/scanned.json"), cwd=str(work)))
+
+
+@pytest.mark.parametrize("cmd", [
+    "ln -s ~/.cache q && echo x > q/agentavow/scanned.json",
+    "python3 -c \"import os;os.symlink(os.path.expanduser('~/.cache'),'q')\"; cat q/agentavow/scanned.json",
+    "cd ~ && cat q/agentavow/scanned.json",
+    "cat r/agentavow/scanned.json",
+    "HOME=/x; cat $HOME/q/agentavow/scanned.json",
+])
+def test_a_plain_parent_that_could_be_an_alias_still_asks(hook, monkeypatch, capsys, cmd):
+    mod, _ = hook
+    # No cwd for the relative ones, a link made in the same command, a `cd` first.
+    _ask_reason(mod, monkeypatch, capsys, _bash(cmd))
+
+
+def test_a_checkout_under_home_var_does_not_ask(hook, monkeypatch, capsys):
+    mod, _ = hook
+    assert _run(mod, monkeypatch, capsys,
+                _bash("grep -rn verdict $HOME/projects/AgentAvow/src | head"),
+                lambda *a, **k: None) == {}

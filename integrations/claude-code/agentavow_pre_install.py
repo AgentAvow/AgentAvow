@@ -514,16 +514,60 @@ _CD_INTO = re.compile(r"\b(?:cd|pushd|chdir)\b[\s(]+[^;&|\n]*(?<![\w.@-])agentav
 # ~/.claude/plugins/cache/agentavow) is not ours; without this every Edit and every
 # absolute path in a checkout of the repo asked the person. A parent that could stand
 # for anything (a variable, substitution, glob, `~`, `.` or `..`) still counts.
-_SEGMENT = re.compile(r"([^\s/]*)/+agentavow(?![\w.-])")
+_SEGMENT = re.compile(r"([^\s/]*)/+agentavow(?![\w.-])", re.IGNORECASE)
 _KEEP_PARENT = re.compile(r"\.cache\b|cache_home|[*?\[\]${}()~]|^\.{0,2}$")
+_REPO_SLUG_ANY_CASE = re.compile(r"agentavow/agentavow|(?:github(?:usercontent)?|gitlab)"
+                                 r"\.com/+agentavow", re.IGNORECASE)
+# A command that makes a link can point a plain-looking folder at the cache folder in
+# the same breath (`ln -s ~/.cache q && cat q/agentavow/...`): nothing is ruled out.
+_MAKES_LINK = re.compile(r"\bln\b|symlink|\bmount\b|\bbindfs\b", re.IGNORECASE)
+_UNRESOLVED = re.compile(r"[*?\[\]${}()`]")
+_HOME_VAR = re.compile(r"\$(?:home\b|\{home\})", re.IGNORECASE)
+_TOKEN_STOP = set(";&|<>=(")
 
 
-def _other_agentavow_dirs(text: str) -> str:
-    """``text`` with each ``<parent>/agentavow`` segment blanked out when its parent is a
-    plain folder name other than a cache folder, so it counts neither as a path into
-    AgentAvow's folder nor as a standalone name."""
+def _is_cache_parent(prefix: str, cwd: object, has_cd: bool, sets_home: bool) -> bool:
+    """Whether the literal path ``prefix`` (the folder that holds an ``agentavow``
+    segment) is, or could be, the cache folder's parent. The real path decides, so a
+    symlink to ~/.cache under a plain name still counts. Anything that cannot be
+    resolved here (a variable, glob or substitution, a relative path after a `cd` or
+    with no known cwd) counts too."""
+    p = prefix if sets_home else _HOME_VAR.sub("~", prefix)
+    if not p or _UNRESOLVED.search(p):
+        return True
+    p = os.path.expanduser(p)
+    if not os.path.isabs(p):
+        if has_cd or not isinstance(cwd, str) or not cwd:
+            return True
+        p = os.path.join(os.path.expanduser(cwd), p)
+    try:
+        here = os.path.realpath(p).lower()
+        return here == os.path.realpath(_own_dir().parent).lower()
+    except Exception:
+        return True
+
+
+def _other_agentavow_dirs(text: str, cwd: object = None) -> str:
+    """``text`` with each ``<parent>/agentavow`` segment blanked out when that parent is
+    a plain folder whose real path is not the cache folder's parent (a checkout of this
+    repo at ~/projects/AgentAvow, the plugin's install folder), so it counts neither as
+    a path into AgentAvow's folder nor as a standalone name. Case is kept so the real
+    path can be resolved."""
+    if _MAKES_LINK.search(text):
+        return text
+    has_cd = bool(_CD_WORD.search(text.lower()))
+    sets_home = bool(re.search(r"\bhome=", text, re.IGNORECASE))
+
     def blank(m: re.Match) -> str:
-        return m.group(0) if _KEEP_PARENT.search(m.group(1)) else m.group(1) + "/_"
+        parent = m.group(1)
+        if _KEEP_PARENT.search(parent.lower()):
+            return m.group(0)
+        start = m.start(1)
+        while start > 0 and not text[start - 1].isspace() and text[start - 1] not in _TOKEN_STOP:
+            start -= 1
+        if _is_cache_parent(text[start:m.end(1)], cwd, has_cd, sets_home):
+            return m.group(0)
+        return parent + "/_"
     return _SEGMENT.sub(blank, text)
 
 
@@ -553,10 +597,11 @@ def _shell_names_own_files(command: str, cwd: object = None) -> bool:
     neither does a folder named AgentAvow anywhere but the cache folder: the test is
     where a folder sits (its parent, or the working directory for a relative `cd`),
     never what a checkout or worktree is called."""
-    s = re.sub(r"[\"'`\\]", "", command.lower())
+    raw = re.sub(r"[\"'`\\]", "", command)
+    s = raw.lower()
     if _NAMED_FILE.search(s):
         return True
-    t = _other_agentavow_dirs(_REPO_SLUG.sub("", s))
+    t = _other_agentavow_dirs(_REPO_SLUG_ANY_CASE.sub("", raw), cwd).lower()
     if _PATH_PART.search(t):  # .../agentavow as a folder, however the rest is spelled
         return True
     standalone = bool(_STANDALONE.search(t))
