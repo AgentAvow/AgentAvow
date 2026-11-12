@@ -51,7 +51,11 @@ def _row_has_error(surface: str, row: dict) -> bool:
 
 
 def _apply_summary(surface: str, row: dict, summ: dict) -> None:
-    """Write a fresh scan summary back onto a row, respecting per-surface field names."""
+    """Write a fresh scan summary back onto a row, respecting per-surface field names.
+    Stamps ``scanned_at`` so Browse can date the row (scan_catalog_router._launch_meta)."""
+    from datetime import datetime, timezone
+
+    row["scanned_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     if surface == "openclaw":
         row["trust_score"] = summ["trust_score"]
         row["critical_count"] = summ["critical"]

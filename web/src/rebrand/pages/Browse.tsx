@@ -134,6 +134,9 @@ const _SURFACE_BADGE: Record<string, string> = {
   npm: 'npm', pypi: 'PyPI', crates: 'crates', mcp: 'MCP', openclaw: 'Skill', x402: 'x402', community: 'repo',
 }
 function listingHref(row: CatalogRow): string | null {
+  // The server names the page (scan_catalog_router.page_path_for, a port of the rules
+  // below), so Browse links the same page it de-duplicated on.
+  if (row.page_path && row.page_path.startsWith('/check/')) return rp(`/rebrand${row.page_path}`)
   const fn = row.full_name
   if (
     (row.surface === 'npm' || row.surface === 'pypi' || row.surface === 'crates' ||
@@ -157,6 +160,18 @@ function listingHref(row: CatalogRow): string | null {
   return null
 }
 
+/** "Scanned Nov 3, 2026" for a dated row, "Launch scan" for an undated corpus row. */
+function scanDateLine(row: CatalogRow): string | null {
+  if (row.surface === 'x402') return null
+  if (row.last_scanned_at) {
+    const d = new Date(row.last_scanned_at)
+    if (!Number.isNaN(d.getTime())) {
+      return `Scanned ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+    }
+  }
+  return row.scan_source === 'launch' ? 'Launch scan' : null
+}
+
 function ToolCard({ row }: { row: CatalogRow }) {
   const [open, setOpen] = useState(false)
   const { display, repoPath } = rowIdentity(row)
@@ -168,6 +183,7 @@ function ToolCard({ row }: { row: CatalogRow }) {
   const chip = statusChip(row)
   const fnd = findingsLine(row)
   const sbx = sandboxMark(row.sandbox)
+  const scanned = scanDateLine(row)
   const x402Scored = row.surface === 'x402' && row.trust_score != null
   return (
     // The whole card opens the report: the "See report" link is stretched over the
@@ -196,6 +212,14 @@ function ToolCard({ row }: { row: CatalogRow }) {
         <span className={`font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded ${chip.cls}`} title={chip.title}>{chip.label}</span>
         {fnd && <span className="font-mono text-[11px] text-text-muted tabular-nums">{fnd}</span>}
         {row.primary_language && <span className="font-mono text-[11px] text-text-muted">· {row.primary_language}</span>}
+        {scanned && (
+          <span
+            className="font-mono text-[11px] text-text-muted"
+            title={row.scan_source === 'launch' ? 'From the one-time launch scan; a fresh scan replaces it' : 'Re-scanned on a schedule'}
+          >
+            · {scanned}
+          </span>
+        )}
         {sbx && (
           <span
             className="font-mono text-[10.5px] px-1.5 py-0.5 rounded bg-surface-hover text-text-muted tabular-nums"

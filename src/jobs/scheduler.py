@@ -1846,6 +1846,47 @@ async def _store_catalog_adoption(surface: str, owner: str, repo: str, db) -> No
         logger.debug("adoption persist failed for %s %s/%s", surface, owner, repo, exc_info=True)
 
 
+# Page keys of corpus rows whose re-scan failed in this process (a deleted or private
+# repo), so the supersede step does not retry them every cycle ahead of the rest.
+_supersede_failed: set[str] = set()
+
+
+async def _rescan_stale_corpus_rows(gh_ok: bool, spacing: float) -> int:
+    """Scan up to ``catalog_supersede_limit`` launch-corpus rows that have no live scan
+    for their page (see scan_catalog_router.stale_corpus_targets). Returns how many
+    landed. GitHub-backed targets wait while the GitHub budget is low."""
+    from src.config import settings
+
+    limit = getattr(settings, "catalog_supersede_limit", 30)
+    if limit <= 0:
+        return 0
+    from src.api.scan_catalog_router import (
+        _fetch_community_rows,
+        page_key,
+        stale_corpus_targets,
+    )
+    from src.database import async_session
+
+    async with async_session() as db:
+        live = await _fetch_community_rows(db)
+    if live is None:
+        return 0  # DB read failed: every corpus row would look unscanned
+    live_keys = {k for k in (page_key(r) for r in live) if k}
+    targets = await asyncio.to_thread(
+        stale_corpus_targets, live_keys, limit, set(_supersede_failed))
+    done = 0
+    for key, surface, owner, repo in targets:
+        if surface in ("github", "openclaw") and not gh_ok:
+            continue
+        async with async_session() as db:
+            if await _rescan_catalog_row(surface, owner, repo, db):
+                done += 1
+            else:
+                _supersede_failed.add(key)
+        await asyncio.sleep(spacing)
+    return done
+
+
 async def _run_catalog_rescan() -> None:
     global _backfill_offset, _discovery_cursor
     from src.config import settings
@@ -1900,6 +1941,11 @@ async def _run_catalog_rescan() -> None:
             if await _rescan_catalog_row(surf, owner, repo, db):
                 refreshed += 1
         await asyncio.sleep(spacing)
+
+    # (a2) Supersede — launch-corpus rows whose page has no live scan yet (Browse lists
+    # the stale corpus answer until one lands, e.g. skyvern's 0 / Do not connect MCP
+    # registry row). Scanning them into community_scans retires those rows for good.
+    superseded = await _rescan_stale_corpus_rows(gh_ok, spacing)
 
     # (b) Growth — curated seed FIRST (recognizable flagships; keep them fresh every
     # cycle), then work through the OpenClaw launch-corpus error backlog by cursor.
@@ -1956,10 +2002,11 @@ async def _run_catalog_rescan() -> None:
             await asyncio.sleep(spacing)
         _discovery_cursor += 1
 
-    if refreshed or seeded or added or discovered:
+    if refreshed or superseded or seeded or added or discovered:
         logger.info(
-            "Catalog re-scan: refreshed %d community rows, %d curated seed, "
-            "%d launch-corpus backfill, %d discovered", refreshed, seeded, added, discovered,
+            "Catalog re-scan: refreshed %d community rows, %d stale corpus rows, "
+            "%d curated seed, %d launch-corpus backfill, %d discovered",
+            refreshed, superseded, seeded, added, discovered,
         )
 
 

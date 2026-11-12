@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.3 (unreleased; prepared 2026-11-11)
+
+- `gate`: the gate now reaches the same answer as the API on dependency advisories. It read the critical/high counts as `max(headline count, items with that severity)`, so the critical dependency advisories in `items` (counted in `critical_all`, never in the shipped `critical`) fired `blockOn: 'critical'`. `vercel/next.js` got Do not connect ("4 critical findings") while the API and MCP answered Safe to connect. The counts are now the shipped headline `critical` / `high` (never `*_all`). A response without headline counts falls back to the blocking items only (no `dependency` category, nothing `shipped: false`).
+- `gate`: a shipped critical that the API's rule reads as Review (a hardcoded credential, or the tool's own published advisory) is now `review`, not `do_not_connect`, as on the API.
+- `gate`: a `decision` inside the signed payload is the answer on the findings. Policy triggers (blocked tier, sandbox canary, known-malicious dependency, `high` when asked), the floor, staleness and drift still apply on top. An unsigned `decision` still only tightens. New `Grade` fields: `criticalReview`, `decisionSigned`.
+- The User-Agent / `clientInfo` version now reads 0.4.3.
+
 ## 0.4.2 (unreleased; prepared 2026-11-07)
 
 - `gate`: a served definition the gate cannot bind now fails closed. Before, a definition `canonicalize` refused (a number literal too large for a double, such as `1e400`, parses to `Infinity`) was allowed with the warning "drift not checked". Now it is a `drift` outcome, routed by `onDrift` (default `block`), and the deprecated `evaluate` blocks it the same way.
