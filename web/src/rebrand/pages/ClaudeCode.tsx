@@ -152,6 +152,8 @@ export default function RebrandClaudeCode() {
             Install the plugin. In your next session, Claude tells you which ones read <b className="font-medium text-text">Safe to connect</b>, <b className="font-medium text-text">Review before you connect</b>, or <b className="font-medium text-text">Do not connect</b>, and why.
           </p>
           <Install />
+          {/* Full page load on purpose, like the footer links: the ad pixel stays on this page. */}
+          <p className="mt-2 text-[13px] text-text-muted">0 tokens per check · about 650 tokens a session. <a href={`${rp('/rebrand/faq')}#context-tokens`} className="text-primary-light hover:underline">How we measured →</a></p>
           <p className="mt-3 text-[14px] text-text-muted">Run each line in Claude Code, then start a new session. Or open <code className="font-mono text-[13px] text-primary-light">/plugin</code> and find AgentAvow Trust under Discover (the directory can lag behind the latest version).</p>
           <div className="flex flex-wrap gap-x-[18px] gap-y-1.5 mt-3.5 text-[13.5px] text-text-muted">
             {['Free, no account', 'The plugin is MIT licensed', 'Only the server URL or package name leaves your machine'].map((f) => (

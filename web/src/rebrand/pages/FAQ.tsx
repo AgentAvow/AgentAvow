@@ -1,5 +1,6 @@
+import { useEffect, type ReactNode } from 'react'
 import { Helmet } from 'react-helmet-async'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { rp } from '../basePath'
 import { Reveal } from '../components/motion'
 
@@ -8,7 +9,52 @@ import { Reveal } from '../components/motion'
  * (Google rich results). Replaces the old social-era FAQ.
  */
 
-interface QA { q: string; a: string }
+/** `id` gives an answer a stable anchor (/faq#id opens it); `extra` renders under the
+ * answer text and stays out of the structured data. */
+interface QA { q: string; a: string; id?: string; extra?: ReactNode }
+
+/** Measured with Claude Code's /context on 12 Nov 2026, plugin 0.1.38. */
+const CONTEXT_ROWS: [string, string][] = [
+  ['Each check (install hook, per-call gate)', '0'],
+  ['8 connector tool names', 'about 90'],
+  ['Connector instructions', 'about 350'],
+  ['/scan command and scan-before-connect skill', 'about 140'],
+  ['Session-start line', 'about 50 to 100'],
+  ['Total a session', 'about 650'],
+]
+const CONTEXT_ON_USE: [string, string][] = [
+  ['One tool\'s full definition', '111 to 571 (all eight: 2,180)'],
+  ['One scan result', 'about 270 to 620'],
+]
+
+function ContextTokens() {
+  const row = (label: string, n: string, bold = false) => (
+    <tr key={label} className="border-t border-border/60">
+      <td className={`py-1.5 pr-4 ${bold ? 'font-semibold text-text' : ''}`}>{label}</td>
+      <td className={`py-1.5 text-right font-mono text-[13px] whitespace-nowrap ${bold ? 'font-semibold text-text' : ''}`}>{n}</td>
+    </tr>
+  )
+  return (
+    <div className="mt-3 text-text-muted text-[14px] leading-relaxed">
+      <table className="w-full max-w-[520px] text-[13.5px]">
+        <thead>
+          <tr><th className="text-left font-semibold text-text pb-1.5">Every session</th><th className="text-right font-semibold text-text pb-1.5">Tokens</th></tr>
+        </thead>
+        <tbody>
+          {CONTEXT_ROWS.map(([l, n], i) => row(l, n, i === CONTEXT_ROWS.length - 1))}
+          <tr><th colSpan={2} className="text-left font-semibold text-text pt-3 pb-1.5">Only when Claude uses it</th></tr>
+          {CONTEXT_ON_USE.map(([l, n]) => row(l, n))}
+        </tbody>
+      </table>
+      <p className="mt-3">Check it yourself in Claude Code:</p>
+      <ol className="mt-1 pl-5 list-decimal grid gap-0.5">
+        <li>With the plugin on, start a session and run <code className="font-mono text-[13px] text-primary-light">/context</code>.</li>
+        <li>Turn the plugin off in <code className="font-mono text-[13px] text-primary-light">/plugin</code>, start a new session and run <code className="font-mono text-[13px] text-primary-light">/context</code> again.</li>
+        <li>Compare the two totals.</li>
+      </ol>
+    </div>
+  )
+}
 interface Section { title: string; items: QA[] }
 
 const SECTIONS: Section[] = [
@@ -46,6 +92,12 @@ const SECTIONS: Section[] = [
       { q: 'How do I add a trust badge to my README?', a: 'Check your repo and copy one line of Markdown. The badge is kept up to date from the current scan and links back to the full, signed, verifiable report — no account needed to mint one.' },
       { q: 'Is there an API, SDK, or CI gate?', a: 'Yes — a REST API, an npm SDK (agentavow-trust) with gates for the Vercel AI SDK, Flue, the Claude Agent SDK and the OpenAI Agents SDK (Python gates are in the repository), a Python client (agentavow-sdk), a local CLI, a GitHub Action, a GitLab CI component, a Bitbucket Pipe, an Azure Pipelines template, an Open Policy Agent policy, and a LiteLLM proxy guardrail for its MCP gateway. The CI gates fail the build when the answer is Do not connect (fail_on: do_not_connect, the default; set review to be stricter). The Action also prints the sandbox result, and with fail_on_behavioral: true it fails the build on a high or critical sandbox finding. See the developer page and docs.' },
       { q: 'What does the Claude Code plugin show?', a: 'When you add an MCP server that runs from an npm or PyPI package, the plugin\'s session-start check prints one line per server: the answer and its reason, the trust score, then the sandbox result (for example "sandbox: called 9 tools, no network beyond the registry", the number of behavioral findings, or why the server could not be exercised). If the maintainer has deprecated the package, the line says so. The session-start check only warns. Installing something that reads Do not connect asks you first, the per-call gate stops a tool on a server that reads Do not connect, and it asks you before using a tool whose definition changed since it was checked.' },
+      {
+        id: 'context-tokens',
+        q: 'How much of Claude\'s context does AgentAvow use?',
+        a: 'Zero tokens per check. About 650 a session. The install-time hook and the per-call gate run as Python scripts on your machine, so they cost Claude nothing. Safe to connect stays silent; only a Review before you connect or Do not connect note reaches Claude. The 650 is the plugin\'s setup: tool names, connector instructions, the /scan command and skill, and the session-start line. Claude Code loads a tool\'s full definition only when it uses that tool. We measured these with Claude Code\'s /context on plugin 0.1.38. They are approximate: the exact number depends on your Claude Code version and your other tools.',
+        extra: <ContextTokens />,
+      },
       { q: 'Can I scan a private repo?', a: 'Yes. Sign in and scan it through the GitHub App, or with a GitHub token you supply that\'s used once and never stored. Claiming with a GitHub topic proves ownership of a public repo only.' },
     ],
   },
@@ -69,6 +121,18 @@ const FAQ_JSONLD = {
 }
 
 export default function RebrandFAQ() {
+  const { hash } = useLocation()
+  // Open and scroll to the answer a link points at (/faq#context-tokens).
+  useEffect(() => {
+    const id = hash.slice(1)
+    if (!id) return
+    const el = document.getElementById(id)
+    if (el instanceof HTMLDetailsElement) {
+      el.open = true
+      el.scrollIntoView({ block: 'start' })
+    }
+  }, [hash])
+
   return (
     <div className="max-w-[820px] mx-auto px-6 py-16">
       <Helmet>
@@ -92,12 +156,13 @@ export default function RebrandFAQ() {
             <h2 className="text-[13px] font-mono uppercase tracking-wide text-primary-light mb-3">{s.title}</h2>
             <div className="flex flex-col gap-2.5">
               {s.items.map((i) => (
-                <details key={i.q} className="glass rounded-xl px-5 py-4 group">
+                <details key={i.q} id={i.id} className="glass rounded-xl px-5 py-4 group scroll-mt-24">
                   <summary className="cursor-pointer list-none flex items-center justify-between gap-3 font-semibold text-[15px]">
                     {i.q}
                     <span className="text-text-muted group-open:rotate-45 transition-transform text-lg leading-none">+</span>
                   </summary>
                   <p className="mt-3 text-text-muted text-[14px] leading-relaxed">{i.a}</p>
+                  {i.extra}
                 </details>
               ))}
             </div>
