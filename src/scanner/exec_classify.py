@@ -558,6 +558,57 @@ def _dynamic_parts_look_dangerous(nodes: list[ast.AST], resolve_name) -> bool:
     return False
 
 
+# POSIX shells whose first non-option operand is a script file to run (`sh x.sh a b`).
+# busybox (applet first), fish/csh and the Windows shells are left to the shell rule.
+_SCRIPT_FILE_SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash"})
+# Options that may precede the script operand and take no value and run no string.
+# Anything else (`-c`, `-s`, `-o opt`, `-i`, a dynamic element) keeps the shell rule.
+_SCRIPT_SHELL_OPT_RE = re.compile(r"^-[euxvn]+$")
+_PATH_METHODS = frozenset({"resolve", "absolute", "as_posix", "expanduser"})
+
+
+def _is_path_expr(node: ast.AST, _depth: int = 0) -> bool:
+    """A filesystem path ending in a constant component that is not an option:
+    ``d / "x.sh"``, ``str(d / "x.sh")``, ``os.path.join(d, "x.sh")``,
+    ``(d / "x.sh").resolve()``. It can never evaluate to ``-c``."""
+    if _depth > 8:
+        return False
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        tail = _const_str(node.right)
+        if tail is not None:
+            return bool(tail) and not tail.startswith(("-", "+"))
+        return _is_path_expr(node.right, _depth + 1)
+    if isinstance(node, ast.Call):
+        f = node.func
+        if isinstance(f, ast.Name) and f.id in ("str", "fspath") and len(node.args) == 1:
+            return _is_path_expr(node.args[0], _depth + 1)
+        if isinstance(f, ast.Attribute):
+            if f.attr == "fspath" and len(node.args) == 1:
+                return _is_path_expr(node.args[0], _depth + 1)
+            if f.attr == "join" and isinstance(f.value, ast.Attribute) \
+                    and f.value.attr == "path" and node.args:
+                tail = _const_str(node.args[-1])
+                return bool(tail) and not tail.startswith(("-", "+"))  # type: ignore[union-attr]
+            if f.attr in _PATH_METHODS and not node.args:
+                return _is_path_expr(f.value, _depth + 1)
+    return False
+
+
+def _runs_script_file(rest: list[ast.AST]) -> bool:
+    """``rest`` (argv after a POSIX shell) starts with no-value options and then a
+    script-file operand: a constant that is not an option, or a path expression."""
+    for node in rest:
+        c = _const_str(node)
+        if c is not None:
+            if c == "--":
+                continue
+            if _SCRIPT_SHELL_OPT_RE.match(c):
+                continue
+            return bool(c) and not c.startswith(("-", "+"))
+        return _is_path_expr(node)
+    return False
+
+
 def _argv_nodes(node: ast.AST, _depth: int = 0) -> list[ast.AST] | None:
     """The element nodes of a literal argv list/tuple (flattening list concatenation
     the same way as :func:`_argv_sequence`; an opaque operand is one element)."""
@@ -810,6 +861,24 @@ def classify_python_exec(
                                 resolve_name(el.id), (ast.List, ast.Tuple)):
                             elements[i] = vals[0]
                 dynamic = any(e is None for e in elements)
+        if dynamic and elements and elements[0] is not None \
+                and _basename(elements[0]) in _SCRIPT_FILE_SHELLS:
+            # `["sh", str(state / "launcher.sh")] + list(args)`: a POSIX shell given a
+            # script FILE as its first operand runs that file; no shell string is
+            # evaluated, so it reads like any other binary run with runtime arguments
+            # `sh -c <string>` never reaches this.
+            arg_node = first
+            if isinstance(arg_node, ast.Name) and resolve_name is not None:
+                arg_node = resolve_name(arg_node.id) or arg_node
+            raw = _argv_nodes(arg_node)
+            if raw is not None and _runs_script_file(raw[1:]):
+                base = _basename(elements[0])
+                if untrusted_near:
+                    return _defect(
+                        "medium", f"runs a shell script file ({base} <script>) with dynamic "
+                        "arguments next to untrusted input", consumed)
+                return _cap("low", f"runs a shell script file ({base} <script>) with runtime "
+                            "arguments (no shell string is evaluated)", CAP_SPAWN, consumed)
         if dynamic and elements and elements[0] is not None \
                 and _basename(elements[0]) in DANGEROUS_ARGV0_SHELLS:
             # `("sh", "-c", ". {0} && npm install -g npm@{1}".format(...))`: an explicit

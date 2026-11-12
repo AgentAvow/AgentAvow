@@ -302,6 +302,43 @@ def classify_match(line: str, start: int, end: int, file_path: str) -> str:
     return CRITICAL
 
 
+# RFC 2606 / RFC 6761 names that never reach a third party: the reserved TLDs never
+# resolve publicly, and example.{com,net,org} are IANA's documentation hosts.
+_RESERVED_TLDS = frozenset({"example", "invalid", "test", "localhost"})
+_RESERVED_DOMAINS = frozenset({"example.com", "example.net", "example.org"})
+_HOST_IN_URL_RE = re.compile(r"""^(?:https?|ftp)://(?:[^@/\s]*@)?([^/:?#\s]+)""", re.IGNORECASE)
+
+WHY_RESERVED_TEST = (
+    "A pipe-to-shell string in a test that names only a reserved domain (RFC 2606 / "
+    "6761: .example, .invalid, .test, example.com). It cannot fetch anyone's script; it "
+    "is sample input (likely a prompt-injection or refusal test)")
+
+
+def _is_reserved_host(host: str) -> bool:
+    h = host.lower().rstrip(".")
+    return (h.rsplit(".", 1)[-1] in _RESERVED_TLDS
+            or any(h == d or h.endswith("." + d) for d in _RESERVED_DOMAINS))
+
+
+def reserved_hosts_only(line: str, pattern: re.Pattern[str], file_path: str) -> bool:
+    """Every pipe-to-shell match on ``line`` fetches from a reserved host (and from
+    nothing else): no variable, no extra URL, at least one host per match."""
+    any_match = False
+    for m in pattern.finditer(line):
+        any_match = True
+        start = _last_command_start(line, m.start(), m.end())
+        target = _target(line, start, m.end())
+        if not target or _VAR_RE.search(target):
+            return False
+        hosts = [hm.group(1) for u in _URL_RE.findall(target)
+                 if (hm := _HOST_IN_URL_RE.match(u))]
+        if not _URL_RE.search(target):
+            hosts = [h.replace("\\.", ".") for h in _HOSTISH_RE.findall(target)]
+        if not hosts or not all(_is_reserved_host(h) for h in hosts):
+            return False
+    return any_match
+
+
 def why(cls: str | None) -> str:
     """The remediation text for a lowered class ("" for everything else)."""
     return {OFFICIAL: WHY_OFFICIAL, PINNED: WHY_PINNED}.get(cls or "", "")
