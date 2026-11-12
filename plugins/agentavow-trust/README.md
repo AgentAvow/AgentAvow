@@ -112,7 +112,9 @@ example-server https://mcp.example.com/mcp K7Q2M-9XA3B
 - As a second check, if Claude tries to run a command that names AgentAvow's folder
   `~/.cache/agentavow` (or a file in it), or to write into that folder, the
   install-time hook asks you first, and so does the gate for an MCP tool call that
-  names it. A Claude command that runs `--allow-line` asks too.
+  names it. A Claude command that runs `--allow-line` asks too. A different folder that
+  happens to be named AgentAvow, such as a checkout of this repo or the plugin's own
+  install folder, does not count.
 
 Settings, all optional, read from the environment and never sent anywhere:
 

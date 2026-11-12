@@ -65,6 +65,7 @@ def test_discover_streams_every_record_once_and_keeps_only_stubs(tmp_path, monke
     assert json.loads(lines[0]) == recs[0]                       # the raw record, whole
     assert len(stubs) == 25                                      # POST + testnet left out
     assert set(stubs[0]) == {"resource", "extensions", "accepts"}
+    assert stubs[0]["accepts"] == [{"network": "eip155:8453", "payTo": PAYEE}]
     assert not (tmp_path / "t.jsonl.tmp").exists()
 
 
