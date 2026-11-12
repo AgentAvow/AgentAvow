@@ -82,8 +82,8 @@ def live_stub(rec: dict) -> dict | None:
     return {"resource": str(rec.get("resource") or rec.get("endpoint_url") or ""),
             "extensions": {"bazaar": {"info": {"input": {
                 "method": xl.declared_method(rec)}}}},
-            "accepts": [{"network": a.get("network")} for a in rec.get("accepts") or []
-                        if isinstance(a, dict)]}
+            "accepts": [{"network": a.get("network"), "payTo": a.get("payTo")}
+                        for a in rec.get("accepts") or [] if isinstance(a, dict)]}
 
 
 def discover(out_path: Path = TARGETS_JSONL, page_size: int = 1000,
@@ -269,6 +269,7 @@ def run_live(stubs: list[dict], run_index: int | None) -> dict[str, dict]:
     the results (per host: requests sent, why it was skipped)."""
     import asyncio
     import datetime
+    from urllib.parse import urlsplit
 
     from src.scanner import x402_live as xl
     from src.ssrf import ssrf_safe_async_client
@@ -285,8 +286,11 @@ def run_live(stubs: list[dict], run_index: int | None) -> dict[str, dict]:
             return await xl.run_live_checks(the_plan, xl.make_fetch(client))
     report = asyncio.run(go())
     now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
-    for v in report.results.values():
+    known = xl.host_payees(stubs)
+    for url, v in report.results.items():
         v["checked_at"] = now
+        if v.get("state") == "paid":
+            v["host_payees"] = sorted(known.get(urlsplit(url).hostname or "", ()))
     log = {"checked_at": now, "run_index": run_index, "user_agent": xl.USER_AGENT,
            "hosts": {h: vars(lg) for h, lg in report.hosts.items()}}
     _common.write_json_atomic(RESULTS_PATH.parent / "x402-live-run.json", log)
