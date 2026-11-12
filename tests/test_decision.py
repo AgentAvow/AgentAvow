@@ -451,6 +451,14 @@ CASES = [
     ("gap_mcp_resources_too_large", _scan(88, 12, coverage={"surface": "mcp"},
                                           coverage_gaps={"resource_list_too_large": True}),
      "review", True, "the server's resource list could not be read"),
+    # Every file of the package is over the 50 MB download cap (pymupdf, 11-12).
+    ("gap_package_too_large", _scan(74, 0, coverage_gaps={"package_too_large": True,
+                                                          "package_size_mb": 65}),
+     "review", True, "the package is 65 MB, over our 50 MB download limit, so its code was "
+     "not read"),
+    ("gap_package_too_large_size_unknown", _scan(74, 0,
+                                                 coverage_gaps={"package_too_large": True}),
+     "review", True, "the package is over our 50 MB download limit, so its code was not read"),
     ("gap_mcp_both_lists", _scan(92, 12, coverage={"surface": "mcp"},
                                  coverage_gaps={"resource_list_too_large": True,
                                                 "prompt_list_unread": True}),
