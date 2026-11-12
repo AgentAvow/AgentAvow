@@ -149,6 +149,28 @@ def require_admin(entity: Entity) -> None:
         )
 
 
+def require_admin_or_viewer(entity: Entity) -> bool:
+    """Allow a full admin or a read-only admin viewer; raise 403 for anyone else.
+
+    Returns ``True`` when the caller is a viewer only (not a full admin): the endpoint
+    must then pass its response through ``src.api.redaction.redact_for_viewer`` so
+    emails, IPs and names tied to them never reach a viewer.
+
+    Use this ONLY on read-only GET endpoints that serve metrics. Anything that changes
+    state, posts, replies, toggles or manages users keeps ``require_admin``
+    (tests/test_admin_viewer.py fails the build if a non-GET route uses this, or a GET
+    route that is not on its reviewed list).
+    """
+    if entity.is_admin:
+        return False
+    if getattr(entity, "is_admin_viewer", False):
+        return True
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Admin access required",
+    )
+
+
 async def require_not_quarantined(
     current_entity: Entity = Depends(get_current_entity),
 ) -> Entity:

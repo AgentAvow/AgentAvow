@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import api from '../../lib/api'
 import { rp } from '../basePath'
+import { ViewOnlyNotice } from './adminAccess'
 
 interface Row { id: string; platform: string; draft_content?: string; post_uri?: string | null; reply_url?: string | null; posted_at?: string | null; engagement_count?: number; target?: { handle?: string | null } }
 type Key = 'date' | 'platform' | 'engagement'
@@ -32,6 +33,7 @@ export default function AdminReplies() {
   }, [data, q, sort, asc])
 
   if (isLoading) return <div className="max-w-[1080px] mx-auto px-6 py-24 text-center text-text-muted">Loading…</div>
+  if (!user?.is_admin && user?.is_admin_viewer) return <ViewOnlyNotice />
   if (!user?.is_admin) return <div className="max-w-[560px] mx-auto px-6 py-24 text-center"><h1 className="text-2xl font-extrabold">Admins only</h1></div>
 
   const th = (k: Key, label: string, right = false) => (

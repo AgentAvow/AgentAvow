@@ -89,6 +89,7 @@ class EntityResponse(BaseModel):
     did_web: str
     is_active: bool
     is_admin: bool = False
+    is_admin_viewer: bool = False
     email_verified: bool = False
     created_at: datetime
 
