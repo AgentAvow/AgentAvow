@@ -95,7 +95,31 @@ A2A_SAFE = {  # an A2A Agent Card read at /public/scan/a2a (2026-11-07)
          "remediation": "Sign it.", "file_path": "card:signatures"}]},
 }
 
+PUPPETEER = {  # @modelcontextprotocol/server-puppeteer 2025.5.12, live read 2026-11-11:
+    # the static scan has no critical/high and the signed check passes, but the sandbox
+    # run's high (undeclared egress) makes the answer Review. The row must fail.
+    "trust_score": 64, "decision": "review", "decision_final": True,
+    "decision_reason": "one high finding: undeclared network call",
+    "certified": {"eligible": False, "checks": {**CHECKS_ALL, "provenance_verified": False}},
+    "certified_mark": False, "coverage_gaps": {},
+    "findings": {"critical": 0, "high": 0, "medium": 1, "items": []},
+    "behavioral": {"ran": True, "plan": "npm-mcp", "findings": [
+        {"severity": "high", "rule": "behavioral_undeclared_egress",
+         "title": "Unexpected network egress during install/run"}],
+        "grade_summary": {"start_reason": "started", "tools_listed": 7, "calls_total": 7}},
+}
+
+REASON_ONLY = {**PUPPETEER, "behavioral": {"ran": True, "plan": "npm-mcp",
+                                           "grade_summary": {"start_reason": "started"}}}
+
+LIVE_PROBE_HIGH = {**SAFE_CERT, "behavioral": {
+    **SAFE_CERT["behavioral"], "plan": "live-probe",
+    "findings": [{"severity": "high", "rule": "x"}]}}
+
 CASES = [
+    ("puppeteer_sandbox_high", PUPPETEER, "package"),
+    ("reason_cites_high", REASON_ONLY, "package"),
+    ("advisory_probe_high", LIVE_PROBE_HIGH, "package"),
     ("a2a_safe", A2A_SAFE, "a2a"),
     ("safe_certified", SAFE_CERT, "package"),
     ("safe_not_certified", SAFE_NOT_CERT, "package"),
@@ -223,3 +247,17 @@ def test_every_result_type_renders_through_one_result_page():
     for rel in ("web/src/rebrand/pages/Check.tsx", "web/src/rebrand/components/ResultPage.tsx"):
         text = (ROOT / rel).read_text()
         assert "Attestation Trust" not in text and "Capability Trust" not in text, rel
+
+
+def test_severe_row_fails_when_the_sandbox_found_a_high(results):
+    r = results["puppeteer_sandbox_high"]
+    assert r["rows"][2] == ["fail", "1 high finding in the sandbox"]
+
+
+def test_severe_row_fails_whenever_the_answer_cites_one(results):
+    assert results["reason_cites_high"]["rows"][2][0] == "fail"
+
+
+def test_advisory_live_probe_never_fails_the_row(results):
+    # A live probe of a remote server is advisory, never a verdict input (verdict.py).
+    assert results["advisory_probe_high"]["rows"][2] == ["pass", "And nothing known-malicious"]
