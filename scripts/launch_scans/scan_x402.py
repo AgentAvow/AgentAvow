@@ -269,7 +269,6 @@ def run_live(stubs: list[dict], run_index: int | None) -> dict[str, dict]:
     the results (per host: requests sent, why it was skipped)."""
     import asyncio
     import datetime
-    from urllib.parse import urlsplit
 
     from src.scanner import x402_live as xl
     from src.ssrf import ssrf_safe_async_client
@@ -290,7 +289,7 @@ def run_live(stubs: list[dict], run_index: int | None) -> dict[str, dict]:
     for url, v in report.results.items():
         v["checked_at"] = now
         if v.get("state") == "paid":
-            v["host_payees"] = sorted(known.get(urlsplit(url).hostname or "", ()))
+            v["host_payees"] = xl.payees_for(known, url)
     log = {"checked_at": now, "run_index": run_index, "user_agent": xl.USER_AGENT,
            "hosts": {h: vars(lg) for h, lg in report.hosts.items()}}
     _common.write_json_atomic(RESULTS_PATH.parent / "x402-live-run.json", log)

@@ -16,10 +16,15 @@ agent and rate plan".
 What changes (``live_findings``, pure):
 * the live 402 asks to pay a different address than the listing, on a network both
   name: HIGH, so the answer is Review. Never Do not connect from one read.
-  Except when the live address is one the same host already lists on its other
+  Except when the live address is one the same site already lists on its other
   endpoints: then the listing is out of date, not redirected, and it is a LOW
   disclosure. Run 2 (11-12): 549 of the 646 payee findings were this case, one live
-  payee per host, already in the host's other listings.
+  payee per host, already in the host's other listings. "Same site" is the registrable
+  domain (``payee_domain``: Public Suffix List, private section included), so one
+  operator's subdomains count together while tenants of shared hosting (vercel.app,
+  onrender.com, an account on workers.dev) stay apart. Run 3 (11-12): 44 of the 56
+  HIGH payee rows were *.use.x402atlas.com, whose new Solana payee 95 other
+  x402atlas.com listings already name.
 * the live price is more than 10x the listing's: MEDIUM.
 * terms match: no finding (``live_check.matches`` is True).
 * no 402, a redirect, another status, a timeout or an unreadable 402: disclosure only.
@@ -198,18 +203,49 @@ def _norm_payee(pt) -> str:
     return p.lower() if p.startswith("0x") else p
 
 
+_PSL = None
+
+
+def payee_domain(host: str | None) -> str:
+    """The site a host belongs to for payee comparison: its registrable domain under
+    the Public Suffix List with the private section (``a.use.x402atlas.com`` ->
+    ``x402atlas.com``; ``app.vercel.app`` stays itself, since vercel.app is a public
+    suffix). An IP literal, a single label or anything the list can't place is
+    compared as the host alone."""
+    import ipaddress
+    global _PSL
+    h = (host or "").strip().lower().rstrip(".")
+    if not h:
+        return ""
+    try:
+        ipaddress.ip_address(h.strip("[]"))
+        return h
+    except ValueError:
+        pass
+    if _PSL is None:
+        from publicsuffixlist import PublicSuffixList
+        _PSL = PublicSuffixList()
+    return _PSL.privatesuffix(h) or h
+
+
 def host_payees(stubs) -> dict[str, set[str]]:
-    """``host -> every payTo its listings name`` (from the live stubs). An address the
-    host already lists elsewhere is not a redirect when an endpoint switches to it."""
+    """``payee_domain(host) -> every payTo its listings name`` (from the live stubs). An
+    address the same site already lists elsewhere is not a redirect when an endpoint
+    switches to it. Look a URL up with ``payees_for(known, url)``."""
     out: dict[str, set[str]] = {}
     for st in stubs or []:
-        host = urlsplit(str(st.get("resource") or "")).hostname
+        host = payee_domain(urlsplit(str(st.get("resource") or "")).hostname)
         if not host:
             continue
         for a in st.get("accepts") or []:
             if isinstance(a, dict) and a.get("payTo"):
                 out.setdefault(host, set()).add(_norm_payee(a["payTo"]))
     return out
+
+
+def payees_for(known: dict[str, set[str]], url: str) -> list[str]:
+    """The payees ``url``'s site lists, sorted, from a ``host_payees`` map."""
+    return sorted(known.get(payee_domain(urlsplit(url).hostname), ()))
 
 
 LIVE_TERM_FIELDS = ("scheme", "network", "asset", "payTo", "amount", "maxAmountRequired")
@@ -267,10 +303,10 @@ def live_findings(listing: dict, reply: dict) -> tuple[list, dict]:
         out.append(_finding(
             "payment_terms",
             f"the listing's pay-to address is out of date on {net}: the endpoint now asks "
-            f"to pay {_clip(live_pt, 20)}, an address this host lists on its other "
+            f"to pay {_clip(live_pt, 20)}, an address this site lists on its other "
             f"endpoints (listing: {_clip(listed_pt, 20)})",
             "low", WHERE_LIVE,
-            "Pay the address in the live request, which the host already uses elsewhere; "
+            "Pay the address in the live request, which the site already uses elsewhere; "
             "the listing has not been refreshed."))
     jumps = []
     for k in shared:
