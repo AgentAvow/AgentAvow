@@ -68,9 +68,9 @@ function AccountMenu() {
   const initial = user.display_name?.charAt(0).toUpperCase() || '?'
 
   return (
-    <div className="flex items-center gap-3" ref={ref}>
+    <div className="flex items-center gap-3">
       <div className="relative" ref={notifRef}>
-        <button onClick={() => setNotifOpen((o) => !o)} className="relative p-1 text-text-muted hover:text-text transition-colors" aria-label={`Notifications${count ? `, ${count} unread` : ''}`}>
+        <button onClick={() => { setOpen(false); setNotifOpen((o) => !o) }} className="relative p-1 text-text-muted hover:text-text transition-colors" aria-label={`Notifications${count ? `, ${count} unread` : ''}`}>
           <svg viewBox="0 0 24 24" fill="none" className="w-[19px] h-[19px]"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /><path d="M13.7 21a2 2 0 0 1-3.4 0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
           {count > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 grid place-items-center rounded-full bg-accent text-white text-[10px] font-bold tabular-nums">{count > 9 ? '9+' : count}</span>}
         </button>
@@ -103,24 +103,25 @@ function AccountMenu() {
           </div>
         )}
       </div>
-      <div className="relative">
-        <button onClick={() => setOpen(!open)} className="flex items-center gap-2 group" aria-label="Account menu">
+      <div className="relative" ref={ref}>
+        <button onClick={() => { setNotifOpen(false); setOpen(!open) }} className="flex items-center gap-2 group" aria-label="Account menu">
           {user.avatar_url
             ? <img src={user.avatar_url} alt="" className="w-8 h-8 rounded-full object-cover ring-1 ring-primary/30" />
             : <span className="w-8 h-8 rounded-full grid place-items-center text-[13px] font-bold text-white bg-gradient-to-br from-primary to-accent">{initial}</span>}
         </button>
         {open && (
-          <div className="absolute right-0 mt-2 w-52 glass rounded-xl border border-border/60 shadow-xl py-1.5 z-30">
+          // Solid surface like the alerts panel; no glass, so the page never shows through.
+          <div className="absolute right-0 mt-2 w-52 bg-surface rounded-xl border border-border shadow-[0_14px_30px_rgba(0,0,0,.25)] py-1.5 z-30">
             <div className="px-3.5 py-2 border-b border-border/60">
               <div className="text-[13.5px] font-semibold truncate">{user.display_name}</div>
               <div className="text-[11.5px] text-text-muted truncate">{user.email}</div>
             </div>
-            <Link to={rp("/rebrand/tools")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">My Tools</Link>
-            <Link to={rp("/rebrand/account")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Watches &amp; alerts</Link>
-            <Link to={rp("/rebrand/notifications")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Notifications</Link>
-            <Link to={rp("/rebrand/settings")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Settings</Link>
-            {user.is_admin && <Link to={rp("/rebrand/admin-dashboard")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Admin</Link>}
-            <button onClick={() => { setOpen(false); logout(); navigate(rp('/rebrand')) }} className="block w-full text-left px-3.5 py-2 text-[13.5px] text-text-muted hover:text-danger hover:bg-surface border-t border-border/60 mt-1">Sign out</button>
+            <Link to={rp("/rebrand/tools")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface-hover">My Tools</Link>
+            <Link to={rp("/rebrand/account")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface-hover">Watches &amp; alerts</Link>
+            <Link to={rp("/rebrand/notifications")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface-hover">Notifications</Link>
+            <Link to={rp("/rebrand/settings")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface-hover">Settings</Link>
+            {user.is_admin && <Link to={rp("/rebrand/admin-dashboard")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface-hover">Admin</Link>}
+            <button onClick={() => { setOpen(false); logout(); navigate(rp('/rebrand')) }} className="block w-full text-left px-3.5 py-2 text-[13.5px] text-text-muted hover:text-danger hover:bg-surface-hover border-t border-border/60 mt-1">Sign out</button>
           </div>
         )}
       </div>
