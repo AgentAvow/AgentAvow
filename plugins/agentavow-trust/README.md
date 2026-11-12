@@ -36,7 +36,7 @@ Scanning is free and needs no account.
 | `scan-before-connect` skill | When you ask Claude to add an MCP server or install a package you name, Claude scans it first and tells you the answer before it goes ahead. | Chat, Cowork, Claude Code |
 | Install-time hook | When a server is about to be added (`claude mcp add …`, or a write to `.mcp.json`), grades it first. "Do not connect": Claude Code asks you, with the answer as the reason. Anything else (Safe to connect; Review before you connect; not scannable): a one-line answer and the add proceeds. Never denies. | Claude Code, Cowork |
 | Package installs | When Claude runs `npm`/`pnpm`/`yarn`/`bun` add or install, `pip`/`python -m pip` install, `uv add`, `uv pip install`, `pipx install` or `poetry add` with named packages (up to 5 per command), each is checked against its stored grade. Safe to connect: silent, unless part of the package could not be read (a file past the read cap or past the unpack budget), which gets one quiet note. Deprecated by its maintainer: a one-line note that it is deprecated (not a security finding). Review before you connect: a one-line note and the install proceeds. Do not connect: Claude Code asks you first. Lockfile installs (`npm install`, `npm ci`, `uv sync`), requirements files, local paths and repository or URL installs are left alone; a package AgentAvow could not grade (not found, not scannable, or the service is busy) gets a one-line "not checked" note; an offline or slow check stays silent. The next session start mentions once how many installs were checked. Turn it off with `AGENTAVOW_INSTALL_CHECKS=off`. | Claude Code, Cowork |
-| SessionStart hook | At the start of a session, grades each MCP server this session can use (user scope, this project, and the servers your installed plugins bring) that it has not seen before, and the project's direct dependencies: package.json `dependencies` (or `devDependencies` when there are none), requirements.txt, pyproject `[project].dependencies`, and Cargo.toml `[dependencies]` (Rust crates). In a workspace root with no manifest of its own, it reads the manifests one folder down (up to 5 sub-projects; never in your home folder). Up to 8 dependencies per start, re-graded only when the declared version changes; `AGENTAVOW_PRECHECK_DEPS=off` turns the dependency pass off. Servers for other projects are counted and graded when you open them. Claude opens its first reply with a one-line summary (how many Safe / Review / Don't connect, the one needing attention), and keeps one line per server and dependency for when you ask. Dependencies are already installed: their answer is advice, never a stop. | Claude Code, Cowork |
+| SessionStart hook | At the start of a session, grades each MCP server this session can use (user scope, this project, and the servers your installed plugins bring) that it has not seen before, and the project's direct dependencies: package.json `dependencies` (or `devDependencies` when there are none), requirements.txt, pyproject `[project].dependencies`, and Cargo.toml `[dependencies]` (Rust crates). In a workspace root with no manifest of its own, it reads the manifests one folder down (up to 5 sub-projects; never in your home folder). Up to 8 dependencies per start, re-graded only when the declared version changes; `AGENTAVOW_PRECHECK_DEPS=off` turns the dependency pass off. A server whose check has no answer within the start's time limit (a first scan can take a minute or more) is named as still being checked and asked about again at the next start until its answer shows (at most 5 starts or 24 hours; then it is reported once as "not graded: check timed out" and checked again in a week). Servers for other projects are counted and graded when you open them. Claude opens its first reply with a one-line summary (how many Safe / Review / Don't connect, the one needing attention), and keeps one line per server and dependency for when you ask. Dependencies are already installed: their answer is advice, never a stop. | Claude Code, Cowork |
 | PreToolUse gate | Before each MCP tool call, checks the answer on file for that server. Stops a call to a server whose answer is "Do not connect" (and, as before, one in the blocked tier), unless you allowed that one server; asks before a tool whose definition changed since it was scanned. "Review before you connect" never prompts. | Claude Code, Cowork |
 
 The session-start hook and the skill warn; a low score adds context and you decide.
@@ -75,22 +75,44 @@ call and says nothing.
 
 If you have looked at a server that reads "Do not connect" and want to use it anyway,
 add one line for it to `~/.cache/agentavow/allowed-servers.txt` (create the file if it
-is not there). The refusal message gives you the exact line: the server's name, a space,
-and the URL or package its grade is for. For example:
+is not there). When the gate stops the server, it shows you (not Claude) the exact line:
+the server's name, the URL or package its grade is for, and a confirmation code. For
+example:
 
 ```
-example-server https://mcp.example.com/mcp
+example-server https://mcp.example.com/mcp K7Q2M-9XA3B
 ```
 
+- The code is what makes the line yours. It is shown only to you, in the gate's notice;
+  Claude's copy of the refusal never carries it, so a line Claude writes, by whatever
+  route, allows nothing. Don't paste the code into the chat. It comes from a random key
+  the gate keeps in `~/.cache/agentavow/allow.key` (readable only by you); deleting that
+  file turns every allow line off, and the next refusal shows new codes.
 - It allows that one server only. There are no patterns and no "allow everything": a
-  line that is not exactly `<name> <graded URL or package>` allows nothing.
+  line that is not exactly `<name> <graded URL or package> <code>` allows nothing. A
+  line written for 0.1.37 (without a code) no longer counts; the next refusal shows the
+  new line.
 - It is tied to what was graded. If the server's config later points at a different URL
   or package, the old line no longer matches and the gate stops calls again.
 - A changed tool definition still asks, allowed or not.
 - Each session shows one note when an allowed server's tools run.
 - Lines starting with `#` are comments. Delete a line to stop allowing that server.
-- Claude cannot quietly allow a server for you: if Claude tries to write or run anything
-  that names this file, the install-time hook asks you first.
+- If you can't see the gate's notice (the VS Code extension may not show it), print the
+  line yourself in your own terminal. The refusal gives the exact command for your
+  install; it looks like this:
+
+  ```
+  python3 ~/.claude/plugins/.../scripts/agentavow_pretool_gate.py --allow-line example-server
+  ```
+
+  It prints the line only when it runs in a real terminal (its input and its output
+  both a terminal). Run from Claude's Bash tool, a pipe or a file, it refuses and
+  prints no code, so Claude can't fetch the code this way either. A name with no grade
+  on file is an error; use the name from the refusal.
+- As a second check, if Claude tries to run a command that names AgentAvow's folder
+  `~/.cache/agentavow` (or a file in it), or to write into that folder, the
+  install-time hook asks you first, and so does the gate for an MCP tool call that
+  names it. A Claude command that runs `--allow-line` asks too.
 
 Settings, all optional, read from the environment and never sent anywhere:
 
@@ -177,19 +199,25 @@ current folder, or one folder down in a workspace root with none of its own.
 **It writes** one file, `~/.cache/agentavow/scanned.json`, so each server is scanned
 once: per server, the score, tier and grade, the signed per-tool digests, the report
 link, and when it was scanned. A server AgentAvow cannot read (one that needs sign-in,
-for example) is reported once and retried after a week. Delete the file to scan
+for example) is reported once and retried after a week. A server still being checked
+is kept as its id, when it was first asked about and how many times, never as a grade.
+Delete the file to scan
 everything again.
 
 **The gate reads** the same config files, for the URL and any `Authorization` header
-of the one server being called, your allow list `~/.cache/agentavow/allowed-servers.txt`
-if it exists, plus its own `AGENTAVOW_GATE*` settings from the
+of the one server being called, your allow list `~/.cache/agentavow/allowed-servers.txt` and its key
+if they exist, plus its own `AGENTAVOW_GATE*` settings from the
 environment. **It sends** one short `initialize` + `tools/list` exchange to that
 server, over the URL in your config (`user:password@` and `#fragment` removed), with
 the configured `Authorization` header if there is one, as Claude Code itself does when
 it connects. A header that still holds a `${...}` placeholder is not expanded and not
 sent. Nothing goes to AgentAvow, and the header is never written to the cache or
 printed. The gate writes the digests it last saw to the same cache file; the graded
-digests are never overwritten by it. It never writes the allow list.
+digests are never overwritten by it. It never writes the allow list. The first time it
+stops a server it creates `~/.cache/agentavow/allow.key`, a random key readable only by
+you that the confirmation codes come from; the key never leaves your machine. Run by
+you with `--allow-line <name>`, it reads the cache file and that key (creating the key
+if needed), prints one line to your terminal, and sends nothing.
 
 The first time the hook finds nothing to scan (no MCP servers it can grade and no
 manifest), it shows one line saying so and how to scan a tool on demand. That line is

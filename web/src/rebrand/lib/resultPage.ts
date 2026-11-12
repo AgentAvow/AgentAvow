@@ -141,14 +141,30 @@ export function certifiedRows(scan: unknown, kind: ResultKind, d: Decision = dec
   }
   rows[rows.length - 1].keys = fileKeys
 
-  // 3 · no critical or high finding
+  // 3 · no critical or high finding: in the code, in the sandbox run (a live run's
+  // findings, as decide() reads them), or wherever the answer's own reason cites one.
+  // The row must never pass while the answer names a critical or high finding
+  // (server-puppeteer 2025.5.12: a sandbox high read Review but this row passed).
   const f = asObj(o.findings)
   const crit = Number(f.critical ?? 0) || 0
   const high = Number(f.high ?? 0) || 0
-  const severe = checks.no_critical_or_high === false || crit + high > 0
+  const bLive = !!(b && b.ran === true && b.pending !== true && b.plan !== 'live-probe' && b.advisory !== true)
+  const bSev = (want: string) => (bLive && Array.isArray(b?.findings) ? (b?.findings as unknown[]) : [])
+    .filter((x) => String(asObj(x).severity ?? '').toLowerCase() === want).length
+  const bCrit = bSev('critical')
+  const bHigh = bSev('high')
+  // a counted finding ("one high finding", "2 critical findings"), never "no critical or high findings"
+  const reasonCites = /\b(?:one|two|three|four|five|\d+)\s+(?:critical|high)\s+findings?\b/i.test(String(d.reason ?? ''))
+  const severe = checks.no_critical_or_high === false || crit + high + bCrit + bHigh > 0 || reasonCites
   if (severe) {
     const parts = [crit && `${crit} critical`, high && `${high} high`].filter(Boolean)
-    rows.push({ label: ROW_SEVERE, state: 'fail', evidence: parts.length ? `${parts.join(', ')} finding${crit + high === 1 ? '' : 's'}` : 'A critical or high finding' })
+    const bParts = [bCrit && `${bCrit} critical`, bHigh && `${bHigh} high`].filter(Boolean)
+    const n = crit + high
+    const bn = bCrit + bHigh
+    const ev = [parts.length ? `${parts.join(', ')} finding${n === 1 ? '' : 's'}` : '',
+      bParts.length ? `${bParts.join(', ')} finding${bn === 1 ? '' : 's'} in the sandbox` : '']
+      .filter(Boolean).join('; ')
+    rows.push({ label: ROW_SEVERE, state: 'fail', evidence: ev || 'A critical or high finding' })
   } else {
     rows.push({ label: ROW_SEVERE, state: 'pass', evidence: 'And nothing known-malicious' })
   }

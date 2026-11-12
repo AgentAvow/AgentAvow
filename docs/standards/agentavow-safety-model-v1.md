@@ -166,7 +166,9 @@ Certified only when **all** hold:
 1. `artifact_scanned` — the published artifact was scanned, not just the repo.
 2. `provenance_verified` — build provenance verifies **and** matches the source claim.
 3. `no_drift` — no injected/modified files, no install hook.
-4. `no_critical_or_high` — zero critical/high across code + supply chain; no known-malicious dep.
+4. `no_critical_or_high` — zero critical/high across code + supply chain, and none from a live
+   sandbox run (the same rule as the answer: not pending, not the advisory live probe; a
+   leaked canary credential counts); no known-malicious dep.
 5. `recompute_ready` — a signed verdict with pinned snapshots.
 6. `full_coverage` — not a sampled / truncated scan.
 

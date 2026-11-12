@@ -59,6 +59,26 @@ def sandbox_alarm(data: dict) -> bool:
                for f in (b.get("findings") or []) if isinstance(f, dict))
 
 
+def certified_with_sandbox(certified: dict | None, behavioral: dict | None) -> dict:
+    """The ``certified`` block as served: check 4 (``no_critical_or_high``) also counts a
+    live sandbox run, by the same rule as ``decide()`` (``sandbox_alarm``: the run ran,
+    is not pending, is not the advisory live probe, and caught a critical/high finding
+    or a leaked canary credential). The scanner computes the block before the sandbox
+    answers, so without this the check read True beside an answer citing a sandbox high
+    (server-puppeteer, 2026-11-11). Unsigned response field; never touches the JWS.
+    Returns a new dict; the input is not modified."""
+    cert = dict(certified or {})
+    checks = dict(cert.get("checks") or {})
+    b = behavioral if isinstance(behavioral, dict) else None
+    if (not checks or b is None or b.get("pending") is True
+            or not sandbox_alarm({"behavioral": b})):
+        return cert
+    checks["no_critical_or_high"] = False
+    cert["checks"] = checks
+    cert["eligible"] = False
+    return cert
+
+
 def _version_key(v: str) -> tuple:
     """A loose sort key for release strings ("1.10.0" > "1.9.2"); never raises."""
     parts = []

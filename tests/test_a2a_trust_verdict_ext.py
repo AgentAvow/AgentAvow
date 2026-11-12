@@ -118,3 +118,15 @@ def test_spec_page_names_both_jwks_hosts():
     assert "https://agentavow.com/.well-known/jwks.json" in page
     assert "https://agentgraph.co/.well-known/jwks.json" in page
     assert "either works" in page
+
+
+def test_spec_page_has_site_header_and_footer():
+    """Third-party links (the A2A discussion) land here: it must not be a dead end."""
+    from pathlib import Path
+
+    page = (Path(__file__).resolve().parent.parent / "web" / "public" / "ext"
+            / "trust-verdict" / "v1" / "index.html").read_text()
+    assert '<header class="site">' in page and '<footer class="foot">' in page
+    for href in ('href="/"', 'href="/browse"', 'href="/docs"', 'href="/check/a2a"', 'href="/legal/privacy"'):
+        assert href in page, href
+    assert "<script" not in page  # static page, no scripts

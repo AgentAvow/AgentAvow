@@ -1749,8 +1749,9 @@ def _scan_struct(
         ][:10],
         # What the sandbox observed (None until the first run completes; see `pending`).
         "sandbox": sandbox,
-        # MUST match the signed attestation's certified.eligible (the 6 crypto gates) — a
-        # trust product cannot have its MCP field disagree with its own signed report.
+        # MUST match the API's certified.eligible (the 6-point gate; check 4 also counts a
+        # live sandbox critical/high, verdict.certified_with_sandbox). Not itself signed:
+        # the JWS signs the score and findings it is computed from.
         # The Certified MARK is the display rule on top (verdict.certified_mark: Safe to
         # connect, final, score >= 81, not thin), the same one the site and badge use;
         # always sent so the card never re-derives it.

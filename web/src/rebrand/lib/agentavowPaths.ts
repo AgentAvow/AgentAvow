@@ -42,7 +42,7 @@ export const AGENTAVOW_PATHS: AgentAvowPath[] = [
   {
     key: 'claude-code', label: 'Claude Code', tag: 'Checks by itself',
     text: 'The plugin checks new MCP servers and packages automatically, and warns you before your agent uses one.',
-    dncText: "On a Do not connect answer, the plugin asks before you install it, and stops calls to a server that's already connected.",
+    dncText: "On a Do not connect answer, the plugin asks before you install it, and stops calls to a server that's already connected, unless you allow that server.",
     snippet: PLUGIN_COMMANDS,
     links: [{ label: 'Full steps →', href: '/rebrand/claude-code' }],
   },
