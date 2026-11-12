@@ -57,7 +57,10 @@ the per-call gate (below); leave it out for session-start verdicts only.
 **Guarantees:** warn-only (never blocks a session), fail-open (a scan error or an
 unrecognized config just stays silent), and it only scans each endpoint once. A
 server AgentAvow can't read (one that needs sign-in, for example) is reported once
-as "not scanned" and left alone for a week. Servers on localhost or a private
+as "not scanned" and left alone for a week. A server whose check has no answer in
+time is named as still being checked and asked about again at the next session start
+until its answer shows (at most 5 starts or 24 hours, then reported once as "not
+graded: check timed out"). Servers on localhost or a private
 network are never sent anywhere, a URL whose path looks like it carries a secret is
 withheld, and credentials and query strings are stripped from a URL before it leaves
 your machine.

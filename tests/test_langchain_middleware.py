@@ -281,6 +281,49 @@ def test_evaluate_high_finding_blocks_even_with_a_good_score():
                            served_definition=TOOL).allow
 
 
+def _next_js_shape(*, critical: int = 0, high: int = 0, decision: str = "safe",
+                   code_items: list | None = None) -> dict:
+    """Shaped like vercel/next.js on 2026-11-11: no shipped critical or high, but 4
+    critical dependency advisories (``critical_all``); the API answers safe."""
+    deps = [{"category": "dependency", "severity": "critical", "name": f"GHSA-{n}",
+             "file_path": "lockfile"} for n in range(4)]
+    data = grade_json(score=65, critical=critical, high=high,
+                      items=deps + list(code_items or []))
+    data["findings"].update(critical_all=4 + critical, high_all=42 + high)
+    data["decision"] = decision
+    return data
+
+
+def test_dependency_criticals_never_block_next_js_shape():
+    g = tg.Grade.from_response(SERVER, _next_js_shape())
+    assert (g.critical, g.high) == (0, 0)
+    d = tg.evaluate("ask_wiki_question", SERVER, g, served_definition=TOOL)
+    assert d.allow and d.outcome == "allow" and d.decision == "safe", d.reason
+    # block_on beyond critical/high also skips dependency items
+    assert tg.evaluate("t", SERVER, g, block_on=("critical", "high", "medium"),
+                       served_definition=TOOL).allow
+
+
+def test_shipped_critical_and_api_do_not_connect_still_block():
+    code = {"category": "code_execution", "severity": "critical", "name": "eval",
+            "file_path": "a.js", "line_number": 1}
+    g = tg.Grade.from_response(
+        SERVER, _next_js_shape(critical=1, decision="do_not_connect", code_items=[code]))
+    assert g.critical == 1
+    d = tg.evaluate("t", SERVER, g, served_definition=TOOL)
+    assert not d.allow and d.outcome == "finding" and "critical" in d.reason
+    # the API's do_not_connect wins over clean counts, even under fail_on="do_not_connect"
+    g2 = tg.Grade.from_response(SERVER, _next_js_shape(decision="do_not_connect"))
+    d2 = tg.evaluate("t", SERVER, g2, served_definition=TOOL, fail_on="do_not_connect")
+    assert not d2.allow and d2.outcome == "decision" and d2.decision == "do_not_connect"
+    # no headline counts: only blocking items count (a dependency one does not)
+    bare = grade_json(score=92)
+    bare["findings"] = {"items": [code, dict(code, category="dependency")]}
+    assert tg.Grade.from_response(SERVER, bare).critical == 1
+    bare["findings"] = {"items": [dict(code, category="dependency")]}
+    assert tg.Grade.from_response(SERVER, bare).critical == 0
+
+
 def test_evaluate_drift_and_unknown_tool():
     g = tg.Grade.from_response(SERVER, grade_json())
     d = tg.evaluate("ask_wiki_question", SERVER, g, served_definition=DRIFTED)

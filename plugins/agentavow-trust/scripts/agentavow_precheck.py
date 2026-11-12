@@ -59,13 +59,14 @@ import json
 import os
 import pathlib
 import re
+import socket
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.37"
+__version__ = "0.1.38"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -94,6 +95,25 @@ class _UnscannableError(Exception):
 
 class _QueuedError(Exception):
     """No stored grade yet; the API queued a scan (HTTP 202). Ask again next session."""
+
+
+# A server whose scan has not answered within this session start's time budget (a slow
+# first scan can take the API ~100 s) is reported as "still being checked" and NOT
+# recorded as graded, so the next session start asks again and reports the real answer.
+# It is retried at most PENDING_MAX_TRIES times or for PENDING_MAX_AGE, then reported
+# once as "not graded: check timed out" and left alone like an unscannable server.
+PENDING_MAX_TRIES = 5
+PENDING_MAX_AGE = 24 * 3600
+
+
+def _no_answer_yet(e: BaseException) -> bool:
+    """The API is slow, busy or still scanning (a timeout, 202 queued, 408/429/5xx),
+    as opposed to this machine being offline (no route, DNS failure), which stays silent."""
+    if isinstance(e, (_QueuedError, TimeoutError, socket.timeout, urllib.error.HTTPError)):
+        return True
+    if isinstance(e, urllib.error.URLError):
+        return isinstance(e.reason, (TimeoutError, socket.timeout))
+    return False
 
 
 # The three headline phrases (src/trust_tiers.py DECISIONS; tests/test_trust_tiers.py pins
@@ -809,11 +829,14 @@ def _previously_graded(cache: dict, targets: list[dict], deps: list[dict],
     out: list[str] = []
     for t in targets:
         e = cache.get(t["name"])
-        if not (isinstance(e, dict) and e.get("id") == t["id"] and "score" in e):
+        if not (isinstance(e, dict) and e.get("id") == t["id"]):
             continue
         if any(f"MCP '{t['name']}'" in ln for ln in new_lines):
             continue
-        out.append(f"  {_flag(e)} MCP '{t['name']}': {_answer(e)}")
+        if "score" in e:
+            out.append(f"  {_flag(e)} MCP '{t['name']}': {_answer(e)}")
+        elif e.get("reason"):
+            out.append(f"  ➖ MCP '{t['name']}': not graded ({e['reason']})")
     for t in deps:
         e = cache.get(t["name"])
         if any(f"dependency '{t['pkg']}'" in ln for ln in new_lines):
@@ -830,7 +853,9 @@ _LEGEND = ("Legend: each line leads with one of three answers and its reason. �
            "version, deprecation, or a score under 51). ⛔ Do not "
            "connect (a critical finding, a planted credential leaving the sandbox, or a "
            "known-malicious package). '· Certified' marks a tool that passed the full "
-           "Certified gate. ➖ not graded, with the reason. Dependencies are already "
+           "Certified gate. ➖ not graded, with the reason. ⏳ still being checked: no "
+           "answer yet, asked again next session; its tools run without a grade until then. "
+           "Dependencies are already "
            "installed: their answer is advice, never a stop. Do not interpret the raw cache "
            "file; this list is the pre-check.")
 
@@ -1462,8 +1487,24 @@ def _show_fine_once_a_day(cache: dict, targets: list[dict], now: float) -> bool:
     return True
 
 
+def _waiting_clause(pending: int, timed_out: int, alone: bool) -> str:
+    """'1 still being checked; its answer shows next session' and/or '1 not graded:
+    check timed out'. ``alone``: nothing was graded, so the clause names the servers."""
+    parts = []
+    if pending:
+        noun = f"MCP server{'' if pending == 1 else 's'} " if alone else ""
+        parts.append(f"{pending} {noun}still being checked; "
+                     f"{'its answer shows' if pending == 1 else 'their answers show'} "
+                     "next session")
+    if timed_out:
+        noun = f"MCP server{'' if timed_out == 1 else 's'} " if alone else ""
+        parts.append(f"{timed_out} {noun}not graded: check timed out")
+    return "; ".join(parts)
+
+
 def _summary(graded: list[tuple[str, dict]], elsewhere: int = 0, deps: str = "",
-             servers_present: bool = True, server_news: bool = True) -> str:
+             servers_present: bool = True, server_news: bool = True,
+             pending: int = 0, timed_out: int = 0) -> str:
     """One line a person can act on: how many servers were graded, how many are safe,
     and the one that needs attention most, then the dependency clause. Shown as the
     hook's systemMessage and relayed by Claude at the top of its first reply.
@@ -1480,6 +1521,9 @@ def _summary(graded: list[tuple[str, dict]], elsewhere: int = 0, deps: str = "",
         # Every server was already graded; only dependencies are new this time.
         return ("AgentAvow pre-check: MCP servers unchanged." + deps
                 + " Ask for the AgentAvow pre-check for details." + tail)
+    if not n and (pending or timed_out):
+        return ("AgentAvow pre-check: " + _waiting_clause(pending, timed_out, True) + "."
+                + deps + " Ask for the AgentAvow pre-check for details." + tail)
     if not n:
         return ("AgentAvow pre-check: a configured MCP server could not be scanned; "
                 "ask for the AgentAvow pre-check for details." + deps + tail)
@@ -1489,6 +1533,8 @@ def _summary(graded: list[tuple[str, dict]], elsewhere: int = 0, deps: str = "",
     if worst:
         name, r = worst
         parts.append(f" (needs attention: '{name}' {_headline(r)}{_why(r)})")
+    if pending or timed_out:
+        parts.append("; " + _waiting_clause(pending, timed_out, False))
     parts.append("." + deps + " Ask for the AgentAvow pre-check for details." + tail)
     return "".join(parts)
 
@@ -1509,6 +1555,54 @@ def _is_cached(entry: object, target_id: str, now: float) -> bool:
         return now < float(entry.get("retry_after") or 0)
     except (TypeError, ValueError):
         return False
+
+
+def _stored_fallback(t: dict, e: BaseException, started: float) -> dict | None:
+    """A package server whose fresh scan did not answer in time: ask for its stored
+    grade instead (instant when the catalog has one; 202 queues a background scan).
+    None when there is no answer yet, no time left, or the target is a live URL."""
+    if t["kind"] != "package" or isinstance(e, _QueuedError):
+        return None
+    if time.monotonic() - started + TIMEOUT > BUDGET:
+        return None
+    try:
+        return _scan(t, stored=True)
+    except Exception:
+        return None
+
+
+def _pending(cache: dict, t: dict, entry: object, now: float, asked: bool,
+             lines: list[str]) -> str:
+    """Record and report a server that has no answer yet. A server already graded for
+    this id keeps its grade (a routine re-check that ran out of time says nothing): "".
+    Otherwise the cache holds {"id", "pending_since", "tries"} (never read as a grade,
+    so the next start asks again and the gate treats it as ungraded) and the line says
+    it is still being checked: "pending". Past PENDING_MAX_TRIES requests or
+    PENDING_MAX_AGE it is reported once as timed out and then left alone for
+    RETRY_UNSCANNABLE, like an unscannable server: "timed_out"."""
+    if isinstance(entry, dict) and entry.get("id") == t["id"] and "approved_at" in entry:
+        return ""
+    coord = t["url"] if t["kind"] == "mcp" else f"{t['registry']}:{t['pkg']}"
+    prior = entry if (isinstance(entry, dict) and entry.get("id") == t["id"]
+                      and "pending_since" in entry) else {}
+    try:
+        since = float(prior.get("pending_since") or now)
+        tries = int(prior.get("tries") or 0)
+    except (TypeError, ValueError):
+        since, tries = now, 0
+    tries += 1 if asked else 0
+    if tries >= PENDING_MAX_TRIES or now - since >= PENDING_MAX_AGE:
+        cache[t["name"]] = {"id": t["id"], "retry_after": now + RETRY_UNSCANNABLE,
+                            "reason": "check timed out"}
+        lines.append(f"➖ MCP '{t['name']}' ({coord}): not graded: check timed out — "
+                     "AgentAvow had no answer after several session starts; it is checked "
+                     "again in a week. Scan it on demand at https://agentavow.com/check.")
+        return "timed_out"
+    cache[t["name"]] = {"id": t["id"], "pending_since": since, "tries": tries}
+    lines.append(f"⏳ MCP '{t['name']}' ({coord}): still being checked — AgentAvow had no "
+                 "answer within this session start's time limit; its answer shows next "
+                 "session. Until then its tools run without a grade.")
+    return "pending"
 
 
 def main() -> None:
@@ -1546,6 +1640,7 @@ def main() -> None:
     results: dict[str, dict | None] = {}  # id -> verdict, None = unscannable
     lines: list[str] = []
     graded: list[tuple[str, dict]] = []  # (server name, verdict) for the summary line
+    pending = timed_out = 0  # servers still being checked / given up on, this session
     for t in targets:
         entry = cache.get(t["name"])
         if _is_cached(entry, t["id"], now):
@@ -1557,16 +1652,28 @@ def main() -> None:
             lines.append(f"➖ MCP '{t['name']}' ({t['host']}): not scanned — its URL looks "
                          "like it contains a secret, so it was not sent to AgentAvow.")
             continue
+        coord = t["url"] if t["kind"] == "mcp" else f"{t['registry']}:{t['pkg']}"
         if t["id"] not in results:  # the same coordinate under two names scans once
             if time.monotonic() - started > BUDGET:
-                break  # out of time; the rest are picked up next session
+                # Out of time: not asked this session. Said, not silently skipped.
+                state = _pending(cache, t, entry, now, asked=False, lines=lines)
+                pending += state == "pending"
+                timed_out += state == "timed_out"
+                continue
             try:
                 results[t["id"]] = _scan(t, force=regraded)
             except _UnscannableError:
                 results[t["id"]] = None
-            except Exception:
-                continue  # fail-open; transient, so not cached
-        coord = t["url"] if t["kind"] == "mcp" else f"{t['registry']}:{t['pkg']}"
+            except Exception as e:
+                slow = _no_answer_yet(e)
+                answer = _stored_fallback(t, e, started) if slow else None
+                if answer is None:
+                    if slow:
+                        state = _pending(cache, t, entry, now, asked=True, lines=lines)
+                        pending += state == "pending"
+                        timed_out += state == "timed_out"
+                    continue  # fail-open; no answer, so never cached as graded
+                results[t["id"]] = answer
         result = results[t["id"]]
         if result is None:
             cache[t["name"]] = {"id": t["id"], "retry_after": now + RETRY_UNSCANNABLE}
@@ -1616,7 +1723,8 @@ def main() -> None:
     except Exception:
         elsewhere = 0
     summary = _summary(graded, elsewhere, dep_clause, servers_present=bool(targets),
-                       server_news=bool(server_lines)) + install_clause
+                       server_news=bool(server_lines), pending=pending,
+                       timed_out=timed_out) + install_clause
     try:
         earlier = _previously_graded(cache, targets, deps, lines)
     except Exception:

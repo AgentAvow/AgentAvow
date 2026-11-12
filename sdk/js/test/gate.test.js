@@ -388,6 +388,84 @@ test('createGate decides on the signed fields, not the unsigned JSON', { skip },
   assert.equal(net.gradeCalls(), 1, 'grade is cached');
 });
 
+// A response shaped like vercel/next.js on 2026-11-11: no shipped critical or high,
+// but 4 critical dependency advisories (`critical_all`), and the API answers safe.
+function nextJsShape({ critical = 0, high = 0, decision = 'safe', codeItems = [] } = {}) {
+  const dep = (n) => ({ category: 'dependency', severity: 'critical', name: `GHSA-dep-${n}`, file_path: 'lockfile' });
+  const json = scanJson({ score: 65, critical, high, items: [dep(1), dep(2), dep(3), dep(4), ...codeItems] });
+  json.findings = { ...json.findings, critical_all: 4 + critical, high_all: 42 + high };
+  json.decision = decision;
+  return json;
+}
+
+test('dependency criticals (critical_all) never block: next.js-shaped grade is safe', { skip }, async () => {
+  const policy = mod.resolvePolicy({ allowFloor: 51, onReview: 'block' });
+  const g = verified(nextJsShape());
+  assert.equal(g.critical, 0);
+  assert.equal(g.high, 0);
+  const d = mod.deriveDecision(g, policy);
+  assert.equal(d.decision, 'safe', d.reason);
+  assert.equal(d.allowed, true);
+
+  // Through the signed path too: the signed payload carries the same findings block.
+  const net = fakeNet({ grade: await signedScan(nextJsShape()) });
+  const gate = mod.createGate({ baseUrl: API, fetch: net.fetch, jwksUrl: JWKS_URL, ...quiet });
+  const live = await gate.check(SERVER);
+  assert.equal(live.decision, 'safe', live.reason);
+  assert.equal(live.attestation.verified, true);
+});
+
+test('a shipped critical is still do_not_connect, and an API do_not_connect wins', { skip }, async () => {
+  const policy = mod.resolvePolicy({});
+  const code = { category: 'code_execution', severity: 'critical', name: 'eval of input', file_path: 'a.js' };
+  const shipped = mod.deriveDecision(verified(nextJsShape({ critical: 1, decision: 'do_not_connect', codeItems: [code] })), policy);
+  assert.equal(shipped.decision, 'do_not_connect');
+  assert.match(shipped.reason, /1 critical finding/);
+  // Even if the label says safe, a signed shipped critical blocks (unsigned labels never loosen).
+  const labelled = mod.deriveDecision(verified(nextJsShape({ critical: 1, decision: 'safe', codeItems: [code] })), policy);
+  assert.equal(labelled.decision, 'do_not_connect');
+  // No headline counts: only blocking items count (the dependency ones do not).
+  const bare = verified({ ...scanJson({ score: 92 }), findings: { items: [code, { ...code, category: 'dependency' }] } });
+  assert.equal(bare.critical, 1);
+  assert.equal(mod.deriveDecision(verified({ ...scanJson({ score: 92 }), findings: { items: [{ ...code, category: 'dependency' }] } }), policy).decision, 'safe');
+  // The API's do_not_connect wins over clean counts.
+  const api = mod.deriveDecision(verified(nextJsShape({ decision: 'do_not_connect' })), policy);
+  assert.equal(api.decision, 'do_not_connect');
+  assert.match(api.reason, /AgentAvow says do not connect/);
+  // A shipped high (the 47/Review re-scan) is review, as the API answers.
+  const high = mod.deriveDecision(verified(nextJsShape({ high: 1, decision: 'review' })), policy);
+  assert.equal(high.decision, 'review');
+});
+
+test('criticals the API reads as review (hardcoded credential, own advisory) are review', { skip }, () => {
+  const policy = mod.resolvePolicy({});
+  const secret = { category: 'secret', severity: 'critical', name: 'AWS key', file_path: 'a.py' };
+  const adv = { category: 'known_vulnerability', severity: 'critical', name: 'CVE-1', file_path: 'package.json' };
+  for (const item of [secret, adv]) {
+    const d = mod.deriveDecision(verified(nextJsShape({ critical: 1, decision: 'review', codeItems: [item] })), policy);
+    assert.equal(d.decision, 'review', item.category);
+    assert.equal(d.outcome, 'finding');
+  }
+});
+
+test('a decision in the signed payload is the answer on the findings', { skip }, async () => {
+  const policy = mod.resolvePolicy({});
+  const code = { category: 'code_execution', severity: 'critical', name: 'x', file_path: 'a.js' };
+  const json = scanJson({ score: 92, critical: 1, items: [code] });
+  const g = await mod.verifyGrade(
+    mod.gradeFromResponse(SERVER, await signedScan(json, { signed: { decision: 'safe' } })), signer.jwks);
+  assert.equal(g.signature, 'verified');
+  assert.equal(g.decisionSigned, true);
+  assert.equal(mod.deriveDecision(g, policy).decision, 'safe');
+  // Policy triggers still apply on top of a signed answer.
+  const low = await mod.verifyGrade(mod.gradeFromResponse(SERVER,
+    await signedScan(scanJson({ score: 7, critical: 1, items: [code] }), { signed: { decision: 'safe' } })), signer.jwks);
+  assert.equal(mod.deriveDecision(low, policy).decision, 'do_not_connect');
+  const dnc = await mod.verifyGrade(mod.gradeFromResponse(SERVER,
+    await signedScan(scanJson({ score: 92 }), { signed: { decision: 'do_not_connect' } })), signer.jwks);
+  assert.equal(mod.deriveDecision(dnc, policy).decision, 'do_not_connect');
+});
+
 test('an attestation that does not verify is an API error (fail closed by default)', { skip }, async () => {
   const good = await signedScan(scanJson({ score: 92 }));
   const [h, , s] = good.jws.split('.');

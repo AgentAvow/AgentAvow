@@ -41,6 +41,7 @@ from src.scanner.categories import (
 )
 from src.scanner.verdict import certified_mark as _certified_mark
 from src.scanner.verdict import certified_mark_status as _certified_mark_status
+from src.scanner.verdict import certified_with_sandbox as _certified_with_sandbox
 from src.scanner.verdict import coverage_gap_notes as _coverage_gap_notes
 from src.scanner.verdict import decide as _decide
 from src.scanner.verdict import is_advisory_block
@@ -1744,7 +1745,7 @@ def _package_response(
         verdict_reason=_verdict_reason(data, _scan_safe),
         findings=FindingsSummary(**data["findings"]),
         grade=data.get("grade") or _grade_from_score(data["trust_score"]),
-        certified=data.get("certified") or {},
+        certified=_certified_with_sandbox(data.get("certified"), behavioral),
         coverage=data.get("coverage", {}),
         supply_chain=data.get("supply_chain", {}),
         coverage_gaps=data.get("coverage_gaps") or {},

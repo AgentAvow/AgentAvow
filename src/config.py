@@ -364,6 +364,9 @@ class Settings(BaseSettings):
     catalog_rescan_startup_delay_sec: int = 300      # don't scan-storm right after deploy
     catalog_rescan_fresh_limit: int = 60             # stalest community rows re-scanned/cycle
     catalog_backfill_limit: int = 40                 # launch-corpus rows backfilled/cycle
+    # launch-corpus rows with no live scan for their page, scanned in per cycle so the
+    # live row replaces the stale one in Browse (half Do-not-connect, half by adoption)
+    catalog_supersede_limit: int = 30
     catalog_rescan_spacing_seconds: float = 1.5      # sleep between scans to smooth bursts
 
     # --- Real-time GitHub rate-limit protection for the PUBLIC scan path -------
