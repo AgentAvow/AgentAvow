@@ -48,7 +48,7 @@ export function WhereItWorks() {
           <a href={rp('/rebrand/claude-code')} onClick={track('claude-code')} className={BTN_SM}>Add it to Claude Code</a>
           <a href={rp('/rebrand/claude-code')} className={LINK}>What you'll see →</a>
         </>}>
-          Your servers at session start, and new servers and packages before they install. Safe to connect stays quiet; Review gets one line with the reason. On Do not connect, Claude Code asks before you install it, and stops calls to a server that's already connected, unless you allow that server.
+          Your servers at session start, and new servers and packages before they install. Safe to connect stays quiet; Review gets one line with the reason. On Do not connect, Claude Code asks before you install it, and stops calls to a server that's already connected, unless you allow that server. The checks run on your machine, so they cost Claude nothing.
         </Tile>
         <Tile n={2} tag="Checks when you ask" title="Claude and ChatGPT" act={<AppsButtons />}>
           Add AgentAvow and ask before you connect anything. Nothing runs by itself in chat.

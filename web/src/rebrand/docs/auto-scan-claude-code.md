@@ -39,6 +39,9 @@ score: **Safe to connect**, **Review before you connect**, or **Do not connect**
 - **A changed definition still pauses** for your confirmation, whatever the answer.
 - **Fail-open.** Any error, timeout or missing result lets the call through.
 
+**Zero tokens per check. Under 1,000 a session.** The checks run on your machine, so
+they cost Claude nothing. [See the numbers and how to measure them](/faq#context-tokens).
+
 If you install the plugin, skip Option 2. It is the same pair of hooks (the plugin also
 checks package installs), and running both scans everything twice.
 
