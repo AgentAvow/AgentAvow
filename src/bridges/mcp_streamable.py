@@ -263,12 +263,21 @@ def _internal_headers() -> dict[str, str]:
     }
 
 
+class ScanStillChecking(httpx.TimeoutException):  # noqa: N818 (a timeout, by design)
+    """The API answered 202: a first scan is still running in the background. A
+    TimeoutException so every existing "taking longer, ask again" path handles it."""
+
+
 async def _get(path: str, params: dict | None = None) -> dict:
     # Above the API's ~90s scan budget (so we receive its graceful 503 rather than
     # timing out first), below nginx's 120s /mcp read timeout.
     async with httpx.AsyncClient(timeout=110.0, headers=_internal_headers()) as client:
         resp = await client.get(f"{_API_BASE}{path}", params=params)
         resp.raise_for_status()
+        if resp.status_code == 202:
+            # A 202 body is {state: checking, ...}, never a result: reading it as one
+            # would show an empty grade.
+            raise ScanStillChecking("still checking", request=resp.request)
         return resp.json()
 
 

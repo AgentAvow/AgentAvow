@@ -1855,6 +1855,147 @@ async def _refresh_package(surface: str, name: str, version: str | None,
         pass  # best-effort; the next stored read serves whatever exists
 
 
+# --- first scans of uncommon packages: answer "checking" instead of a 503 ---------
+# A first scan of an uncommon package can run past any caller's budget (claude-mem and
+# hyperframes took ~100 s and hit the old 90 s cap as a 503). The scan now runs as a
+# background task: the request waits up to ``wait`` seconds for it, then answers
+# 202 {state: "checking", retry_after} while it finishes; the next call returns the
+# cached result. One scan per coordinate across workers (Redis lock); a call that lands
+# on a worker without the task polls the cache instead of starting another scan.
+_FIRST_SCAN_TIMEOUT = 300         # the background scan's own cap
+_FIRST_SCAN_LOCK_TTL = _FIRST_SCAN_TIMEOUT + 30
+_FIRST_SCAN_WAIT_DEFAULT = 20     # seconds a request waits before answering "checking"
+_FIRST_SCAN_RETRY_AFTER = 15
+_FIRST_SCAN_ERROR_TTL = 600
+_FIRST_SCAN_LOCK_PREFIX = "public_scan_first:"
+_FIRST_SCAN_ERROR_PREFIX = "public_scan_first_error:"
+_first_scans: dict[str, asyncio.Task] = {}
+
+
+class _ScanFailedError(Exception):
+    """The background scan finished with the scanner's error (not found, too large…)."""
+
+
+async def _redis_or_none():
+    try:
+        from src.redis_client import get_redis
+        return get_redis()
+    except Exception:
+        return None
+
+
+async def _first_scan_error(key: str) -> str | None:
+    r = await _redis_or_none()
+    if r is None:
+        return None
+    try:
+        v = await r.get(f"{_FIRST_SCAN_ERROR_PREFIX}{key}")
+        return (v.decode() if isinstance(v, bytes) else v) or None
+    except Exception:
+        return None
+
+
+async def _first_scan_in_flight(key: str) -> bool:
+    """True when this or another worker is already running the first scan of ``key``."""
+    t = _first_scans.get(key)
+    if t is not None and not t.done():
+        return True
+    r = await _redis_or_none()
+    if r is None:
+        return False
+    try:
+        return bool(await r.exists(f"{_FIRST_SCAN_LOCK_PREFIX}{key}"))
+    except Exception:
+        return False
+
+
+async def _start_first_scan(key: str, run) -> asyncio.Task | None:
+    """Start ``run()`` (returns the result dict, raises ``_ScanFailedError``) as a background
+    task that caches its own result. None when another worker holds the lock."""
+    r = await _redis_or_none()
+    if r is not None:
+        try:
+            if not await r.set(f"{_FIRST_SCAN_LOCK_PREFIX}{key}", "1", nx=True,
+                               ex=_FIRST_SCAN_LOCK_TTL):
+                return None
+            await r.delete(f"{_FIRST_SCAN_ERROR_PREFIX}{key}")
+        except Exception:
+            pass  # no Redis: run without the cross-worker dedupe
+
+    async def _job() -> dict:
+        try:
+            return await asyncio.wait_for(run(), timeout=_FIRST_SCAN_TIMEOUT)
+        except _ScanFailedError as e:
+            if r is not None:
+                try:
+                    await r.set(f"{_FIRST_SCAN_ERROR_PREFIX}{key}", str(e)[:300],
+                                ex=_FIRST_SCAN_ERROR_TTL)
+                except Exception:
+                    pass
+            raise
+        finally:
+            _first_scans.pop(key, None)
+            if r is not None:
+                try:
+                    await r.delete(f"{_FIRST_SCAN_LOCK_PREFIX}{key}")
+                except Exception:
+                    pass
+
+    task = asyncio.get_running_loop().create_task(_job())
+    # A finished task nobody awaited must not log "exception was never retrieved".
+    task.add_done_callback(lambda t: t.cancelled() or t.exception())
+    _first_scans[key] = task
+    return task
+
+
+async def _wait_first_scan(key: str, task: asyncio.Task | None, wait: float,
+                           cache_owner: str, cache_repo: str) -> dict | None:
+    """The finished result within ``wait`` seconds, else None (still checking). Raises
+    ``_ScanFailedError`` when the scan ended with an error."""
+    if task is None:
+        task = _first_scans.get(key)
+    if task is not None:
+        done, _ = await asyncio.wait({task}, timeout=max(0.0, wait))
+        if not done:
+            return None
+        exc = task.exception() if not task.cancelled() else None
+        if isinstance(exc, _ScanFailedError):
+            raise exc
+        if exc is not None or task.cancelled():
+            return None  # timed out / crashed: the next call starts a fresh scan
+        return task.result()
+    # Another worker runs it: poll the cache (and its error) until the wait is up.
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max(0.0, wait)
+    while True:
+        data = await _get_cached(cache_owner, cache_repo)
+        if data:
+            return data
+        err = await _first_scan_error(key)
+        if err:
+            raise _ScanFailedError(err)
+        if loop.time() >= deadline:
+            return None
+        await asyncio.sleep(min(1.5, max(0.0, deadline - loop.time())))
+
+
+def _checking_response(surface: str, name: str, version: str | None) -> JSONResponse:
+    """202: the first scan is still running. Callers treat it as pending and ask again."""
+    return JSONResponse(
+        status_code=202,
+        headers={"Retry-After": str(_FIRST_SCAN_RETRY_AFTER)},
+        content={"state": "checking", "status": "checking", "surface": surface,
+                 "name": name, "version": version, "retry_after": _FIRST_SCAN_RETRY_AFTER,
+                 "detail": "First check of this package is still running. Ask again in "
+                           f"about {_FIRST_SCAN_RETRY_AFTER} seconds; the result is cached "
+                           "once ready."})
+
+
+def _scan_error_status(error: str) -> int:
+    low = error.lower()
+    return 404 if ("not found" in low or "version not found" in low) else 502
+
+
 _PKG_BADGE_SURFACES = ("npm", "pypi", "crates", "huggingface", "docker")
 
 
@@ -1979,6 +2120,11 @@ async def scan_package_endpoint(
     force: bool = Query(False, description="Bypass cache and force a fresh scan"),
     behavioral: bool = Query(False, description="Force a fresh behavioral sandbox run (npm/PyPI)"),
     version: str | None = Query(None, description="Exact version; default = latest"),
+    wait: int | None = Query(
+        None, ge=0, le=60,
+        description="Seconds to wait for a fresh scan before answering 202 "
+                    "{state: checking, retry_after} (default 20). The scan keeps running; "
+                    "ask again for the result."),
     stored: bool = Query(
         False,
         description="Return the last STORED grade (up to 7 days old) at once and never run a "
@@ -2065,34 +2211,46 @@ async def scan_package_endpoint(
         if cached:
             return await _signed_response(cached, cached=True)
 
-    if request is not None:
-        from src.api.rate_limit import enforce_fresh_scan_limit
-        await enforce_fresh_scan_limit(request)
-        await _track_checker(request)
+    wait_s = wait if isinstance(wait, int) and not isinstance(wait, bool) \
+        else _FIRST_SCAN_WAIT_DEFAULT
+    scan_key = f"{cache_owner}/{cache_repo}"
+    task = None
+    if not await _first_scan_in_flight(scan_key):
+        # Only a call that starts a scan spends the fresh-scan budget; asking again
+        # while it runs is free.
+        if request is not None:
+            from src.api.rate_limit import enforce_fresh_scan_limit
+            await enforce_fresh_scan_limit(request)
+            await _track_checker(request)
 
-    from src.scanner.scan import scan_package
+        async def _run() -> dict:
+            from src.scanner.scan import scan_package
+            result = await scan_package(surface, name, version)
+            if result.error:
+                raise _ScanFailedError(str(result.error))
+            data = _scan_result_to_dict(result)
+            await _set_cached(cache_owner, cache_repo, data)
+            if not version:
+                # Record the latest-version result: the catalog row and the score-history
+                # point (the signed /drift/pkg feed and the package page's history). Its
+                # own session: the request's may be closed by the time the scan ends.
+                try:
+                    from src.database import async_session
+                    async with async_session() as s:
+                        await _capture_community_scan(surface, name, data, s, surface=surface)
+                except Exception:
+                    logger.debug("package capture failed for %s:%s", surface, name,
+                                 exc_info=True)
+            return data
+
+        task = await _start_first_scan(scan_key, _run)
 
     try:
-        result = await asyncio.wait_for(scan_package(surface, name, version), timeout=90)
-    except asyncio.TimeoutError:
-        raise HTTPException(
-            503, "Scan is taking longer than expected — please retry shortly.",
-            headers={"Retry-After": "30"},
-        )
-    if result.error:
-        low = result.error.lower()
-        code = 404 if ("not found" in low or "version not found" in low) else 502
-        raise HTTPException(code, f"Scan error: {result.error}")
-
-    data = _scan_result_to_dict(result)
-    await _set_cached(cache_owner, cache_repo, data)
-    if not version:
-        # Record the latest-version result: the catalog row and the score-history
-        # point (the signed /drift/pkg feed and the package page's history).
-        try:
-            await _capture_community_scan(surface, name, data, db, surface=surface)
-        except Exception:
-            logger.debug("package capture failed for %s:%s", surface, name, exc_info=True)
+        data = await _wait_first_scan(scan_key, task, wait_s, cache_owner, cache_repo)
+    except _ScanFailedError as e:
+        raise HTTPException(_scan_error_status(str(e)), f"Scan error: {e}")
+    if data is None:
+        return _checking_response(surface, name, version)
     return await _signed_response(data, cached=False)
 
 
