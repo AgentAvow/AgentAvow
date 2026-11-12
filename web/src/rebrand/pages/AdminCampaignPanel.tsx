@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import api from '../../lib/api'
+import { useAdminAccess } from './adminAccess'
 
 const DEFAULT_CAMPAIGN = '2026-11-test-dev'
 const ALL = '__all__'
@@ -47,9 +48,13 @@ export default function CampaignPanel() {
     queryKey: ['admin-campaign-cost', days, campaignParam],
     queryFn: async () => (await api.get('/admin/ad-spend/cost-per-action', { params: { days, campaign: campaignParam } })).data,
   })
+  // The spend rows and the editor are admin-only; a read-only viewer sees the funnel and
+  // cost per action (the server 403s a viewer on /admin/ad-spend and its writes).
+  const { isAdmin } = useAdminAccess()
   const spend = useQuery<{ rows: SpendRow[]; total_usd: number }>({
     queryKey: ['admin-ad-spend'],
     queryFn: async () => (await api.get('/admin/ad-spend', { params: { days: 60 } })).data,
+    enabled: isAdmin,
   })
   const refresh = () => ['admin-campaign-cost', 'admin-ad-spend'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }))
 
@@ -141,11 +146,11 @@ export default function CampaignPanel() {
               </tr>
             </tbody>
           </table>
-        ) : <p className="text-[12.5px] text-text-muted/70">No spend or sessions for this campaign in the window. Enter spend below.</p>}
+        ) : <p className="text-[12.5px] text-text-muted/70">No spend or sessions for this campaign in the window.{isAdmin ? ' Enter spend below.' : ''}</p>}
         <p className="mt-2 text-[11px] text-text-muted/60">Spend is summed over the last {days} UTC days; the funnel covers sessions active in the same window. A cost shows once its action count is above zero.</p>
       </div>
 
-      <SpendEditor key={campaign} campaign={campaignParam ?? DEFAULT_CAMPAIGN} rows={spend.data?.rows || []} onChange={refresh} />
+      {isAdmin && <SpendEditor key={campaign} campaign={campaignParam ?? DEFAULT_CAMPAIGN} rows={spend.data?.rows || []} onChange={refresh} />}
     </section>
   )
 }

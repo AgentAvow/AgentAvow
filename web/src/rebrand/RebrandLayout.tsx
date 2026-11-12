@@ -120,7 +120,7 @@ function AccountMenu() {
             <Link to={rp("/rebrand/account")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface-hover">Watches &amp; alerts</Link>
             <Link to={rp("/rebrand/notifications")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface-hover">Notifications</Link>
             <Link to={rp("/rebrand/settings")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface-hover">Settings</Link>
-            {user.is_admin && <Link to={rp("/rebrand/admin-dashboard")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface-hover">Admin</Link>}
+            {(user.is_admin || user.is_admin_viewer) && <Link to={rp("/rebrand/admin-dashboard")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface-hover">Admin</Link>}
             <button onClick={() => { setOpen(false); logout(); navigate(rp('/rebrand')) }} className="block w-full text-left px-3.5 py-2 text-[13.5px] text-text-muted hover:text-danger hover:bg-surface-hover border-t border-border/60 mt-1">Sign out</button>
           </div>
         )}

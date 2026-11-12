@@ -2274,3 +2274,17 @@ async def admin_recent_scans(
             "scanned_at": row.scanned_at.isoformat() if row.scanned_at else None,
         })
     return {"scans": scans}
+
+
+@router.get("/access", dependencies=[Depends(rate_limit_reads)])
+async def list_admin_access_accounts(
+    current_entity: Entity = Depends(get_current_entity),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Every account with admin or read-only viewer access: display name, email
+    (unmasked), role (Admin / Viewer), active flag and created date. Full admins only:
+    a viewer gets 403 (this lists people's emails)."""
+    require_admin(current_entity)
+    from src.admin_access import list_admin_access
+
+    return {"accounts": await list_admin_access(db)}

@@ -9,8 +9,9 @@ from sqlalchemy import and_, case, func, literal_column, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import get_current_entity, require_admin
+from src.api.deps import get_current_entity, require_admin, require_admin_or_viewer
 from src.api.rate_limit import rate_limit_analytics, rate_limit_reads, rate_limit_writes
+from src.api.redaction import viewer_safe
 from src.database import get_db
 from src.models import AnalyticsEvent, AnalyticsFirstTouch, Entity, InteractionEvent
 
@@ -391,8 +392,8 @@ async def get_daily_conversion(
     current_entity: Entity = Depends(get_current_entity),
     db: AsyncSession = Depends(get_db),
 ):
-    """Daily event breakdown. Admin only."""
-    require_admin(current_entity)
+    """Daily event breakdown. Admin or read-only admin viewer (masked)."""
+    viewer = require_admin_or_viewer(current_entity)
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
@@ -423,9 +424,9 @@ async def get_daily_conversion(
         for date, counts in sorted(daily_map.items())
     ]
 
-    return DailyConversion(
+    return viewer_safe(DailyConversion(
         period_days=days, daily=daily, landing=await _daily_landing(db, cutoff, day_col),
-    )
+    ), viewer)
 
 
 def _paid_first_touch():
@@ -582,8 +583,10 @@ async def get_campaign_attribution(
     Each number is distinct sessions active in the window, so a return visit counts toward
     the campaign that first brought the session in. Events classed as bots are left out.
     """
-    require_admin(current_entity)
-    return CampaignAttribution(period_days=days, campaigns=await campaign_rows(db, days))
+    viewer = require_admin_or_viewer(current_entity)
+    return viewer_safe(
+        CampaignAttribution(period_days=days, campaigns=await campaign_rows(db, days)), viewer,
+    )
 
 
 async def campaign_rows(db: AsyncSession, days: int) -> list[CampaignRow]:
@@ -640,8 +643,8 @@ async def get_page_actions(
 ):
     """Browse, Trust Index, Certified, Preflight and For developers: sessions that viewed
     each page (guest_page_view) and that took each main action (page_action, by intent).
-    Bots left out. Admin only."""
-    require_admin(current_entity)
+    Bots left out. Admin or read-only admin viewer (masked)."""
+    viewer = require_admin_or_viewer(current_entity)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     sessions = func.count(func.distinct(AnalyticsEvent.session_id))
     pages = list(PAGE_ACTION_PATHS) + [f"/rebrand{p}" for p in PAGE_ACTION_PATHS]
@@ -669,7 +672,7 @@ async def get_page_actions(
         .order_by(sessions.desc())
     )
     actions = {intent: count for intent, count in rows.all() if intent}
-    return PageActivity(period_days=days, views=views, actions=actions)
+    return viewer_safe(PageActivity(period_days=days, views=views, actions=actions), viewer)
 
 
 # --- Interaction Analytics ---
