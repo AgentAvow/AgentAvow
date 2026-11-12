@@ -10,7 +10,7 @@ your setup in a directory review. You opt in; you stay in control.
 
 ## The plugin (easiest)
 
-The **AgentAvow Trust** plugin bundles the connector, a `/scan` command, a skill
+The **AgentAvow Trust** plugin bundles the connector, a scan command (`/agentavow-trust:scan`), a skill
 that scans a server or package before Claude adds it (the same idea as Option 1),
 the SessionStart hook described under Option 2, and the per-call gate described
 below it. Find it in the Anthropic plugin directory, or install it from the repo:
@@ -20,7 +20,7 @@ below it. Find it in the Anthropic plugin directory, or install it from the repo
 /plugin install agentavow-trust@agentavow
 ```
 
-**Test it:** run `/scan npm chalk`. Then add an MCP server and start a new session;
+**Test it:** ask Claude to "scan npm chalk", or run `/agentavow-trust:scan npm chalk`. Then add an MCP server and start a new session;
 its answer appears in context.
 
 Every line the plugin shows leads with one of three answers and its reason, then the
