@@ -195,6 +195,12 @@ export const RESOURCE_PROMPT_LISTS_UNREAD_REASON = "the server's resource and pr
 // The other things we exist to read (partial-coverage audit, 10-20); twins of the
 // *_UNREAD_REASON constants in src/scanner/verdict.py.
 export const CODE_UNREAD_REASON = 'the scan could not read the code'
+export const PACKAGE_TOO_LARGE_REASON = 'the package is over our 50 MB download limit, so its code was not read'
+
+export function packageTooLargeReason(mb: number): string {
+  if (mb > 0) return `the package is ${fmtInt(mb)} MB, over our 50 MB download limit, so its code was not read`
+  return PACKAGE_TOO_LARGE_REASON
+}
 export const AGENT_FILE_UNREAD_REASON = 'an agent instruction file was too large to read'
 export const SKILL_REF_UNREAD_REASON = "a file the skill's instructions use could not be read"
 export const CUSTOM_CODE_UNREAD_REASON = "the model's custom code could not be read"
@@ -436,6 +442,11 @@ export function coverageGapNotes(input: unknown): string[] {
   }
   if (g.tree_truncated === true) notes.push('GitHub returned only part of the file tree')
   if (g.tree_unavailable === true) notes.push('the file list could not be read')
+  if (g.package_too_large === true) {
+    const mb = toInt(g.package_size_mb)
+    notes.push(mb > 0 ? `the package (${fmtInt(mb)} MB) is over the 50 MB download limit; its code was not read`
+      : 'the package is over the 50 MB download limit; its code was not read')
+  }
   n = toInt(g.package_skipped)
   if (n > 0) notes.push(`${filesPhrase(n)} in the package ${was(n)} skipped for size`)
   n = toInt(g.dependency_files_unread)
@@ -597,6 +608,7 @@ export function decide(input: unknown): Decision {
       || toInt(gap.fetch_failed) > 0 || toInt(gap.time_limit_unread) > 0)) {
       return done('review', CODE_UNREAD_REASON)
     }
+    if (gap.package_too_large === true) return done('review', packageTooLargeReason(toInt(gap.package_size_mb)))
     if (toInt(gap.oversized_agent_files) > 0) return done('review', AGENT_FILE_UNREAD_REASON)
     if (toInt(gap.skill_refs_unread) > 0) return done('review', SKILL_REF_UNREAD_REASON)
     if (toInt(gap.custom_code_unread) > 0) return done('review', CUSTOM_CODE_UNREAD_REASON)
