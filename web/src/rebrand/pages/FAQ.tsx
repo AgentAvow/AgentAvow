@@ -17,10 +17,10 @@ interface QA { q: string; a: string; id?: string; extra?: ReactNode }
 const CONTEXT_ROWS: [string, string][] = [
   ['Each check (install hook, per-call gate)', '0'],
   ['8 connector tool names', 'about 90'],
-  ['Connector instructions', 'about 350'],
-  ['/scan command and scan-before-connect skill', 'about 140'],
+  ['Connector instructions', 'about 620'],
+  ['/agentavow-trust:scan command and scan-before-connect skill', 'about 140'],
   ['Session-start line', 'about 50 to 100'],
-  ['Total a session', 'about 650'],
+  ['Total a session', 'under 1,000'],
 ]
 const CONTEXT_ON_USE: [string, string][] = [
   ['One tool\'s full definition', '111 to 571 (all eight: 2,180)'],
@@ -95,7 +95,7 @@ const SECTIONS: Section[] = [
       {
         id: 'context-tokens',
         q: 'How much of Claude\'s context does AgentAvow use?',
-        a: 'Zero tokens per check. About 650 a session. The install-time hook and the per-call gate run as Python scripts on your machine, so they cost Claude nothing. Safe to connect stays silent; only a Review before you connect or Do not connect note reaches Claude. The 650 is the plugin\'s setup: tool names, connector instructions, the /scan command and skill, and the session-start line. Claude Code loads a tool\'s full definition only when it uses that tool. We measured these with Claude Code\'s /context on plugin 0.1.38. They are approximate: the exact number depends on your Claude Code version and your other tools.',
+        a: 'Zero tokens per check. Under 1,000 a session. The install-time hook and the per-call gate run as Python scripts on your machine, so they cost Claude nothing. Safe to connect stays silent; only a Review before you connect or Do not connect note reaches Claude. That is the plugin\'s setup: tool names, connector instructions, the /agentavow-trust:scan command and skill, and the session-start line. Claude Code loads a tool\'s full definition only when it uses that tool. We measured these with Claude Code\'s /context on plugin 0.1.38. They are approximate: the exact number depends on your Claude Code version and your other tools.',
         extra: <ContextTokens />,
       },
       { q: 'Can I scan a private repo?', a: 'Yes. Sign in and scan it through the GitHub App, or with a GitHub token you supply that\'s used once and never stored. Claiming with a GitHub topic proves ownership of a public repo only.' },
