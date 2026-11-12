@@ -51,7 +51,8 @@ What leaves your machine: for a remote server with a grade on file, one short
 `initialize` + `tools/list` exchange with THAT server, over the URL in your config
 (user:password@ and #fragment removed). If the config has an Authorization header
 for that server, it is sent to that server only, as Claude Code itself would; it is
-never written to the cache or printed. Nothing is sent to AgentAvow.
+never written to the cache or printed. Nothing is sent to AgentAvow, so the
+install ID the other two hooks send (see agentavow_precheck.py) is never sent from here.
 
 Design guarantees (deliberate):
   • FAIL-OPEN — any error, timeout, or unexpected shape means allow, silently.
@@ -84,7 +85,7 @@ import time
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.39"
+__version__ = "0.1.40"
 
 CACHE = pathlib.Path.home() / ".cache" / "agentavow" / "scanned.json"
 META_KEY = "_agentavow"  # cache entry holding hook state; never a server name

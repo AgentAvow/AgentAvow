@@ -1275,6 +1275,8 @@ async def traffic_metrics(
     UTC day, for the admin dashboard. Admin only. See ``notes`` for what each column counts
     and why it differs from the live MCP counters."""
     require_admin(current_entity)
+    from src.install_activity import INSTALL_NOTES, install_series
+
     day_strs, rows = await _traffic_rows(days)
     by_day = {r["day"]: r for r in rows}
     series = {
@@ -1289,13 +1291,25 @@ async def traffic_metrics(
                     "a2a_card_fetches")
     }
     latest = rows[-1] if rows else None
+    # Plugin installs by the hooks' random install ID (src/install_activity): kept apart
+    # from the IP-derived rows above, one value per day in ``installs.days``. The same
+    # columns join ``series`` when it is laid out on the same days.
+    install_days = day_strs or window_day_strs(days)
+    installs = await install_series(install_days)
+    if day_strs:
+        series.update(installs)
     return {
         "days": day_strs,
         "rows": rows,
         "series": series,
         "latest": latest,
         "covered_days": len(rows),
-        "notes": _TRAFFIC_NOTES,
+        "installs": {
+            "days": install_days,
+            "series": installs,
+            "latest": {col: vals[-1] if vals else None for col, vals in installs.items()},
+        },
+        "notes": _TRAFFIC_NOTES + INSTALL_NOTES,
     }
 
 

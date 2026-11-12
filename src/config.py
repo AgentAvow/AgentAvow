@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 15
     jwt_refresh_token_expire_days: int = 7
 
+    # Key for the one-way hash of the Claude Code plugin's install ID (src/install_activity).
+    # Empty: derived from jwt_secret. Set it once and keep it: a new key makes every
+    # install read as new for 40 days. Env INSTALL_ID_HASH_KEY (prod: .env.secrets).
+    install_id_hash_key: str = ""
+
     # Google OAuth
     google_client_id: str | None = None
     google_client_secret: str | None = None

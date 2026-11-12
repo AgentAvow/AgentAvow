@@ -167,6 +167,11 @@ observation (tools called, network, file writes, credentials) as its own section
 
 ## What the hook reads and what leaves your machine
 
+What leaves your machine: the server URL or package name being checked, and a random
+install ID, a code made up once on your machine that isn't tied to you, your account or
+your files. We use it only to count how many installs keep using the plugin. To turn it
+off, set `AGENTAVOW_ANON_ID=off`.
+
 The hooks are three Python scripts, `scripts/agentavow_precheck.py` (session start),
 `scripts/agentavow_pre_install.py` (install time) and `scripts/agentavow_pretool_gate.py`
 (per call), started by the `scripts/run_hook.sh` launcher. They use only the standard
@@ -190,6 +195,15 @@ current folder, or one folder down in a workspace root with none of its own.
   string, and fragment are removed first), or
 - a package name and its registry (npm, PyPI or crates.io).
 
+Each of those requests also carries the install ID, as the `X-AgentAvow-Install`
+header: a random UUID made once, with Python's `uuid.uuid4()`, and kept in
+`~/.cache/agentavow/install_id` (readable only by you). Nothing about you, your
+machine or your files goes into it. AgentAvow keeps only a one-way hash of it, for each
+day it was seen, for 40 days, and never with your IP address. With
+`AGENTAVOW_ANON_ID=off` the file is not made and the header is not sent. The
+install-time hook sends the same header on its requests; the gate sends nothing to
+AgentAvow, so it never sends it.
+
 **It does not send:**
 
 - servers on localhost, a private network, or a `.local` / `.internal` name;
@@ -202,7 +216,7 @@ current folder, or one folder down in a workspace root with none of its own.
 - AgentAvow's own connector;
 - anything else from your machine. No file contents, environment values, or credentials.
 
-**It writes** one file, `~/.cache/agentavow/scanned.json`, so each server is scanned
+**It writes** `~/.cache/agentavow/install_id` once (see above) and `~/.cache/agentavow/scanned.json`, so each server is scanned
 once: per server, the score, tier and grade, the signed per-tool digests, the report
 link, and when it was scanned. A server AgentAvow cannot read (one that needs sign-in,
 for example) is reported once and retried after a week. A server still being checked
