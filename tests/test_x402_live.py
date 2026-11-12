@@ -102,6 +102,42 @@ def test_moved_payee_is_high_and_reads_review():
     assert "in its live payment request" in d.reason
 
 
+def test_payee_the_host_already_lists_is_an_out_of_date_listing_not_a_redirect():
+    other = "0x" + "9" * 40
+    stubs = [{"resource": "https://api.example.com/other",
+              "accepts": [{"network": "eip155:8453", "payTo": other.upper().replace("0X", "0x")}]},
+             {"resource": "https://elsewhere.example/x",
+              "accepts": [{"network": "eip155:8453", "payTo": "0x" + "7" * 40}]}]
+    known = xl.host_payees(stubs)
+    assert known["api.example.com"] == {other}
+    reply = xl.read_reply(*_v2_reply(pay_to=other))
+    reply["host_payees"] = sorted(known["api.example.com"])
+    f, rec = xl.live_findings(_listing(), reply)
+    assert [x.severity for x in f] == ["low"] and "out of date" in f[0].name
+    assert rec["payee_known_to_host"] is True and rec["matches"] is False
+    r = scan_result_from_listing(_listing(), reply)
+    from src.scanner.verdict import decide
+    items = [{"category": x.category, "name": x.name, "severity": x.severity,
+              "file_path": x.file_path} for x in r.findings]
+    assert decide({"trust_score": r.trust_score, "findings": {"items": items},
+                   "metadata": {"files_scanned": 1}, "coverage": r.coverage,
+                   "coverage_gaps": r.coverage_gaps}).decision == "safe"
+    # an address only another host uses is still HIGH
+    reply = xl.read_reply(*_v2_reply(pay_to="0x" + "7" * 40))
+    reply["host_payees"] = sorted(known["api.example.com"])
+    f, rec = xl.live_findings(_listing(), reply)
+    assert [x.severity for x in f] == ["high"] and rec["payee_known_to_host"] is False
+
+
+def test_solana_payees_compare_case_sensitively():
+    reply = xl.read_reply(*_v2_reply(pay_to="AbCdSo1", net="solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"))
+    reply["host_payees"] = ["abcdso1"]
+    listing = _listing(net="solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", pay_to="Old1")
+    listing["accepts"][0]["asset"] = USDC
+    f, _ = xl.live_findings(listing, reply)
+    assert [x.severity for x in f] == ["high"]
+
+
 def test_payee_on_another_network_only_is_not_compared():
     reply = xl.read_reply(*_v2_reply(pay_to="So1anaWa11et", net="solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"))
     f, rec = xl.live_findings(_listing(), reply)
@@ -113,6 +149,20 @@ def test_price_jump_over_10x_is_medium():
     assert [x.severity for x in f] == ["medium"]
     f, _ = xl.live_findings(_listing(amount="1000"), xl.read_reply(*_v2_reply(amount="9000")))
     assert f == []
+
+
+def test_live_terms_are_kept_for_review():
+    reply = xl.read_reply(*_v2_reply(pay_to="0x" + "9" * 40, amount="100000"))
+    reply["accepts"][0]["extra"] = {"name": "USD Coin", "version": "2"}
+    reply["accepts"][0]["payTo"] = reply["accepts"][0]["payTo"] + "z" * 200
+    _, rec = xl.live_findings(_listing(), reply)
+    (t,) = rec["live_terms"]
+    assert t["scheme"] == "exact" and t["amount"] == "100000" and t["asset"] == USDC
+    assert len(t["payTo"]) == 100 and t["extra_keys"] == ["name", "version"]
+    r = scan_result_from_listing(_listing(), reply)
+    assert r.artifact_scan["live_check"]["live_terms"] == rec["live_terms"]
+    _, rec = xl.live_findings(_listing(), xl.read_reply(200, {}, b"{}"))
+    assert "live_terms" not in rec
 
 
 # ── robots.txt ─────────────────────────────────────────────────────────────────

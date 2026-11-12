@@ -16,6 +16,10 @@ agent and rate plan".
 What changes (``live_findings``, pure):
 * the live 402 asks to pay a different address than the listing, on a network both
   name: HIGH, so the answer is Review. Never Do not connect from one read.
+  Except when the live address is one the same host already lists on its other
+  endpoints: then the listing is out of date, not redirected, and it is a LOW
+  disclosure. Run 2 (11-12): 549 of the 646 payee findings were this case, one live
+  payee per host, already in the host's other listings.
 * the live price is more than 10x the listing's: MEDIUM.
 * terms match: no finding (``live_check.matches`` is True).
 * no 402, a redirect, another status, a timeout or an unreadable 402: disclosure only.
@@ -188,23 +192,69 @@ def _terms(accepts: list) -> dict[tuple[str, str], tuple[set[str], Decimal | Non
     return out
 
 
+def _norm_payee(pt) -> str:
+    """EVM addresses compare case-insensitively; other chains as written."""
+    p = str(pt or "").strip()
+    return p.lower() if p.startswith("0x") else p
+
+
+def host_payees(stubs) -> dict[str, set[str]]:
+    """``host -> every payTo its listings name`` (from the live stubs). An address the
+    host already lists elsewhere is not a redirect when an endpoint switches to it."""
+    out: dict[str, set[str]] = {}
+    for st in stubs or []:
+        host = urlsplit(str(st.get("resource") or "")).hostname
+        if not host:
+            continue
+        for a in st.get("accepts") or []:
+            if isinstance(a, dict) and a.get("payTo"):
+                out.setdefault(host, set()).add(_norm_payee(a["payTo"]))
+    return out
+
+
+LIVE_TERM_FIELDS = ("scheme", "network", "asset", "payTo", "amount", "maxAmountRequired")
+
+
+def live_terms(accepts: list) -> list[dict]:
+    """The live 402's payment terms as read, kept on ``live_check`` so a reviewer can
+    compare them with the listing later (run 2 kept only the clipped finding text). At
+    most 5 entries; each value is a string of at most 100 characters; ``extra`` is kept
+    only as its key names."""
+    out = []
+    for a in (accepts or [])[:5]:
+        if not isinstance(a, dict):
+            continue
+        t = {k: str(a[k])[:100] for k in LIVE_TERM_FIELDS if a.get(k) is not None}
+        if isinstance(a.get("extra"), dict):
+            t["extra_keys"] = sorted(str(k)[:40] for k in a["extra"])[:10]
+        out.append(t)
+    return out
+
+
 def live_findings(listing: dict, reply: dict) -> tuple[list, dict]:
     """Findings from one live reply, and the ``live_check`` record to keep."""
     from src.scanner.x402_scan import _clip, _finding
     record: dict[str, Any] = {"state": reply.get("state"), "status": reply.get("status")}
     if reply.get("state") != "paid":
         return [], record
+    record["live_terms"] = live_terms(reply.get("accepts") or [])
     want = _terms(listing.get("accepts") or [])
     got = _terms(reply.get("accepts") or [])
     out = []
     shared = [k for k in got if k in want]
     record["networks_compared"] = sorted({k[0] for k in shared})
-    moved = []
+    known = {_norm_payee(p) for p in reply.get("host_payees") or []}
+    moved, unknown = [], []
     for k in shared:
         if got[k][0] and want[k][0] and not (got[k][0] & want[k][0]):
-            moved.append((k[0], sorted(got[k][0])[0], sorted(want[k][0])[0]))
+            m = (k[0], sorted(got[k][0])[0], sorted(want[k][0])[0])
+            moved.append(m)
+            if not {_norm_payee(p) for p in got[k][0]} <= known:
+                unknown.append(m)
     if moved:
-        net, live_pt, listed_pt = moved[0]
+        record["payee_known_to_host"] = not unknown
+    if unknown:
+        net, live_pt, listed_pt = unknown[0]
         out.append(_finding(
             "payment_terms",
             f"the endpoint asks to pay a different address than its listing says on {net} "
@@ -212,6 +262,16 @@ def live_findings(listing: dict, reply: dict) -> tuple[list, dict]:
             "high", WHERE_LIVE,
             "Check the live payment terms before you pay. The listing is reviewed once; "
             "the endpoint chooses whom it collects for on every call."))
+    elif moved:
+        net, live_pt, listed_pt = moved[0]
+        out.append(_finding(
+            "payment_terms",
+            f"the listing's pay-to address is out of date on {net}: the endpoint now asks "
+            f"to pay {_clip(live_pt, 20)}, an address this host lists on its other "
+            f"endpoints (listing: {_clip(listed_pt, 20)})",
+            "low", WHERE_LIVE,
+            "Pay the address in the live request, which the host already uses elsewhere; "
+            "the listing has not been refreshed."))
     jumps = []
     for k in shared:
         g, w = got[k][1], want[k][1]
