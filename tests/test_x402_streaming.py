@@ -100,29 +100,49 @@ def test_legacy_targets_json_is_still_readable(tmp_path, monkeypatch):
         [_rec(1)["resource"]]
 
 
-def _peak_scoring(tmp_path, n: int, pad: int) -> tuple[int, int]:
-    src = tmp_path / f"t{n}.jsonl"
+def _write_listing(tmp_path, tag: str, n: int, pad: int) -> Path:
+    src = tmp_path / f"t{tag}.jsonl"
     with src.open("w") as fh:
         for i in range(n):
             fh.write(json.dumps(_rec(i, pad=pad)) + "\n")
+    return src
+
+
+def _peak_scoring(tmp_path, src: Path) -> int:
+    import gc
+    gc.collect()
     tracemalloc.start()
     try:
-        sx.score_all(sx.iter_targets(src), None, out_path=tmp_path / f"r{n}.json")
-        return tracemalloc.get_traced_memory()[1], src.stat().st_size
+        tracemalloc.reset_peak()
+        sx.score_all(sx.iter_targets(src), None, out_path=tmp_path / f"r-{src.stem}.json")
+        return tracemalloc.get_traced_memory()[1]
     finally:
         tracemalloc.stop()
 
 
 def test_memory_stays_flat_while_scoring_a_large_listing(tmp_path):
-    """Peak allocation does not grow with the number of listings: 4x the listings
-    (several MB more on disk) adds well under a quarter of that size to the peak.
-    Holding the listing would add about twice the file size; that is what OOM-killed
-    the 33k-listing run, and streaming is what lets it fit in ~700 MB."""
-    _peak_scoring(tmp_path, 5, 100)                     # warm-up: imports, regex caches
-    small, small_size = _peak_scoring(tmp_path, 100, 3000)
-    big, big_size = _peak_scoring(tmp_path, 400, 3000)
-    assert big_size - small_size > 900_000
-    assert big - small < 0.25 * (big_size - small_size), (small, big, small_size, big_size)
+    """Peak allocation does not grow with the number of listings. Holding the listing
+    costs two to three times its size on disk (what OOM-killed the 33k-listing run);
+    streaming adds well under one times the extra bytes, however the environment's
+    one-time costs (imports, lazy tables, regex caches) fall. A full-size warm-up run
+    absorbs those before anything is measured."""
+    small_src = _write_listing(tmp_path, "small", 100, 3000)
+    big_src = _write_listing(tmp_path, "big", 400, 3000)
+    _peak_scoring(tmp_path, big_src)                      # warm-up, same shape as measured
+    small = _peak_scoring(tmp_path, small_src)
+    big = _peak_scoring(tmp_path, big_src)
+    extra = big_src.stat().st_size - small_src.stat().st_size
+    assert extra > 900_000
+    assert big - small < 1.0 * extra, (small, big, extra)
+    # and the measurement does see retention: holding the rows grows by about 2x+ extra
+    held = []
+    tracemalloc.start()
+    try:
+        held.extend(sx.iter_targets(big_src))
+        holding = tracemalloc.get_traced_memory()[0]
+    finally:
+        tracemalloc.stop()
+    assert holding > 1.5 * big_src.stat().st_size * 0.75
 
 
 def test_peak_rss_is_reported_and_the_guard_stops_the_run(monkeypatch, capsys):
