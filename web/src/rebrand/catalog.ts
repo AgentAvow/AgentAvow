@@ -58,6 +58,12 @@ export interface CatalogRow {
   /** The three-phrase headline (safe | review | do_not_connect) + reason; null when unscored. */
   decision?: 'safe' | 'review' | 'do_not_connect' | null
   decision_reason?: string | null
+  /** The /check page this row opens (no /rebrand prefix); Browse lists one row per page. */
+  page_path?: string | null
+  /** When this row's data was scanned (ISO); null for an undated launch-corpus row. */
+  last_scanned_at?: string | null
+  /** 'live': a scan kept fresh by the re-scan loop; 'launch': the one-time launch corpus. */
+  scan_source?: 'live' | 'launch' | null
 }
 
 export interface CatalogSandbox {

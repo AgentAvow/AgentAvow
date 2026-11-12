@@ -51,6 +51,8 @@ _CATALOG_BUILD_LOCK = threading.Lock()
 # uvicorn worker has its own copy; a write in one worker invalidates only that
 # worker's cache, the others pick the change up when the TTL lapses.
 COMMUNITY_ROWS_TTL_SECONDS = 60
+# Memory guard on the community read (one row per scanned tool; prod is well under it).
+COMMUNITY_ROWS_MAX = 50_000
 FLAGGED_STAT_TTL_SECONDS = 120
 CATALOG_CACHE_CONTROL = "public, max-age=60"
 
@@ -169,9 +171,24 @@ class CatalogRow(BaseModel):
     # None for a row with no trust score (skipped / errored / x402 probe).
     decision: str | None = None
     decision_reason: str | None = None
+    # The tool page this row links to (a port of Browse's listingHref, without the
+    # /rebrand prefix), e.g. /check/owner/repo or /check/pkg/npm/name. Browse lists ONE
+    # row per page: a live scan for the page replaces launch-corpus rows for it, and
+    # duplicate corpus rows collapse (see _dedupe_static / _supersede). None for a row
+    # with no page (an x402 endpoint, a registry entry with no repo).
+    page_path: str | None = None
+    # When this row's data was scanned. A live (community) row carries its last scan; a
+    # launch-corpus row carries its own date when the file stores one, else None.
+    last_scanned_at: datetime | None = None
+    # "live": a community_scans row (re-scanned by the catalog loop); "launch": the
+    # one-time launch corpus files, replaced by a live row once one exists.
+    scan_source: str | None = None
 
     @model_validator(mode="after")
     def _fill_decision(self) -> CatalogRow:
+        if self.page_path is None:
+            self.page_path = page_path_for(
+                self.surface, self.name, self.full_name, self.endpoint_url)
         if self.certified_mark is None:
             self.certified_mark = self.grade == "A+"
         if self.trust_score is not None and self.decision is None:
@@ -184,6 +201,52 @@ class CatalogRow(BaseModel):
             d = decide({"trust_score": self.trust_score, "findings": findings})
             self.decision, self.decision_reason = d.decision, d.reason
         return self
+
+
+_PKG_SURFACES = ("npm", "pypi", "crates", "huggingface", "docker")
+_HTTP_RE = re.compile(r"^https?://", re.IGNORECASE)
+
+
+def page_path_for(
+    surface: str | None, name: str | None, full_name: str | None,
+    endpoint_url: str | None = None,
+) -> str | None:
+    """The /check page a catalog row links to. A Python port of ``listingHref`` in
+    web/src/rebrand/pages/Browse.tsx (keep the two in step): packages go to
+    /check/pkg/<surface>/<name>, a skill to /check/skill/<owner>/<repo>, an MCP row with
+    an http(s) endpoint to the live MCP check, anything else with owner/repo to
+    /check/<owner>/<repo>. None when the row has no page."""
+    from urllib.parse import quote
+
+    s = (surface or "").lower()
+    if s in _PKG_SURFACES and name:
+        return f"/check/pkg/{s}/{name}"
+    if s == "openclaw" and full_name and "/" in full_name:
+        return f"/check/skill/{full_name}"
+    if s == "mcp":
+        ep = next((v for v in (endpoint_url, name, full_name) if v and _HTTP_RE.match(v)), None)
+        if ep:
+            # encodeURIComponent's unreserved set
+            return "/check/mcp?endpoint=" + quote(ep, safe="-_.!~*'()")
+    if full_name and "/" in full_name:
+        return f"/check/{full_name}"
+    return None
+
+
+def _path_key(path: str | None) -> str | None:
+    """Case-fold a page path where the page is case-insensitive: a GitHub owner/repo
+    (repo and skill pages). Package names and MCP endpoints keep their case (a registry
+    may list Left-Pad and left-pad as two packages)."""
+    if not path:
+        return None
+    if path.startswith(("/check/pkg/", "/check/mcp?")):
+        return path
+    return path.lower()
+
+
+def page_key(row: CatalogRow) -> str | None:
+    """The identity two rows share when they open the same page (see _path_key)."""
+    return _path_key(row.page_path)
 
 
 _SANDBOX_SURFACES = ("npm", "pypi", "docker")
@@ -546,6 +609,28 @@ def _x402_top_findings(raw: dict) -> list[CatalogFinding]:
     return out
 
 
+def _parse_when(v: Any) -> datetime | None:
+    """An ISO-8601 date or datetime from a launch-scan file, as an aware datetime."""
+    if not isinstance(v, str) or not v.strip():
+        return None
+    try:
+        dt = datetime.fromisoformat(v.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _launch_meta(raw: dict) -> dict[str, Any]:
+    """A launch-corpus row's source and its own scan date (``scanned_at``, written by
+    rescore_corpus.py on every re-score; older rows have none)."""
+    when = None
+    for k in ("scanned_at", "scan_date", "checked_at"):
+        when = _parse_when(raw.get(k))
+        if when:
+            break
+    return {"scan_source": "launch", "last_scanned_at": when}
+
+
 def _normalize_row(surface: str, raw: dict) -> CatalogRow:
     """Convert a per-surface raw record into the unified row shape."""
     if surface == "x402":
@@ -569,6 +654,7 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
             low=_int_or_none(raw.get("low")) if score is not None else None,
             top_findings=_x402_top_findings(raw) if score is not None else None,
             scan_error=raw.get("error") if isinstance(raw.get("error"), str) else None,
+            **_launch_meta(raw),
             **_raw_decision(raw, score),
         )
     if surface == "openclaw":
@@ -593,6 +679,7 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
             findings_count=raw.get("findings_count"),
             primary_language=raw.get("primary_language"),
             scan_error=oc_err,
+            **_launch_meta(raw),
             **_raw_decision(raw, oc_score),
             adoption_count=raw.get("adoption_count") or raw.get("stars"),
             adoption_unit=raw.get("adoption_unit") or ("stars" if raw.get("stars") else None),
@@ -618,6 +705,7 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
         is_mcp_server=raw.get("is_mcp_server"),
         scan_error=err,
         skipped=raw.get("skipped"),
+        **_launch_meta(raw),
         **_raw_decision(raw, score),
         # Adoption signal: prefer a stored adoption_count (community rows), else fall
         # back to repo stars the scanner captured, so Browse shows adoption for the
@@ -645,7 +733,15 @@ def _load_surface(
     results = data.get(results_key, data) if isinstance(data, dict) else data
     if not isinstance(results, list):
         return []
-    return [_normalize_row(surface, r) for r in results if isinstance(r, dict)]
+    rows = [_normalize_row(surface, r) for r in results if isinstance(r, dict)]
+    # A file-level scan date (openclaw-results.json carries one) dates every row
+    # that has none of its own.
+    file_when = _parse_when(data.get("scan_date")) if isinstance(data, dict) else None
+    if file_when is not None:
+        for r in rows:
+            if r.last_scanned_at is None:
+                r.last_scanned_at = file_when
+    return rows
 
 
 # The launch-scan files the static catalog is built from: (surface, file, list key).
@@ -699,6 +795,16 @@ def _build_catalog(rows: list[CatalogRow] | None = None) -> dict[str, Any]:
             source_sig = tuple(
                 (f, -1, -1) if f in failed else (f, m, s) for f, m, s in source_sig)
 
+    # One row per page URL inside the corpus too: registry name variants of one repo
+    # (io.github.SceneView/mcp, io.github.sceneview/mcp) and several skills of one repo
+    # all open the same page, so Browse lists that page once.
+    rows = _dedupe_static(rows)
+    static_by_key: dict[str, CatalogRow] = {}
+    for r in rows:
+        k = page_key(r)
+        if k is not None:
+            static_by_key[k] = r
+
     # Categorize the static corpus ONCE at build time (cached) — doing it per request
     # over ~37k rows was a real CPU cost. Community rows (small, fresh) categorize per
     # request in the handler.
@@ -751,7 +857,7 @@ def _build_catalog(rows: list[CatalogRow] | None = None) -> dict[str, Any]:
     # Sorted score list for percentile lookups ("safer than X% of scanned tools").
     scores = sorted(r.trust_score for r in rows if r.trust_score is not None)
     return {"rows": rows, "summary": summary, "static_cats": static_cats, "scores": scores,
-            "source_sig": source_sig}
+            "source_sig": source_sig, "static_by_key": static_by_key}
 
 
 def _get_catalog() -> dict[str, Any]:
@@ -848,33 +954,41 @@ async def _fetch_community_rows(db: AsyncSession) -> list[CatalogRow] | None:
     from src.models import CommunityScan
 
     try:
+        # Every row (the old 2,000-newest cap silently dropped the rest from Browse and
+        # its totals). The ceiling only guards memory; reaching it is logged.
         result = await db.execute(
-            select(CommunityScan).order_by(CommunityScan.last_scanned_at.desc()).limit(2000)
+            select(CommunityScan).order_by(CommunityScan.last_scanned_at.desc())
+            .limit(COMMUNITY_ROWS_MAX)
         )
+        scanned = result.scalars().all()
+        if len(scanned) >= COMMUNITY_ROWS_MAX:
+            logger.warning("community_scans: %d rows reached the catalog read ceiling",
+                           len(scanned))
         out: list[CatalogRow] = []
-        seen: set[tuple[str, str]] = set()
-        for c in result.scalars().all():
-            # Newest first: a case-only duplicate (Chris221/x vs chris221/x) of a
-            # GitHub/skill row is the same repo, so only its latest scan is listed.
-            _key = ((getattr(c, "surface", None) or "github").lower(), (c.full_name or "").lower())
-            if _key[0] in ("github", "openclaw"):
-                if _key in seen:
-                    continue
-                seen.add(_key)
-            stored_grade = await community_mark_grade(c)
+        seen: set[str] = set()
+        for c in scanned:
             # Route each community row by its real surface (default github for
             # pre-t18 rows): npm/pypi → package name, mcp → endpoint URL, else repo.
             surf = (getattr(c, "surface", None) or "github").lower()
             name = c.full_name
             repository_url = None
             endpoint_url = None
-            if surf in ("npm", "pypi", "crates", "huggingface", "docker"):
+            if surf in _PKG_SURFACES:
                 name = c.repo
             elif surf == "mcp":
                 name = c.repo
                 endpoint_url = c.repo
             else:  # github / openclaw
                 repository_url = f"https://github.com/{c.full_name}"
+            # Newest first: two rows that open the same page (a case-only duplicate,
+            # Chris221/x vs chris221/x) are the same tool, so only the latest is listed.
+            path = page_path_for(surf, name, c.full_name, endpoint_url)
+            pkey = _path_key(path)
+            if pkey is not None:
+                if pkey in seen:
+                    continue
+                seen.add(pkey)
+            stored_grade = await community_mark_grade(c)
             out.append(
                 CatalogRow(
                     surface=surf,
@@ -897,6 +1011,9 @@ async def _fetch_community_rows(db: AsyncSession) -> list[CatalogRow] | None:
                     adoption_score=getattr(c, "adoption_score", None),
                     adoption_count=getattr(c, "adoption_count", None),
                     adoption_unit=getattr(c, "adoption_unit", None),
+                    page_path=path,
+                    last_scanned_at=getattr(c, "last_scanned_at", None),
+                    scan_source="live",
                 )
             )
         return out
@@ -979,6 +1096,164 @@ async def _cached_default_view(key: tuple[Any, ...], db: AsyncSession) -> Catalo
     return out
 
 
+def _corpus_rank(r: CatalogRow) -> tuple[Any, ...]:
+    """Which of several launch-corpus rows for one page stays: a scored row over an
+    unscored one, then the LOWEST score (a collection page leads with its worst skill,
+    and a stale corpus row must never hide a worse answer behind a better one), then
+    the most adopted."""
+    return (r.trust_score is None, r.trust_score or 0, -(r.adoption_count or 0))
+
+
+def _dedupe_static(rows: list[CatalogRow]) -> list[CatalogRow]:
+    """Collapse launch-corpus rows that open the same page to one (``_corpus_rank``),
+    kept at the first row's position. Rows with no page are untouched."""
+    best: dict[str, CatalogRow] = {}
+    for r in rows:
+        k = page_key(r)
+        if k is None:
+            continue
+        cur = best.get(k)
+        if cur is None or _corpus_rank(r) < _corpus_rank(cur):
+            best[k] = r
+    out: list[CatalogRow] = []
+    placed: set[str] = set()
+    for r in rows:
+        k = page_key(r)
+        if k is None:
+            out.append(r)
+        elif k not in placed:
+            placed.add(k)
+            out.append(best[k])
+    return out
+
+
+def _take_over(live: CatalogRow, corpus: CatalogRow) -> CatalogRow:
+    """The live row that replaces a corpus row for the same page. It keeps the corpus
+    row's surface tab (a GitHub scan of a repo listed as an MCP server stays in the MCP
+    tab) and fills adoption the live row has not computed yet; the answer, score,
+    counts and scan date are the live row's own."""
+    update: dict[str, Any] = {}
+    if corpus.surface != live.surface:
+        update["surface"] = corpus.surface
+        update["category"] = corpus.category
+        if corpus.surface == "mcp":
+            update["is_mcp_server"] = True
+    if live.adoption_count is None and corpus.adoption_count is not None:
+        update["adoption_count"] = corpus.adoption_count
+        update["adoption_unit"] = corpus.adoption_unit
+        update["adoption_score"] = corpus.adoption_score
+    return live.model_copy(update=update) if update else live
+
+
+def _supersede(
+    catalog: dict[str, Any], community: list[CatalogRow],
+) -> tuple[list[CatalogRow], list[CatalogRow], list[CatalogRow]]:
+    """Merge the live (community) rows into the launch corpus, one row per page URL: a
+    live row for a page replaces the corpus row for it (the skyvern case: a launch MCP
+    registry row said 0 / Do not connect while the fresh scan its page shows says 87 /
+    Safe). Returns (merged rows, the live rows as listed, the corpus rows dropped)."""
+    static: list[CatalogRow] = catalog["rows"]
+    by_key: dict[str, CatalogRow] = catalog.get("static_by_key") or {}
+    replace: dict[int, CatalogRow] = {}
+    dropped: list[CatalogRow] = []
+    listed: list[CatalogRow] = []
+    extra: list[CatalogRow] = []
+    for c in community:
+        k = page_key(c)
+        s = by_key.get(k) if k is not None else None
+        if s is not None and id(s) not in replace:
+            row = _take_over(c, s)
+            replace[id(s)] = row
+            dropped.append(s)
+        else:
+            row = c
+            extra.append(row)
+        listed.append(row)
+    if not replace:
+        return static + extra, listed, dropped
+    return [replace.get(id(r), r) for r in static] + extra, listed, dropped
+
+
+def _drop_from_summary(summary: CatalogSummary, dropped: list[CatalogRow]) -> None:
+    """Take superseded corpus rows out of the corpus counts (in place)."""
+    for r in dropped:
+        surf = r.surface
+        summary.total_scans -= 1
+        summary.by_surface[surf] = summary.by_surface.get(surf, 0) - 1
+        b = _severity_bucket(r)
+        if b == BUCKET_CRITICAL:
+            summary.by_surface_critical[surf] = summary.by_surface_critical.get(surf, 0) - 1
+        elif b == BUCKET_HIGH:
+            summary.by_surface_high[surf] = summary.by_surface_high.get(surf, 0) - 1
+        if b in _VERDICT_BUCKETS:
+            summary.by_surface_scanned[surf] = summary.by_surface_scanned.get(surf, 0) - 1
+        elif b == BUCKET_SKIPPED:
+            summary.by_surface_skipped[surf] = summary.by_surface_skipped.get(surf, 0) - 1
+        if surf != "x402":
+            summary.repo_scans_total -= 1
+            if b == BUCKET_CRITICAL:
+                summary.repo_scans_with_critical -= 1
+            elif b == BUCKET_HIGH:
+                summary.repo_scans_with_high -= 1
+            if b in _VERDICT_BUCKETS:
+                summary.repo_scans_scanned -= 1
+            elif b == BUCKET_SKIPPED:
+                summary.repo_scans_skipped -= 1
+
+
+def _rescan_target(r: CatalogRow) -> tuple[str, str, str] | None:
+    """The (surface, owner, repo) coordinate whose live scan lands on this corpus row's
+    page, in the catalog re-scan loop's terms; None when the row has no scannable page."""
+    path = r.page_path or ""
+    if path.startswith("/check/pkg/"):
+        return (r.surface, r.surface, r.name)
+    if path.startswith("/check/skill/"):
+        owner, _, repo = (r.full_name or "").partition("/")
+        return ("openclaw", owner, repo) if owner and repo else None
+    if path.startswith("/check/mcp?"):
+        ep = next((v for v in (r.endpoint_url, r.name, r.full_name)
+                   if v and _HTTP_RE.match(v)), None)
+        return ("mcp", "mcp", ep) if ep else None
+    if path.startswith("/check/"):
+        owner, _, repo = (r.full_name or "").partition("/")
+        # A repo page is the GitHub scan (an MCP registry row's page is its source repo).
+        return ("github", owner, repo) if owner and repo and "/" not in repo else None
+    return None
+
+
+def stale_corpus_targets(
+    live_keys: set[str], limit: int, skip: set[str] | None = None,
+) -> list[tuple[str, str, str, str]]:
+    """Launch-corpus rows whose page has no live scan yet, as re-scan targets
+    ``(page_key, surface, owner, repo)``, so a live scan replaces each stale row for good
+    (not just hides it). Half the batch is Do-not-connect rows (the answers most likely
+    to be stale and most costly when wrong), the rest the most adopted other rows; each
+    half by adoption. Blocking (walks the whole corpus): run it in a thread."""
+    if limit <= 0:
+        return []
+    skip = skip or set()
+    dnc: list[tuple[int, str, tuple[str, str, str]]] = []
+    other: list[tuple[int, str, tuple[str, str, str]]] = []
+    for r in _get_catalog()["rows"]:
+        if r.surface == "x402" or r.scan_source != "launch" or r.skipped:
+            continue
+        k = page_key(r)
+        if k is None or k in live_keys or k in skip:
+            continue
+        t = _rescan_target(r)
+        if t is None:
+            continue
+        item = (-(r.adoption_count or 0), k, t)
+        (dnc if r.decision == "do_not_connect" else other).append(item)
+    dnc.sort(key=lambda x: x[:2])
+    other.sort(key=lambda x: x[:2])
+    half = (limit + 1) // 2
+    picked = dnc[:half] + other[:limit - min(half, len(dnc))]
+    if len(picked) < limit:
+        picked += dnc[half:half + limit - len(picked)]
+    return [(k, *t) for _a, k, t in picked]
+
+
 async def _lead_with_skill_collections(rows: list[CatalogRow]) -> list[CatalogRow]:
     """A repo graded as a collection of agent skills is ONE tool in Browse: its skill
     row, scored as the collection (the worst skill), the same number its result page,
@@ -1036,12 +1311,16 @@ async def _catalog_view(
     # Merge in community scans (on-demand scans users ran). Search + the
     # 'community' tab see them; other single-surface tabs stay the launch corpus.
     community = await _community_rows(db)
+    # One row per page URL: a live scan replaces the launch-corpus row for its page.
+    merged, listed, dropped = _supersede(catalog, community)
     summary = summary.model_copy(deep=True)
+    _drop_from_summary(summary, dropped)
     by_surface = dict(summary.by_surface)
     by_surface["community"] = len(community)
     # Community rows carry their real surface — count them into their own tab so
     # surfaces with no static launch corpus (crates, huggingface) show a live count.
-    for _r in community:
+    # A live row that replaced a corpus row counts in that row's tab (as listed).
+    for _r in listed:
         _s = (_r.surface or "").lower()
         if _s and _s != "community":
             by_surface[_s] = by_surface.get(_s, 0) + 1
@@ -1051,17 +1330,20 @@ async def _catalog_view(
     # a published package appears in its own surface tab too. Add them everywhere
     # except the dedicated 'community' tab (which shows them all, below).
     if community and surface != "community":
-        rows = rows + community
+        rows = merged
     rows = await _lead_with_skill_collections(rows)
 
     # Static rows are already categorized at build time (cached). Only categorize the
     # small community set here, and merge its counts onto the cached static counts.
     cat_counts = dict(catalog.get("static_cats") or {})
-    for _r in community:
+    for _r in dropped:
+        cat_counts[_r.category or "Library"] = cat_counts.get(_r.category or "Library", 0) - 1
+    for _r in listed:
         if _r.category is None:
             _r.category = _categorize(_r)
         cat_counts[_r.category or "Library"] = cat_counts.get(_r.category or "Library", 0) + 1
-    summary.by_category = dict(sorted(cat_counts.items(), key=lambda kv: -kv[1]))
+    summary.by_category = dict(
+        sorted(((k, v) for k, v in cat_counts.items() if v > 0), key=lambda kv: -kv[1]))
 
     filtered = rows
     if surface == "community":
@@ -1335,7 +1617,7 @@ async def stop_flagged_stat_refresher() -> None:
 def _compute_flagged_stat(
     catalog: dict[str, Any], community: list[CatalogRow],
 ) -> dict[str, Any]:
-    rows: list[CatalogRow] = list(catalog["rows"]) + community
+    rows, _listed, _dropped = _supersede(catalog, community)
     totals = _flagged_counts(rows)
     grouped: dict[str, list[CatalogRow]] = {}
     for r in rows:
