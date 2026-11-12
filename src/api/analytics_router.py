@@ -388,7 +388,9 @@ async def get_conversion_funnel(
     dependencies=[Depends(rate_limit_reads)],
 )
 async def get_daily_conversion(
-    days: int = Query(30, ge=1, le=90),
+    # Up to 190 days: the dashboard asks for twice its 90-day window plus today, to
+    # compare a period with the one before it.
+    days: int = Query(30, ge=1, le=190),
     current_entity: Entity = Depends(get_current_entity),
     db: AsyncSession = Depends(get_db),
 ):

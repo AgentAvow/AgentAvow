@@ -1,16 +1,17 @@
-/** Paid campaign test: the per-campaign funnel (sessions → lp_view → copy_plugin_cmd by
- * utm_source / utm_campaign / utm_content), the spend Kenne enters, and cost per action.
- * Reads /analytics/attribution/campaigns (first-touch UTM tags, bots left out) and
- * /admin/ad-spend. Admin only, like the rest of the dashboard. */
+/** Paid campaign test: the per-campaign funnel (visits → landed (lp_view) → copied the
+ * install command (copy_plugin_cmd), by utm_source / utm_campaign / utm_content), the
+ * spend Kenne enters, and cost per result. Uses the page's time window. Reads
+ * /analytics/attribution/campaigns (first-touch UTM tags, bots left out) and
+ * /admin/ad-spend. Spend entry is admin only. */
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import api from '../../lib/api'
 import { useAdminAccess } from './adminAccess'
+import { useDashWindow } from './adminMetricsUtil'
 
 const DEFAULT_CAMPAIGN = '2026-11-test-dev'
 const ALL = '__all__'
-const WINDOWS = [7, 14, 28] as const
 
 interface CampaignRow {
   source: string | null; medium: string | null; campaign: string | null
@@ -36,7 +37,9 @@ const td = 'py-1.5 pr-3 tabular-nums'
 
 export default function CampaignPanel() {
   const qc = useQueryClient()
-  const [days, setDays] = useState<(typeof WINDOWS)[number]>(14)
+  // The page window (7 / 30 / 90). These endpoints count visits up to now, so today
+  // so far is included here; the scope line says so.
+  const { days } = useDashWindow()
   const [campaign, setCampaign] = useState<string>(DEFAULT_CAMPAIGN)
   const campaignParam = campaign === ALL ? undefined : campaign
 
@@ -68,8 +71,9 @@ export default function CampaignPanel() {
       <div className="flex items-baseline justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-lg font-bold">Paid campaign test</h2>
+          <p className="mt-0.5 font-mono text-[11.5px] text-primary-light/90">Last {days} days up to now (UTC), today so far included: this panel counts visits and spend, not whole days</p>
           <p className="mt-1 text-text-muted text-[13px] max-w-[72ch]">
-            Sessions → landed (lp_view) → copied the plugin command, by each session's first campaign tags. A return visit counts toward the campaign that first brought the session in. Crawlers and headless browsers are left out (events from Nov 11 on carry a bot/browser class; older events all count). Plugin directory and /plugin installs can't be tied to a campaign: these are clicks and copies, not installs.
+            Visits → landed on a landing page → copied the /plugin install command, by the campaign tags on the link that first brought each visitor in. A return visit counts toward the campaign that first brought the visitor. Crawlers and headless browsers are left out (from Nov 11 on; older visits all count). Plugin directory and /plugin installs can't be tied to a campaign: these are clicks and copies, not installs.
           </p>
         </div>
         <div className="flex items-center gap-2 font-mono text-[12px]">
@@ -77,22 +81,19 @@ export default function CampaignPanel() {
             <option value={ALL}>All campaigns</option>
             {campaigns.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
-          {WINDOWS.map((w) => (
-            <button key={w} onClick={() => setDays(w)} className={`px-2.5 py-1 rounded-lg transition-colors ${days === w ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>{w}d</button>
-          ))}
         </div>
       </div>
 
       <div className="glass rounded-2xl p-5 mt-4 overflow-x-auto">
         <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">
-          Funnel · {fmt(tot.sessions)} sessions · {fmt(tot.lp)} landed · {fmt(tot.copy)} copied ({rate(tot.copy, tot.lp)} of landed)
+          Funnel · {fmt(tot.sessions)} visits · {fmt(tot.lp)} landed · {fmt(tot.copy)} copied the install command ({rate(tot.copy, tot.lp)} of landed)
         </div>
         {rows.length ? (
           <table className="w-full text-[12.5px]">
             <thead><tr>
-              <th className={th}>Source / medium</th>{campaign === ALL && <th className={th}>Campaign</th>}<th className={th}>Content</th><th className={th}>Term</th>
-              <th className={`${th} text-right`}>Sessions</th><th className={`${th} text-right`}>Landed</th><th className={`${th} text-right`}>Checks</th>
-              <th className={`${th} text-right`}>Copied cmd</th><th className={`${th} text-right`}>Copy rate</th><th className={`${th} text-right`}>Plugin dir</th>
+              <th className={th}>Channel / medium</th>{campaign === ALL && <th className={th}>Campaign</th>}<th className={th} title="utm_content on the ad's link">Ad</th><th className={th} title="utm_term on the ad's link">Keyword</th>
+              <th className={`${th} text-right`}>Visits</th><th className={`${th} text-right`}>Landed</th><th className={`${th} text-right`}>Ran a check</th>
+              <th className={`${th} text-right`}>Copied install cmd</th><th className={`${th} text-right`}>Copy rate</th><th className={`${th} text-right`}>Opened plugin directory</th>
               <th className={`${th} text-right`}>Add Claude</th><th className={`${th} text-right`}>Add ChatGPT</th>
             </tr></thead>
             <tbody>
@@ -114,22 +115,22 @@ export default function CampaignPanel() {
               ))}
             </tbody>
           </table>
-        ) : <p className="text-[12.5px] text-text-muted/70">{funnel.isLoading ? 'Loading…' : `No sessions tagged ${campaign === ALL ? 'with any campaign' : campaign} in the last ${days} days.`}</p>}
+        ) : <p className="text-[12.5px] text-text-muted/70">{funnel.isLoading ? 'Loading…' : `No visits tagged ${campaign === ALL ? 'with any campaign' : campaign} in the last ${days} days.`}</p>}
       </div>
 
       <div className="glass rounded-2xl p-5 mt-3 overflow-x-auto">
-        <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Cost per action · by utm_content</div>
+        <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Cost per result · by ad</div>
         {cost.data?.rows.length ? (
           <table className="w-full text-[12.5px]">
             <thead><tr>
-              <th className={th}>Content</th><th className={`${th} text-right`}>Spend</th><th className={`${th} text-right`}>Impr.</th><th className={`${th} text-right`}>Clicks</th>
-              <th className={`${th} text-right`}>Landed</th><th className={`${th} text-right`}>Copied cmd</th>
-              <th className={`${th} text-right`}>$ / landed</th><th className={`${th} text-right`}>$ / copy</th>
+              <th className={th} title="utm_content on the ad's link">Ad</th><th className={`${th} text-right`}>Spend</th><th className={`${th} text-right`}>Impressions</th><th className={`${th} text-right`}>Clicks</th>
+              <th className={`${th} text-right`}>Landed</th><th className={`${th} text-right`}>Copied install cmd</th>
+              <th className={`${th} text-right`}>$ per landed visit</th><th className={`${th} text-right`}>$ per copy</th>
             </tr></thead>
             <tbody>
               {cost.data.rows.map((r) => (
                 <tr key={r.utm_content ?? ''} className="border-t border-border/40">
-                  <td className="py-1.5 pr-3 font-mono">{r.utm_content || '(no content)'}</td>
+                  <td className="py-1.5 pr-3 font-mono">{r.utm_content || '(no ad tag)'}</td>
                   <td className={`${td} text-right`}>{usd(r.spend_usd)}</td>
                   <td className={`${td} text-right text-text-muted`}>{fmt(r.impressions)}</td>
                   <td className={`${td} text-right text-text-muted`}>{fmt(r.clicks)}</td>
@@ -146,8 +147,8 @@ export default function CampaignPanel() {
               </tr>
             </tbody>
           </table>
-        ) : <p className="text-[12.5px] text-text-muted/70">No spend or sessions for this campaign in the window.{isAdmin ? ' Enter spend below.' : ''}</p>}
-        <p className="mt-2 text-[11px] text-text-muted/60">Spend is summed over the last {days} UTC days; the funnel covers sessions active in the same window. A cost shows once its action count is above zero.</p>
+        ) : <p className="text-[12.5px] text-text-muted/70">No spend or visits for this campaign in the window.{isAdmin ? ' Enter spend below.' : ''}</p>}
+        <p className="mt-2 text-[11px] text-text-muted/60">Spend is summed over the last {days} UTC days, today included; the funnel covers visits active in the last {days} × 24 hours. A cost shows once its count is above zero.</p>
       </div>
 
       {isAdmin && <SpendEditor key={campaign} campaign={campaignParam ?? DEFAULT_CAMPAIGN} rows={spend.data?.rows || []} onChange={refresh} />}
@@ -185,11 +186,11 @@ function SpendEditor({ campaign, rows, onChange }: { campaign: string; rows: Spe
 
   return (
     <div className="glass rounded-2xl p-5 mt-3">
-      <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Ad spend · one row per day per ad (utm_content)</div>
+      <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Ad spend · one row per day per ad</div>
       <form className="flex items-center gap-2 flex-wrap text-[12px]" onSubmit={(e) => { e.preventDefault(); setMsg(null); put.mutate() }}>
         <input type="date" value={day} onChange={(e) => setDay(e.target.value)} className={input} />
-        <input value={utmCampaign} onChange={(e) => setUtmCampaign(e.target.value)} placeholder="utm_campaign" className={`${input} min-w-[12rem]`} />
-        <input value={content} onChange={(e) => setContent(e.target.value)} placeholder="utm_content (ad)" className={`${input} min-w-[10rem]`} />
+        <input value={utmCampaign} onChange={(e) => setUtmCampaign(e.target.value)} placeholder="campaign (utm_campaign)" className={`${input} min-w-[12rem]`} />
+        <input value={content} onChange={(e) => setContent(e.target.value)} placeholder="ad tag (utm_content)" className={`${input} min-w-[10rem]`} />
         <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="spend $" className={`${input} w-24`} />
         <input value={impressions} onChange={(e) => setImpressions(e.target.value)} inputMode="numeric" placeholder="impressions" className={`${input} w-28`} />
         <input value={clicks} onChange={(e) => setClicks(e.target.value)} inputMode="numeric" placeholder="clicks" className={`${input} w-20`} />
