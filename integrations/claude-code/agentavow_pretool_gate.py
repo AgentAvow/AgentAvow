@@ -84,7 +84,7 @@ import time
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.38"
+__version__ = "0.1.39"
 
 CACHE = pathlib.Path.home() / ".cache" / "agentavow" / "scanned.json"
 META_KEY = "_agentavow"  # cache entry holding hook state; never a server name

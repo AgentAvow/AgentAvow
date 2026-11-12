@@ -430,6 +430,7 @@ export default function RebrandForDevelopers() {
           </div>
           <p className="mt-4 text-[13.5px] text-text-muted">Claude Code: <code className={codeCls}>{claudeCodeStdio(AA_MCP)}</code></p>
           <p onCopy={trackPluginCommandCopy} className="mt-2 text-[13.5px] text-text-muted max-w-[72ch]">Or install the Claude Code plugin, which also checks each new MCP server at session start and warns you before your agent uses one: <code className={codeCls}>/plugin marketplace add AgentAvow/AgentAvow</code> then <code className={codeCls}>/plugin install agentavow-trust@agentavow</code>. <Link to={rp('/rebrand/docs/auto-scan-claude-code')} className="text-primary-light hover:underline">How it works</Link>.</p>
+          <p className="mt-2 text-[13.5px] text-text-muted max-w-[72ch]">The plugin&apos;s checks run on your machine, so they cost Claude nothing: zero tokens per check, under 1,000 a session. <Link to={`${rp('/rebrand/faq')}#context-tokens`} className="text-primary-light hover:underline">The numbers</Link>.</p>
           <div className="relative mt-4 max-w-[760px]">
             <pre className="font-mono text-[12px] bg-surface border border-border rounded-xl px-4 py-3.5 pr-16 text-text overflow-x-auto">{MCP_CONFIG}</pre>
             <button type="button" onClick={() => copy('mcp', MCP_CONFIG)} className={copyBtn}>{copied === 'mcp' ? 'copied ✓' : 'copy'}</button>

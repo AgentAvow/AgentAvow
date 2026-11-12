@@ -506,6 +506,12 @@ def _ask_reason(mod, monkeypatch, capsys, payload):
     "python3 -c \"import os;d=os.path.expanduser('~/.cache/agentavow');open(d+'/k','w')\"",
     "node -e \"require('fs').appendFileSync(require('os').homedir()+'/.cache/agentavow/x','y')\"",
     "XDG_CACHE_HOME=/x; ls $XDG_CACHE_HOME/agentavow",
+    # a parent that could stand for the cache folder still counts (0.1.39)
+    "ls ~/.cache/./agentavow",
+    "ls ~/.cache/x/../agentavow",
+    "C=~/.cache; cat $C/agentavow/scanned.json",
+    "cat $(dirname ~/.cache/x)/agentavow/k",
+    "ls ~/.cach?/agentavow",
     # cp / mv / tee / ln from another file
     "cp /tmp/list ~/.cache/agentavow/allowed-servers.txt",
     "mv /tmp/l \"$HOME/.cache/agentavow/\"",
@@ -566,7 +572,114 @@ def test_a_write_through_a_symlink_or_relative_path_into_the_folder_asks(
     {"hook_event_name": "PreToolUse", "tool_name": "Edit",
      "tool_input": {"file_path": "plugins/agentavow-trust/README.md", "old_string": "a",
                     "new_string": "~/.cache/agentavow/allowed-servers.txt"}},
+    # A folder named AgentAvow that is not the cache folder (0.1.39): a checkout of this
+    # repo, and the plugin's own install folder. These asked on every edit in a checkout.
+    _bash("cd /home/me/projects/AgentAvow && git status"),
+    _bash("grep -rn verdict /home/me/projects/AgentAvow/src/scanner | head"),
+    _bash("sh ~/.claude/plugins/cache/agentavow/agentavow-trust/0.1.38/scripts/run_hook.sh x"),
+    _bash("ls /home/me/projects/AgentAvow/tests && du -sh ~/.cache/pip"),
+    {"hook_event_name": "PreToolUse", "tool_name": "Edit", "cwd": "/home/me/projects/AgentAvow",
+     "tool_input": {"file_path": "/home/me/projects/AgentAvow/src/scanner/scan.py",
+                    "old_string": "a", "new_string": "b"}},
+    {"hook_event_name": "PreToolUse", "tool_name": "Write", "cwd": "/home/me/projects/AgentAvow",
+     "tool_input": {"file_path": "/home/me/projects/AgentAvow/tests/test_x.py", "content": "x"}},
 ])
 def test_other_steps_are_not_mistaken_for_agentavow_files(hook, monkeypatch, capsys, payload):
     mod, _ = hook
     assert _run(mod, monkeypatch, capsys, payload, lambda *a, **k: None) == {}
+
+
+# The rule is about where a folder sits, not what it is called: any checkout or worktree
+# name, under any plain parent, is not the cache folder. Names and parents are examples
+# of the shape, not a list the hook knows.
+_CHECKOUT_NAMES = ["AgentAvow", "agentavow", "AGENTAVOW", "AgentAvow-wt-hook",
+                   "AgentAvow-review-2", "AgentAvow.bak", "agentavow_old", "AgentAvow2"]
+_PLAIN_PARENTS = ["/home/me/projects", "/srv/build/7", "/Users/me/src/github.com/org",
+                  "/tmp/ci-workspace", "/mnt/c/Users/me/code"]
+
+
+@pytest.mark.parametrize("parent", _PLAIN_PARENTS)
+@pytest.mark.parametrize("name", _CHECKOUT_NAMES)
+def test_any_checkout_folder_name_is_not_the_cache_folder(hook, monkeypatch, capsys,
+                                                          parent, name):
+    mod, _ = hook
+    root = f"{parent}/{name}"
+    for payload in (
+        _bash(f"cd {root} && git status"),
+        _bash(f"grep -rn verdict {root}/src | head"),
+        {"hook_event_name": "PreToolUse", "tool_name": "Edit", "cwd": root,
+         "tool_input": {"file_path": f"{root}/src/app.py", "old_string": "a",
+                        "new_string": "b"}},
+    ):
+        assert _run(mod, monkeypatch, capsys, payload, lambda *a, **k: None) == {}, payload
+
+
+@pytest.mark.parametrize("name", _CHECKOUT_NAMES)
+def test_relative_cd_into_a_checkout_is_judged_by_the_working_directory(
+        hook, monkeypatch, capsys, tmp_path, name):
+    mod, _ = hook
+    cache = tmp_path / "home" / ".cache"
+    (cache / "agentavow").mkdir(parents=True)
+    monkeypatch.setattr(mod, "_own_dir", lambda: cache / "agentavow")
+    elsewhere = tmp_path / "projects"
+    elsewhere.mkdir()
+    cmd = _bash(f"cd {name} && git status")
+    # From a projects folder: a checkout, whatever it is called.
+    assert _run(mod, monkeypatch, capsys, dict(cmd, cwd=str(elsewhere)),
+                lambda *a, **k: None) == {}
+    if name.lower() == "agentavow":
+        # From the cache folder itself, or with no known cwd, or after a second `cd`
+        # that could move first: still asks.
+        _ask_reason(mod, monkeypatch, capsys, dict(cmd, cwd=str(cache)))
+        _ask_reason(mod, monkeypatch, capsys, cmd)
+        _ask_reason(mod, monkeypatch, capsys,
+                    dict(_bash(f"cd $D; cd {name} && git status"), cwd=str(elsewhere)))
+
+
+@pytest.mark.parametrize("parent", ["~/.cache", "$HOME/.cache", "${XDG_CACHE_HOME}",
+                                    "$C", "~/.cache/.", "~/.cache/x/..", "~/.ca*"])
+def test_the_cache_folder_under_any_spelling_still_asks(hook, monkeypatch, capsys, parent):
+    mod, _ = hook
+    _ask_reason(mod, monkeypatch, capsys, _bash(f"cat {parent}/agentavow/scanned.json"))
+
+
+# A plain-looking parent can be a symlink to the cache folder: the real path decides,
+# and a step that makes a link, or a relative path after a `cd`, is not ruled out.
+def _cache_with_alias(mod, monkeypatch, tmp_path):
+    cache = tmp_path / "home" / ".cache"
+    (cache / "agentavow").mkdir(parents=True)
+    monkeypatch.setattr(mod, "_own_dir", lambda: cache / "agentavow")
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "q").symlink_to(cache)
+    return cache, work
+
+
+def test_a_symlinked_parent_into_the_cache_folder_still_asks(hook, monkeypatch, capsys,
+                                                             tmp_path):
+    mod, _ = hook
+    _, work = _cache_with_alias(mod, monkeypatch, tmp_path)
+    _ask_reason(mod, monkeypatch, capsys,
+                _bash(f"echo x > {work}/q/agentavow/scanned.json"))
+    _ask_reason(mod, monkeypatch, capsys,
+                dict(_bash("cat q/agentavow/scanned.json"), cwd=str(work)))
+
+
+@pytest.mark.parametrize("cmd", [
+    "ln -s ~/.cache q && echo x > q/agentavow/scanned.json",
+    "python3 -c \"import os;os.symlink(os.path.expanduser('~/.cache'),'q')\"; cat q/agentavow/scanned.json",
+    "cd ~ && cat q/agentavow/scanned.json",
+    "cat r/agentavow/scanned.json",
+    "HOME=/x; cat $HOME/q/agentavow/scanned.json",
+])
+def test_a_plain_parent_that_could_be_an_alias_still_asks(hook, monkeypatch, capsys, cmd):
+    mod, _ = hook
+    # No cwd for the relative ones, a link made in the same command, a `cd` first.
+    _ask_reason(mod, monkeypatch, capsys, _bash(cmd))
+
+
+def test_a_checkout_under_home_var_does_not_ask(hook, monkeypatch, capsys):
+    mod, _ = hook
+    assert _run(mod, monkeypatch, capsys,
+                _bash("grep -rn verdict $HOME/projects/AgentAvow/src | head"),
+                lambda *a, **k: None) == {}

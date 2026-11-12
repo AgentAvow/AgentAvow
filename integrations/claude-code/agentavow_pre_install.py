@@ -44,7 +44,7 @@ import sys
 import time
 import urllib.error
 
-__version__ = "0.1.38"
+__version__ = "0.1.39"
 
 TIMEOUT = 12  # seconds per scan: an install is rare, so a slower fresh scan is fine
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -506,26 +506,110 @@ _REPO_SLUG = re.compile(r"agentavow/agentavow|(?:github(?:usercontent)?|gitlab)\
 _PATH_PART = re.compile(r"/agentavow(?![\w.-])")
 _CACHE_DIR = re.compile(r"\.cache\b|xdg_cache_home")
 _GLOB_AFTER_CACHE = re.compile(r"\.cache/+[^\s/]*[*?\[]")
-_CD_INTO = re.compile(r"\b(?:cd|pushd|chdir)\b[\s(]+[^;&|\n]*agentavow")
+# `cd` into a folder named agentavow (the whole name: a checkout at AgentAvow-wt-x is not).
+_CD_INTO = re.compile(r"\b(?:cd|pushd|chdir)\b[\s(]+[^;&|\n]*(?<![\w.@-])agentavow(?![\w.-])")
+# An `agentavow` path segment and the segment before it. The cache folder is reached
+# under `.cache` or $XDG_CACHE_HOME, so a folder named AgentAvow under a plain literal
+# parent (a checkout of this repo at ~/projects/AgentAvow, the plugin's install folder
+# ~/.claude/plugins/cache/agentavow) is not ours; without this every Edit and every
+# absolute path in a checkout of the repo asked the person. A parent that could stand
+# for anything (a variable, substitution, glob, `~`, `.` or `..`) still counts.
+_SEGMENT = re.compile(r"([^\s/]*)/+agentavow(?![\w.-])", re.IGNORECASE)
+_KEEP_PARENT = re.compile(r"\.cache\b|cache_home|[*?\[\]${}()~]|^\.{0,2}$")
+_REPO_SLUG_ANY_CASE = re.compile(r"agentavow/agentavow|(?:github(?:usercontent)?|gitlab)"
+                                 r"\.com/+agentavow", re.IGNORECASE)
+# A command that makes a link can point a plain-looking folder at the cache folder in
+# the same breath (`ln -s ~/.cache q && cat q/agentavow/...`): nothing is ruled out.
+_MAKES_LINK = re.compile(r"\bln\b|symlink|\bmount\b|\bbindfs\b", re.IGNORECASE)
+_UNRESOLVED = re.compile(r"[*?\[\]${}()`]")
+_HOME_VAR = re.compile(r"\$(?:home\b|\{home\})", re.IGNORECASE)
+_TOKEN_STOP = set(";&|<>=(")
 
 
-def _shell_names_own_files(command: str) -> bool:
+def _is_cache_parent(prefix: str, cwd: object, has_cd: bool, sets_home: bool) -> bool:
+    """Whether the literal path ``prefix`` (the folder that holds an ``agentavow``
+    segment) is, or could be, the cache folder's parent. The real path decides, so a
+    symlink to ~/.cache under a plain name still counts. Anything that cannot be
+    resolved here (a variable, glob or substitution, a relative path after a `cd` or
+    with no known cwd) counts too."""
+    p = prefix if sets_home else _HOME_VAR.sub("~", prefix)
+    if not p or _UNRESOLVED.search(p):
+        return True
+    p = os.path.expanduser(p)
+    if not os.path.isabs(p):
+        if has_cd or not isinstance(cwd, str) or not cwd:
+            return True
+        p = os.path.join(os.path.expanduser(cwd), p)
+    try:
+        here = os.path.realpath(p).lower()
+        return here == os.path.realpath(_own_dir().parent).lower()
+    except Exception:
+        return True
+
+
+def _other_agentavow_dirs(text: str, cwd: object = None) -> str:
+    """``text`` with each ``<parent>/agentavow`` segment blanked out when that parent is
+    a plain folder whose real path is not the cache folder's parent (a checkout of this
+    repo at ~/projects/AgentAvow, the plugin's install folder), so it counts neither as
+    a path into AgentAvow's folder nor as a standalone name. Case is kept so the real
+    path can be resolved."""
+    if _MAKES_LINK.search(text):
+        return text
+    has_cd = bool(_CD_WORD.search(text.lower()))
+    sets_home = bool(re.search(r"\bhome=", text, re.IGNORECASE))
+
+    def blank(m: re.Match) -> str:
+        parent = m.group(1)
+        if _KEEP_PARENT.search(parent.lower()):
+            return m.group(0)
+        start = m.start(1)
+        while start > 0 and not text[start - 1].isspace() and text[start - 1] not in _TOKEN_STOP:
+            start -= 1
+        if _is_cache_parent(text[start:m.end(1)], cwd, has_cd, sets_home):
+            return m.group(0)
+        return parent + "/_"
+    return _SEGMENT.sub(blank, text)
+
+
+_CD_WORD = re.compile(r"\b(?:cd|pushd|chdir)\b")
+
+
+def _cd_cannot_reach_own_dir(s: str, cwd: object) -> bool:
+    """A command with a single `cd` into a bare relative `agentavow`, run from a folder
+    that is not the cache folder, cannot land in AgentAvow's folder (a checkout named
+    AgentAvow, entered from its parent). Unknown cwd, or a second `cd` that could move
+    first: not ruled out."""
+    if not isinstance(cwd, str) or not cwd or len(_CD_WORD.findall(s)) != 1:
+        return False
+    try:
+        here = os.path.realpath(os.path.expanduser(cwd))
+        return here != os.path.realpath(_own_dir().parent)
+    except Exception:
+        return False
+
+
+def _shell_names_own_files(command: str, cwd: object = None) -> bool:
     """Whether a shell command names AgentAvow's cache folder or one of its files, in
     any of the spellings a person or a script would use: ~ / $HOME / ${HOME} /
     expanduser, quotes or backslashes inside a word, path pieces joined in Python,
     `cd` into the folder, a glob over ~/.cache. Our own repo and package names
-    (AgentAvow/AgentAvow, agentavow-trust, agentavow_precheck) do not count."""
-    s = re.sub(r"[\"'`\\]", "", command.lower())
+    (AgentAvow/AgentAvow, agentavow-trust, agentavow_precheck) do not count, and
+    neither does a folder named AgentAvow anywhere but the cache folder: the test is
+    where a folder sits (its parent, or the working directory for a relative `cd`),
+    never what a checkout or worktree is called."""
+    raw = re.sub(r"[\"'`\\]", "", command)
+    s = raw.lower()
     if _NAMED_FILE.search(s):
         return True
-    t = _REPO_SLUG.sub("", s)
+    t = _other_agentavow_dirs(_REPO_SLUG_ANY_CASE.sub("", raw), cwd).lower()
     if _PATH_PART.search(t):  # .../agentavow as a folder, however the rest is spelled
         return True
     standalone = bool(_STANDALONE.search(t))
     if _CACHE_DIR.search(s) and (standalone or _GLOB_AFTER_CACHE.search(s)
                                  or "allow" in s):
         return True
-    return standalone and bool(_CD_INTO.search(s) or re.search(r"allow|scanned", s))
+    cd_in = bool(_CD_INTO.search(t)) and not _cd_cannot_reach_own_dir(s, cwd)
+    return standalone and (cd_in or bool(re.search(r"allow|scanned", s)))
 
 
 def _path_in_own_dir(raw: str, cwd: object) -> bool:
@@ -554,7 +638,7 @@ def _touches_own_files(payload: dict) -> bool:
         return False
     tool = str(payload.get("tool_name") or "")
     if tool == "Bash":
-        return _shell_names_own_files(str(inp.get("command") or ""))
+        return _shell_names_own_files(str(inp.get("command") or ""), payload.get("cwd"))
     if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
         raw = inp.get("file_path") or inp.get("notebook_path") or ""
         return _path_in_own_dir(str(raw), payload.get("cwd"))
