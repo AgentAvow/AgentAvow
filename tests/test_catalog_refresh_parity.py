@@ -198,7 +198,7 @@ async def test_package_route_called_directly_uses_real_defaults(monkeypatch):
 async def test_skill_routes_called_directly_pass_real_bools(monkeypatch):
     seen = []
 
-    async def fake_skill_scan(owner, repo, skill_path, request, force, behavioral):
+    async def fake_skill_scan(owner, repo, skill_path, request, force, behavioral, wait=None):
         seen.append((force, behavioral))
         return "ok"
 

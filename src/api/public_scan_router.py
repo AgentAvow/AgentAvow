@@ -1855,13 +1855,15 @@ async def _refresh_package(surface: str, name: str, version: str | None,
         pass  # best-effort; the next stored read serves whatever exists
 
 
-# --- first scans of uncommon packages: answer "checking" instead of a 503 ---------
-# A first scan of an uncommon package can run past any caller's budget (claude-mem and
-# hyperframes took ~100 s and hit the old 90 s cap as a 503). The scan now runs as a
-# background task: the request waits up to ``wait`` seconds for it, then answers
-# 202 {state: "checking", retry_after} while it finishes; the next call returns the
-# cached result. One scan per coordinate across workers (Redis lock); a call that lands
-# on a worker without the task polls the cache instead of starting another scan.
+# --- slow fresh scans answer "checking" instead of a 503 ----------------------------
+# A first scan can run past any caller's budget (npm claude-mem and hyperframes took
+# ~100 s and hit the old 90 s cap as a 503). Every scan route (package, repo, skill, MCP
+# endpoint) now runs the scan as a background task: an HTTP request waits up to ``wait``
+# seconds for it, then answers 202 {state: "checking", retry_after} while it finishes;
+# the next call returns the cached result. One scan per target across workers (Redis
+# lock); a call that lands on a worker without the task polls the cache instead of
+# starting another scan. Internal callers (no request) keep the old behaviour: they wait
+# the route's old cap and get a 503 past it, never a 202 they would not understand.
 _FIRST_SCAN_TIMEOUT = 300         # the background scan's own cap
 _FIRST_SCAN_LOCK_TTL = _FIRST_SCAN_TIMEOUT + 30
 _FIRST_SCAN_WAIT_DEFAULT = 20     # seconds a request waits before answering "checking"
@@ -1870,10 +1872,17 @@ _FIRST_SCAN_ERROR_TTL = 600
 _FIRST_SCAN_LOCK_PREFIX = "public_scan_first:"
 _FIRST_SCAN_ERROR_PREFIX = "public_scan_first_error:"
 _first_scans: dict[str, asyncio.Task] = {}
+_STILL_RUNNING = "Scan is taking longer than expected — please retry shortly."
 
 
 class _ScanFailedError(Exception):
-    """The background scan finished with the scanner's error (not found, too large…)."""
+    """The background scan ended with an answer that is an error: ``detail`` and the
+    HTTP ``status`` the route has always given for it (not found 404, upstream 502…)."""
+
+    def __init__(self, detail: str, status: int = 502):
+        super().__init__(detail)
+        self.detail = detail
+        self.status = status
 
 
 async def _redis_or_none():
@@ -1884,19 +1893,23 @@ async def _redis_or_none():
         return None
 
 
-async def _first_scan_error(key: str) -> str | None:
+async def _first_scan_error(key: str) -> _ScanFailedError | None:
     r = await _redis_or_none()
     if r is None:
         return None
     try:
         v = await r.get(f"{_FIRST_SCAN_ERROR_PREFIX}{key}")
-        return (v.decode() if isinstance(v, bytes) else v) or None
     except Exception:
         return None
+    v = (v.decode() if isinstance(v, bytes) else v) or ""
+    if not v:
+        return None
+    code, _, detail = v.partition("|")
+    return _ScanFailedError(detail or v, int(code) if code.isdigit() else 502)
 
 
 async def _first_scan_in_flight(key: str) -> bool:
-    """True when this or another worker is already running the first scan of ``key``."""
+    """True when this or another worker is already running the scan of ``key``."""
     t = _first_scans.get(key)
     if t is not None and not t.done():
         return True
@@ -1910,8 +1923,8 @@ async def _first_scan_in_flight(key: str) -> bool:
 
 
 async def _start_first_scan(key: str, run) -> asyncio.Task | None:
-    """Start ``run()`` (returns the result dict, raises ``_ScanFailedError``) as a background
-    task that caches its own result. None when another worker holds the lock."""
+    """Start ``run()`` (returns the result dict and caches it, raises
+    ``_ScanFailedError``) as a background task. None when another worker holds the lock."""
     r = await _redis_or_none()
     if r is not None:
         try:
@@ -1924,12 +1937,20 @@ async def _start_first_scan(key: str, run) -> asyncio.Task | None:
 
     async def _job() -> dict:
         try:
-            return await asyncio.wait_for(run(), timeout=_FIRST_SCAN_TIMEOUT)
+            try:
+                return await asyncio.wait_for(run(), timeout=_FIRST_SCAN_TIMEOUT)
+            except _ScanFailedError:
+                raise
+            except asyncio.TimeoutError:
+                raise _ScanFailedError(_STILL_RUNNING, 503) from None
+            except Exception:
+                logger.exception("background scan failed for %s", key)
+                raise _ScanFailedError("Internal error while scanning", 500) from None
         except _ScanFailedError as e:
             if r is not None:
                 try:
-                    await r.set(f"{_FIRST_SCAN_ERROR_PREFIX}{key}", str(e)[:300],
-                                ex=_FIRST_SCAN_ERROR_TTL)
+                    await r.set(f"{_FIRST_SCAN_ERROR_PREFIX}{key}",
+                                f"{e.status}|{e.detail[:300]}", ex=_FIRST_SCAN_ERROR_TTL)
                 except Exception:
                     pass
             raise
@@ -1956,13 +1977,11 @@ async def _wait_first_scan(key: str, task: asyncio.Task | None, wait: float,
         task = _first_scans.get(key)
     if task is not None:
         done, _ = await asyncio.wait({task}, timeout=max(0.0, wait))
-        if not done:
+        if not done or task.cancelled():
             return None
-        exc = task.exception() if not task.cancelled() else None
-        if isinstance(exc, _ScanFailedError):
+        exc = task.exception()
+        if exc is not None:
             raise exc
-        if exc is not None or task.cancelled():
-            return None  # timed out / crashed: the next call starts a fresh scan
         return task.result()
     # Another worker runs it: poll the cache (and its error) until the wait is up.
     loop = asyncio.get_running_loop()
@@ -1973,28 +1992,61 @@ async def _wait_first_scan(key: str, task: asyncio.Task | None, wait: float,
             return data
         err = await _first_scan_error(key)
         if err:
-            raise _ScanFailedError(err)
+            raise err
         if loop.time() >= deadline:
             return None
         await asyncio.sleep(min(1.5, max(0.0, deadline - loop.time())))
 
 
-def _checking_response(surface: str, name: str, version: str | None) -> JSONResponse:
-    """202: the first scan is still running. Callers treat it as pending and ask again."""
+def _scan_wait(wait: object, request: object, internal_wait: int) -> int:
+    """Seconds to wait inline: the caller's ``?wait=`` (0-60), else the default; an
+    internal caller (no request) waits the route's old cap."""
+    if request is None:
+        return internal_wait
+    if isinstance(wait, int) and not isinstance(wait, bool):
+        return wait
+    return _FIRST_SCAN_WAIT_DEFAULT
+
+
+async def _fresh_scan(*, key: str, run, wait: int, request: object, cache_owner: str,
+                      cache_repo: str) -> dict | None:
+    """Run (or join) the background scan of ``key`` and wait for it. Only a call that
+    starts a scan spends the fresh-scan budget; asking again while it runs is free.
+    Returns the result, or None while still checking; a failed scan raises the
+    route's HTTPException."""
+    task = None
+    if not await _first_scan_in_flight(key):
+        if request is not None:
+            from src.api.rate_limit import enforce_fresh_scan_limit
+            await enforce_fresh_scan_limit(request)
+            await _track_checker(request)
+        task = await _start_first_scan(key, run)
+    try:
+        return await _wait_first_scan(key, task, wait, cache_owner, cache_repo)
+    except _ScanFailedError as e:
+        raise HTTPException(e.status, e.detail)
+
+
+def _still_checking(request: object, fields: dict) -> JSONResponse:
+    """202 for an HTTP caller (it asks again); an internal caller gets the old 503."""
+    if request is None:
+        raise HTTPException(503, _STILL_RUNNING, headers={"Retry-After": "30"})
     return JSONResponse(
         status_code=202,
         headers={"Retry-After": str(_FIRST_SCAN_RETRY_AFTER)},
-        content={"state": "checking", "status": "checking", "surface": surface,
-                 "name": name, "version": version, "retry_after": _FIRST_SCAN_RETRY_AFTER,
-                 "detail": "First check of this package is still running. Ask again in "
-                           f"about {_FIRST_SCAN_RETRY_AFTER} seconds; the result is cached "
-                           "once ready."})
+        content={"state": "checking", "status": "checking", **fields,
+                 "retry_after": _FIRST_SCAN_RETRY_AFTER,
+                 "detail": "The first check of this target is still running. Ask again "
+                           f"in about {_FIRST_SCAN_RETRY_AFTER} seconds; the result is "
+                           "cached once ready."})
 
 
-def _scan_error_status(error: str) -> int:
-    low = error.lower()
-    return 404 if ("not found" in low or "version not found" in low) else 502
-
+def _wait_query():
+    return Query(
+        None, ge=0, le=60,
+        description="Seconds to wait for a fresh scan before answering 202 "
+                    "{state: checking, retry_after} (default 20). The scan keeps running; "
+                    "ask again for the result.")
 
 _PKG_BADGE_SURFACES = ("npm", "pypi", "crates", "huggingface", "docker")
 
@@ -2120,11 +2172,7 @@ async def scan_package_endpoint(
     force: bool = Query(False, description="Bypass cache and force a fresh scan"),
     behavioral: bool = Query(False, description="Force a fresh behavioral sandbox run (npm/PyPI)"),
     version: str | None = Query(None, description="Exact version; default = latest"),
-    wait: int | None = Query(
-        None, ge=0, le=60,
-        description="Seconds to wait for a fresh scan before answering 202 "
-                    "{state: checking, retry_after} (default 20). The scan keeps running; "
-                    "ask again for the result."),
+    wait: int | None = _wait_query(),
     stored: bool = Query(
         False,
         description="Return the last STORED grade (up to 7 days old) at once and never run a "
@@ -2211,46 +2259,34 @@ async def scan_package_endpoint(
         if cached:
             return await _signed_response(cached, cached=True)
 
-    wait_s = wait if isinstance(wait, int) and not isinstance(wait, bool) \
-        else _FIRST_SCAN_WAIT_DEFAULT
-    scan_key = f"{cache_owner}/{cache_repo}"
-    task = None
-    if not await _first_scan_in_flight(scan_key):
-        # Only a call that starts a scan spends the fresh-scan budget; asking again
-        # while it runs is free.
-        if request is not None:
-            from src.api.rate_limit import enforce_fresh_scan_limit
-            await enforce_fresh_scan_limit(request)
-            await _track_checker(request)
+    async def _run() -> dict:
+        from src.scanner.scan import scan_package
+        result = await scan_package(surface, name, version)
+        if result.error:
+            low = str(result.error).lower()
+            raise _ScanFailedError(f"Scan error: {result.error}",
+                                   404 if "not found" in low else 502)
+        data = _scan_result_to_dict(result)
+        await _set_cached(cache_owner, cache_repo, data)
+        if not version:
+            # Record the latest-version result: the catalog row and the score-history
+            # point (the signed /drift/pkg feed and the package page's history). Its
+            # own session: the request's may be closed by the time the scan ends.
+            try:
+                from src.database import async_session
+                async with async_session() as s:
+                    await _capture_community_scan(surface, name, data, s, surface=surface)
+            except Exception:
+                logger.debug("package capture failed for %s:%s", surface, name,
+                             exc_info=True)
+        return data
 
-        async def _run() -> dict:
-            from src.scanner.scan import scan_package
-            result = await scan_package(surface, name, version)
-            if result.error:
-                raise _ScanFailedError(str(result.error))
-            data = _scan_result_to_dict(result)
-            await _set_cached(cache_owner, cache_repo, data)
-            if not version:
-                # Record the latest-version result: the catalog row and the score-history
-                # point (the signed /drift/pkg feed and the package page's history). Its
-                # own session: the request's may be closed by the time the scan ends.
-                try:
-                    from src.database import async_session
-                    async with async_session() as s:
-                        await _capture_community_scan(surface, name, data, s, surface=surface)
-                except Exception:
-                    logger.debug("package capture failed for %s:%s", surface, name,
-                                 exc_info=True)
-            return data
-
-        task = await _start_first_scan(scan_key, _run)
-
-    try:
-        data = await _wait_first_scan(scan_key, task, wait_s, cache_owner, cache_repo)
-    except _ScanFailedError as e:
-        raise HTTPException(_scan_error_status(str(e)), f"Scan error: {e}")
+    data = await _fresh_scan(key=f"{cache_owner}/{cache_repo}", run=_run,
+                             wait=_scan_wait(wait, request, 90), request=request,
+                             cache_owner=cache_owner, cache_repo=cache_repo)
     if data is None:
-        return _checking_response(surface, name, version)
+        return _still_checking(request, {"surface": surface, "name": name,
+                                         "version": version})
     return await _signed_response(data, cached=False)
 
 
@@ -2270,6 +2306,7 @@ async def scan_skill_endpoint(
         "lifecycle hooks and bundled scripts are run with canary credentials (implies "
         "a fresh scan). The run is also started automatically on the first scan.",
     ),
+    wait: int | None = _wait_query(),
     db: AsyncSession = Depends(get_db),
 ) -> PublicScanResponse:
     """Grade an **OpenClaw / Agent Skill** in a GitHub repo — the capability surface
@@ -2278,7 +2315,8 @@ async def scan_skill_endpoint(
     scripts. `coverage.surface = openclaw`. E.g. `/public/scan/skill/owner/repo`.
     The behavioral sandbox (plan `skill`) clones the repo and runs its hooks and
     scripts; the signed observation comes back in `behavioral`."""
-    return await _skill_scan(owner, repo, None, request, _qbool(force), _qbool(behavioral))
+    return await _skill_scan(owner, repo, None, request, _qbool(force), _qbool(behavioral),
+                             wait=wait)
 
 
 @router.get(
@@ -2293,6 +2331,7 @@ async def scan_one_skill_endpoint(
     request: Request = None,
     force: bool = Query(False, description="Bypass cache and force a fresh scan"),
     behavioral: bool = Query(False, description="Force a fresh behavioral sandbox run"),
+    wait: int | None = _wait_query(),
     db: AsyncSession = Depends(get_db),
 ) -> PublicScanResponse:
     """Grade ONE skill inside a repo that holds many (e.g.
@@ -2303,12 +2342,12 @@ async def scan_one_skill_endpoint(
             or not all(c.isalnum() or c in "-_./" for c in skill_path)):
         raise HTTPException(400, "Invalid skill path")
     return await _skill_scan(owner, repo, skill_path, request, _qbool(force),
-                             _qbool(behavioral))
+                             _qbool(behavioral), wait=wait)
 
 
 async def _skill_scan(
     owner: str, repo: str, skill_path: str | None, request: Request | None,
-    force: bool, behavioral: bool,
+    force: bool, behavioral: bool, wait: object = None,
 ) -> PublicScanResponse:
     if not all(c.isalnum() or c in "-_." for c in owner):
         raise HTTPException(400, "Invalid owner")
@@ -2337,39 +2376,35 @@ async def _skill_scan(
         if cached:
             return await _signed_response(cached, cached=True)
 
-    if request is not None:
-        from src.api.rate_limit import enforce_fresh_scan_limit
-        await enforce_fresh_scan_limit(request)
-        await _track_checker(request)
+    async def _run() -> dict:
+        from src.scanner.scan import scan_skill
+        result = await (scan_skill(owner, repo, skill_path) if skill_path
+                        else scan_skill(owner, repo))
+        if result.error:
+            low = result.error.lower()
+            raise _ScanFailedError(
+                f"Scan error: {result.error}",
+                404 if ("not found" in low or "no skill.md" in low) else 502)
+        data = _scan_result_to_dict(result)
+        await _set_cached("skill", cache_key, data)
+        # A multi-skill repo graded every skill: cache each one so its own page opens
+        # at once instead of re-scanning.
+        for sub_path, sub in (getattr(result, "per_skill", None) or {}).items():
+            if sub_path:
+                try:
+                    sub.repo = f"skill:{full_name}/{sub_path}"
+                    await _set_cached("skill", f"{full_name}/{sub_path}",
+                                      _scan_result_to_dict(sub))
+                except Exception:
+                    logger.debug("per-skill cache failed for %s/%s", full_name, sub_path,
+                                 exc_info=True)
+        return data
 
-    from src.scanner.scan import scan_skill
-
-    try:
-        result = await asyncio.wait_for(
-            scan_skill(owner, repo, skill_path) if skill_path else scan_skill(owner, repo),
-            timeout=60)
-    except asyncio.TimeoutError:
-        raise HTTPException(
-            503, "Scan is taking longer than expected — please retry shortly.",
-            headers={"Retry-After": "30"},
-        )
-    if result.error:
-        low = result.error.lower()
-        code = 404 if ("not found" in low or "no skill.md" in low) else 502
-        raise HTTPException(code, f"Scan error: {result.error}")
-
-    data = _scan_result_to_dict(result)
-    await _set_cached("skill", cache_key, data)
-    # A multi-skill repo graded every skill: cache each one so its own page opens
-    # at once instead of re-scanning.
-    for sub_path, sub in (getattr(result, "per_skill", None) or {}).items():
-        if sub_path:
-            try:
-                sub.repo = f"skill:{full_name}/{sub_path}"
-                await _set_cached("skill", f"{full_name}/{sub_path}", _scan_result_to_dict(sub))
-            except Exception:
-                logger.debug("per-skill cache failed for %s/%s", full_name, sub_path,
-                             exc_info=True)
+    data = await _fresh_scan(key=f"skill/{cache_key}", run=_run,
+                             wait=_scan_wait(wait, request, 60), request=request,
+                             cache_owner="skill", cache_repo=cache_key)
+    if data is None:
+        return _still_checking(request, {"surface": "skill", "name": cache_key})
     return await _signed_response(data, cached=False)
 
 
@@ -2488,6 +2523,7 @@ async def scan_mcp_endpoint(
             "servers you own or are allowed to test."
         ),
     ),
+    wait: int | None = _wait_query(),
     db: AsyncSession = Depends(get_db),
 ) -> PublicScanResponse:
     """Grade a LIVE **MCP server** by its endpoint URL — enumerates the served
@@ -2527,34 +2563,35 @@ async def scan_mcp_endpoint(
             resp.behavioral = await _mcp_live_probe_block(url, run=probe)
             return resp
 
-    if request is not None:
-        from src.api.rate_limit import enforce_fresh_scan_limit
-        await enforce_fresh_scan_limit(request)
-        await _track_checker(request)
-
-    # The previous scan of this endpoint, for tool-definition drift.
+    # The previous scan of this endpoint, for tool-definition drift. Read before the
+    # scan writes the cache (a call joining a running scan reads the same old copy).
     old_cached = await _get_cached("mcp", key) or await _get_stale_cached("mcp", key)
 
-    from src.scanner.scan import scan_mcp
+    async def _run() -> dict:
+        from src.scanner.scan import scan_mcp
+        result = await scan_mcp(url)
+        if result.error:
+            # An unreachable / non-Streamable-HTTP endpoint is a bad USER input, not a
+            # server fault — 422 (client error) so it doesn't page us as a 5xx.
+            raise _ScanFailedError(f"Scan error: {result.error}", 422)
+        data = _scan_result_to_dict(result)
+        await _set_cached("mcp", key, data)
+        # A durable history point when the score or the signed tool-set digest
+        # changed: the endpoint page's score history and the /drift/mcp feed read it.
+        # Its own session: the request's may be closed by the time the scan ends.
+        if len(full) <= 512:
+            try:
+                from src.database import async_session
+                async with async_session() as s:
+                    await _record_scan_history(full, "mcp", "mcp", url[:255], data, s)
+            except Exception:
+                logger.debug("mcp history failed for %s", url, exc_info=True)
+        return data
 
-    try:
-        result = await asyncio.wait_for(scan_mcp(url), timeout=45)
-    except asyncio.TimeoutError:
-        raise HTTPException(
-            503, "MCP handshake timed out — please retry shortly.",
-            headers={"Retry-After": "20"},
-        )
-    if result.error:
-        # An unreachable / non-Streamable-HTTP endpoint is a bad USER input, not a
-        # server fault — return 422 (client error) so it doesn't page us as a 5xx.
-        raise HTTPException(422, f"Scan error: {result.error}")
-
-    data = _scan_result_to_dict(result)
-    await _set_cached("mcp", key, data)
-    # A durable history point when the score or the signed tool-set digest changed:
-    # the endpoint page's score history and the /drift/mcp feed read it.
-    if len(full) <= 512:
-        await _record_scan_history(full, "mcp", "mcp", url[:255], data, db)
+    data = await _fresh_scan(key=f"mcp/{key}", run=_run, wait=_scan_wait(wait, request, 45),
+                             request=request, cache_owner="mcp", cache_repo=key)
+    if data is None:
+        return _still_checking(request, {"surface": "mcp", "endpoint": url})
     # Only diff against a scan that pinned digests: a copy cached before live-MCP
     # digests existed has none, and every tool would read as newly added.
     drift = (
@@ -2889,13 +2926,16 @@ async def public_scan(
         description="Also run the behavioral sandbox tier (deep scan, ~45s; implies "
         "a fresh scan).",
     ),
+    wait: int | None = _wait_query(),
     db: AsyncSession = Depends(get_db),
 ) -> PublicScanResponse:
     """Scan a GitHub repo and return the three-phrase answer, trust score, tier and
     findings, with a signed JWS attestation (see ``_public_scan_repo``). A repo that is
     a collection of agent skills also carries ``skill_collection``: the collection's
     answer (its worst skill), which the result page, badge and card lead with."""
-    resp = await _public_scan_repo(owner, repo, request, force, behavioral, db)
+    resp = await _public_scan_repo(owner, repo, request, force, behavioral, db, wait=wait)
+    if isinstance(resp, JSONResponse):
+        return resp  # 202: still checking
     try:
         coll = await _skill_collection_data(owner, repo)
         if coll is not None:
@@ -2917,6 +2957,7 @@ async def _public_scan_repo(
         "that feeds the trust score by fixed rules.",
     ),
     db: AsyncSession = Depends(get_db),
+    wait: object = None,
 ) -> PublicScanResponse:
     """Scan a GitHub repo and return trust tier with recommended rate limits.
 
@@ -3007,94 +3048,71 @@ async def _public_scan_repo(
             headers={"Retry-After": "120"},
         )
 
-    # --- Self-imposed fresh-scan rate limit (per-IP + global) ----------------
-    # Only reached on a cache-miss / force=true scan, so cached (1h) hits never
-    # consume it. Protects the shared GitHub budget from user traffic. Skipped
-    # for internal callers (no request — the watch/badge/wallet paths call
-    # public_scan() directly and have their own caps).
-    if request is not None:
-        from src.api.rate_limit import enforce_fresh_scan_limit
+    # --- The scan: background task, joined by repeat calls ---------------------
+    # The self-imposed fresh-scan rate limit (per-IP + global) is spent only by a call
+    # that starts a scan (cached 1h hits and joins never consume it). It protects the
+    # shared GitHub budget from user traffic; internal callers (no request: the
+    # watch/badge/wallet paths) have their own caps.
+    async def _run() -> dict:
+        from src.github_auth import get_github_token
+        from src.scanner.scan import scan_repo
 
-        await enforce_fresh_scan_limit(request)
-        await _track_checker(request)
+        token = await get_github_token()
+        try:
+            result = await scan_repo(full_name=full_name, stars=0, description="",
+                                     framework="", token=token)
+        except httpx.HTTPError as exc:
+            # A genuine GitHub/upstream network failure — 502 is accurate here.
+            logger.warning("GitHub upstream error scanning %s: %s", full_name, exc)
+            raise _ScanFailedError("Scan failed — GitHub API may be unavailable", 502) \
+                from None
+        if result.error:
+            # A missing / private / empty repo is a client-side "not found" (404), not
+            # an upstream gateway failure (502) — 502 would trip external uptime monitors.
+            low = (result.error or "").lower()
+            not_found = any(s in low for s in (
+                "not found", "may be empty or private", "empty or private",
+                "could not fetch repo tree",
+            ))
+            raise _ScanFailedError(f"Scan error: {result.error}", 404 if not_found else 502)
 
-    # Run scan
-    from src.github_auth import get_github_token
-    from src.scanner.scan import scan_repo
+        data = _scan_result_to_dict(result)
+        await _set_cached(owner, repo, data)
+        # Persist to the community catalog so on-demand scans grow the browsable
+        # dataset (best-effort; its own session, the request's may be closed by now).
+        try:
+            from src.database import async_session
+            async with async_session() as s:
+                await _capture_community_scan(owner, repo, data, s)
+        except Exception:
+            logger.debug("community scan capture failed for %s", full_name, exc_info=True)
+        # Notify outbound webhooks if score changed (fire-and-forget)
+        new_score = data["trust_score"]
+        if new_score != old_score:
+            try:
+                from src.trust.outbound_webhooks import notify_scan_change
 
-    token = await get_github_token()
-    try:
-        # Cap the synchronous scan so a large repo can't hold a uvicorn worker
-        # until nginx cuts the upstream (→ 502). On timeout we degrade
-        # gracefully below instead of hanging the worker.
-        result = await asyncio.wait_for(
-            scan_repo(
-                full_name=full_name,
-                stars=0,
-                description="",
-                framework="",
-                token=token,
-            ),
-            timeout=90,
-        )
-    except asyncio.TimeoutError:
-        logger.warning("Public scan timed out for %s after 90s", full_name)
-        # Prefer serving a stale cached result over failing the request.
-        stale = await _get_cached(owner, repo)
-        if stale:
-            payload = _build_scan_payload(full_name, stale)
+                asyncio.create_task(notify_scan_change(full_name, new_score, old_score))
+            except Exception:
+                logger.debug("Failed to dispatch scan-change webhook for %s", full_name)
+        return data
+
+    data = await _fresh_scan(key=f"github/{full_name}", run=_run,
+                             wait=_scan_wait(wait, request, 90), request=request,
+                             cache_owner=owner, cache_repo=repo)
+    if data is None:
+        # Still running. Prefer the existing result (a forced re-scan of a repo we
+        # already hold) over "checking", as before; the new one lands in the cache.
+        if old_cached:
+            payload = _build_scan_payload(full_name, old_cached)
             jws = create_jws(canonicalize(payload))
             entity_trust = await _get_entity_trust(full_name, db)
-            trust_envelope = await _build_scan_envelope(owner, repo, stale, db)
+            trust_envelope = await _build_scan_envelope(owner, repo, old_cached, db)
             return _package_response(
-                full_name, stale, jws, cached=True,
+                full_name, old_cached, jws, cached=True,
                 entity_trust=entity_trust, trust_envelope=trust_envelope,
             )
-        # No cache to fall back on — tell the caller to retry, don't hang or 502.
-        raise HTTPException(
-            503,
-            "Scan is taking longer than expected — please retry shortly.",
-            headers={"Retry-After": "30"},
-        )
-    except httpx.HTTPError as exc:
-        # A genuine GitHub/upstream network failure — 502 is accurate here.
-        logger.warning("GitHub upstream error scanning %s: %s", full_name, exc)
-        raise HTTPException(502, "Scan failed — GitHub API may be unavailable")
-    except Exception:
-        # An internal bug, not an upstream outage — don't mislabel it a 502.
-        logger.exception("Public scan internal error for %s", full_name)
-        raise HTTPException(500, "Internal error while scanning repository")
-
-    if result.error:
-        # A missing / private / empty repo is a client-side "not found" (404), not an
-        # upstream gateway failure (502) — 502 would trip external uptime monitors.
-        low = (result.error or "").lower()
-        not_found = any(s in low for s in (
-            "not found", "may be empty or private", "empty or private",
-            "could not fetch repo tree",
-        ))
-        raise HTTPException(404 if not_found else 502, f"Scan error: {result.error}")
-
-    # Convert to dict and cache
-    data = _scan_result_to_dict(result)
-    await _set_cached(owner, repo, data)
-
-    # Persist to the community catalog so on-demand scans grow the browsable
-    # dataset (best-effort — never let this break a scan response).
-    try:
-        await _capture_community_scan(owner, repo, data, db)
-    except Exception:
-        logger.debug("community scan capture failed for %s", full_name, exc_info=True)
-
-    # Notify outbound webhooks if score changed (fire-and-forget)
-    new_score = data["trust_score"]
-    if new_score != old_score:
-        try:
-            from src.trust.outbound_webhooks import notify_scan_change
-
-            asyncio.create_task(notify_scan_change(full_name, new_score, old_score))
-        except Exception:
-            logger.debug("Failed to dispatch scan-change webhook for %s", full_name)
+        return _still_checking(request, {"surface": "github", "repo": full_name})
 
     # #8 — detect tool-definition drift vs the previous scan (rug-pull signal)
     drift = _compute_tool_drift(old_cached, data)

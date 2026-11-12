@@ -1,4 +1,5 @@
-"""A slow first package scan answers 202 {state: checking} instead of a 503.
+"""A slow first scan answers 202 {state: checking} instead of a 503 (package, repo,
+skill and MCP-endpoint routes).
 
 claude-mem and hyperframes took ~100 s on their first scan and hit the old 90 s cap as a
 503. The scan now runs in the background: the request waits up to ``wait`` seconds, then
@@ -48,11 +49,11 @@ class Harness:
     async def set_cached(self, owner, repo, data):
         self.cache[f"{owner}/{repo}"] = data
 
-    async def scan_package(self, surface, name, version=None):
+    async def scan_package(self, *a, **kw):
         self.scans += 1
         if self.delay:
             await self.release.wait()
-        return SimpleNamespace(error=self.error)
+        return SimpleNamespace(error=self.error, per_skill={})
 
     async def charge(self, request):
         self.charges += 1
@@ -67,6 +68,20 @@ class Harness:
             patch.object(psr, "create_jws", new=lambda b: "jws"),
             patch.object(psr, "_redis_or_none", new=AsyncMock(return_value=redis)),
             patch("src.scanner.scan.scan_package", new=self.scan_package),
+            patch("src.scanner.scan.scan_repo", new=self.scan_package),
+            patch("src.scanner.scan.scan_skill", new=self.scan_package),
+            patch("src.scanner.scan.scan_mcp", new=self.scan_package),
+            patch("src.github_auth.get_github_token", new=AsyncMock(return_value="t")),
+            patch("src.jobs.scan_health.is_github_budget_low",
+                  new=AsyncMock(return_value=False)),
+            patch("src.ssrf.validate_url_https", new=lambda u, **kw: u),
+            patch.object(psr, "_get_stale_cached", new=AsyncMock(return_value=None)),
+            patch.object(psr, "_behavioral_block", new=AsyncMock(return_value=None)),
+            patch.object(psr, "_get_entity_trust", new=AsyncMock(return_value=None)),
+            patch.object(psr, "_build_scan_envelope", new=AsyncMock(return_value=None)),
+            patch.object(psr, "_skill_collection_data", new=AsyncMock(return_value=None)),
+            patch.object(psr, "_mcp_live_probe_block", new=AsyncMock(return_value=None)),
+            patch.object(psr, "_record_scan_history", new=AsyncMock()),
             patch("src.api.rate_limit.enforce_fresh_scan_limit", new=self.charge),
         ]
 
@@ -190,7 +205,7 @@ async def test_a_call_on_another_worker_polls_the_cache_instead_of_scanning():
 @pytest.mark.asyncio
 async def test_another_workers_failed_scan_is_reported():
     h = Harness()
-    ps = h.patches(redis=FakeRedis(error="Package not found"))
+    ps = h.patches(redis=FakeRedis(error="404|Scan error: Package not found"))
     _enter(ps)
     try:
         with pytest.raises(HTTPException) as e:
@@ -213,3 +228,90 @@ async def test_mcp_connector_reads_a_202_as_still_checking(monkeypatch):
         await ms._get("/public/scan/package/npm/claude-mem")
     with pytest.raises(ms.ScanStillChecking):
         await ms._get("/public/scan/package/npm/claude-mem")
+
+
+# ── the repo, skill and MCP-endpoint routes give the same shape ───────────────────
+
+async def _repo(wait=0, force=False):
+    return await psr.public_scan(owner="acme", repo="bigrepo", request=object(), force=force,
+                                 behavioral=False, wait=wait, db=None)
+
+
+async def _skill(wait=0):
+    return await psr.scan_skill_endpoint(owner="acme", repo="skills", request=object(),
+                                         force=False, behavioral=False, wait=wait, db=None)
+
+
+async def _mcp(wait=0):
+    return await psr.scan_mcp_endpoint(endpoint="https://mcp.example.com/mcp",
+                                       request=object(), force=False, probe=False,
+                                       wait=wait, db=None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("call,fields", [
+    (_repo, {"surface": "github", "repo": "acme/bigrepo"}),
+    (_skill, {"surface": "skill", "name": "acme/skills"}),
+    (_mcp, {"surface": "mcp", "endpoint": "https://mcp.example.com/mcp"}),
+])
+async def test_every_scan_route_answers_checking_then_the_result(call, fields):
+    h = Harness(delay=1)
+    ps = h.patches()
+    _enter(ps)
+    try:
+        first = await call()
+        assert first.status_code == 202
+        body = json.loads(first.body)
+        assert body["state"] == "checking" and body["retry_after"] == 15
+        assert {k: body[k] for k in fields} == fields
+        assert first.headers["retry-after"] == "15"
+        assert (await call()).status_code == 202
+        assert h.scans == 1 and h.charges == 1
+        h.release.set()
+        await asyncio.sleep(0.05)
+        done = await call()
+        assert done.trust_score == 88
+    finally:
+        _exit(ps)
+
+
+@pytest.mark.asyncio
+async def test_forced_repo_rescan_still_serves_the_held_result_while_running():
+    h = Harness(delay=1)
+    h.cache["acme/bigrepo"] = _data(77)
+    ps = h.patches()
+    _enter(ps)
+    try:
+        r = await _repo(force=True)
+        assert r.trust_score == 77 and r.cached is True
+    finally:
+        h.release.set()
+        await asyncio.sleep(0.01)
+        _exit(ps)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("call,error,code", [
+    (_repo, "Repository not found", 404),
+    (_skill, "No SKILL.md in repo", 404),
+    (_mcp, "handshake refused", 422),
+])
+async def test_route_errors_keep_their_status(call, error, code):
+    h = Harness(error=error)
+    ps = h.patches()
+    _enter(ps)
+    try:
+        with pytest.raises(HTTPException) as e:
+            await call(wait=5)
+        assert e.value.status_code == code
+    finally:
+        _exit(ps)
+
+
+def test_internal_callers_keep_the_old_cap_and_503():
+    assert psr._scan_wait(None, None, 90) == 90
+    assert psr._scan_wait(7, object(), 90) == 7
+    assert psr._scan_wait(None, object(), 90) == psr._FIRST_SCAN_WAIT_DEFAULT
+    with pytest.raises(HTTPException) as e:
+        psr._still_checking(None, {})
+    assert e.value.status_code == 503
