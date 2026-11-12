@@ -17,6 +17,8 @@ import { DECISIONS, TRUST_TIERS } from '../../components/trust/gradeSystem'
 import { rp } from '../basePath'
 import { Reveal } from '../components/motion'
 import StartHerePanel from './AdminStartHere'
+import SummaryStrip from './AdminSummaryStrip'
+import { GlossarySection, Info } from './AdminGlossary'
 import CampaignPanel from './AdminCampaignPanel'
 import PostStudioTab from './AdminPostStudio'
 import { AdminAccessPanel, useAdminAccess, ViewOnlyNotice } from './adminAccess'
@@ -327,7 +329,7 @@ function BehavioralPanel() {
         <Stat label="Sandbox runs" value={fmt(runs)} series={s.runs} />
         <Stat label="Servers actually exercised" value={fmt(b.exercised)} sub={runs ? `${pctOf(b.exercised ?? 0, runs)} of runs: it started and its tools were called` : undefined} series={s.exercised} />
         <Stat label="Runs with findings" value={fmt(b.with_findings)} />
-        <Stat label="Canary leaks" value={fmt(b.canary_leaks)} sub="a fake credential was sent out over the network" />
+        <Stat label={<>Canary leaks<Info k="canary" /></>} value={fmt(b.canary_leaks)} sub="a fake credential was sent out over the network" />
         <Stat label="Turned away (all slots busy)" value={fmt(b.slot_rejected)} sub={attempts ? `${pctOf(b.slot_rejected ?? 0, attempts)} of attempts` : undefined} series={s.slot_rejected} />
         <Stat label="Killed (out of time or memory)" value={fmt(b.killed)} sub={runs ? `${pctOf(b.killed ?? 0, runs)} of runs` : undefined} />
         <Stat label="Re-used a recent result" value={b.cache_hit_rate != null ? `${Math.round(b.cache_hit_rate * 100)}%` : '—'} sub={`${fmt(b.cache_hits)} re-used · ${fmt(b.cache_misses)} ran fresh`} />
@@ -411,7 +413,7 @@ function ScanKindsPanel({ data }: { data?: Metrics }) {
   const scope = useMetricsScope()
   const k = data?.scan_kinds || {}
   return (
-    <Section title="Scan requests by kind" scope={scope.label} note={`Answered public scan-API requests, by what was asked: checks per kind, with README badge / card / link-preview images and other reads split out. Preflight runs and drift-feed reads are counted here too. Counted from ${COUNTED_FROM.kinds}; the "Public scan requests by caller type" chart above still mixes all of them.`}>
+    <Section title="Scan requests by kind" scope={scope.label} note={`Answered public scan-API requests, by what was asked: checks per kind, with README badge / card / link-preview images and other reads split out. Preflight runs and drift-feed reads are counted here too. Counted from ${COUNTED_FROM.kinds}; the "Public scan requests by caller type" chart in Adoption trend still mixes all of them.`}>
       <div className="grid md:grid-cols-3 gap-3">
         <BarList title="Checks" rows={k.checks || {}} labels={KIND_LABEL} empty="No checks counted yet." gradient="linear-gradient(90deg,#2dd4bf,#818cf8)" />
         <BarList title="Images (badges, cards, previews)" rows={k.renders || {}} labels={KIND_LABEL} empty="No images counted yet." gradient="linear-gradient(90deg,#fbbf24,#f59e0b)" />
@@ -525,7 +527,7 @@ function GrowthPanel() {
   return (
     <Section title="Growth — Certified, activation, downloads, search" scope={`${label}${firstRow && firstRow > dayList[0] ? ` · daily rows exist from ${dayLabel(firstRow)} (days before are blank, not zero)` : ''}`} note="Daily rows written by the 6-hour job from Nov 11 on. x402 is left out of the catalog mix, as on the site.">
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <Stat label={`Certified · ${dayLabel(snapDay)}`} value={snap ? fmt(snap.certified) : '—'} sub={<>{snap ? `of ${fmt(snap.total)} tools` : 'no daily row yet'}{now ? ` · right now: ${fmt(now.certified)}` : ''}</>} tip="The card and the chart legend read the same daily row (the last complete day). 'Right now' is the live count, which can be a few tools apart." />
+        <Stat label={<>Certified · {dayLabel(snapDay)}<Info k="certified" /></>} value={snap ? fmt(snap.certified) : '—'} sub={<>{snap ? `of ${fmt(snap.total)} tools` : 'no daily row yet'}{now ? ` · right now: ${fmt(now.certified)}` : ''}</>} tip="The card and the chart legend read the same daily row (the last complete day). 'Right now' is the live count, which can be a few tools apart." />
         {DECISIONS.map((d) => <Stat key={d.value} label={`${d.phrase} · ${dayLabel(snapDay)}`} value={snap ? fmt(snap[d.value]) : '—'} sub={<>{snap && snap.total ? pctOf(snap[d.value] ?? 0, snap.total) : ''}{now ? ` · right now: ${fmt(now[d.value])}` : ''}</>} />)}
         <Stat label={`npm downloads · 7 days to ${dayLabel(dlDay)}`} value={fmtOrDash(dlRow?.npm_week)} sub={<>agentavow-trust{g.downloads_latest?.npm_week != null ? ` · newest fetch: ${fmt(g.downloads_latest.npm_week)}` : ''}</>} />
         <Stat
@@ -552,7 +554,7 @@ function GrowthPanel() {
           <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Claude Code activation by entrypoint · {rangeLabel(dayList)}</div>
           {hasEp ? (
             <table className="w-full text-[12.5px]">
-              <thead><tr className="text-left font-mono text-[11px] uppercase tracking-wide text-text-muted/70"><th className="py-1 pr-3">Entrypoint</th><th className="py-1 pr-3 text-right">Connecting (days of use)</th><th className="py-1 pr-3 text-right">Checked (days of use)</th><th className="py-1 text-right">Share</th></tr></thead>
+              <thead><tr className="text-left font-mono text-[11px] uppercase tracking-wide text-text-muted/70"><th className="py-1 pr-3">Entrypoint</th><th className="py-1 pr-3 text-right">Connecting (days of use<Info k="days_of_use" />)</th><th className="py-1 pr-3 text-right">Checked (days of use)</th><th className="py-1 text-right">Share</th></tr></thead>
               <tbody>
                 {Object.keys(EP_LABEL).map((ep) => {
                   const c = tsum(`cc_machines_${ep}`), k = tsum(`checked_machines_${ep}`)
@@ -635,8 +637,8 @@ function ClaudeTrafficPanel() {
     <Section title="Claude traffic — day by day" scope={`${label} · snapshot rows for ${covered} of the ${w.days} days`} note="Traffic that starts in Anthropic's apps, one row per UTC day, written by the nightly snapshot at 00:40 UTC for the day before and kept for good (the server log itself only holds four days). Today never appears: its row is written after it ends. 'Machines checked' is the headline usage number: distinct machines where the plugin checked something on its own that day, at session start or when a tool was being installed, leaving out the owner's test machines. 'Machines connecting' is distinct addresses that opened the plugin's MCP server from Claude Code (installs, not use). Both come from the server log, NOT the tool-call counters in the panels above. A row marked partial did not cover all 24 hours." right={toggle}>
       <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Latest complete day with a snapshot: {day}{latest?.log_complete === 0 ? ' (partial)' : ''}</div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-3">
-        <Stat label={`Machines checked · ${day}`} value={fmt(latest?.checked_machines_excl_owner)} sub={`${fmt(latest?.preinstall_machines)} at install time · owner excluded`} series={col('checked_machines_excl_owner')} />
-        <Stat label={`Machines connecting · ${day}`} value={fmt(latest?.cc_machines)} sub={`${fmt(latest?.cc_new_machines_30d)} new`} series={col('cc_machines')} />
+        <Stat label={<>Machines checked · {day}<Info k="daily_machines" /></>} value={fmt(latest?.checked_machines_excl_owner)} sub={`${fmt(latest?.preinstall_machines)} at install time · owner excluded`} series={col('checked_machines_excl_owner')} />
+        <Stat label={<>Machines connecting · {day}<Info k="connecting" /></>} value={fmt(latest?.cc_machines)} sub={`${fmt(latest?.cc_new_machines_30d)} new`} series={col('cc_machines')} />
         <Stat label={`claude.ai connector requests · ${day}`} value={fmt(latest?.claudeai_reqs)} sub="every HTTP request through Anthropic's proxy: handshakes, tool lists and calls" series={col('claudeai_reqs')} />
         <Stat label={`Hook machines · ${day}`} value={fmt(latest?.hook_machines_nginx)} sub={`${fmt(latest?.hook_reqs)} scans · most common plugin version ${latest?.hook_top_version ?? '—'}`} series={col('hook_machines_nginx')} />
         <Stat label={`Claude Code tool calls · ${day}`} value={fmt(latest?.calls_claude_code)} sub={`${fmt(latest?.callers_claude_code)} distinct machines`} series={col('calls_claude_code')} />
@@ -703,7 +705,7 @@ function LandingTrendPanel() {
     { key: 'copy-paid', label: 'Copied install command · from ads', color: '#f59e0b', dashed: true, data: dayList.map((d) => get(d, 'copy_plugin_cmd_paid')), today: get(t, 'copy_plugin_cmd_paid') },
   ]
   return (
-    <Section title="Landings and install-command copies — day by day" scope={label} note="Visits per UTC day that landed on a landing page, and that copied the /plugin install command, split by whether the visit first arrived from an ad (its link tags say paid / cpc / ppc / display / paid-social, or it came from reddit, meta, facebook or instagram). Bots left out. Read it next to machines protected.">
+    <Section title={<>Landings and install-command copies — day by day<Info k="copy" /></>} scope={label} note="Visits per UTC day that landed on a landing page, and that copied the /plugin install command, split by whether the visit first arrived from an ad (its link tags say paid / cpc / ppc / display / paid-social, or it came from reddit, meta, facebook or instagram). Bots left out. Read it next to machines protected.">
       <div className="glass rounded-2xl p-5">
         <TrendChart days={dayList} lines={lines} yLabel="Visits per day" empty="No landings in this window yet." />
       </div>
@@ -750,6 +752,8 @@ function MetricsTab() {
   return (
     <DashWindowContext.Provider value={win}>
       <WindowBar days={days} setDays={setDays} includeToday={includeToday} setIncludeToday={setIncludeToday} />
+      <SummaryStrip />
+      <GlossarySection />
       <MetricsBody />
     </DashWindowContext.Provider>
   )
@@ -793,9 +797,9 @@ function MetricsBody() {
           <Stat label="Badge fetches" value={fmt(h.badge_fetches)} sub={`${fmt(h.readme_renders)} in READMEs${tsf('badge_fetches')}`} series={s.badge_fetches} />
           <Stat label="Watches created" value={fmt(h.watches_created)} sub={tsf('watches_created').replace(/^ · /, '') || undefined} series={s.watches_created} />
           <Stat label="Unique checkers" value={fmt(h.unique_checkers)} sub={`distinct people and agents who ran a check, each counted once over the window${tsf('unique_checkers')}`} />
-          <Stat label="Browser visits (one per person per day)" value={fmt(h.unique_humans)} sub={`not unique people: a person on 3 days counts 3 times. Counted privately, nothing identifying stored${tsf('unique_humans')}`} />
+          <Stat label={<>Browser visits (one per person per day)<Info k="visit" /></>} value={fmt(h.unique_humans)} sub={`not unique people: a person on 3 days counts 3 times. Counted privately, nothing identifying stored${tsf('unique_humans')}`} />
           <Stat label="Adoption score lookups" value={fmt(h.adoption_hits)} sub={tsf('adoption_hits').replace(/^ · /, '') || undefined} series={s.adoption_hits} />
-          <Stat label="One-click install clicks" value={fmt(h.install_clicks)} sub={`${installSplit(data?.installs_by_client) ?? ''} · split by app from ${COUNTED_FROM.installSplit}; earlier clicks are in the total only${tsf('install_clicks')}`} series={s.install_clicks} />
+          <Stat label={<>One-click install clicks<Info k="install_click" /></>} value={fmt(h.install_clicks)} sub={`${installSplit(data?.installs_by_client) ?? ''} · split by app from ${COUNTED_FROM.installSplit}; earlier clicks are in the total only${tsf('install_clicks')}`} series={s.install_clicks} />
           <Stat label="Forced re-scans" value={fmt(h.force_rescans)} sub={`someone asked for a fresh result instead of the 1-hour cache${tsf('force_rescans')}`} series={s.force_rescans} />
           <Stat label="API-key requests" value={fmt(h.api_calls)} sub="requests signed in with an API key. The public scan API needs no key, so scans don't count here" series={s.api_calls} />
           <Stat label="Formal attestations stored" value={fmt(h.attestations_issued)} sub="agent-to-agent attestations. Every scan's signed result is made per request and not stored, so scans don't count here" />
@@ -803,7 +807,7 @@ function MetricsBody() {
           <Stat label="Verified claims" value={fmt(data?.claims?.verified_total)} sub={`all time · ${fmt(data?.claims?.public)} public · ${fmt(data?.claims?.private)} private`} />
           <Stat label="Active verification badges" value={fmt(data?.attestations?.verification_badges_active)} sub="right now" />
           <Stat label="MCP connector calls" value={fmt(h.mcp_calls)} sub={`${fmt(data?.mcp?.checks_window)} hand-run checks · ${fmt(data?.mcp?.errors_window)} errors${tsf('mcp_calls')}`} series={s.mcp_calls} />
-          <Stat label="MCP callers · days of use" value={fmt(h.mcp_callers)} sub={`${fmt(realCallers)} people and agents · ${fmt(crawlerCallers)} crawlers and monitors. Each machine counts once per day it called`} series={s.mcp_callers} />
+          <Stat label={<>MCP callers · days of use<Info k="days_of_use" /></>} value={fmt(h.mcp_callers)} sub={`${fmt(realCallers)} people and agents · ${fmt(crawlerCallers)} crawlers and monitors. Each machine counts once per day it called`} series={s.mcp_callers} />
           <Stat label="Plugin hook scans" value={fmt(h.hook_scans)} sub={`${fmt(h.hook_machines)} days of use · session-start and install-time hooks (install-time counted from ${COUNTED_FROM.installTimeHook})${tsf('hook_scans')}`} series={s.hook_scans} />
           <Stat label="Private repo scans (GitHub App)" value={fmt(data?.private_repos?.app_scans)} sub={`all time · ${fmt(data?.private_repos?.app_installs_active)} installs · ${fmt(data?.private_repos?.published_to_search)} published`} />
           <Stat label="One-time private scans" value={fmt(data?.private_repos?.onetime_scans_window)} sub="scans with a token supplied once, in the window" />
@@ -844,7 +848,7 @@ function MetricsBody() {
                 const n = answers[d.value] ?? 0
                 return <Stat key={d.value} label={d.phrase} value={fmt(n)} sub={answered ? `${pctOf(n, answered)} of answers` : undefined} />
               })}
-              <Stat label="Hand-run checks" value={fmt(mcp.checks_window)} sub="calls minus about_agentavow overviews and owner machines" />
+              <Stat label={<>Hand-run checks<Info k="hand_run" /></>} value={fmt(mcp.checks_window)} sub="calls minus about_agentavow overviews and owner machines" />
             </div>
             <div className="glass rounded-2xl p-5 mt-3">
               <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Calls by tool</div>
@@ -867,7 +871,7 @@ function MetricsBody() {
                 <div className="space-y-1">
                   <div className="flex justify-between text-[11px] font-mono uppercase tracking-wide text-text-muted/60 pb-1">
                     <span>Surface</span>
-                    <span className="flex gap-4"><span className="w-16 text-right">Calls</span><span className="w-20 text-right" title="Distinct callers per day, added up over the window">Callers (days of use)</span><span className="w-16 text-right">Errors</span><span className="w-28 text-right">Safe/Review/No</span></span>
+                    <span className="flex gap-4"><span className="w-16 text-right">Calls</span><span className="w-20 text-right" title="Distinct callers per day, added up over the window">Callers (days of use)<Info k="days_of_use" /></span><span className="w-16 text-right">Errors</span><span className="w-28 text-right">Safe/Review/No</span></span>
                   </div>
                   {rowsBySurface.map((r) => (
                     <div key={r.s} className={`flex justify-between text-[12.5px] py-0.5${r.calls === 0 ? ' opacity-50' : ''}`}>
@@ -937,60 +941,9 @@ function MetricsBody() {
 
       <PageActionsPanel />
 
-      <ScanKindsPanel data={data} />
-
       <WatchAlertsPanel data={data} today={today} />
 
       <GrowthPanel />
-
-      <BehavioralPanel />
-
-      <Section title="Who is calling — people, agents, our clients, automation" scope={scope.label} note={`Public scan requests and badge fetches split by the caller's User-Agent. 'AgentAvow clients' is our own plugin hooks, npm/Python gates and SDK adapters (their own row from ${COUNTED_FROM.ourClients}; before that the plugin hook counted as an agent and the rest as automated). The GitHub Action sends a bare curl User-Agent, so it still lands in 'automated'. 'Automated' is crawlers, uptime monitors and scripts and is not usage. Honest usage = people + agents + our clients.`}>
-        <div className="grid md:grid-cols-2 gap-4">
-          {([['scan_requests', 'Scan requests'], ['badge_fetches', 'Badge fetches']] as const).map(([key, title]) => {
-            const q = data?.traffic_quality?.[key] || {}
-            const total = q.total ?? 0
-            const rows: [string, number, string][] = [
-              ['People (browser)', q.human ?? 0, 'linear-gradient(90deg,#2dd4bf,#818cf8)'],
-              ['Agents (Claude, ChatGPT, Cursor, README badges)', q.agent ?? 0, 'linear-gradient(90deg,#818cf8,#e879f9)'],
-              ['AgentAvow clients (hooks, gates, SDKs)', q.agentavow ?? 0, 'linear-gradient(90deg,#e879f9,#f59e0b)'],
-              ['Automated (crawlers, monitors, scripts)', q.automated ?? 0, 'linear-gradient(90deg,#64748b,#94a3b8)'],
-            ]
-            const real = (q.human ?? 0) + (q.agent ?? 0) + (q.agentavow ?? 0)
-            return (
-              <div key={key} className="glass rounded-2xl p-5">
-                <div className="flex justify-between items-baseline mb-3">
-                  <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted">{title}</div>
-                  <div className="text-[12.5px] tabular-nums text-text-muted">{fmt(real)} real <span className="text-text-muted/60">of {fmt(total)}</span></div>
-                </div>
-                {total > 0 ? rows.map(([rowLabel, n, bg]) => (
-                  <div key={rowLabel} className="mb-2">
-                    <div className="flex justify-between text-[12.5px] mb-1"><span className="text-text-muted">{rowLabel}</span><span className="tabular-nums text-text-muted/70">{fmt(n)} <span className="text-[11px]">({pctOf(n, total)})</span></span></div>
-                    <div className="h-2 rounded-full bg-surface overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(n / total) * 100}%`, background: bg }} /></div>
-                  </div>
-                )) : (
-                  <p className="text-[12.5px] text-text-muted/70">No classified requests in this window yet.</p>
-                )}
-              </div>
-            )
-          })}
-        </div>
-        {/* The counting rules and the date they changed — so the step down in every
-            usage line on that date reads as a rule change, not a drop. */}
-        {data?.baseline?.rules?.length ? (
-          <div className="glass rounded-2xl p-5 mt-4">
-            <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">
-              Counting rules · since {data.baseline.rules_changed_on ?? '—'}
-            </div>
-            <ul className="space-y-1">
-              {data.baseline.rules.map((rule) => (
-                <li key={rule} className="text-[12.5px] text-text-muted/80 pl-3 border-l border-primary/30">{rule}</li>
-              ))}
-            </ul>
-            <p className="text-[11px] text-text-muted/60 mt-2">Every usage number above steps down on that date. That is the rules changing, not usage.</p>
-          </div>
-        ) : null}
-      </Section>
 
       <Section title="Product funnel — where users drop off" scope={scope.label} note="Repos scanned → watches created → ownership claims, with the share that made it from each step to the next.">
         <div className="glass rounded-2xl p-6 flex flex-col gap-3">
@@ -1011,7 +964,7 @@ function MetricsBody() {
       </Section>
 
       <div className="grid md:grid-cols-2 gap-4">
-        <Section title="Answers for community-scanned repos" scope={`Right now · the ${fmt(communityTotal)} repos people have scanned on demand`} note="Not the whole catalog: the full catalog's answer mix is in Growth. The three-phrase answer each tool leads with, then the trust tiers underneath as detail.">
+        <Section title={<>Answers for community-scanned repos<Info k="answer" /></>} scope={`Right now · the ${fmt(communityTotal)} repos people have scanned on demand`} note="Not the whole catalog: the full catalog's answer mix is in Growth. The three-phrase answer each tool leads with, then the trust tiers underneath as detail.">
           <div className="glass rounded-2xl p-5 flex flex-col gap-2">
             {/* The headline: Safe to connect / Review before you connect / Do not connect
                 (metrics_dashboard_router._DECISION_CASE, from the stored critical/high counts + score). */}
@@ -1051,17 +1004,79 @@ function MetricsBody() {
         </div>
       </Section>
 
-      <Section title="x402 listings" scope="Right now" note="Paid x402 endpoints, scored from their public Bazaar listing alone (never the code). Kept out of every catalog total. The answer mix covers listings the site shows; testnet-only listings can't take real payment and are hidden from default views.">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-          <Stat label="Listings" value={fmt(data?.x402?.listings)} />
-          <Stat label="Scored" value={fmt(data?.x402?.scored)} />
-          {DECISIONS.map((d) => <Stat key={d.value} label={d.phrase} value={fmt(data?.x402?.answers?.[d.value])} />)}
-          <Stat label="Testnet (hidden)" value={fmt(data?.x402?.testnet_hidden)} />
-        </div>
-      </Section>
-
       {isAdmin && <AdminAccessPanel />}
+
+      <details className="mt-12 glass rounded-2xl px-5 py-4">
+        <summary className="cursor-pointer text-[14px] font-semibold select-none">For engineering <span className="font-normal text-[12.5px] text-text-muted">· who is calling, counting rules, scan requests by kind, the behavioral sandbox and its eval, x402 listings</span></summary>
+        <WhoIsCallingPanel data={data} />
+        <CountingRulesPanel data={data} />
+        <ScanKindsPanel data={data} />
+        <BehavioralPanel />
+        <Section title="x402 listings" scope="Right now" note="Paid x402 endpoints, scored from their public Bazaar listing alone (never the code). Kept out of every catalog total. The answer mix covers listings the site shows; testnet-only listings can't take real payment and are hidden from default views.">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <Stat label="Listings" value={fmt(data?.x402?.listings)} />
+            <Stat label="Scored" value={fmt(data?.x402?.scored)} />
+            {DECISIONS.map((d) => <Stat key={d.value} label={d.phrase} value={fmt(data?.x402?.answers?.[d.value])} />)}
+            <Stat label="Testnet (hidden)" value={fmt(data?.x402?.testnet_hidden)} />
+          </div>
+        </Section>
+      </details>
     </>
+  )
+}
+
+/** Who is calling (engineering detail): scan requests and badge fetches by caller type. */
+function WhoIsCallingPanel({ data }: { data?: Metrics }) {
+  const scope = useMetricsScope()
+  return (
+    <Section title="Who is calling — people, agents, our clients, automation" scope={scope.label} note={`Public scan requests and badge fetches split by the caller's User-Agent. 'AgentAvow clients' is our own plugin hooks, npm/Python gates and SDK adapters (their own row from ${COUNTED_FROM.ourClients}; before that the plugin hook counted as an agent and the rest as automated). The GitHub Action sends a bare curl User-Agent, so it still lands in 'automated'. 'Automated' is crawlers, uptime monitors and scripts and is not usage. Honest usage = people + agents + our clients.`}>
+      <div className="grid md:grid-cols-2 gap-4">
+        {([['scan_requests', 'Scan requests'], ['badge_fetches', 'Badge fetches']] as const).map(([key, title]) => {
+          const q = data?.traffic_quality?.[key] || {}
+          const total = q.total ?? 0
+          const rows: [string, number, string][] = [
+            ['People (browser)', q.human ?? 0, 'linear-gradient(90deg,#2dd4bf,#818cf8)'],
+            ['Agents (Claude, ChatGPT, Cursor, README badges)', q.agent ?? 0, 'linear-gradient(90deg,#818cf8,#e879f9)'],
+            ['AgentAvow clients (hooks, gates, SDKs)', q.agentavow ?? 0, 'linear-gradient(90deg,#e879f9,#f59e0b)'],
+            ['Automated (crawlers, monitors, scripts)', q.automated ?? 0, 'linear-gradient(90deg,#64748b,#94a3b8)'],
+          ]
+          const real = (q.human ?? 0) + (q.agent ?? 0) + (q.agentavow ?? 0)
+          return (
+            <div key={key} className="glass rounded-2xl p-5">
+              <div className="flex justify-between items-baseline mb-3">
+                <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted">{title}</div>
+                <div className="text-[12.5px] tabular-nums text-text-muted">{fmt(real)} real <span className="text-text-muted/60">of {fmt(total)}</span></div>
+              </div>
+              {total > 0 ? rows.map(([rowLabel, n, bg]) => (
+                <div key={rowLabel} className="mb-2">
+                  <div className="flex justify-between text-[12.5px] mb-1"><span className="text-text-muted">{rowLabel}</span><span className="tabular-nums text-text-muted/70">{fmt(n)} <span className="text-[11px]">({pctOf(n, total)})</span></span></div>
+                  <div className="h-2 rounded-full bg-surface overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(n / total) * 100}%`, background: bg }} /></div>
+                </div>
+              )) : (
+                <p className="text-[12.5px] text-text-muted/70">No classified requests in this window yet.</p>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </Section>
+  )
+}
+
+/** The counting rules and the date they changed, so the step down in every usage line
+ *  on that date reads as a rule change, not a drop. */
+function CountingRulesPanel({ data }: { data?: Metrics }) {
+  if (!data?.baseline?.rules?.length) return null
+  return (
+    <Section title="Counting rules" scope={`In force since ${dayLabel(data.baseline.rules_changed_on)}`} note="What counts as usage, and what doesn't. Every usage number steps down on that date: that is the rules changing, not usage.">
+      <div className="glass rounded-2xl p-5">
+        <ul className="space-y-1">
+          {data.baseline.rules.map((rule) => (
+            <li key={rule} className="text-[12.5px] text-text-muted/80 pl-3 border-l border-primary/30">{rule}</li>
+          ))}
+        </ul>
+      </div>
+    </Section>
   )
 }
 

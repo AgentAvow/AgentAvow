@@ -6,6 +6,8 @@ import { useQuery } from '@tanstack/react-query'
 
 import api from '../../lib/api'
 import { liveListings, pendingListings } from './adminListings'
+import { Info } from './AdminGlossary'
+import type { GlossaryKey } from './adminGlossaryTerms'
 import { dayLabel, pctOf, rangeLabel, useDashWindow, useWindowLabel } from './adminMetricsUtil'
 
 interface Row {
@@ -38,11 +40,11 @@ const handRunChecks = (r: Row) =>
 /** Raw tool calls for a day before the checks counter existed (three surfaces only). */
 const rawCalls = (r: Row) => (r.calls_claude_code ?? 0) + (r.calls_claude ?? 0) + (r.calls_chatgpt ?? 0)
 
-function Card({ label, value, meaning, tip, children }: { label: string; value: string; meaning: ReactNode; tip?: string; children?: ReactNode }) {
+function Card({ label, k, value, meaning, tip, children }: { label: string; k?: GlossaryKey; value: string; meaning: ReactNode; tip?: string; children?: ReactNode }) {
   return (
     <div className="glass rounded-xl p-4" title={tip}>
       <div className="text-[12.5px] font-semibold text-text-muted">
-        {label}{tip && <span className="ml-1 cursor-help text-text-muted/60" aria-label={tip}>ⓘ</span>}
+        {label}{k && <Info k={k} />}{tip && <span className="ml-1 cursor-help text-text-muted/60" aria-label={tip}>ⓘ</span>}
       </div>
       <div className="mt-1 text-2xl font-extrabold tabular-nums">{value}</div>
       <p className="mt-1 text-[12px] text-text-muted">{meaning}</p>
@@ -93,13 +95,15 @@ export default function StartHerePanel() {
       </p>
       <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         <Card
-          label={`Claude Code machines protected · 7 days to ${dayLabel(latest?.day)}`}
+          label={`Claude Code machines protected · unique, 7 days to ${dayLabel(latest?.day)}`}
+          k="protected"
           value={protectedMachines != null ? `${protectedMachines.toLocaleString()}${share}` : 'Not ready'}
           meaning={<>Machines where the Claude Code plugin's session-start or install-time check ran at least once in those 7 days, out of machines connecting.{sevenDayPartial ? ` Partial: this count is complete from ${dayLabel(SEVEN_DAY_COMPLETE_FROM)} (it needs 7 days of data).` : ''}</>}
           tip={`Each machine counts once in the 7 days. Owner machines (data/owner-ips.txt on the host) are excluded. Not counted: hand-run checks in claude.ai, ChatGPT, Cursor, VS Code or Codex; the npm and Python gates; CI. ${cloudExcluded ? 'Machines seen on an Anthropic cloud (remote) entrypoint in the last 30 days are excluded too.' : 'Anthropic cloud addresses (remote Claude Code sessions) are NOT excluded on this row: the snapshot did not split by entrypoint yet, so they inflate both the count and the share.'}`}
         />
         <Card
           label={`New machines · ${rangeLabel(w.complete)}`}
+          k="machine"
           value={sum(rows, (r) => r.cc_new_machines_30d).toLocaleString()}
           meaning="Claude Code machines connecting for the first time in 30 days. Shows whether people are finding us."
           tip="A machine is an IP address, so an address change reads as a new machine. Owner machines are not excluded here. Each machine is new on one day only, so the days add up."
@@ -112,6 +116,7 @@ export default function StartHerePanel() {
         />
         <Card
           label={`Hand-run checks · ${checkDays.length ? rangeLabel(checkDays.map((r) => r.day)) : 'none yet'}`}
+          k="hand_run"
           value={checks.toLocaleString()}
           meaning={<>Checks people asked for by hand in Claude Code, claude.ai, ChatGPT, Cursor, VS Code and Codex. Shows people asking on purpose.{preDays.length > 0 && checkDays.length > 0 ? ` Counted from ${dayLabel(checkDays[0].day)}, when this count started; the ${preDays.length} earlier day${preDays.length === 1 ? '' : 's'} in the window had ${sum(preDays, rawCalls).toLocaleString()} raw tool calls, not included.` : ''}</>}
           tip={`Leaves out about_agentavow (an overview, not a check) and calls from owner machines (METRICS_OWNER_IPS). Owner calls through claude.ai and ChatGPT arrive from the vendor's proxy, so they cannot be excluded. Codex has its own surface only if its User-Agent says "codex" (not yet confirmed); otherwise its calls stay under ChatGPT or "unknown", which is not counted. Same counter as "Hand-run checks" in the MCP panel.`}

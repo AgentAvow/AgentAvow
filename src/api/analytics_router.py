@@ -591,10 +591,15 @@ async def get_campaign_attribution(
     )
 
 
-async def campaign_rows(db: AsyncSession, days: int) -> list[CampaignRow]:
+async def campaign_rows(
+    db: AsyncSession, days: int, offset_days: int = 0,
+) -> list[CampaignRow]:
     """Per-campaign funnel rows (see ``get_campaign_attribution``), largest first.
-    Shared with the admin cost-per-action view."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    Shared with the admin cost-per-action view. ``offset_days`` moves the window back:
+    ``days=7, offset_days=7`` is the 7 days before the last 7 (the previous period)."""
+    now = datetime.now(timezone.utc)
+    end = now - timedelta(days=offset_days)
+    cutoff = end - timedelta(days=days)
     tags = (
         AnalyticsFirstTouch.utm_source,
         AnalyticsFirstTouch.utm_medium,
@@ -605,6 +610,7 @@ async def campaign_rows(db: AsyncSession, days: int) -> list[CampaignRow]:
     sessions = func.count(func.distinct(AnalyticsEvent.session_id))
     joined_in_window = (
         AnalyticsEvent.created_at >= cutoff,
+        AnalyticsEvent.created_at < end,
         AnalyticsEvent.session_id == AnalyticsFirstTouch.session_id,
         _NOT_BOT,
     )
