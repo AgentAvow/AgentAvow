@@ -28,8 +28,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import get_current_entity, require_admin
+from src.api.deps import get_current_entity, require_admin, require_admin_or_viewer
 from src.api.rate_limit import rate_limit_reads, rate_limit_writes
+from src.api.redaction import viewer_safe
 from src.database import get_db
 from src.models import AdSpend, Entity
 
@@ -301,7 +302,9 @@ async def cost_per_action(
     ``/analytics/attribution/campaigns`` (distinct non-bot sessions by first touch).
     A cost is null when its action count is zero. Spend entered without a
     utm_content joins the "(no content)" row."""
-    require_admin(current_entity)
+    # Read-only metric: a viewer may read it (masked). The spend list and every write
+    # above keep require_admin.
+    viewer = require_admin_or_viewer(current_entity)
     from src.api.analytics_router import campaign_rows
 
     want = _clean_tag(campaign) or None
@@ -346,7 +349,7 @@ async def cost_per_action(
     tot_spend = sum((sp["spend"] for sp in spend.values()), Decimal(0))
     tot_lp = sum(f["lp_view"] for f in funnel.values())
     tot_copy = sum(f["copy_plugin_cmd"] for f in funnel.values())
-    return {
+    return viewer_safe({
         "days": days,
         "campaign": want,
         "rows": rows,
@@ -358,4 +361,4 @@ async def cost_per_action(
             "cost_per_lp_view": _cost(tot_spend, tot_lp),
             "cost_per_copy_plugin_cmd": _cost(tot_spend, tot_copy),
         },
-    }
+    }, viewer)

@@ -174,6 +174,11 @@ class Entity(Base):
     # Profile metadata
     is_active = Column(Boolean, default=True, server_default="true", nullable=False)
     is_admin = Column(Boolean, default=False)
+    # Read-only admin: may read the admin Metrics endpoints (require_admin_or_viewer),
+    # never anything that changes state; personal data is masked for them. Migration t31.
+    is_admin_viewer = Column(
+        Boolean, default=False, server_default="false", nullable=False,
+    )
     is_quarantined = Column(Boolean, default=False)
     suspended_until = Column(DateTime(timezone=True), nullable=True)
 
