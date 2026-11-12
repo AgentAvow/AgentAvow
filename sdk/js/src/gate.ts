@@ -14,9 +14,12 @@
 // sandbox `behavioral` block, a `decision`/`verdict` label) can only make the
 // decision stricter, never looser.
 //
-// Three-phrase decision, derived in ONE place (`deriveDecision`) so the rule can
-// be swapped when the API grows a `decision` field:
-//   do_not_connect  a `blockOn` trigger fired (critical finding, sandbox canary
+// Three-phrase decision, derived in ONE place (`deriveDecision`). The finding
+// counts are the SHIPPED headline counts (`critical`, `high`), read as the API's
+// own `decide()` reads them; `critical_all` / `high_all` (which add dependency
+// advisories) never feed it. A `decision` in the signed payload is taken as the
+// answer on the findings; an unsigned one only tightens.
+//   do_not_connect  a `blockOn` trigger fired (shipped critical finding, sandbox canary
 //                   exfiltration, known-malicious dependency, blocked tier), or
 //                   a tool definition drifted / was never graded under
 //                   `onDrift: 'block'`, or AgentAvow could not answer under
@@ -62,7 +65,7 @@ export const ISSUER_DID = 'did:web:agentgraph.co';
 export { DEFAULT_JWKS_URL };
 const WEB = 'https://agentavow.com';
 const MAX_REDIRECTS = 3;
-export const VERSION = '0.4.2';
+export const VERSION = '0.4.3';
 
 // ── the per-tool digest, exactly as the attestation signs it ────────────────
 
@@ -308,7 +311,14 @@ export interface Grade {
   server: string;
   score: number | null;
   tier: string;
+  /** Shipped criticals that make the answer Do not connect: the headline `critical`
+   *  count (never `critical_all`, which adds dependency advisories), less the
+   *  criticals the API's rule reads as Review (a hardcoded credential, the tool's
+   *  own published advisory). */
   critical: number;
+  /** Shipped criticals the API's rule reads as Review, not Do not connect. */
+  criticalReview: number;
+  /** Shipped highs: the headline `high` count (never `high_all`). */
   high: number;
   findings: Array<Record<string, unknown>>;
   toolDigests: Record<string, string>;
@@ -319,8 +329,11 @@ export interface Grade {
   error: string | null;
   /** ISO time the analysis ran (signed `scannedAt` when verified). */
   scannedAt: string | null;
-  /** The API's own label when the response carries one (unsigned; tighten-only). */
+  /** The API's own label when the response carries one (unsigned: tighten-only). */
   apiDecision: string | null;
+  /** True when `apiDecision` came from the signed payload (then it is authoritative
+   *  for the finding counts; policy triggers still apply). */
+  decisionSigned: boolean;
   verdict: string | null;
   /** Adoption score when the response carries one (never a verdict input). */
   adoption: number | null;
@@ -340,28 +353,62 @@ export interface Grade {
 
 export function errorGrade(server: string, error: string): Grade {
   return {
-    server, score: null, tier: '', critical: 0, high: 0, findings: [], toolDigests: {},
+    server, score: null, tier: '', critical: 0, criticalReview: 0, high: 0, findings: [], toolDigests: {},
     toolManifestDigest: null, reportUrl: reportUrl(server), jws: null, fetchedAt: Date.now(), error,
-    scannedAt: null, apiDecision: null, verdict: null, adoption: null, certified: false, maliciousDeps: [],
+    scannedAt: null, apiDecision: null, decisionSigned: false, verdict: null, adoption: null, certified: false, maliciousDeps: [],
     canaryExfil: false, signature: 'missing', signatureReason: null, kid: null, attestation: null,
   };
 }
 
 type Dict = Record<string, any>;
 
+// Item-level mirrors of `src/scanner/verdict.py` (`_is_malicious_item`,
+// `_is_blocking_item`), so a recompute counts what the API's own rule counts.
+function isMaliciousItem(i: Record<string, unknown>): boolean {
+  return i.kind !== 'capability' && String(i.name ?? '').toLowerCase().includes('malicious');
+}
+
+function isBlockingItem(i: Record<string, unknown>): boolean {
+  if (isMaliciousItem(i)) return true;
+  if (i.kind === 'capability' || i.installed === false) return false;
+  if (i.category === 'install_hook') return true;
+  if (i.category === 'dependency') return false; // a dependency advisory never blocks
+  return i.shipped !== false;
+}
+
+const isOwnAdvisory = (i: Record<string, unknown>) =>
+  i.category === 'known_vulnerability' && i.kind !== 'capability';
+const isSecretItem = (i: Record<string, unknown>) =>
+  i.category === 'secret' && i.kind !== 'capability' && !isMaliciousItem(i);
+
+/**
+ * The counts the decision reads, the way the API's `decide()` reads them: the
+ * headline `critical` / `high` are the SHIPPED (blocking) counts; `critical_all` /
+ * `high_all` add dependency advisories and never feed the decision. A shape with
+ * no headline counts falls back to the blocking items. Criticals that are the
+ * tool's own published advisory or a hardcoded credential read as Review.
+ */
 function findingsOf(findings: unknown): {
-  items: Array<Record<string, unknown>>; critical: number; high: number;
+  items: Array<Record<string, unknown>>; critical: number; criticalReview: number; high: number;
 } {
-  const f: Dict = findings && typeof findings === 'object' ? findings as Dict : {};
+  const f: Dict = findings && typeof findings === 'object' && !Array.isArray(findings) ? findings as Dict : {};
   const rawItems = Array.isArray(findings) ? findings : f.items ?? [];
   const items = (rawItems as unknown[]).filter(
     (x): x is Record<string, unknown> => !!x && typeof x === 'object');
-  const sev = items.map((x) => String(x.severity ?? '').toLowerCase());
-  const count = (k: string) => Number((!Array.isArray(findings) && f[k]) || 0);
+  const sev = (x: Record<string, unknown>) => String(x.severity ?? '').toLowerCase();
+  const headline = (k: string): number | null => {
+    const v = f[k];
+    return typeof v === 'number' && Number.isFinite(v) ? Math.max(Math.trunc(v), 0) : null;
+  };
+  const crit = items.filter((x) => sev(x) === 'critical');
+  const reviewCrit = crit.filter((x) => isOwnAdvisory(x) || (isSecretItem(x) && isBlockingItem(x))).length;
+  const critHead = headline('critical') ?? crit.filter(isBlockingItem).length;
+  const critical = Math.max(critHead - reviewCrit, 0);
   return {
     items,
-    critical: Math.max(count('critical'), sev.filter((s) => s === 'critical').length),
-    high: Math.max(count('high'), sev.filter((s) => s === 'high').length),
+    critical,
+    criticalReview: critHead - critical,
+    high: headline('high') ?? items.filter((x) => sev(x) === 'high' && isBlockingItem(x)).length,
   };
 }
 
@@ -407,18 +454,18 @@ export function certifiedOf(data: Dict): boolean {
 
 /** The unsigned view of a public scan response. */
 export function gradeFromResponse(server: string, data: Dict): Grade {
-  const { items, critical, high } = findingsOf(data.findings);
+  const { items, critical, criticalReview, high } = findingsOf(data.findings);
   const score = typeof data.trust_score === 'number' ? Math.trunc(data.trust_score) : null;
   const adoptionRaw = data.adoption?.score ?? data.adoption_score;
   const apiDecision = DECISIONS.includes(String(data.decision)) ? String(data.decision) : null;
   return {
-    server, score, tier: String(data.trust_tier ?? ''), critical, high, findings: items,
+    server, score, tier: String(data.trust_tier ?? ''), critical, criticalReview, high, findings: items,
     toolDigests: digestsOf(data.tool_digests),
     toolManifestDigest: typeof data.tool_manifest_digest === 'string' ? data.tool_manifest_digest : null,
     reportUrl: reportUrl(server),
     jws: typeof data.jws === 'string' ? data.jws : null, fetchedAt: Date.now(), error: null,
     scannedAt: typeof data.scanned_at === 'string' ? data.scanned_at : null,
-    apiDecision, verdict: typeof data.verdict === 'string' ? data.verdict : null,
+    apiDecision, decisionSigned: false, verdict: typeof data.verdict === 'string' ? data.verdict : null,
     adoption: typeof adoptionRaw === 'number' ? adoptionRaw : null,
     certified: certifiedOf(data),
     maliciousDeps: maliciousOf(data.supply_chain, items),
@@ -464,17 +511,18 @@ export async function verifyGrade(
     return { ...grade, signature: 'invalid', kid: r.kid, signatureReason: `attestation issuer ${issuer} is not ${expectIssuer}` };
   }
   const scan: Dict = p.scan && typeof p.scan === 'object' ? p.scan : {};
-  const { items, critical, high } = findingsOf(scan.findings);
+  const { items, critical, criticalReview, high } = findingsOf(scan.findings);
   const score = typeof scan.trustScore === 'number' ? Math.trunc(scan.trustScore) : null;
   const signedDecision = DECISIONS.includes(String(scan.decision)) ? String(scan.decision) : null;
   return {
     ...grade,
-    score, tier: String(scan.trustTier ?? grade.tier), critical, high, findings: items,
+    score, tier: String(scan.trustTier ?? grade.tier), critical, criticalReview, high, findings: items,
     toolDigests: digestsOf(scan.toolDigests),
     toolManifestDigest: typeof scan.toolManifestDigest === 'string' ? scan.toolManifestDigest : null,
     scannedAt: typeof p.scannedAt === 'string' ? p.scannedAt : grade.scannedAt,
-    // An unsigned label may only tighten; a signed one (future) is authoritative.
+    // An unsigned label may only tighten; a signed one is authoritative on the findings.
     apiDecision: signedDecision ?? grade.apiDecision,
+    decisionSigned: signedDecision !== null,
     maliciousDeps: [...new Set([...maliciousOf(scan.supplyChain, items), ...grade.maliciousDeps])],
     signature: 'verified', signatureReason: null, kid: r.kid, attestation: p,
   };
@@ -668,9 +716,9 @@ function softened(d: Decision, mode: OnDrift, policy: ResolvedPolicy): Decision 
 }
 
 /**
- * THE three-phrase rule, grade -> decision, no I/O. Kept in one function so it can
- * be swapped when the API's own `decision` field lands (today an unsigned label can
- * only tighten the derived decision; a signed one is taken as authoritative).
+ * THE three-phrase rule, grade -> decision, no I/O. An unsigned API `decision` can
+ * only tighten the derived decision; a signed one is the answer on the findings
+ * (policy triggers, the floor, staleness and drift still apply).
  */
 export function deriveDecision(grade: Grade, policy: ResolvedPolicy, toolName: string | null = null): Decision {
   const d = deriveDecisionRaw(grade, policy, toolName);
@@ -703,9 +751,12 @@ function deriveDecisionRaw(grade: Grade, policy: ResolvedPolicy, toolName: strin
   }
 
   // Hard stops: policy triggers, then an API/signed label that says so.
+  // A signed API decision is the answer on the findings (the API's own rule ran on
+  // them); the counts below are the recompute for an unsigned or older response.
+  const signedAnswer = grade.decisionSigned && grade.apiDecision !== null;
   const hits: string[] = [];
   for (const t of policy.blockOn) {
-    if (t === 'critical' && grade.critical > 0) hits.push(`${grade.critical} critical finding${grade.critical > 1 ? 's' : ''}`);
+    if (t === 'critical' && grade.critical > 0 && !signedAnswer) hits.push(`${grade.critical} critical finding${grade.critical > 1 ? 's' : ''}`);
     if (t === 'high' && grade.high > 0) hits.push(`${grade.high} high finding${grade.high > 1 ? 's' : ''}`);
     if (t === 'sandbox_canary' && grade.canaryExfil) hits.push('a sandbox canary credential was exfiltrated');
     if (t === 'malicious_dependency' && grade.maliciousDeps.length) {
@@ -729,6 +780,9 @@ function deriveDecisionRaw(grade: Grade, policy: ResolvedPolicy, toolName: strin
   if (grade.score < policy.allowFloor) {
     d.outcome = 'low_score';
     d.reason = `AgentAvow: review ${what}: graded ${scoreText(grade)}, below the floor of ${policy.allowFloor}. ${report}`;
+  } else if (grade.criticalReview > 0 && !signedAnswer) {
+    d.outcome = 'finding';
+    d.reason = `AgentAvow: review ${what}: the grade (${scoreText(grade)}) carries ${grade.criticalReview} critical finding${grade.criticalReview > 1 ? 's' : ''} AgentAvow reads as review (a hardcoded credential or a published advisory). ${report}`;
   } else if (grade.high > 0 && !policy.blockOn.includes('high')) {
     d.outcome = 'finding';
     d.reason = `AgentAvow: review ${what}: the grade (${scoreText(grade)}) carries ${grade.high} high finding${grade.high > 1 ? 's' : ''}. ${report}`;
