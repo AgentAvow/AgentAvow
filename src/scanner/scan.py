@@ -7048,6 +7048,37 @@ async def _removed_version_answer(result: ScanResult, eco: str, surface: str, na
     return True
 
 
+async def _too_large_answer(result: ScanResult, eco: str, surface: str, name: str,
+                            version: str | None, size_bytes: int | None) -> None:
+    """Fill ``result`` for a package whose every file is over the download cap (pymupdf's
+    65 MB wheels and 84 MB sdist, 11-12). Nothing was read, so it is a coverage gap that
+    reads Review with the size (``decide()``), never Certified, never a 502. Its own
+    published advisories still count (OSV needs no download). Fail-open."""
+    from src.scanner.coverage import SCAN_DEPTH_ARTIFACT, build_coverage
+
+    mb = round(size_bytes / (1024 * 1024)) if size_bytes else 0
+    result.files_scanned = 0
+    result.total_scannable_files = 0
+    result.artifact_scan = {"version": version, "too_large": True,
+                            **({"size_bytes": size_bytes} if size_bytes else {})}
+    result.coverage_gaps = {**(result.coverage_gaps or {}), "package_too_large": True,
+                            **({"package_size_mb": mb} if mb else {})}
+    try:
+        from src.scanner.incident_history import fetch_incident_history
+        result.incident_history = await fetch_incident_history(surface, name, version)
+        result.findings = result.findings + _own_advisory_findings(
+            name, version, (result.incident_history or {}).get("advisories") or [])
+    except Exception:  # noqa: BLE001 — fail-open: the size answer stands without it
+        logger.debug("advisory lookup failed for oversized %s:%s", eco, name, exc_info=True)
+    try:
+        result.coverage = build_coverage(surface=eco, scan_depth=SCAN_DEPTH_ARTIFACT)
+    except Exception:  # noqa: BLE001
+        pass
+    result.trust_score = _calculate_trust_score(result)
+    result.category_scores = _calculate_category_scores(result)
+    result.certified = False
+
+
 async def scan_package(surface: str, name: str, version: str | None = None) -> ScanResult:
     """Grade a PUBLISHED npm / PyPI package directly by coordinate — no GitHub repo
     required. Fetches + STATICALLY scans the real artifact tree (the same 14-category
@@ -7062,6 +7093,7 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
     from src.config import settings
     from src.scanner.artifact_fetch import (
         ArtifactFetchError,
+        ArtifactTooLargeError,
         fetch_crates_artifact,
         fetch_docker_artifact,
         fetch_huggingface_artifact,
@@ -7101,6 +7133,10 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
             fetched = await fetch_docker_artifact(name, version)
         else:
             fetched = await fetch_pypi_artifact(name, version)
+    except ArtifactTooLargeError as exc:
+        await _too_large_answer(result, eco, surface, name, exc.version or version,
+                                exc.size_bytes)
+        return result
     except ArtifactFetchError as exc:
         # A version the registry no longer serves (unpublished, deleted) still gets an
         # answer when we can tell it existed: a lockfile can pin it.

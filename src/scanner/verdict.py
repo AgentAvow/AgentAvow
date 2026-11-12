@@ -226,6 +226,16 @@ RESOURCE_PROMPT_LISTS_UNREAD_REASON = "the server's resource and prompt lists co
 # No file read because the tree or every fetch failed (an outage, not an empty
 # metapackage: THIN_REASON_NO_CODE stays Safe for one).
 CODE_UNREAD_REASON = "the scan could not read the code"
+# A published package over the download cap (pymupdf's 65 MB wheels, 11-12): nothing was
+# read, so it reads Review with the size, never an error page. Padding past the cap is cheap.
+PACKAGE_TOO_LARGE_REASON = "the package is over our 50 MB download limit, so its code was not read"
+
+
+def package_too_large_reason(mb: int) -> str:
+    if mb > 0:
+        return (f"the package is {mb:,} MB, over our 50 MB download limit, so its code was "
+                "not read")
+    return PACKAGE_TOO_LARGE_REASON
 # An agent-instruction file (SKILL.md, AGENTS.md, CLAUDE.md, mcp.json, server.json) over
 # the 500 KB read cap: padding it is the published evasion, and it is what agents read.
 AGENT_FILE_UNREAD_REASON = "an agent instruction file was too large to read"
@@ -571,6 +581,11 @@ def coverage_gap_notes(data: dict) -> list[str]:
         notes.append("GitHub returned only part of the file tree")
     if g.get("tree_unavailable") is True:
         notes.append("the file list could not be read")
+    if g.get("package_too_large") is True:
+        mb = _int(g.get("package_size_mb"))
+        notes.append(f"the package ({mb:,} MB) is over the 50 MB download limit; its code "
+                     "was not read" if mb > 0 else
+                     "the package is over the 50 MB download limit; its code was not read")
     n = _int(g.get("package_skipped"))
     if n > 0:
         notes.append(f"{_files_phrase(n)} in the package {_was(n)} skipped for size")
@@ -797,6 +812,8 @@ def decide(data: dict) -> Decision:
             or _int(gap.get("fetch_failed")) > 0
             or _int(gap.get("time_limit_unread")) > 0):
         return done(DECISION_REVIEW, CODE_UNREAD_REASON)
+    if gap.get("package_too_large") is True:
+        return done(DECISION_REVIEW, package_too_large_reason(_int(gap.get("package_size_mb"))))
     if _int(gap.get("oversized_agent_files")) > 0:
         return done(DECISION_REVIEW, AGENT_FILE_UNREAD_REASON)
     if _int(gap.get("skill_refs_unread")) > 0:
