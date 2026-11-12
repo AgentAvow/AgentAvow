@@ -24,6 +24,10 @@ const HEADLINES: Record<string, string> = {
   'd2-before-npx': 'Before you add that MCP server, get one clear answer.',
   'd3-do-not-connect': 'Here\'s what a Do not connect looks like, and why.',
   'd4-definition-changed': 'Know when an MCP server you approved changes its tools.',
+  // The X campaign's ads (2026-11-test-x) tell the same stories as d1-d3.
+  'x1-archived': 'Before you add that MCP server, get one clear answer.',
+  'x2-automatic': 'Claude Code checks your MCP servers and packages before your agent uses them, automatically.',
+  'x3-do-not-connect': 'Here\'s what a Do not connect looks like, and why.',
 }
 const DEFAULT_HEADLINE = 'd1-automatic'
 
