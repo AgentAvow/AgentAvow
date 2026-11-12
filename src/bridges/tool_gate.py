@@ -307,6 +307,42 @@ def is_mcp(server: str) -> bool:
 # ── grade and decision ────────────────────────────────────────────────────────
 
 
+def _is_blocking_item(i: dict) -> bool:
+    """Mirror of ``src.scanner.verdict._is_blocking_item`` (kept inline: this module
+    depends only on httpx). A dependency advisory is never blocking."""
+    if i.get("kind") != "capability" and "malicious" in str(i.get("name") or "").lower():
+        return True
+    if i.get("kind") == "capability" or i.get("installed") is False:
+        return False
+    cat = i.get("category")
+    if cat == "install_hook":
+        return True
+    if cat == "dependency":
+        return False
+    return i.get("shipped") is not False
+
+
+def _decision_counts(findings: dict, items: list[dict]) -> tuple[int, int]:
+    """(critical, high) as the API's own rule reads them: the headline counts are the
+    SHIPPED (blocking) ones. ``critical_all`` / ``high_all`` add dependency advisories
+    and never feed a decision. A shape without headline counts falls back to the
+    blocking items."""
+    def headline(key: str) -> int | None:
+        v = findings.get(key)
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            return None
+        return max(int(v), 0)
+
+    def from_items(sev: str) -> int:
+        return sum(1 for i in items
+                   if str(i.get("severity", "")).lower() == sev and _is_blocking_item(i))
+
+    crit = headline("critical")
+    high = headline("high")
+    return (from_items("critical") if crit is None else crit,
+            from_items("high") if high is None else high)
+
+
 @dataclass
 class Grade:
     """What the gate needs from one public scan response."""
@@ -333,9 +369,7 @@ class Grade:
         findings = data.get("findings") or {}
         items = findings.get("items") if isinstance(findings, dict) else findings
         items = [f for f in (items or []) if isinstance(f, dict)]
-        sev = [str(f.get("severity", "")).lower() for f in items]
-        crit = int(findings.get("critical", 0) or 0) if isinstance(findings, dict) else 0
-        high = int(findings.get("high", 0) or 0) if isinstance(findings, dict) else 0
+        crit, high = _decision_counts(findings if isinstance(findings, dict) else {}, items)
         score = data.get("trust_score")
         dec, dec_reason, dec_final = _decision_of(data)
         return cls(
@@ -344,8 +378,8 @@ class Grade:
             server=server,
             score=int(score) if isinstance(score, (int, float)) else None,
             tier=str(data.get("trust_tier") or ""),
-            critical=max(crit, sev.count("critical")),
-            high=max(high, sev.count("high")),
+            critical=crit,
+            high=high,
             findings=items,
             tool_digests={
                 str(k): str(v) for k, v in (data.get("tool_digests") or {}).items()},
@@ -358,6 +392,8 @@ class Grade:
         """The severities in ``block_on`` that the grade carries, in that order."""
         counts = {"critical": self.critical, "high": self.high}
         for f in self.findings:
+            if not _is_blocking_item(f):  # a dependency advisory never blocks
+                continue
             s = str(f.get("severity", "")).lower()
             if s not in counts:
                 counts[s] = counts.get(s, 0) + 1
