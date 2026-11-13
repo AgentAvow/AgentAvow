@@ -9,6 +9,8 @@ export interface Entity {
   privacy_tier: string
   is_active: boolean
   is_admin: boolean
+  /** Read-only admin: Metrics pages only, personal data masked server-side. */
+  is_admin_viewer?: boolean
   avatar_url: string | null
   created_at: string
 }

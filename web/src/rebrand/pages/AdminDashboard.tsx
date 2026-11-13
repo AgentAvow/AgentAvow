@@ -11,7 +11,6 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 
-import { useAuth } from '../../hooks/useAuth'
 import api from '../../lib/api'
 import { DECISIONS, TRUST_TIERS } from '../../components/trust/gradeSystem'
 import { rp } from '../basePath'
@@ -19,6 +18,7 @@ import { Reveal } from '../components/motion'
 import StartHerePanel from './AdminStartHere'
 import CampaignPanel from './AdminCampaignPanel'
 import PostStudioTab from './AdminPostStudio'
+import { AdminAccessPanel, useAdminAccess, ViewOnlyNotice } from './adminAccess'
 
 // ── shared types (loose — endpoints already validated server-side) ──────────
 type Win = 'today' | '7d' | '30d'
@@ -250,6 +250,7 @@ function BarList({ title, rows, labels, empty, gradient }: { title: string; rows
 
 // ── Scheduled eval tile (weekly corpus run; POST /admin/metrics/behavioral/eval) ──
 function EvalTile({ report, corpus, win }: { report?: EvalReport | null; corpus: CorpusEntry[]; win: Win }) {
+  const { isAdmin } = useAdminAccess() // a viewer reads the report; no run / corpus edits
   const qc = useQueryClient()
   const [msg, setMsg] = useState<string | null>(null)
   const [showCorpus, setShowCorpus] = useState(false)
@@ -294,13 +295,15 @@ function EvalTile({ report, corpus, win }: { report?: EvalReport | null; corpus:
         </div>
         <div className="flex items-center gap-2">
           {msg && <span className="text-[11.5px] text-text-muted">{msg}</span>}
-          <button
-            onClick={() => { setMsg(null); run.mutate() }}
-            disabled={run.isPending || !!r?.running}
-            className="px-2.5 py-1 rounded-lg text-[12px] font-mono bg-primary/15 text-primary-light hover:bg-primary/25 disabled:opacity-50 transition-colors"
-          >
-            {r?.running ? 'running…' : 'Run eval now'}
-          </button>
+          {isAdmin ? (
+            <button
+              onClick={() => { setMsg(null); run.mutate() }}
+              disabled={run.isPending || !!r?.running}
+              className="px-2.5 py-1 rounded-lg text-[12px] font-mono bg-primary/15 text-primary-light hover:bg-primary/25 disabled:opacity-50 transition-colors"
+            >
+              {r?.running ? 'running…' : 'Run eval now'}
+            </button>
+          ) : r?.running ? <span className="text-[12px] font-mono text-text-muted">running…</span> : null}
         </div>
       </div>
       {r ? (
@@ -356,17 +359,17 @@ function EvalTile({ report, corpus, win }: { report?: EvalReport | null; corpus:
                   <span className="font-mono">{c.surface}:{c.name}</span>
                   {c.source === 'admin' && <span className="text-[10.5px] px-1.5 rounded bg-primary/15 text-primary-light">admin</span>}
                   {(c.expect_rules || []).length > 0 && <span className="text-[11px] text-text-muted/70">expects {c.expect_rules!.join(', ')}</span>}
-                  <button onClick={() => edit.mutate({ action: 'remove', surface: c.surface, name: c.name })} className="text-[11px] text-text-muted hover:text-danger">remove</button>
+                  {isAdmin && <button onClick={() => edit.mutate({ action: 'remove', surface: c.surface, name: c.name })} className="text-[11px] text-text-muted hover:text-danger">remove</button>}
                 </li>
               ))}
               {removed.map((c) => (
                 <li key={c.key} className="flex items-center gap-2 flex-wrap opacity-60">
                   <span className="font-mono line-through">{c.surface}:{c.name}</span>
-                  <button onClick={() => edit.mutate({ action: 'add', surface: c.surface, name: c.name, expect_rules: c.expect_rules || [] })} className="text-[11px] text-text-muted hover:text-success">restore</button>
+                  {isAdmin && <button onClick={() => edit.mutate({ action: 'add', surface: c.surface, name: c.name, expect_rules: c.expect_rules || [] })} className="text-[11px] text-text-muted hover:text-success">restore</button>}
                 </li>
               ))}
             </ul>
-            <form
+            {isAdmin && <form
               className="mt-2 flex items-center gap-2 flex-wrap text-[12px]"
               onSubmit={(e) => { e.preventDefault(); if (addName.trim()) edit.mutate({ action: 'add', surface: addSurface, name: addName.trim(), expect_rules: addRules.split(',').map((x) => x.trim()).filter(Boolean) }) }}
             >
@@ -377,7 +380,7 @@ function EvalTile({ report, corpus, win }: { report?: EvalReport | null; corpus:
               <input value={addRules} onChange={(e) => setAddRules(e.target.value)} placeholder="expect_rules (comma-separated, optional)" className="bg-surface rounded-lg px-2 py-1 font-mono min-w-[16rem]" />
               <button type="submit" disabled={edit.isPending || !addName.trim()} className="px-2.5 py-1 rounded-lg font-mono bg-primary/15 text-primary-light hover:bg-primary/25 disabled:opacity-50">add</button>
               {edit.isError && <span className="text-danger">could not save</span>}
-            </form>
+            </form>}
           </div>
         )}
       </div>
@@ -806,6 +809,7 @@ function PageActionsPanel() {
 
 // ── METRICS TAB ──────────────────────────────────────────────────────────────
 function MetricsTab() {
+  const { isAdmin } = useAdminAccess()
   const [win, setWin] = useState<Win>('7d')
   const [trend, setTrend] = useState<'callers' | 'calls'>('callers')
   const { data } = useQuery<Metrics>({
@@ -1098,6 +1102,8 @@ function MetricsTab() {
           <Stat label="Testnet (hidden)" value={fmt(data?.x402?.testnet_hidden)} />
         </div>
       </Section>
+
+      {isAdmin && <AdminAccessPanel />}
     </>
   )
 }
@@ -1568,15 +1574,17 @@ function RadarTab() {
 }
 
 export default function AdminDashboard() {
-  const { user, isLoading } = useAuth()
+  const { isLoading, isAdmin, canView } = useAdminAccess()
   // Tab lives in the URL so browser back/forward restores it.
   const [sp, setSp] = useSearchParams()
   const _t = sp.get('tab')
   const tab: 'metrics' | 'marketing' | 'posts' | 'radar' = _t === 'marketing' ? 'marketing' : _t === 'posts' ? 'posts' : _t === 'radar' ? 'radar' : 'metrics'
   const setTab = (t: 'metrics' | 'marketing' | 'posts' | 'radar') => setSp(t === 'metrics' ? {} : { tab: t })
+  // A read-only viewer gets the Metrics tab only (the server 403s everything else).
+  const tabs = isAdmin ? (['metrics', 'marketing', 'posts', 'radar'] as const) : (['metrics'] as const)
 
   if (isLoading) return <div className="max-w-[1080px] mx-auto px-6 py-24 text-center text-text-muted">Loading…</div>
-  if (!user?.is_admin) return (
+  if (!canView) return (
     <div className="max-w-[560px] mx-auto px-6 py-24 text-center">
       <h1 className="text-2xl font-extrabold tracking-tight">Admins only</h1>
       <p className="mt-3 text-text-muted text-[14px]">This dashboard is restricted. <Link to={rp('/rebrand')} className="text-primary-light hover:text-primary font-semibold">← Back home</Link></p>
@@ -1591,15 +1599,17 @@ export default function AdminDashboard() {
             <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Operations</span>
             <h1 className="mt-2 text-3xl md:text-4xl font-extrabold tracking-tight">Admin dashboard</h1>
           </div>
-          <a href="/admin" className="text-[12.5px] text-text-muted hover:text-text font-semibold">Legacy admin ↗</a>
+          {isAdmin
+            ? <a href="/admin" className="text-[12.5px] text-text-muted hover:text-text font-semibold">Legacy admin ↗</a>
+            : <span className="text-[12.5px] font-mono px-2.5 py-1 rounded-lg border border-border/60 text-text-muted">View-only access</span>}
         </div>
         <div className="mt-6 flex gap-1 border-b border-border/60">
-          {(['metrics', 'marketing', 'posts', 'radar'] as const).map((t) => (
+          {tabs.map((t) => (
             <button key={t} onClick={() => setTab(t)} className={`px-4 py-2 text-[14px] font-semibold capitalize border-b-2 -mb-px transition-colors ${tab === t ? 'border-primary text-text' : 'border-transparent text-text-muted hover:text-text'}`}>{t === 'radar' ? 'Dev radar' : t}</button>
           ))}
         </div>
       </Reveal>
-      {tab === 'metrics' ? <MetricsTab /> : tab === 'marketing' ? <MarketingTab /> : tab === 'posts' ? <PostStudioTab /> : <RadarTab />}
+      {tab === 'metrics' ? <MetricsTab /> : !isAdmin ? <ViewOnlyNotice /> : tab === 'marketing' ? <MarketingTab /> : tab === 'posts' ? <PostStudioTab /> : <RadarTab />}
     </div>
   )
 }

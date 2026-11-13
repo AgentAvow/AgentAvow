@@ -24,6 +24,10 @@ const HEADLINES: Record<string, string> = {
   'd2-before-npx': 'Before you add that MCP server, get one clear answer.',
   'd3-do-not-connect': 'Here\'s what a Do not connect looks like, and why.',
   'd4-definition-changed': 'Know when an MCP server you approved changes its tools.',
+  // The X campaign's ads (2026-11-test-x) tell the same stories as d1-d3.
+  'x1-archived': 'Before you add that MCP server, get one clear answer.',
+  'x2-automatic': 'Claude Code checks your MCP servers and packages before your agent uses them, automatically.',
+  'x3-do-not-connect': 'Here\'s what a Do not connect looks like, and why.',
 }
 const DEFAULT_HEADLINE = 'd1-automatic'
 
@@ -152,6 +156,8 @@ export default function RebrandClaudeCode() {
             Install the plugin. In your next session, Claude tells you which ones read <b className="font-medium text-text">Safe to connect</b>, <b className="font-medium text-text">Review before you connect</b>, or <b className="font-medium text-text">Do not connect</b>, and why.
           </p>
           <Install />
+          {/* Full page load on purpose, like the footer links: the ad pixel stays on this page. */}
+          <p className="mt-2 text-[13px] text-text-muted">0 tokens per check · under 1,000 tokens a session. <a href={`${rp('/rebrand/faq')}#context-tokens`} className="text-primary-light hover:underline">How we measured →</a></p>
           <p className="mt-3 text-[14px] text-text-muted">Run each line in Claude Code, then start a new session. Or open <code className="font-mono text-[13px] text-primary-light">/plugin</code> and find AgentAvow Trust under Discover (the directory can lag behind the latest version).</p>
           <div className="flex flex-wrap gap-x-[18px] gap-y-1.5 mt-3.5 text-[13.5px] text-text-muted">
             {['Free, no account', 'The plugin is MIT licensed', 'Sends only the tool being checked and a random install ID'].map((f) => (

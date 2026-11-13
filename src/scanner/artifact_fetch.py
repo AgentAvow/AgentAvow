@@ -153,6 +153,17 @@ class ArtifactFetchError(Exception):
     """Raised on any resolve/download/guard failure. Caller falls open."""
 
 
+class ArtifactTooLargeError(ArtifactFetchError):
+    """The artifact is over :data:`MAX_DOWNLOAD_BYTES`. Not a failure of ours: the caller
+    answers Review with the size (a coverage gap), never an error page."""
+
+    def __init__(self, message: str, *, size_bytes: int | None = None,
+                 version: str | None = None) -> None:
+        super().__init__(message)
+        self.size_bytes = size_bytes
+        self.version = version
+
+
 @dataclass
 class ArtifactFile:
     """One unpacked file from the published artifact (static — never executed)."""
@@ -332,13 +343,14 @@ async def _download_spooled(url: str, client: httpx.AsyncClient) -> IO[bytes]:
             if clen:
                 try:
                     if int(clen) > MAX_DOWNLOAD_BYTES:
-                        raise ArtifactFetchError("artifact Content-Length exceeds cap")
+                        raise ArtifactTooLargeError("artifact Content-Length exceeds cap",
+                                                    size_bytes=int(clen))
                 except ValueError:
                     pass
             async for chunk in resp.aiter_bytes():
                 size += len(chunk)
                 if size > MAX_DOWNLOAD_BYTES:
-                    raise ArtifactFetchError("artifact download exceeded size cap")
+                    raise ArtifactTooLargeError("artifact download exceeded size cap")
                 out.write(chunk)
         if not size:
             raise ArtifactFetchError("empty artifact download")
@@ -859,6 +871,14 @@ def _pick_pypi_url(urls: list[dict]) -> tuple[str, str] | None:
     return (over[0][2], "wheel") if over else None
 
 
+def _listed_size(urls: list[dict], url: str) -> int:
+    """The size PyPI lists for ``url`` (0 when unknown)."""
+    for u in urls or []:
+        if isinstance(u, dict) and u.get("url") == url:
+            return _pypi_size(u)
+    return 0
+
+
 def _pypi_size(u: dict) -> int:
     try:
         return int(u.get("size") or 0)
@@ -962,8 +982,21 @@ async def fetch_pypi_artifact(
         if not picked:
             raise ArtifactFetchError(f"no downloadable sdist/wheel for {name}=={version}")
         url, kind = picked
-
-        with await _download_spooled(url, client) as raw:
+        listed = _listed_size(meta.get("urls") or [], url)
+        if listed > MAX_DOWNLOAD_BYTES:
+            # Every file is over the cap (the pick prefers one that fits): say so with
+            # the smallest file's size, without starting a download.
+            sizes = [_pypi_size(u) for u in meta.get("urls") or [] if isinstance(u, dict)]
+            raise ArtifactTooLargeError("artifact Content-Length exceeds cap",
+                                        size_bytes=min([x for x in sizes if x] or [listed]),
+                                        version=version)
+        try:
+            raw_cm = await _download_spooled(url, client)
+        except ArtifactTooLargeError as exc:
+            exc.version = exc.version or version
+            exc.size_bytes = exc.size_bytes or (listed or None)
+            raise
+        with raw_cm as raw:
             installed_paths = await _sdist_installed_paths(name, version, kind, meta, client)
             # Unpack + hash is CPU-bound: off the event loop.
             return await asyncio.to_thread(

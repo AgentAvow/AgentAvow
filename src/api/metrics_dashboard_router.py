@@ -24,6 +24,10 @@ Endpoints (both under the ``/admin`` prefix, reusing ``require_admin``):
     the latest scheduled eval report (``last_eval``) and the known-good corpus
   * POST /admin/metrics/behavioral/eval   -> start an eval run now (202 / 409 if running)
   * POST /admin/metrics/behavioral/corpus -> add / remove a known-good corpus entry
+
+The read-only GETs (/metrics, /metrics/behavioral, /metrics/traffic, /metrics/growth)
+also admit a read-only admin viewer (``require_admin_or_viewer``), with personal data
+masked by ``src.api.redaction``. Both POSTs stay ``require_admin``.
 """
 from __future__ import annotations
 
@@ -38,8 +42,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import case, func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import get_current_entity, require_admin
+from src.api.deps import get_current_entity, require_admin, require_admin_or_viewer
 from src.api.rate_limit import rate_limit_reads, rate_limit_writes
+from src.api.redaction import viewer_safe
 from src.database import get_db
 from src.models import (
     AlertWebhook,
@@ -905,19 +910,20 @@ async def engagement_metrics(
     Every number is backed by stored data (community_scans, tool_watches,
     repo_claims, alert_webhooks, api_keys, formal_attestations) except badge
     fetches / API-key calls, which come from best-effort Redis day counters.
+    Read-only admin viewers may read it, with personal data masked.
     """
-    require_admin(current_entity)
+    viewer = require_admin_or_viewer(current_entity)
 
     from src import cache
 
     cache_key = f"admin:metrics:{window}"
     cached = await cache.get(cache_key)
     if cached is not None:
-        return cached
+        return viewer_safe(cached, viewer)
 
     result = await _aggregate(db, window)
     await cache.set(cache_key, result, ttl=cache.TTL_SHORT)
-    return result
+    return viewer_safe(result, viewer)
 
 
 # ---------------------------------------------------------------------------
@@ -1136,8 +1142,8 @@ async def behavioral_metrics(
     durations, start-reason and finding-rule breakdowns, a per-day series, and a
     ``scaling_hint`` ('add capacity' | 'watch memory' | 'ok'). One Redis MGET.
     """
-    require_admin(current_entity)
-    return await _behavioral_aggregate(window)
+    viewer = require_admin_or_viewer(current_entity)
+    return viewer_safe(await _behavioral_aggregate(window), viewer)
 
 
 _TRAFFIC_PREFIX = f"{_METRICS_PREFIX}traffic:"
@@ -1274,7 +1280,7 @@ async def traffic_metrics(
     requests, plugin-hook machines, tool calls + distinct callers by surface), one row per
     UTC day, for the admin dashboard. Admin only. See ``notes`` for what each column counts
     and why it differs from the live MCP counters."""
-    require_admin(current_entity)
+    viewer = require_admin_or_viewer(current_entity)
     from src.install_activity import INSTALL_NOTES, install_series
 
     day_strs, rows = await _traffic_rows(days)
@@ -1298,7 +1304,7 @@ async def traffic_metrics(
     installs = await install_series(install_days)
     if day_strs:
         series.update(installs)
-    return {
+    return viewer_safe({
         "days": day_strs,
         "rows": rows,
         "series": series,
@@ -1310,7 +1316,7 @@ async def traffic_metrics(
             "latest": {col: vals[-1] if vals else None for col, vals in installs.items()},
         },
         "notes": _TRAFFIC_NOTES + INSTALL_NOTES,
-    }
+    }, viewer)
 
 
 # Referrer hosts grouped for the "search referrals" view. A host matches a group when
@@ -1377,7 +1383,7 @@ async def growth_metrics(
     """Daily series the 6-hour job keeps (catalog answer mix + Certified, x402
     excluded; npm / PyPI downloads), the catalog mix right now, and search / AI
     referrals to landing pages over ``days``. Admin only."""
-    require_admin(current_entity)
+    viewer = require_admin_or_viewer(current_entity)
     from src import cache
     from src.indexnow_record import recent_runs as recent_indexnow_runs
     from src.jobs.metrics_daily import (
@@ -1390,7 +1396,7 @@ async def growth_metrics(
     cache_key = f"admin:metrics:growth:{days}"
     cached = await cache.get(cache_key)
     if cached is not None:
-        return cached
+        return viewer_safe(cached, viewer)
 
     day_strs = window_day_strs(days)
     catalog = await read_daily(CATALOG_PREFIX, day_strs)
@@ -1422,7 +1428,7 @@ async def growth_metrics(
         ],
     }
     await cache.set(cache_key, result, ttl=cache.TTL_SHORT)
-    return result
+    return viewer_safe(result, viewer)
 
 
 _EVAL_TASKS: set[asyncio.Task] = set()
