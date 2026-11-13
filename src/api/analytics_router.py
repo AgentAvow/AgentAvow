@@ -388,7 +388,9 @@ async def get_conversion_funnel(
     dependencies=[Depends(rate_limit_reads)],
 )
 async def get_daily_conversion(
-    days: int = Query(30, ge=1, le=90),
+    # Up to 190 days: the dashboard asks for twice its 90-day window plus today, to
+    # compare a period with the one before it.
+    days: int = Query(30, ge=1, le=190),
     current_entity: Entity = Depends(get_current_entity),
     db: AsyncSession = Depends(get_db),
 ):
@@ -589,10 +591,15 @@ async def get_campaign_attribution(
     )
 
 
-async def campaign_rows(db: AsyncSession, days: int) -> list[CampaignRow]:
+async def campaign_rows(
+    db: AsyncSession, days: int, offset_days: int = 0,
+) -> list[CampaignRow]:
     """Per-campaign funnel rows (see ``get_campaign_attribution``), largest first.
-    Shared with the admin cost-per-action view."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    Shared with the admin cost-per-action view. ``offset_days`` moves the window back:
+    ``days=7, offset_days=7`` is the 7 days before the last 7 (the previous period)."""
+    now = datetime.now(timezone.utc)
+    end = now - timedelta(days=offset_days)
+    cutoff = end - timedelta(days=days)
     tags = (
         AnalyticsFirstTouch.utm_source,
         AnalyticsFirstTouch.utm_medium,
@@ -603,6 +610,7 @@ async def campaign_rows(db: AsyncSession, days: int) -> list[CampaignRow]:
     sessions = func.count(func.distinct(AnalyticsEvent.session_id))
     joined_in_window = (
         AnalyticsEvent.created_at >= cutoff,
+        AnalyticsEvent.created_at < end,
         AnalyticsEvent.session_id == AnalyticsFirstTouch.session_id,
         _NOT_BOT,
     )

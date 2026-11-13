@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 15
     jwt_refresh_token_expire_days: int = 7
 
+    # Key for the one-way hash of the Claude Code plugin's install ID (src/install_activity).
+    # Empty: derived from jwt_secret. Set it once and keep it: a new key makes every
+    # install read as new for 40 days. Env INSTALL_ID_HASH_KEY (prod: .env.secrets).
+    install_id_hash_key: str = ""
+
     # Google OAuth
     google_client_id: str | None = None
     google_client_secret: str | None = None
@@ -437,6 +442,12 @@ class Settings(BaseSettings):
     # counter (admin dashboard, Start here). Comma-separated client IPs, the same list
     # as data/owner-ips.txt on the prod host. Empty = nothing excluded.
     metrics_owner_ips: str = ""
+
+    # The hosted MCP connector's once-a-week "make this automatic" tip (install the
+    # Claude Code plugin), shown only to Claude Code callers that connected without the
+    # plugin (src/bridges/mcp_streamable._with_plugin_tip). Kill switch: env
+    # AGENTAVOW_PLUGIN_TIP=off (also false/0/no). Default on.
+    agentavow_plugin_tip: bool = True
 
     # MCP connector health alerting (src/jobs/mcp_health.py). On 2026-10-17..20 every
     # first request from current Claude clients got 400 "Unsupported protocol version"

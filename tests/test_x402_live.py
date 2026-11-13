@@ -109,9 +109,9 @@ def test_payee_the_host_already_lists_is_an_out_of_date_listing_not_a_redirect()
              {"resource": "https://elsewhere.example/x",
               "accepts": [{"network": "eip155:8453", "payTo": "0x" + "7" * 40}]}]
     known = xl.host_payees(stubs)
-    assert known["api.example.com"] == {other}
+    assert known["example.com"] == {other}
     reply = xl.read_reply(*_v2_reply(pay_to=other))
-    reply["host_payees"] = sorted(known["api.example.com"])
+    reply["host_payees"] = sorted(known["example.com"])
     f, rec = xl.live_findings(_listing(), reply)
     assert [x.severity for x in f] == ["low"] and "out of date" in f[0].name
     assert rec["payee_known_to_host"] is True and rec["matches"] is False
@@ -124,7 +124,7 @@ def test_payee_the_host_already_lists_is_an_out_of_date_listing_not_a_redirect()
                    "coverage_gaps": r.coverage_gaps}).decision == "safe"
     # an address only another host uses is still HIGH
     reply = xl.read_reply(*_v2_reply(pay_to="0x" + "7" * 40))
-    reply["host_payees"] = sorted(known["api.example.com"])
+    reply["host_payees"] = sorted(known["example.com"])
     f, rec = xl.live_findings(_listing(), reply)
     assert [x.severity for x in f] == ["high"] and rec["payee_known_to_host"] is False
 
@@ -270,3 +270,48 @@ def test_docs_page_states_the_approved_plan():
     assert xl.USER_AGENT in doc and xl.OPT_OUT_CONTACT in doc
     assert "User-agent: AgentAvowBot" in doc and "every 2 seconds per host" in doc
     assert "50" in doc and "never a payment" in doc
+
+
+def test_payee_domain_groups_one_sites_subdomains_but_not_shared_hosting():
+    assert xl.payee_domain("companies.use.x402atlas.com") == "x402atlas.com"
+    assert xl.payee_domain("API.Webacy.com.") == "webacy.com"
+    assert xl.payee_domain("foo.bar.co.uk") == "bar.co.uk"
+    # shared hosting: every tenant is its own site
+    assert xl.payee_domain("apex-edge-coral.vercel.app") == "apex-edge-coral.vercel.app"
+    assert xl.payee_domain("sml-greenlight.onrender.com") == "sml-greenlight.onrender.com"
+    assert xl.payee_domain("a.b.github.io") == "b.github.io"
+    assert xl.payee_domain("money-reactor.makar52nn2016.workers.dev") == \
+        "makar52nn2016.workers.dev"
+    # nothing the list can place is widened
+    assert xl.payee_domain("10.0.0.1") == "10.0.0.1"
+    assert xl.payee_domain("[::1]") == "[::1]"
+    assert xl.payee_domain("localhost") == "localhost"
+    assert xl.payee_domain(None) == "" and xl.payee_domain("") == ""
+
+
+def test_a_payee_another_subdomain_of_the_same_site_lists_is_low():
+    """Run 3 (11-12): *.use.x402atlas.com moved its Solana payee; 95 other x402atlas.com
+    listings already named the new address, but each subdomain was its own host."""
+    net = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+    stubs = [{"resource": "https://startup.use.x402atlas.com/x",
+              "accepts": [{"network": net, "payTo": "NewSol1"}]}]
+    known = xl.host_payees(stubs)
+    listing = _listing(net=net, pay_to="OldSol1")
+    listing["accepts"][0]["asset"] = USDC
+    listing["resource"] = "https://companies.use.x402atlas.com/french-company-data"
+    reply = xl.read_reply(*_v2_reply(pay_to="NewSol1", net=net))
+    reply["host_payees"] = xl.payees_for(known, listing["resource"])
+    f, rec = xl.live_findings(listing, reply)
+    assert [x.severity for x in f] == ["low"] and "this site lists" in f[0].name
+    assert rec["payee_known_to_host"] is True
+
+
+def test_a_payee_another_tenant_of_shared_hosting_lists_stays_high():
+    stubs = [{"resource": "https://attacker.vercel.app/x",
+              "accepts": [{"network": "eip155:8453", "payTo": "0x" + "6" * 40}]}]
+    known = xl.host_payees(stubs)
+    assert xl.payees_for(known, "https://victim.vercel.app/y") == []
+    reply = xl.read_reply(*_v2_reply(pay_to="0x" + "6" * 40))
+    reply["host_payees"] = xl.payees_for(known, "https://victim.vercel.app/y")
+    f, rec = xl.live_findings(_listing(), reply)
+    assert [x.severity for x in f] == ["high"] and rec["payee_known_to_host"] is False

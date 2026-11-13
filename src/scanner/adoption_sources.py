@@ -122,16 +122,22 @@ async def record_global_checker(identity: str) -> None:
 async def get_global_unique_checkers(days: int) -> int:
     """Distinct site-wide checkers over the last ``days`` — the union cardinality of
     the daily HLLs (PFCOUNT accepts multiple keys and ignores missing ones). 0 on error."""
+    now = datetime.now(timezone.utc)
+    return await get_global_unique_checkers_for_days(
+        [(now - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(max(1, days))]
+    )
+
+
+async def get_global_unique_checkers_for_days(day_strs: list[str]) -> int:
+    """Distinct site-wide checkers over exactly these UTC days (YYYY-MM-DD): the union
+    of their daily HLLs. 0 on error or for no days."""
+    if not day_strs:
+        return 0
     try:
         from src.redis_client import get_redis
 
         r = get_redis()
-        now = datetime.now(timezone.utc)
-        keys = [
-            f"{_GLOBAL_UNIQ_PREFIX}" + (now - timedelta(days=i)).strftime("%Y-%m-%d")
-            for i in range(max(1, days))
-        ]
-        return int(await r.pfcount(*keys))
+        return int(await r.pfcount(*[f"{_GLOBAL_UNIQ_PREFIX}{d}" for d in day_strs]))
     except Exception:
         return 0
 
