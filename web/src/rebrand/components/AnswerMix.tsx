@@ -64,6 +64,7 @@ export function AnswerMixBar({ size }: { size: 'slim' | 'big' }) {
       <div className="glass rounded-2xl px-[18px] py-3.5">
         <div className="font-mono text-[11px] tracking-[0.12em] uppercase text-primary-light">
           How the catalog reads · <b className="text-text">{total}</b> tools checked
+          {mix && mix.x402 > 0 && <> · plus {mix.x402.toLocaleString()} paid x402 endpoints</>}
         </div>
         <div className="mt-3"><Stack mix={mix} height={18} /></div>
         <div className="mt-2.5"><Legend mix={mix} big={false} /></div>
@@ -76,6 +77,7 @@ export function AnswerMixBar({ size }: { size: 'slim' | 'big' }) {
         <div>
           <b className="block gradient-text font-extrabold leading-none tracking-[-0.03em] tabular-nums text-[clamp(46px,8vw,72px)]">{total}</b>
           <span className="block mt-1.5 text-[15px] text-text-muted">tools checked, and how they read</span>
+          <X402Line x402={mix?.x402} />
         </div>
         <Legend mix={mix} big />
       </div>
@@ -124,5 +126,15 @@ export function StatCards({ set }: { set: 'home' | 'index' }) {
     <div className="grid grid-cols-2 min-[760px]:grid-cols-4 gap-3 mt-4">
       {cards.map((c) => <StatCard key={c.label} {...c} />)}
     </div>
+  )
+}
+
+/** "plus N paid x402 endpoints": checked too, but a different kind of thing, so never in the tools total. */
+export function X402Line({ x402, className = '' }: { x402?: number; className?: string }) {
+  if (!x402) return null
+  return (
+    <span className={`block mt-1 text-[13px] text-text-muted ${className}`}>
+      plus <b className="text-text tabular-nums">{x402.toLocaleString()}</b> paid x402 endpoints
+    </span>
   )
 }

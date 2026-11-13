@@ -7,6 +7,7 @@ import { ScorePairMini } from '../components/TrustMark'
 import { DECISIONS, decide, decisionPhrase, getTrustTier } from '../../components/trust/gradeSystem'
 
 import { RevealStagger } from '../components/motion'
+import { X402Line } from '../components/AnswerMix'
 import { useAnswerMix, type AnswerMix } from '../lib/answerMix'
 import { PageHeader } from '../components/PageBits'
 import SEOHead from '../../components/SEOHead'
@@ -323,6 +324,7 @@ function CatalogGraphic({ mix, decision, certifiedOn, onDecision, onCertified, r
         <div>
           <b className="block gradient-text font-extrabold leading-none tracking-[-.02em] tabular-nums text-[clamp(30px,5vw,40px)]">{ready ? mix.total.toLocaleString() : '—'}</b>
           <span className="block mt-1 text-[13.5px] text-text-muted">tools checked, and how they read</span>
+          {ready && <X402Line x402={mix?.x402} />}
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[13px] text-text-muted">
           {MIX_SEGMENTS.map((s) => (

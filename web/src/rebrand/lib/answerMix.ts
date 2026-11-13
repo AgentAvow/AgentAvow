@@ -3,6 +3,7 @@
  *
  *   tools checked  = the sum of the three /public/scan-catalog?decision=… totals
  *   Certified      = /public/scan-catalog?grade=certified total
+ *   x402           = summary.x402_scored (paid x402 endpoints, counted apart from tools)
  *
  * Numbers only (no rows), so the prerender ships it as is. Cached for an hour.
  */
@@ -16,12 +17,17 @@ export interface AnswerMix {
   certified: number
   /** tools checked: safe + review + dnc */
   total: number
+  /** paid x402 endpoints checked: shown apart, never added to total */
+  x402: number
 }
 
 async function fetchAnswerMix(): Promise<AnswerMix> {
+  let x402 = 0
   const total = async (params: Record<string, string | number>) => {
     const data = await fetchCatalog({ ...params, limit: 1 })
     if (typeof data.total !== 'number') throw new Error('catalog total missing')
+    const s = data.summary
+    x402 = Math.max(x402, s?.x402_scored || s?.x402_endpoints_total || 0)
     return data.total
   }
   const [safe, review, dnc, certified] = await Promise.all([
@@ -30,7 +36,7 @@ async function fetchAnswerMix(): Promise<AnswerMix> {
     total({ decision: 'do_not_connect' }),
     total({ grade: 'certified' }),
   ])
-  return { safe, review, dnc, certified, total: safe + review + dnc }
+  return { safe, review, dnc, certified, total: safe + review + dnc, x402 }
 }
 
 export function useAnswerMix() {
