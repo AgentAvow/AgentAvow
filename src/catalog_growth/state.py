@@ -173,8 +173,28 @@ def merge_pending(pending: list[dict], items: list[dict]) -> list[dict]:
         cur = by_key.get(k)
         if cur is None or it.get("priority", 9) < cur.get("priority", 9):
             by_key[k] = it
-    return sorted(by_key.values(),
-                  key=lambda i: (i.get("priority", 9), -(i.get("adoption") or 0), i["key"]))
+    return interleave_sources(by_key.values())
+
+
+def interleave_sources(items) -> list[dict]:
+    """Order the queue by priority (lower first); within one priority, take turns across
+    sources (mcp_registry, npm, pypi, openclaw, ...), each source most-adopted first.
+
+    Sorting by adoption alone put every npm package (which has download counts) ahead of
+    every MCP Registry server (which mostly has none): the first live run (11-13) scanned
+    492 npm packages and 0 MCP servers. Taking turns gives each source a fair share of
+    every run, and of the PENDING_MAX slots when the queue is trimmed."""
+    by_prio: dict[int, dict[str, list[dict]]] = {}
+    for it in items:
+        src = it.get("source") or it.get("surface") or ""
+        by_prio.setdefault(it.get("priority", 9), {}).setdefault(src, []).append(it)
+    out: list[dict] = []
+    for prio in sorted(by_prio):
+        buckets = [sorted(b, key=lambda i: (-(i.get("adoption") or 0), i["key"]))
+                   for _, b in sorted(by_prio[prio].items())]
+        for n in range(max(len(b) for b in buckets)):
+            out.extend(b[n] for b in buckets if n < len(b))
+    return out
 
 
 # -- metrics (Redis, for /admin/metrics/growth) -----------------------------------
