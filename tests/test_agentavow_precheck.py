@@ -28,6 +28,7 @@ def _load(path: pathlib.Path):
 def hook(tmp_path, monkeypatch):
     mod = _load(PLUGIN_COPY)
     monkeypatch.setattr(mod, "CACHE", tmp_path / "scanned.json")
+    monkeypatch.setattr(mod, "_start_active", lambda: None)  # no daily active request
     monkeypatch.setattr("sys.stdin", io.StringIO("{}"))
     # The repo root has a pyproject.toml; run from an empty folder so the dependency
     # pass has nothing to grade unless a test writes a manifest.

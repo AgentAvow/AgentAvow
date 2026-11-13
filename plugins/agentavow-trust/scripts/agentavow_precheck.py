@@ -42,6 +42,10 @@ by every client. So the hook does both, and the context block asks Claude to ope
 first reply with the one-line summary — the one channel every surface shows.
 A server whose tool definitions the gate saw change since the grade is re-graded here
 at the next session start, and reported again.
+Once a UTC day the hook also sends one small "active" request: the anonymous install
+ID, the plugin version and the app type (desktop, cli, sdk, cloud or other). Nothing
+about your tools, servers, files or code. It lets AgentAvow count machines the plugin
+protects. AGENTAVOW_ANON_ID=off turns it off along with the install ID.
 
 Design guarantees (deliberate):
   • OPT-IN — nothing runs unless YOU install this hook. AgentAvow's MCP server never
@@ -61,12 +65,13 @@ import pathlib
 import re
 import socket
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.40"
+__version__ = "0.1.41"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -1371,6 +1376,81 @@ def _headers() -> dict:
     return headers
 
 
+# Once a UTC day, one small "active" request so AgentAvow can count the machines the
+# plugin protects. Most session starts answer from the cache and send nothing, so the
+# scan requests alone miss most protected machines. It carries the install ID (as the
+# header above), the plugin version and the app type, and nothing else: no tool, server,
+# path or repo name. Same opt-out as the install ID (AGENTAVOW_ANON_ID=off): no ID, no
+# request. The day is written to the hook state before sending, so it never goes twice
+# in a day; a failure is not retried until the next day. Silent, 2 s at most, and it
+# runs beside the pre-check, so it never holds the session up.
+ACTIVE_URL = "https://agentavow.com/api/v1/public/plugin/active"
+ACTIVE_UA = "agentavow-active"  # its own User-Agent: never counted as a scan or a check
+ACTIVE_TIMEOUT = 2  # seconds
+ACTIVE_DAY_KEY = "active_day"  # meta: the UTC day the active request was last sent
+APP_TYPES = ("desktop", "cli", "sdk", "cloud", "other")
+
+
+def _app_type() -> str:
+    """CLAUDE_CODE_ENTRYPOINT reduced to one of APP_TYPES, the same grouping AgentAvow
+    applies to Claude Code's own User-Agent (scripts/ops/anthropic_traffic_snapshot.py)."""
+    ep = os.environ.get("CLAUDE_CODE_ENTRYPOINT", "").strip().lower()
+    if ep.startswith("remote"):
+        return "cloud"
+    if ep in ("claude-desktop", "local-agent") or ep.startswith("desktop"):
+        return "desktop"
+    if ep.startswith("sdk"):
+        return "sdk"
+    if ep == "cli" or ep.startswith(("claude-vscode", "claude-jetbrains")) or "ide" in ep:
+        return "cli"
+    return "other"
+
+
+def _active_due(now: float) -> str | None:
+    """The install ID when today's active request is still to send, after recording
+    today in the hook state; None when it went already today, is switched off, or the
+    state can't be written (so it can never repeat)."""
+    if _install_id_off():
+        return None
+    day = time.strftime("%Y-%m-%d", time.gmtime(now))
+    cache = _load_cache()
+    meta = cache.get(META_KEY) if isinstance(cache.get(META_KEY), dict) else {}
+    if meta.get(ACTIVE_DAY_KEY) == day:
+        return None
+    iid = _install_id()
+    if not iid:
+        return None
+    cache[META_KEY] = dict(meta, **{ACTIVE_DAY_KEY: day})
+    return iid if _save_cache(cache) else None
+
+
+def _send_active(iid: str) -> None:
+    body = json.dumps({"version": __version__, "app": _app_type()}).encode("utf-8")
+    req = urllib.request.Request(ACTIVE_URL, data=body, method="POST", headers={
+        "User-Agent": f"{ACTIVE_UA}/{__version__}",
+        "Content-Type": "application/json",
+        INSTALL_ID_HEADER: iid,
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=ACTIVE_TIMEOUT):  # noqa: S310 (https only)
+            pass
+    except Exception:
+        pass  # fail-open and silent
+
+
+def _start_active() -> threading.Thread | None:
+    """Send today's active request on a background thread; None when not due."""
+    try:
+        iid = _active_due(time.time())
+        if not iid:
+            return None
+        t = threading.Thread(target=_send_active, args=(iid,), daemon=True)
+        t.start()
+        return t
+    except Exception:
+        return None
+
+
 def _fetch(path: str, params: dict) -> dict:
     url = f"{API}{path}?{urllib.parse.urlencode(params)}" if params else f"{API}{path}"
     req = urllib.request.Request(url, headers=_headers())
@@ -1496,7 +1576,7 @@ def _show_intro_once() -> None:
     meta = cache.get(META_KEY)
     if isinstance(meta, dict) and meta.get("intro_shown"):
         return
-    cache[META_KEY] = {"intro_shown": __version__}
+    cache[META_KEY] = dict(meta if isinstance(meta, dict) else {}, intro_shown=__version__)
     if _save_cache(cache):
         print(json.dumps({"systemMessage": _intro_message()}))
 
@@ -1681,6 +1761,16 @@ def _pending(cache: dict, t: dict, entry: object, now: float, asked: bool,
 
 
 def main() -> None:
+    started = time.monotonic()
+    active = _start_active()
+    try:
+        _main()
+    finally:
+        if active is not None:  # wait for it only up to ACTIVE_TIMEOUT from the start
+            active.join(max(0.0, ACTIVE_TIMEOUT - (time.monotonic() - started)))
+
+
+def _main() -> None:
     payload = None
     try:
         payload = json.load(sys.stdin)  # the SessionStart payload: ``cwd`` is the session folder

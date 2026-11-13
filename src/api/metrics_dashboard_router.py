@@ -1310,7 +1310,12 @@ async def traffic_metrics(
     UTC day, for the admin dashboard. Admin only. See ``notes`` for what each column counts
     and why it differs from the live MCP counters."""
     viewer = require_admin_or_viewer(current_entity)
-    from src.install_activity import INSTALL_NOTES, install_series
+    from src.install_activity import (
+        ACTIVE_NOTES,
+        INSTALL_NOTES,
+        active_ping_series,
+        install_series,
+    )
 
     day_strs, rows = await _traffic_rows(days)
     by_day = {r["day"]: r for r in rows}
@@ -1331,8 +1336,12 @@ async def traffic_metrics(
     # columns join ``series`` when it is laid out on the same days.
     install_days = day_strs or window_day_strs(days)
     installs = await install_series(install_days)
+    # Machines protected by the plugin's once-a-day active request (plugin 0.1.41+),
+    # on the same days. Counting starts on the day the first one arrived.
+    active = await active_ping_series(install_days)
     if day_strs:
         series.update(installs)
+        series.update(active["series"])
     return viewer_safe({
         "days": day_strs,
         "rows": rows,
@@ -1344,7 +1353,15 @@ async def traffic_metrics(
             "series": installs,
             "latest": {col: vals[-1] if vals else None for col, vals in installs.items()},
         },
-        "notes": _TRAFFIC_NOTES + INSTALL_NOTES,
+        "active_installs": {
+            "days": install_days,
+            "counting_from": active["counting_from"],
+            "seven_day_complete_from": active["seven_day_complete_from"],
+            "series": active["series"],
+            "latest": {col: vals[-1] if vals else None
+                       for col, vals in active["series"].items()},
+        },
+        "notes": _TRAFFIC_NOTES + INSTALL_NOTES + ACTIVE_NOTES,
     }, viewer)
 
 

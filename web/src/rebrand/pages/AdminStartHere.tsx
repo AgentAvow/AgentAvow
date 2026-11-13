@@ -1,5 +1,5 @@
-/** The five numbers to read first on the admin dashboard, in plain English. Everything
- * else on the Metrics tab stays below this panel. Uses the page's time window; the two
+/** The numbers to read first on the admin dashboard, in plain English. Everything
+ * else on the Metrics tab stays below this panel. Uses the page's time window; the
  * machine counts are 7-day counts by nature and say so. */
 import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -21,6 +21,14 @@ interface Row {
   checks_total?: number | null; checks_claude_code?: number | null; checks_claude?: number | null
   checks_chatgpt?: number | null; checks_cursor?: number | null; checks_vscode?: number | null
   checks_codex?: number | null
+}
+
+/** The plugin's once-a-day active signal (plugin 0.1.41+), by install ID. */
+interface ActiveInstalls {
+  days?: string[]
+  counting_from?: string | null
+  seven_day_complete_from?: string | null
+  series?: Record<string, (number | null)[]>
 }
 
 const sum = (rows: Row[], pick: (r: Row) => number | null | undefined) =>
@@ -56,7 +64,7 @@ function Card({ label, k, value, meaning, tip, children }: { label: string; k?: 
 export default function StartHerePanel() {
   const w = useDashWindow()
   const label = useWindowLabel()
-  const { data } = useQuery<{ rows?: Row[] }>({
+  const { data } = useQuery<{ rows?: Row[]; active_installs?: ActiveInstalls }>({
     queryKey: ['admin-dash-claude-traffic', w.days + 1],
     queryFn: async () => (await api.get('/admin/metrics/traffic', { params: { days: w.days + 1 } })).data,
   })
@@ -80,6 +88,18 @@ export default function StartHerePanel() {
   const checkDays = rows.filter((r) => r.checks_total != null)
   const preDays = rows.filter((r) => r.checks_total == null)
   const checks = sum(checkDays, handRunChecks)
+  // Machines protected, by the plugin's once-a-day active signal: the 7 days to the last
+  // complete day, and today so far. Counting starts the day the first signal arrived.
+  const act = data?.active_installs
+  const actDays = act?.days || []
+  const actAt = (col: string, day?: string) => {
+    const i = day ? actDays.indexOf(day) : -1
+    return i >= 0 ? act?.series?.[col]?.[i] ?? null : null
+  }
+  const active7 = actAt('active_installs_7d', yesterday)
+  const activeToday = actAt('active_installs', w.today)
+  const activeFrom = act?.counting_from ?? null
+  const activePartial = activeFrom && act?.seven_day_complete_from && yesterday < act.seven_day_complete_from
   const live = liveListings()
   const pending = pendingListings()
 
@@ -88,18 +108,27 @@ export default function StartHerePanel() {
       <h2 className="text-lg font-bold">Start here</h2>
       <p className="mt-0.5 font-mono text-[11.5px] text-primary-light/90">{label}</p>
       <p className="mt-1 text-text-muted text-[13px]">
-        The five numbers that matter. Higher is better on all of them.
+        The numbers that matter. Higher is better on all of them.
         {latest
-          ? <> The two machine counts are 7-day counts from the {dayLabel(latest.day)} snapshot ({rangeLabel(sevenDays)}); the rest cover the whole window ({rows.length} of {w.days} days have a snapshot).{latest.day !== yesterday ? ` The ${dayLabel(yesterday)} snapshot isn't written yet (it lands at 00:40 UTC).` : ''}</>
+          ? <> The first machine count is a 7-day count from the {dayLabel(latest.day)} snapshot ({rangeLabel(sevenDays)}); the active-installs count is a 7-day count from the plugin's daily signal; the rest cover the whole window ({rows.length} of {w.days} days have a snapshot).{latest.day !== yesterday ? ` The ${dayLabel(yesterday)} snapshot isn't written yet (it lands at 00:40 UTC).` : ''}</>
           : ' No snapshot on file for this window yet.'}
       </p>
-      <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <Card
           label={`Claude Code machines protected · unique, 7 days to ${dayLabel(latest?.day)}`}
           k="protected"
           value={protectedMachines != null ? `${protectedMachines.toLocaleString()}${share}` : 'Not ready'}
           meaning={<>Machines where the Claude Code plugin's session-start or install-time check ran at least once in those 7 days, out of machines connecting.{sevenDayPartial ? ` Partial: this count is complete from ${dayLabel(SEVEN_DAY_COMPLETE_FROM)} (it needs 7 days of data).` : ''}</>}
           tip={`Each machine counts once in the 7 days. Owner machines (data/owner-ips.txt on the host) are excluded. Not counted: hand-run checks in claude.ai, ChatGPT, Cursor, VS Code or Codex; the npm and Python gates; CI. ${cloudExcluded ? 'Machines seen on an Anthropic cloud (remote) entrypoint in the last 30 days are excluded too.' : 'Anthropic cloud addresses (remote Claude Code sessions) are NOT excluded on this row: the snapshot did not split by entrypoint yet, so they inflate both the count and the share.'}`}
+        />
+        <Card
+          label={`Machines protected (active installs${activeFrom ? `, from ${dayLabel(activeFrom)}` : ''}) · unique, 7 days to ${dayLabel(yesterday)}`}
+          k="active_installs"
+          value={active7 != null ? active7.toLocaleString() : 'Not ready'}
+          meaning={activeFrom
+            ? <>Plugin installs that sent the once-a-day active signal in those 7 days, counted by install ID. Starts counting on {dayLabel(activeFrom)}, the day plugin 0.1.41 first sent it; installs not yet on 0.1.41 are not in it, so it grows as people update.{activePartial ? ` Partial: fewer than 7 days counted until ${dayLabel(act?.seven_day_complete_from)}.` : ''}{activeToday != null ? ` Today so far: ${activeToday.toLocaleString()}.` : ''}</>
+            : <>Starts counting on the day plugin 0.1.41 (the once-a-day active signal) is released and the first signal arrives. Nothing yet.</>}
+          tip="Each install counts once in the 7 days. Unlike the count beside it, this sees machines whose session start answered from the plugin's cache without a request. Owner machines (METRICS_OWNER_IPS) are left out. An Anthropic cloud session starts on a fresh machine, so each can count as its own install."
         />
         <Card
           label={`New machines · ${rangeLabel(w.complete)}`}

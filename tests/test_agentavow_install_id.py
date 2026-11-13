@@ -103,7 +103,7 @@ def test_header_rides_on_package_requests_too_with_the_hook_user_agent(pc):
     req = pc._sent[0]
     assert req.full_url.startswith("https://agentavow.com/api/v1/public/scan/package/npm/chalk")
     assert req.get_header(HEADER) == _id_file(pc).read_text().strip()
-    assert req.get_header("User-agent").startswith("agentavow-precheck/0.1.40")
+    assert req.get_header("User-agent").startswith(f"agentavow-precheck/{pc.__version__}")
 
 
 @pytest.mark.parametrize("value", ["off", "OFF", " off "])
@@ -161,6 +161,7 @@ def test_cache_folder_that_cannot_be_made_sends_nothing(pc, monkeypatch, tmp_pat
 def _session_start(tmp_path, monkeypatch, capsys, anon: str | None) -> tuple[str, str, list]:
     mod = _load("agentavow_precheck")
     monkeypatch.setattr(mod, "CACHE", tmp_path / "scanned.json")
+    monkeypatch.setattr(mod, "_start_active", lambda: None)  # no daily active request
     if anon is None:
         monkeypatch.delenv("AGENTAVOW_ANON_ID", raising=False)
     else:

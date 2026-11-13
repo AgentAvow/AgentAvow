@@ -27,6 +27,7 @@ def _load():
 def hook(tmp_path, monkeypatch):
     mod = _load()
     monkeypatch.setattr(mod, "CACHE", tmp_path / "cache" / "scanned.json")
+    monkeypatch.setattr(mod, "_start_active", lambda: None)  # no daily active request
     monkeypatch.setattr("sys.stdin", io.StringIO("{}"))
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv(mod.DEPS_ENV, raising=False)

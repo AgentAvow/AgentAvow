@@ -67,8 +67,10 @@ your machine.
 
 What leaves your machine: the server URL or package name being checked, and a random
 install ID, a code made up once on your machine that isn't tied to you, your account or
-your files. We use it only to count how many installs keep using the plugin. To turn it
-off, set `AGENTAVOW_ANON_ID=off`.
+your files. Once a day the session-start hook also sends that install ID with the plugin
+version and the app type (desktop, CLI, SDK or cloud), and nothing about your tools or
+code, so we can count how many machines the plugin protects. To turn both off, set
+`AGENTAVOW_ANON_ID=off`.
 
 ---
 

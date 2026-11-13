@@ -202,6 +202,11 @@ Silence means allow. A deny or a confirmation comes back as a JSON object with a
   files. It is used only to count how many installs keep using the plugin, and is
   stored only as a one-way hash, never with an IP address. To turn it off, set
   `AGENTAVOW_ANON_ID=off`. The gate never sends it.
+- **Once a day, an active signal.** On the first session start of each UTC day
+  the session-start hook sends the install ID, the plugin version and the app
+  type (desktop, CLI, SDK or cloud), and nothing about your tools or code. It
+  lets us count how many machines the plugin protects. It waits at most 2
+  seconds and prints nothing. `AGENTAVOW_ANON_ID=off` turns it off too.
 - **Quiet.** Each server is scanned once. One AgentAvow can't read (it needs
   sign-in, for example) is reported once as "not scanned" and left alone for a week.
 

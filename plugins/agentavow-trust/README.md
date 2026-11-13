@@ -169,8 +169,10 @@ observation (tools called, network, file writes, credentials) as its own section
 
 What leaves your machine: the server URL or package name being checked, and a random
 install ID, a code made up once on your machine that isn't tied to you, your account or
-your files. We use it only to count how many installs keep using the plugin. To turn it
-off, set `AGENTAVOW_ANON_ID=off`.
+your files. Once a day the session-start hook also sends that install ID with the plugin
+version and the app type (desktop, CLI, SDK or cloud), and nothing about your tools or
+code, so we can count how many machines the plugin protects. To turn both off, set
+`AGENTAVOW_ANON_ID=off`.
 
 The hooks are three Python scripts, `scripts/agentavow_precheck.py` (session start),
 `scripts/agentavow_pre_install.py` (install time) and `scripts/agentavow_pretool_gate.py`
@@ -203,6 +205,18 @@ day it was seen, for 40 days, and never with your IP address. With
 `AGENTAVOW_ANON_ID=off` the file is not made and the header is not sent. The
 install-time hook sends the same header on its requests; the gate sends nothing to
 AgentAvow, so it never sends it.
+
+**Once a day** (the first session start of each UTC day, even when there is nothing new
+to check) the session-start hook sends one more small request, a POST to
+`https://agentavow.com/api/v1/public/plugin/active` with the same install ID header and
+a body of `{"version": "0.1.41", "app": "desktop"}`: the plugin version and the app
+type, one of `desktop`, `cli`, `sdk`, `cloud` or `other`, read from Claude Code's
+`CLAUDE_CODE_ENTRYPOINT`. No tool, server, path or repo name goes in it. It lets
+AgentAvow count the machines the plugin protects, including the many days the hook
+answers from its cache and sends nothing else. The day it was sent is kept in the
+hook's cache file so it never goes twice in a day; it waits at most 2 seconds, runs
+beside the check, prints nothing, and a failure is simply skipped. `AGENTAVOW_ANON_ID=off`
+turns it off too.
 
 **It does not send:**
 

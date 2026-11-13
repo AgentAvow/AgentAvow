@@ -25,7 +25,7 @@ import { AdminAccessPanel, useAdminAccess, ViewOnlyNotice } from './adminAccess'
 import { BarList, Section, Stat, TrendChart, WindowBar } from './adminMetricsKit'
 import type { TrendLine } from './adminMetricsKit'
 import {
-  completeDays, dayLabel, DashWindowContext, fmt, fmtOrDash, metricsWindow, pctOf, rangeLabel,
+  completeDays, dayLabel, DashWindowContext, fmt, fmtOrDash, metricsWindow, pctOf, rangeLabel, sumOf,
   usd, useDashWindow, useMetricsScope, useWindowLabel, utcDay,
 } from './adminMetricsUtil'
 import type { PageWin } from './adminMetricsUtil'
@@ -383,7 +383,9 @@ interface TrafficRow {
   a2a_card_fetches?: number | null; a2a_card_fetchers?: number | null
   [col: string]: number | string | null | undefined
 }
-interface Traffic { days?: string[]; rows?: TrafficRow[]; latest?: TrafficRow | null; covered_days?: number; notes?: string[] }
+/** The plugin's once-a-day active signal (plugin 0.1.41+), counted by install ID. */
+interface ActiveInstalls { days?: string[]; counting_from?: string | null; series?: Record<string, (number | null)[]> }
+interface Traffic { days?: string[]; rows?: TrafficRow[]; latest?: TrafficRow | null; covered_days?: number; notes?: string[]; active_installs?: ActiveInstalls }
 
 /** The nightly traffic snapshot for the page window: one row per complete UTC day that
  *  has a snapshot (today never does; the cron writes each day after it ends). */
@@ -398,7 +400,11 @@ function useTraffic() {
   const byDay = Object.fromEntries(rows.map((r) => [r.day, r]))
   /** A column aligned to the window's days; null where there is no snapshot or no value. */
   const col = (name: string) => w.complete.map((d) => { const v = byDay[d]?.[name]; return typeof v === 'number' ? v : null })
-  return { rows, byDay, col, latest: rows[rows.length - 1] }
+  /** An active-installs column aligned to the window's days; null before counting began. */
+  const act = q.data?.active_installs
+  const actIdx = Object.fromEntries((act?.days || []).map((d, i) => [d, i]))
+  const activeCol = (name: string) => w.complete.map((d) => { const i = actIdx[d]; const v = i == null ? null : act?.series?.[name]?.[i]; return typeof v === 'number' ? v : null })
+  return { rows, byDay, col, activeCol, activeFrom: act?.counting_from ?? null, latest: rows[rows.length - 1] }
 }
 
 // ── Scan requests by kind (GET /admin/metrics → scan_kinds) ─────────────────
@@ -554,16 +560,18 @@ function GrowthPanel() {
           <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Claude Code activation by entrypoint · {rangeLabel(dayList)}</div>
           {hasEp ? (
             <table className="w-full text-[12.5px]">
-              <thead><tr className="text-left font-mono text-[11px] uppercase tracking-wide text-text-muted/70"><th className="py-1 pr-3">Entrypoint</th><th className="py-1 pr-3 text-right">Connecting (days of use<Info k="days_of_use" />)</th><th className="py-1 pr-3 text-right">Checked (days of use)</th><th className="py-1 text-right">Share</th></tr></thead>
+              <thead><tr className="text-left font-mono text-[11px] uppercase tracking-wide text-text-muted/70"><th className="py-1 pr-3">Entrypoint</th><th className="py-1 pr-3 text-right">Connecting (days of use<Info k="days_of_use" />)</th><th className="py-1 pr-3 text-right">Checked (days of use)</th><th className="py-1 pr-3 text-right">Share</th><th className="py-1 text-right">Active installs<Info k="active_installs" /></th></tr></thead>
               <tbody>
                 {Object.keys(EP_LABEL).map((ep) => {
                   const c = tsum(`cc_machines_${ep}`), k = tsum(`checked_machines_${ep}`)
+                  const a = traffic.activeCol(`active_installs_${ep}`)
                   return (
                     <tr key={ep} className={`border-t border-border/40${c === 0 ? ' opacity-50' : ''}`}>
                       <td className="py-1.5 pr-3">{EP_LABEL[ep]}</td>
                       <td className="py-1.5 pr-3 tabular-nums text-right">{fmt(c)}</td>
                       <td className="py-1.5 pr-3 tabular-nums text-right">{fmt(k)}</td>
-                      <td className="py-1.5 tabular-nums text-right">{c ? pctOf(k, c) : '—'}</td>
+                      <td className="py-1.5 pr-3 tabular-nums text-right">{c ? pctOf(k, c) : '—'}</td>
+                      <td className="py-1.5 tabular-nums text-right">{a.some((v) => v != null) ? fmt(sumOf(a)) : '—'}</td>
                     </tr>
                   )
                 })}
@@ -575,6 +583,7 @@ function GrowthPanel() {
             {' · '}within their first week: <span className="font-semibold tabular-nums">{d7Cohort && traffic.rows.some((r) => r.d7_cohort_checked != null) ? pctOf(d7Checked, d7Cohort) : '—'}</span> <span className="text-text-muted">(machines first seen a week earlier; counted from Nov 11, so the first full week ends Nov 18)</span>
           </p>
           <p className="mt-1 text-[11px] text-text-muted/60">A day of use is one machine on one day: a machine seen on two days counts twice, and on two entrypoints, in both. Owner machines excluded.</p>
+          <p className="mt-1 text-[11px] text-text-muted/60">Active installs: installs that sent the plugin's once-a-day active signal, by install ID, added up across the days (days of use). {traffic.activeFrom ? `Counting from ${dayLabel(traffic.activeFrom)}; days before read —.` : 'Starts counting on the day plugin 0.1.41 is released; — until then.'} Installs not yet on 0.1.41 are not in it.</p>
         </div>
         <div className="glass rounded-2xl p-5">
           <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Landing visits by referrer · last {w.days} × 24 hours up to now</div>
