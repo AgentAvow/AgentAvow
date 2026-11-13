@@ -755,10 +755,56 @@ _CATALOG_SOURCES: tuple[tuple[str, str, str], ...] = (
 )
 
 
+# Remote endpoints for launch-corpus MCP registry rows that were skipped for having no
+# readable code: {"endpoints": {"<registry name>": "https://host/path"}}. Written by
+# src.catalog_growth only after a live tool-definition scan of that endpoint landed in
+# community_scans, so such a row opens the endpoint's page and the live scan replaces it
+# (one row per page) instead of a "not checked" row sitting beside the live one.
+_MCP_ENDPOINTS_FILE = "mcp-endpoints.json"
+
+
+def load_mcp_endpoints(path: Path | None = None) -> dict[str, str]:
+    """The registry-name -> endpoint overlay; https URLs in endpoint-identity form only
+    (no credentials, query or fragment). {} when absent or unreadable."""
+    from src.ssrf import mcp_endpoint_identity
+
+    try:
+        doc = json.loads((path or _DATA_DIR / _MCP_ENDPOINTS_FILE).read_text())
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        logger.warning("scan_catalog: unreadable %s", _MCP_ENDPOINTS_FILE)
+        return {}
+    eps = doc.get("endpoints") if isinstance(doc, dict) else None
+    out: dict[str, str] = {}
+    for name, url in (eps or {}).items() if isinstance(eps, dict) else []:
+        if not (isinstance(name, str) and isinstance(url, str)
+                and url.lower().startswith("https://")):
+            continue
+        try:
+            if mcp_endpoint_identity(url) != url:
+                continue
+        except ValueError:
+            continue
+        out[name] = url
+    return out
+
+
+def _apply_mcp_endpoints(rows: list[CatalogRow], endpoints: dict[str, str]) -> None:
+    """Give a skipped MCP corpus row with no page its scanned endpoint's page (in place)."""
+    if not endpoints:
+        return
+    for r in rows:
+        if r.surface == "mcp" and r.page_path is None and r.name in endpoints:
+            r.endpoint_url = endpoints[r.name]
+            r.page_path = page_path_for(r.surface, r.name, r.full_name, r.endpoint_url)
+
+
 def _load_rows(failed: set[str] | None = None) -> list[CatalogRow]:
     rows: list[CatalogRow] = []
     for surface, fname, key in _CATALOG_SOURCES:
         rows += _load_surface(surface, _DATA_DIR / fname, results_key=key, failed=failed)
+    _apply_mcp_endpoints(rows, load_mcp_endpoints())
     return rows
 
 
@@ -767,7 +813,7 @@ def _source_signature() -> tuple[tuple[str, int | None, int | None], ...]:
     (file, None, None). The host re-score scripts rewrite these files atomically
     (tmp + rename), so any rewrite changes the signature."""
     out: list[tuple[str, int | None, int | None]] = []
-    for _surface, fname, _key in _CATALOG_SOURCES:
+    for fname in [f for _s, f, _k in _CATALOG_SOURCES] + [_MCP_ENDPOINTS_FILE]:
         try:
             st = (_DATA_DIR / fname).stat()
             out.append((fname, st.st_mtime_ns, st.st_size))
@@ -949,6 +995,21 @@ async def community_mark_grade(c: Any) -> str | None:
     return stored_grade
 
 
+def community_row_coords(
+    surface: str | None, repo: str, full_name: str,
+) -> tuple[str, str, str | None, str | None]:
+    """(surface, name, repository_url, endpoint_url) of a community_scans row as the
+    catalog lists it. Routes by the row's real surface (default github for pre-t18
+    rows): npm/pypi/... -> package name, mcp -> endpoint URL, else the repo. Shared with
+    src.catalog_growth so its "already in the catalog" check keys rows the same way."""
+    surf = (surface or "github").lower()
+    if surf in _PKG_SURFACES:
+        return surf, repo, None, None
+    if surf == "mcp":
+        return surf, repo, None, repo
+    return surf, full_name, f"https://github.com/{full_name}", None
+
+
 async def _fetch_community_rows(db: AsyncSession) -> list[CatalogRow] | None:
     """One DB read of the community rows; None on a DB error."""
     from src.models import CommunityScan
@@ -967,19 +1028,8 @@ async def _fetch_community_rows(db: AsyncSession) -> list[CatalogRow] | None:
         out: list[CatalogRow] = []
         seen: set[str] = set()
         for c in scanned:
-            # Route each community row by its real surface (default github for
-            # pre-t18 rows): npm/pypi → package name, mcp → endpoint URL, else repo.
-            surf = (getattr(c, "surface", None) or "github").lower()
-            name = c.full_name
-            repository_url = None
-            endpoint_url = None
-            if surf in _PKG_SURFACES:
-                name = c.repo
-            elif surf == "mcp":
-                name = c.repo
-                endpoint_url = c.repo
-            else:  # github / openclaw
-                repository_url = f"https://github.com/{c.full_name}"
+            surf, name, repository_url, endpoint_url = community_row_coords(
+                getattr(c, "surface", None), c.repo, c.full_name)
             # Newest first: two rows that open the same page (a case-only duplicate,
             # Chris221/x vs chris221/x) are the same tool, so only the latest is listed.
             path = page_path_for(surf, name, c.full_name, endpoint_url)

@@ -1371,6 +1371,7 @@ async def growth_metrics(
     referrals to landing pages over ``days``. Admin only."""
     viewer = require_admin_or_viewer(current_entity)
     from src import cache
+    from src.catalog_growth.state import recent_runs as recent_catalog_growth_runs
     from src.indexnow_record import recent_runs as recent_indexnow_runs
     from src.jobs.metrics_daily import (
         CATALOG_PREFIX,
@@ -1401,6 +1402,7 @@ async def growth_metrics(
         "downloads_latest": latest_dl,
         "referrals": await _referrals(db, days),
         "indexnow_runs": await recent_indexnow_runs(5),
+        "catalog_growth_runs": await recent_catalog_growth_runs(10),
         "notes": [
             "catalog_daily is written by the 6-hour scheduler job (src/jobs/metrics_daily) "
             "from the PR 2 deploy on; days before it are absent, not zero. x402 listings "
@@ -1411,6 +1413,12 @@ async def growth_metrics(
             "that sent them. Only the host is stored. Counted from the PR 2 deploy.",
             "indexnow_runs: the newest IndexNow pings, newest first (when, outcome, URLs "
             "submitted, HTTP status), stored by scripts/deploy-prod.sh after each deploy.",
+            "catalog_growth_runs: the newest catalog discovery / version-refresh runs, "
+            "newest first (src/catalog_growth): job (discover | refresh), mode (dry-run | "
+            "on), totals and by_source counts (discovered, new, already, queued, changed, "
+            "unchanged, baselined, scanned, failed, deferred, skipped_with_url, "
+            "no_code_no_url, below_floor, dnc_held...), registry requests per policy, "
+            "duration_s, and why a run stopped early. A dry run scans nothing.",
         ],
     }
     await cache.set(cache_key, result, ttl=cache.TTL_SHORT)
