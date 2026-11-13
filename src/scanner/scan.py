@@ -3052,6 +3052,17 @@ def _is_fake_fixture_secret(val_norm: str, file_path: str) -> bool:
             and _is_test_fixture_file(file_path))
 
 
+def _is_filler_placeholder(val: str) -> bool:
+    """A key body that is one character repeated (``ghp_000…0``, ``sk-aaaa…``) or only
+    ``0`` / ``x`` / ``*`` filler (``ghp_xxxx…``, ``****``) is a placeholder, never key
+    material (eve's ``ghp_`` + 36 zeros, 2026-11-13). The body is the part after the
+    last ``_`` / ``-``, 8+ characters; anything with a second real character stays."""
+    body = re.split(r"[_-]", val)[-1].lower()
+    if len(body) < 8:
+        return False
+    return len(set(body)) == 1 or set(body) <= set("0x*")
+
+
 def _is_counting_placeholder(val: str) -> bool:
     """A key body made only of counting runs (``1234567890abcdef1234567890…``, ghapi's
     spec example) is a made-up value, never random key material. Every maximal run of
@@ -3940,18 +3951,24 @@ def _scan_content(
 
         # Check secrets
         for name, pattern, severity in secret_rules:
-            match = pattern.search(line)
-            if match:
-                # Skip if the MATCHED VALUE is clearly a placeholder (not the whole line).
-                # The captured secret value (group 1 when present, else the full match).
-                val = match.group(1) if match.groups() else match.group()
+            # The first match on the line whose VALUE is not a placeholder: a filler
+            # token earlier on a (minified) line must not hide a real one after it.
+            match = None
+            for cand in pattern.finditer(line):
+                # Skip if the MATCHED VALUE is clearly a placeholder (not the whole
+                # line). The captured value (group 1 when present, else the match).
+                val = cand.group(1) if cand.groups() else cand.group()
                 # Collapse separators/case so "CHANGE-ME-IN-PRODUCTION", "change_me",
                 # "your-api-key" all reduce to a comparable core before matching.
                 val_norm = re.sub(r"[^a-z0-9]", "", val.lower())
                 if (any(tok in val_norm for tok in _SECRET_PLACEHOLDER_CORES)
                         or _is_counting_placeholder(val)
+                        or _is_filler_placeholder(val)
                         or _is_fake_fixture_secret(val_norm, file_path)):
                     continue
+                match = cand
+                break
+            if match:
                 # --- Option 2: Allowlist check ---
                 if _is_allowlisted(file_path, name, allowlist):
                     continue

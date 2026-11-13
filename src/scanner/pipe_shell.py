@@ -74,6 +74,12 @@ VENDOR_INSTALLERS: tuple[tuple[str, str], ...] = (
     # huggingface_hub/installation gives it (hf.co redirects to huggingface.co).
     ("hf.co", "/cli/install.sh"),                         # Hugging Face hf CLI
     ("huggingface.co", "/cli/install.sh"),                # Hugging Face hf CLI
+    # Round 4 (2026-11-13): agent CLIs that packages tell agents / containers to install.
+    # cursor.com/install serves cursor-agent-installer.sh (Cursor CLI docs give
+    # `curl https://cursor.com/install -fsS | bash`); .google is a registry only Google
+    # can register in, and antigravity.google/cli/install.sh is the Antigravity CLI.
+    ("cursor.com", "/install"),                           # Cursor CLI (cursor-agent)
+    ("antigravity.google", "/cli/install.sh"),            # Google Antigravity CLI
 )
 
 _TOOL_RE = re.compile(r"\b(?:curl|wget)\b")
