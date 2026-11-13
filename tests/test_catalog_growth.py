@@ -269,6 +269,22 @@ async def test_mcp_registry_source_parses_latest_servers():
     assert client.calls[1][1]["cursor"] == "c1"
 
 
+
+@pytest.mark.asyncio
+async def test_mcp_registry_warns_when_page_cap_hit(caplog):
+    n = iter(range(10))
+    client = FakeClient({discover.MCP_REGISTRY_URL: lambda u, p, h: Resp(200, {
+        "servers": [{"server": {"name": f"com.x/s{next(n)}"}}],
+        "metadata": {"nextCursor": "more"}})})
+    with caplog.at_level("WARNING"):
+        cands, _ = await discover.mcp_registry(fetcher(client), max_pages=2)
+    assert len(cands) == 2 and len(client.calls) == 2
+    assert "page cap" in caplog.text
+
+
+def test_mcp_registry_cap_reads_past_60k():
+    assert discover.MCP_REGISTRY_MAX_PAGES * 100 > 60_000
+
 def test_skipped_with_url_pass():
     idx = make_index()
     assert {"com.example/remote-only", "com.example/nothing"} <= idx.skipped_mcp_names

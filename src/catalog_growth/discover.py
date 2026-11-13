@@ -67,7 +67,9 @@ CLAWHUB_PAGES = 50
 CLAWHUB_PAGE = 100
 SMITHERY_PAGE = 100
 SMITHERY_MAX_PAGES = 300
-MCP_REGISTRY_MAX_PAGES = 600
+# The registry passed 60,000 entries (11-13 dry run stopped at 600 pages); a full read
+# is a few thousand pages at most, and the cursor ends the loop before the cap.
+MCP_REGISTRY_MAX_PAGES = 3000
 # A package below this many weekly downloads is counted, not queued (the long tail of
 # one-off MCP experiments would otherwise crowd out tools people use).
 MIN_WEEKLY_DOWNLOADS = 25
@@ -181,6 +183,9 @@ async def mcp_registry(f: Fetcher, *, max_pages: int = MCP_REGISTRY_MAX_PAGES
         cursor = md.get("nextCursor") or md.get("next_cursor")
         if not cursor or not servers:
             break
+    else:
+        logger.warning("mcp_registry: stopped at the %d-page cap; later servers not read",
+                       max_pages)
     return out, remotes
 
 
