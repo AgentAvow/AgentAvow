@@ -374,6 +374,23 @@ class Settings(BaseSettings):
     catalog_supersede_limit: int = 30
     catalog_rescan_spacing_seconds: float = 1.5      # sleep between scans to smooth bursts
 
+    # --- Catalog growth: discovery + version refresh (src/catalog_growth) ----------
+    # Runs OUTSIDE the web backend, as a one-off container of the backend image started
+    # by host cron (scripts/catalog_growth.sh). Each switch is off | dry-run | on and
+    # defaults to off; any other value reads as off. dry-run talks to the registries and
+    # writes the work lists + counts under catalog_growth_data_dir, and never scans or
+    # writes to the catalog. on also scans the work list into community_scans.
+    catalog_discovery: str = "off"   # weekly: new tools from the registries
+    catalog_refresh: str = "off"     # daily: re-scan catalog tools whose version moved
+    catalog_growth_data_dir: str = "data/catalog-growth"
+    catalog_growth_max_scans_per_run: int = 150      # scans one invocation may run
+    catalog_growth_scan_spacing_seconds: float = 3.0
+    catalog_growth_top_n: int = 2000                 # checked daily; the rest weekly
+    catalog_growth_github_min_budget: int = 1500     # leave this much GitHub core budget
+    catalog_growth_github_calls_per_run: int = 2500  # HEAD-sha checks per refresh run
+    catalog_growth_smithery_detail_max: int = 300    # Smithery detail lookups per run
+    catalog_growth_retry_failed_days: int = 30       # a failed new tool is retried after
+
     # --- Real-time GitHub rate-limit protection for the PUBLIC scan path -------
     # The daily re-scan job (Job 19) only probes GitHub's budget once/24h. Under
     # live user traffic the public scan API can drain or 429 the 5000/hr GitHub

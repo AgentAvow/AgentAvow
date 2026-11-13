@@ -284,3 +284,27 @@ async def test_growth_groups_landing_referrals(client, db, monkeypatch):  # noqa
     assert ref["ai"] == {"chatgpt": 1}
     assert ref["other_top"] == {"www.reddit.com": 1}
     assert out["catalog_now"]["certified"] == 1
+
+
+@pytest.mark.asyncio
+async def test_growth_lists_catalog_growth_runs(client, db, monkeypatch):  # noqa: F811
+    """Additive field: the newest catalog discovery / refresh runs (src/catalog_growth)."""
+    async def mix(db):
+        return None
+
+    async def no_cache(key):
+        return None
+
+    async def runs(limit=10):
+        return [{"at": "2026-11-12T03:20:00+00:00", "job": "discover", "mode": "dry-run",
+                 "totals": {"discovered": 40, "new": 7, "queued": 5}, "by_source": {},
+                 "requests": {"npm": 12}, "duration_s": 300, "stopped": None}]
+
+    monkeypatch.setattr(metrics_daily, "current_catalog_mix", mix)
+    monkeypatch.setattr("src.cache.get", no_cache)
+    monkeypatch.setattr("src.catalog_growth.state.recent_runs", runs)
+    token = await _token(client, db, admin=True)
+    out = (await client.get("/api/v1/admin/metrics/growth", params={"days": 7},
+                            headers=_auth(token))).json()
+    assert out["catalog_growth_runs"][0]["totals"]["new"] == 7
+    assert any(n.startswith("catalog_growth_runs:") for n in out["notes"])
