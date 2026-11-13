@@ -1504,6 +1504,27 @@ async def _catalog_view(
     )
 
 
+async def browse_listed_rows(db: AsyncSession) -> list[CatalogRow]:
+    """Every row the all-kinds Browse list holds before any filter: the launch corpus
+    with the live (community) scans merged in, one row per page (``_supersede``), a
+    skill collection's plain GitHub row dropped (``_lead_with_skill_collections``), and
+    x402 left out. ``GET /public/scan-catalog?decision=<d>`` counts these rows by
+    ``decision``, so the admin dashboard counts the same set and its totals equal the
+    site's (Home / Browse answer mix). Mirrors ``_catalog_view`` with no filters."""
+    community = await _community_rows(db)
+    merged, _listed, _dropped = _supersede(_get_catalog(), community)
+    rows = await _lead_with_skill_collections(merged)
+    return [r for r in rows if r.surface != "x402"]
+
+
+def raw_row_count(catalog: dict[str, Any], community: list[CatalogRow]) -> int:
+    """Corpus rows plus every community scan, x402 left out, BEFORE one-row-per-page
+    merging: a page with both a corpus row and a live scan counts twice here. The
+    dashboard's pre-2026-11-13 catalog total; kept as a labelled figure, not a headline."""
+    return sum(1 for r in catalog["rows"] if r.surface != "x402") + sum(
+        1 for r in community if r.surface != "x402")
+
+
 @router.post("/refresh", include_in_schema=False)
 async def refresh_catalog(
     current_entity: Entity = Depends(get_current_entity),

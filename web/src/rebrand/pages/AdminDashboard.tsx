@@ -488,6 +488,9 @@ const INDEXNOW_OUTCOME: Record<string, string> = {
 }
 const EP_LABEL: Record<string, string> = { desktop: 'Desktop app', cli: 'CLI + IDE extensions', sdk: 'Agent SDK', cloud: 'Anthropic cloud (remote)', other: 'Other / unknown' }
 
+/** Tools with an answer in a catalog-mix row: Safe + Review + Do not connect. */
+const answeredOf = (row: Record<string, number>) => DECISIONS.reduce((a, d) => a + (row[d.value] ?? 0), 0)
+
 /** The newest day in `days` (oldest first) that has a row in `byDay`. */
 const newestWithRow = (days: string[], byDay: Record<string, unknown>) => [...days].reverse().find((d) => byDay[d])
 
@@ -533,8 +536,8 @@ function GrowthPanel() {
   return (
     <Section title="Growth — Certified, activation, downloads, search" scope={`${label}${firstRow && firstRow > dayList[0] ? ` · daily rows exist from ${dayLabel(firstRow)} (days before are blank, not zero)` : ''}`} note="Daily rows written by the 6-hour job from Nov 11 on. x402 is left out of the catalog mix, as on the site.">
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <Stat label={<>Certified · {dayLabel(snapDay)}<Info k="certified" /></>} value={snap ? fmt(snap.certified) : '—'} sub={<>{snap ? `of ${fmt(snap.total)} tools` : 'no daily row yet'}{now ? ` · right now: ${fmt(now.certified)}` : ''}</>} tip="The card and the chart legend read the same daily row (the last complete day). 'Right now' is the live count, which can be a few tools apart." />
-        {DECISIONS.map((d) => <Stat key={d.value} label={`${d.phrase} · ${dayLabel(snapDay)}`} value={snap ? fmt(snap[d.value]) : '—'} sub={<>{snap && snap.total ? pctOf(snap[d.value] ?? 0, snap.total) : ''}{now ? ` · right now: ${fmt(now[d.value])}` : ''}</>} />)}
+        <Stat label={<>Certified · {dayLabel(snapDay)}<Info k="certified" /></>} value={snap ? fmt(snap.certified) : '—'} sub={<>{snap ? `of ${fmt(snap.total)} ${snap.all_rows != null ? 'tools listed (with or without an answer)' : 'catalog rows (older count)'}` : 'no daily row yet'}{now ? ` · right now: ${fmt(now.certified)}` : ''}</>} tip="The card and the chart legend read the same daily row (the last complete day). 'Right now' is the live count, which can be a few tools apart. The 'of' number is every tool listed on Browse, including tools with no answer yet (a fetch was skipped or failed); days before Nov 13 counted corpus rows plus every community scan instead, a page with both counted twice." />
+        {DECISIONS.map((d) => <Stat key={d.value} label={`${d.phrase} · ${dayLabel(snapDay)}`} value={snap ? fmt(snap[d.value]) : '—'} sub={<>{snap && answeredOf(snap) ? `${pctOf(snap[d.value] ?? 0, answeredOf(snap))} of tools checked` : ''}{now ? ` · right now: ${fmt(now[d.value])}` : ''}</>} />)}
         <Stat label={`npm downloads · 7 days to ${dayLabel(dlDay)}`} value={fmtOrDash(dlRow?.npm_week)} sub={<>agentavow-trust{g.downloads_latest?.npm_week != null ? ` · newest fetch: ${fmt(g.downloads_latest.npm_week)}` : ''}</>} />
         <Stat
           label={`PyPI downloads · 7 days to ${dayLabel(dlDay)}`}
@@ -545,6 +548,14 @@ function GrowthPanel() {
           tip={g.downloads_latest?.pypi_week != null ? `Newest fetch: ${fmt(g.downloads_latest.pypi_week)} in 7 days${g.downloads_latest.pypi_month != null ? `, ${fmt(g.downloads_latest.pypi_month)} in 30` : ''}.` : undefined}
         />
       </div>
+      {now && (
+        <p className="mt-2 text-[11.5px] text-text-muted/80 max-w-[90ch]">
+          Right now: <b className="text-text tabular-nums">{fmt(answeredOf(now))}</b> tools checked (Safe + Review + Do not connect), counted as the site counts them (Home and Browse: one row per tool page, x402 left out), so this equals the site's total.
+          {now.total != null ? ` ${fmt(now.total - answeredOf(now))} more are listed with no answer yet (${fmt(now.total)} listed in all).` : ''}
+          {now.all_rows != null ? ` Older, larger count: ${fmt(now.all_rows)} catalog rows (corpus rows plus every community scan, before merging; a page with both counts twice).` : ''}
+          {snap && snap.all_rows == null ? ' The daily rows shown here were written before Nov 13 with that older count, so they read higher than the site; rows from Nov 13 on use the site count.' : ''}
+        </p>
+      )}
       <div className="grid md:grid-cols-2 gap-3 mt-3">
         <div className="glass rounded-2xl p-5">
           <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Certified and the answer mix · tools on each day (x402 left out)</div>
@@ -662,24 +673,24 @@ function ClaudeTrafficPanel() {
       </div>
       <div className="glass rounded-2xl p-5 mt-3 overflow-x-auto max-h-[28rem] overflow-y-auto">
         <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Day by day · {rangeLabel(w.complete)} (UTC), newest first</div>
-        <table className="w-full text-[12.5px] tabular-nums">
+        <table className="w-full min-w-[60rem] text-[12.5px] tabular-nums">
           <thead>
-            <tr className="text-[11px] font-mono uppercase tracking-wide text-text-muted/60">
-              <th className="text-left py-1">Day</th><th className="text-right">Machines connecting</th><th className="text-right">New</th><th className="text-right">Sessions</th>
-              <th className="text-right" title="Every HTTP request from claude.ai: handshakes, tool lists and tool calls">claude.ai requests (all)</th><th className="text-right">Hook machines</th><th className="text-right">Hook scans</th>
-              <th className="text-right">Claude Code tool calls / machines</th><th className="text-right" title="Only actual tool calls (checks) from claude.ai">claude.ai tool calls</th><th className="text-right">ChatGPT tool calls</th>
+            <tr className="text-[11px] font-mono uppercase tracking-wide text-text-muted/60 align-bottom">
+              <th className="text-left py-1 pr-4 whitespace-nowrap">Day</th><th className={dayTh}>Machines connecting</th><th className={dayTh} title="Machines connecting for the first time in 30 days">New machines</th><th className={dayTh}>Sessions</th>
+              <th className={dayTh} title="Every HTTP request from claude.ai: handshakes, tool lists and tool calls">claude.ai requests (all)</th><th className={dayTh}>Hook machines</th><th className={dayTh}>Hook scans</th>
+              <th className={dayTh}>Claude Code tool calls / machines</th><th className={dayTh} title="Only actual tool calls (checks) from claude.ai">claude.ai tool calls</th><th className={dayTh}>ChatGPT tool calls</th>
             </tr>
           </thead>
           <tbody>
             {[...w.complete].reverse().map((d) => {
               const r = rows.find((x) => x.day === d)
-              if (!r) return <tr key={d} className="border-t border-border/40 opacity-50"><td className="py-1 font-mono text-text-muted">{d}</td><td colSpan={9} className="text-text-muted/70 text-right">no snapshot</td></tr>
+              if (!r) return <tr key={d} className="border-t border-border/40 opacity-50"><td className="py-1 pr-4 font-mono text-text-muted whitespace-nowrap">{d}</td><td colSpan={9} className="text-text-muted/70 text-right">no snapshot</td></tr>
               return (
                 <tr key={d} className={`border-t border-border/40${r.log_complete === 0 ? ' opacity-70' : ''}`}>
-                  <td className="py-1 font-mono text-text-muted">{r.day}{r.log_complete === 0 ? ' *' : ''}</td>
-                  <td className="text-right text-text">{fmt(r.cc_machines)}</td><td className="text-right">{fmt(r.cc_new_machines_30d)}</td><td className="text-right">{fmt(r.cc_sessions)}</td>
-                  <td className="text-right">{fmt(r.claudeai_reqs)}</td><td className="text-right">{fmt(r.hook_machines_nginx)}</td><td className="text-right">{fmt(r.hook_reqs)}</td>
-                  <td className="text-right">{fmt(r.calls_claude_code)} / {fmt(r.callers_claude_code)}</td><td className="text-right">{fmt(r.calls_claude)}</td><td className="text-right">{fmt(r.calls_chatgpt)}</td>
+                  <td className="py-1 pr-4 font-mono text-text-muted whitespace-nowrap">{r.day}{r.log_complete === 0 ? ' *' : ''}</td>
+                  <td className={`${dayTd} text-text`}>{fmt(r.cc_machines)}</td><td className={dayTd}>{fmt(r.cc_new_machines_30d)}</td><td className={dayTd}>{fmt(r.cc_sessions)}</td>
+                  <td className={dayTd}>{fmt(r.claudeai_reqs)}</td><td className={dayTd}>{fmt(r.hook_machines_nginx)}</td><td className={dayTd}>{fmt(r.hook_reqs)}</td>
+                  <td className={dayTd}>{fmt(r.calls_claude_code)} / {fmt(r.callers_claude_code)}</td><td className={dayTd}>{fmt(r.calls_claude)}</td><td className={dayTd}>{fmt(r.calls_chatgpt)}</td>
                 </tr>
               )
             })}
@@ -690,6 +701,11 @@ function ClaudeTrafficPanel() {
     </Section>
   )
 }
+
+/** Day-by-day table cells: right-aligned with a fixed gap on the left so adjacent
+ *  numbers never run together; headers wrap inside their column, numbers never do. */
+const dayTh = 'text-right py-1 pl-5 min-w-[6.5rem]'
+const dayTd = 'text-right py-1 pl-5 whitespace-nowrap'
 
 // ── Landing trend: landings and install-command copies per day, ads vs organic ──
 interface LandingDay { date: string; lp_view: number; lp_view_paid: number; copy_plugin_cmd: number; copy_plugin_cmd_paid: number }
@@ -777,6 +793,15 @@ function MetricsBody() {
     queryKey: ['admin-dash-flagged'],
     queryFn: async () => { try { return (await api.get('/public/scan-catalog/flagged-stat')).data } catch { return { pct: null, flagged: 0, scanned: 0 } } },
   })
+  // The catalog right now, counted as the site's Browse list counts it (same query and
+  // cache as the Growth panel). Its answered total equals the site's tools-checked total.
+  const dw = useDashWindow()
+  const growthNow = useQuery<Growth>({
+    queryKey: ['admin-dash-growth', dw.days + 1],
+    queryFn: async () => { try { return (await api.get('/admin/metrics/growth', { params: { days: dw.days + 1 } })).data } catch { return {} } },
+  })
+  const catNow = growthNow.data?.catalog_now
+  const answeredNow = catNow ? answeredOf(catNow) : null
   const h = data?.headline || {}
   const s = data?.series || {}
   const f = data?.funnel || {}
@@ -1000,9 +1025,20 @@ function MetricsBody() {
         </Section>
       </div>
 
-      <Section title="Catalog risk" scope="Right now" note="Share of scanned tools carrying a high or critical finding: the headline safety signal (and content angle).">
+      <Section title="Catalog risk" scope="Right now" note="Share of checked tools carrying a high or critical finding: the headline safety signal (and content angle). The first card counts the same tools as the site's answer mix (Home, Browse), so its 'of' number is the site's tools-checked total.">
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <Stat label="Flagged (high/critical)" value={flagged.data?.pct != null ? `${flagged.data.pct}%` : '—'} sub={`${fmt(flagged.data?.flagged)} of ${fmt(flagged.data?.scanned)}`} />
+          <Stat
+            label="Flagged (high/critical) · tools on the site"
+            value={answeredNow && catNow?.flagged != null ? pctOf(catNow.flagged, answeredNow) : '—'}
+            sub={answeredNow && catNow?.flagged != null ? `${fmt(catNow.flagged)} of ${fmt(answeredNow)} tools checked` : 'not ready'}
+            tip="One row per tool page, as Browse lists them: Safe + Review + Do not connect on the site. x402 listings left out."
+          />
+          <Stat
+            label="Flagged · public headline stat"
+            value={flagged.data?.pct != null ? `${flagged.data.pct}%` : '—'}
+            sub={`${fmt(flagged.data?.flagged)} of ${fmt(flagged.data?.scanned)} rows with a verdict`}
+            tip="/public/scan-catalog/flagged-stat, the figure Home, the Index and the research report cite. It counts a few more rows than the site lists: a repo graded as a skill collection counts as its skill row AND its plain GitHub row, where Browse lists one."
+          />
         </div>
         <p className="mt-2 text-[11.5px] text-text-muted/70">A breakdown by finding category (which kinds are most common) needs category tallies stored on each scan: not built yet.</p>
       </Section>

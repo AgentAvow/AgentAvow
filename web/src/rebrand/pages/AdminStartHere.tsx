@@ -52,7 +52,7 @@ function Card({ label, k, value, meaning, tip, children }: { label: string; k?: 
   return (
     <div className="glass rounded-xl p-4" title={tip}>
       <div className="text-[12.5px] font-semibold text-text-muted">
-        {label}{k && <Info k={k} />}{tip && <span className="ml-1 cursor-help text-text-muted/60" aria-label={tip}>ⓘ</span>}
+        {label}{k ? <Info k={k} extra={tip} /> : tip && <span className="ml-1 cursor-help text-text-muted/60" aria-label={tip}>ⓘ</span>}
       </div>
       <div className="mt-1 text-2xl font-extrabold tabular-nums">{value}</div>
       <p className="mt-1 text-[12px] text-text-muted">{meaning}</p>

@@ -50,11 +50,21 @@ CHANNELS = ("reddit", "x", "google")
 _CHANNEL_ALIASES = {"twitter": "x", "x.com": "x", "t.co": "x", "googleads": "google",
                     "adwords": "google"}
 NO_CHANNEL = "(no utm_source)"
+# Our own marketing bot tags its links utm_source=agentgraph_bot_<platform>; some arrive
+# cut short or garbled (agentgraph_, agentgraph_bot…). They are all one channel.
+BOT_CHANNEL = "agentgraph_bot"
+_BOT_PREFIX = "agentgraph_"
+CHANNEL_LABELS = {"reddit": "Reddit", "x": "X", "google": "Google",
+                  NO_CHANNEL: "No channel tag", BOT_CHANNEL: "Our bot posts (agentgraph_bot)"}
 
 
 def channel_of(source: str | None) -> str:
-    """The channel a utm_source belongs to: lowercased, aliases folded (twitter -> x)."""
+    """The channel a utm_source belongs to: lowercased, aliases folded (twitter -> x),
+    and every agentgraph_* source (trailing "…" / "..." stripped) folded into the bot."""
     s = (source or "").strip().lower()
+    trimmed = s.removesuffix("…").removesuffix("...").strip()
+    if trimmed.startswith(_BOT_PREFIX):
+        return BOT_CHANNEL
     return _CHANNEL_ALIASES.get(s, s) or NO_CHANNEL
 _CSV_MAX_BYTES = 512 * 1024
 _CSV_MAX_ROWS = 5000
@@ -379,7 +389,8 @@ async def _cost_view(
         f = funnel.get(key, {"sessions": 0, "lp_view": 0, "copy_plugin_cmd": 0})
         sp = spend.get(key, {"spend": Decimal(0), "impressions": 0, "clicks": 0})
         rows.append({
-            **({"channel": key} if by_source else {"utm_content": key or None}),
+            **({"channel": key, "label": CHANNEL_LABELS.get(key, key)} if by_source
+               else {"utm_content": key or None}),
             "spend_usd": float(sp["spend"]),
             "impressions": sp["impressions"],
             "clicks": sp["clicks"],

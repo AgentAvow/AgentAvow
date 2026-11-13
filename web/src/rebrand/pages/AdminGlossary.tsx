@@ -3,14 +3,16 @@
 import { GLOSSARY } from './adminGlossaryTerms'
 import type { GlossaryKey } from './adminGlossaryTerms'
 
-/** A small (i) after a label: hover (or focus) shows the term's definition. */
-export function Info({ k }: { k: GlossaryKey }) {
+/** A small (i) after a label: hover (or focus) shows the term's definition. ``extra``
+ *  adds a card's own note to the same tooltip, so a card never shows two icons. */
+export function Info({ k, extra }: { k: GlossaryKey; extra?: string }) {
   const g = GLOSSARY[k]
+  const text = `${g.term}: ${g.def}${extra ? `\n\n${extra}` : ''}`
   return (
     <span
       tabIndex={0}
-      title={`${g.term}: ${g.def}`}
-      aria-label={`${g.term}: ${g.def}`}
+      title={text}
+      aria-label={text}
       className="ml-1 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-current text-[9px] leading-none font-sans normal-case not-italic cursor-help opacity-60 hover:opacity-100 focus:opacity-100 align-middle"
     >
       i
