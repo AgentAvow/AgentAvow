@@ -2,16 +2,23 @@
 
 Nothing else in the product knows what a campaign cost, so the admin enters it here:
 one row per UTC day per ``utm_campaign`` / ``utm_content`` (one form row at a time, or
-a pasted Reddit Ads CSV export). The cost view divides that spend by the campaign
-funnel from ``/analytics/attribution/campaigns`` (sessions by first-touch UTM tags,
-bots left out) to give cost per lp_view and cost per copy_plugin_cmd.
+a pasted ads CSV export), tagged with its channel in ``utm_source`` (reddit, x, google,
+...). The cost view divides that spend by the campaign funnel from
+``/analytics/attribution/campaigns`` (sessions by first-touch UTM tags, bots left out)
+to give cost per lp_view and cost per copy_plugin_cmd, per ad or per channel.
+
+A row is keyed on (day, campaign, ad), not the channel: each channel runs its own
+campaign names (2026-11-test-dev on reddit, 2026-11-test-x on x, ...). Entering spend
+for a (day, campaign, ad) another channel already holds is refused (409), so one
+channel can never silently overwrite another's row.
 
 Endpoints (all under ``/admin``, admin only):
   * GET    /admin/ad-spend                  -> rows in the window + totals
   * PUT    /admin/ad-spend                  -> add or replace one day's spend
   * DELETE /admin/ad-spend/{id}             -> remove a row
   * POST   /admin/ad-spend/import           -> paste a CSV (Reddit Ads export)
-  * GET    /admin/ad-spend/cost-per-action  -> spend joined to the funnel per utm_content
+  * GET    /admin/ad-spend/cost-per-action  -> spend joined to the funnel per utm_content,
+    or per channel (``group_by=source``); ``previous=true`` adds the period before
 """
 from __future__ import annotations
 
@@ -37,6 +44,18 @@ from src.models import AdSpend, Entity
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 _TAG_MAX = 200
+# Channels the dashboard always lists, even with no spend or visits yet.
+CHANNELS = ("reddit", "x", "google")
+# utm_source spellings that mean the same channel.
+_CHANNEL_ALIASES = {"twitter": "x", "x.com": "x", "t.co": "x", "googleads": "google",
+                    "adwords": "google"}
+NO_CHANNEL = "(no utm_source)"
+
+
+def channel_of(source: str | None) -> str:
+    """The channel a utm_source belongs to: lowercased, aliases folded (twitter -> x)."""
+    s = (source or "").strip().lower()
+    return _CHANNEL_ALIASES.get(s, s) or NO_CHANNEL
 _CSV_MAX_BYTES = 512 * 1024
 _CSV_MAX_ROWS = 5000
 _SPEND_MAX = Decimal("1000000")
@@ -106,6 +125,19 @@ def _window_start(days: int) -> date:
     return datetime.now(timezone.utc).date() - timedelta(days=days - 1)
 
 
+async def _channel_clash(db: AsyncSession, row: dict) -> str | None:
+    """The channel already holding this (day, campaign, ad) when it is a different one
+    than ``row``'s, else None. A row with no channel on either side never clashes."""
+    held = (await db.execute(
+        select(AdSpend.utm_source).where(
+            AdSpend.day == row["day"], AdSpend.utm_campaign == row["utm_campaign"],
+            AdSpend.utm_content == row["utm_content"])
+    )).scalar_one_or_none()
+    if held and row.get("utm_source") and channel_of(held) != channel_of(row["utm_source"]):
+        return held
+    return None
+
+
 @router.get("/ad-spend", dependencies=[Depends(rate_limit_reads)])
 async def list_ad_spend(
     days: int = Query(28, ge=1, le=366),
@@ -134,7 +166,7 @@ async def put_ad_spend(
     """Add one day's spend for a campaign / utm_content, replacing any earlier entry
     for the same day, campaign and content."""
     require_admin(current_entity)
-    await _upsert(db, {
+    row = {
         "day": body.day,
         "utm_campaign": body.utm_campaign,
         "utm_content": _clean_tag(body.utm_content),
@@ -143,7 +175,15 @@ async def put_ad_spend(
         "impressions": body.impressions,
         "clicks": body.clicks,
         "source": "manual",
-    })
+    }
+    held = await _channel_clash(db, row)
+    if held:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{body.day} {body.utm_campaign} {row['utm_content'] or '(no ad)'} already "
+                   f"has spend from {held}. Use that channel's campaign name, or remove "
+                   "that row first.")
+    await _upsert(db, row)
     await db.flush()
     return {"status": "ok"}
 
@@ -277,67 +317,69 @@ async def import_ad_spend(
     the stored one, so pasting the same export twice changes nothing."""
     require_admin(current_entity)
     rows, errors = parse_spend_csv(body.csv, body.utm_campaign, body.utm_source)
+    imported = 0
     for row in rows:
         if row["spend_usd"] > _SPEND_MAX:
             errors.append(f"{row['day']} {row['utm_content'] or '(no ad)'}: spend too large.")
             continue
+        held = await _channel_clash(db, row)
+        if held:
+            errors.append(f"{row['day']} {row['utm_content'] or '(no ad)'}: already has spend "
+                          f"from {held}; skipped.")
+            continue
         await _upsert(db, row)
+        imported += 1
     await db.flush()
-    return {"imported": len(rows), "errors": errors[:50]}
+    return {"imported": imported, "errors": errors[:50]}
 
 
 # --- Cost per action ------------------------------------------------------------
 
 
-@router.get("/ad-spend/cost-per-action", dependencies=[Depends(rate_limit_reads)])
-async def cost_per_action(
-    days: int = Query(14, ge=1, le=90),
-    campaign: str | None = Query(None, max_length=_TAG_MAX),
-    current_entity: Entity = Depends(get_current_entity),
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Spend ÷ funnel per utm_content for one campaign (or all), over ``days``.
+def _cost(total: Decimal, n: int) -> float | None:
+    return round(float(total) / n, 2) if n and total else None
 
-    Spend is summed over the last ``days`` UTC days; the funnel is the same window of
-    ``/analytics/attribution/campaigns`` (distinct non-bot sessions by first touch).
-    A cost is null when its action count is zero. Spend entered without a
-    utm_content joins the "(no content)" row."""
-    # Read-only metric: a viewer may read it (masked). The spend list and every write
-    # above keep require_admin.
-    viewer = require_admin_or_viewer(current_entity)
+
+async def _cost_view(
+    db: AsyncSession, days: int, want: str | None, by_source: bool, offset_days: int = 0,
+) -> tuple[list[dict], dict]:
+    """``(rows, total)``: spend ÷ funnel per utm_content (or per channel) over ``days``
+    UTC days ending ``offset_days`` days ago (0 = today included)."""
     from src.api.analytics_router import campaign_rows
 
-    want = _clean_tag(campaign) or None
+    def key_of(source: str | None, content: str | None) -> str:
+        return channel_of(source) if by_source else (content or "")
+
     funnel: dict[str, dict] = {}
-    for r in await campaign_rows(db, days):
+    for r in await campaign_rows(db, days, offset_days):
         if want and r.campaign != want:
             continue
-        key = r.content or ""
-        acc = funnel.setdefault(key, {"sessions": 0, "lp_view": 0, "copy_plugin_cmd": 0})
+        acc = funnel.setdefault(key_of(r.source, r.content),
+                                {"sessions": 0, "lp_view": 0, "copy_plugin_cmd": 0})
         acc["sessions"] += r.sessions
         acc["lp_view"] += r.lp_view
         acc["copy_plugin_cmd"] += r.copy_plugin_cmd
 
-    q = select(AdSpend).where(AdSpend.day >= _window_start(days))
+    start = _window_start(days + offset_days)
+    q = select(AdSpend).where(
+        AdSpend.day >= start, AdSpend.day < start + timedelta(days=days))
     if want:
         q = q.where(AdSpend.utm_campaign == want)
     spend: dict[str, dict] = {}
     for s in (await db.execute(q)).scalars().all():
-        acc = spend.setdefault(s.utm_content or "", {
+        acc = spend.setdefault(key_of(s.utm_source, s.utm_content), {
             "spend": Decimal(0), "impressions": 0, "clicks": 0})
         acc["spend"] += s.spend_usd
         acc["impressions"] += s.impressions or 0
         acc["clicks"] += s.clicks or 0
 
-    def _cost(total: Decimal, n: int) -> float | None:
-        return round(float(total) / n, 2) if n and total else None
-
+    keys = set(funnel) | set(spend) | (set(CHANNELS) if by_source else set())
     rows = []
-    for key in sorted(set(funnel) | set(spend)):
+    for key in sorted(keys):
         f = funnel.get(key, {"sessions": 0, "lp_view": 0, "copy_plugin_cmd": 0})
         sp = spend.get(key, {"spend": Decimal(0), "impressions": 0, "clicks": 0})
         rows.append({
-            "utm_content": key or None,
+            **({"channel": key} if by_source else {"utm_content": key or None}),
             "spend_usd": float(sp["spend"]),
             "impressions": sp["impressions"],
             "clicks": sp["clicks"],
@@ -349,16 +391,43 @@ async def cost_per_action(
     tot_spend = sum((sp["spend"] for sp in spend.values()), Decimal(0))
     tot_lp = sum(f["lp_view"] for f in funnel.values())
     tot_copy = sum(f["copy_plugin_cmd"] for f in funnel.values())
-    return viewer_safe({
-        "days": days,
-        "campaign": want,
-        "rows": rows,
-        "total": {
-            "spend_usd": float(tot_spend),
-            "sessions": sum(f["sessions"] for f in funnel.values()),
-            "lp_view": tot_lp,
-            "copy_plugin_cmd": tot_copy,
-            "cost_per_lp_view": _cost(tot_spend, tot_lp),
-            "cost_per_copy_plugin_cmd": _cost(tot_spend, tot_copy),
-        },
-    }, viewer)
+    total = {
+        "spend_usd": float(tot_spend),
+        "sessions": sum(f["sessions"] for f in funnel.values()),
+        "lp_view": tot_lp,
+        "copy_plugin_cmd": tot_copy,
+        "cost_per_lp_view": _cost(tot_spend, tot_lp),
+        "cost_per_copy_plugin_cmd": _cost(tot_spend, tot_copy),
+    }
+    return rows, total
+
+
+@router.get("/ad-spend/cost-per-action", dependencies=[Depends(rate_limit_reads)])
+async def cost_per_action(
+    days: int = Query(14, ge=1, le=90),
+    campaign: str | None = Query(None, max_length=_TAG_MAX),
+    group_by: str = Query("content", pattern="^(content|source)$"),
+    previous: bool = Query(False),
+    current_entity: Entity = Depends(get_current_entity),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Spend ÷ funnel per utm_content (``group_by=content``, the default) or per channel
+    (``group_by=source``: utm_source, lowercased, twitter folded into x; reddit, x and
+    google always listed) for one campaign (or all), over ``days``.
+
+    Spend is summed over the last ``days`` UTC days; the funnel is the same window of
+    ``/analytics/attribution/campaigns`` (distinct non-bot sessions by first touch).
+    A cost is null when its action count is zero. Spend entered without a
+    utm_content joins the "(no content)" row. ``previous=true`` adds ``previous``: the
+    same totals for the ``days`` before, for a change-vs-last-period readout."""
+    # Read-only metric: a viewer may read it (masked). The spend list and every write
+    # above keep require_admin.
+    viewer = require_admin_or_viewer(current_entity)
+    want = _clean_tag(campaign) or None
+    by_source = group_by == "source"
+    rows, total = await _cost_view(db, days, want, by_source)
+    out: dict = {"days": days, "campaign": want, "group_by": group_by,
+                 "rows": rows, "total": total}
+    if previous:
+        _, out["previous"] = await _cost_view(db, days, want, by_source, offset_days=days)
+    return viewer_safe(out, viewer)
