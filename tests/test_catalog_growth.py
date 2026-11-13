@@ -760,6 +760,17 @@ def test_merge_pending_dedupes_and_orders():
     assert st.merge_pending([a], [b, c]) == [b, c]
 
 
+
+def test_queue_takes_turns_across_sources():
+    npm = [{"key": f"n{i}", "priority": 2, "adoption": 1000 - i, "source": "npm"}
+           for i in range(3)]
+    mcp = [{"key": f"m{i}", "priority": 2, "adoption": 0, "source": "mcp_registry"}
+           for i in range(3)]
+    changed = {"key": "c0", "priority": 0, "adoption": 0, "source": "pypi"}
+    order = [i["key"] for i in st.merge_pending([], [*npm, *mcp, changed])]
+    assert order[0] == "c0"  # a higher priority still goes first
+    assert order[1:] == ["m0", "n0", "m1", "n1", "m2", "n2"]  # turns; npm by adoption
+
 def test_run_lock_is_exclusive(tmp_path):
     with st.run_lock(tmp_path) as one:
         assert one.acquired
