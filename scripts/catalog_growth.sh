@@ -27,8 +27,8 @@ shift || true
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-MEM="${CATALOG_GROWTH_MEMORY:-1g}"
-MAX_RSS_MB="${CATALOG_GROWTH_MAX_RSS_MB:-800}"
+MEM="${CATALOG_GROWTH_MEMORY:-2g}"
+MAX_RSS_MB="${CATALOG_GROWTH_MAX_RSS_MB:-1600}"
 NAME="catalog-growth-$JOB"
 IMAGE="agentavow-backend:latest"
 mkdir -p data/catalog-growth
