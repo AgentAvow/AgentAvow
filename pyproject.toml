@@ -32,6 +32,8 @@ dependencies = [
     "jsonschema>=4.20,<5.0",
     "Pillow>=10.0,<12.0",
     "boto3>=1.34,<2.0",
+    # x402 live check: one site's subdomains share payees, shared-hosting tenants don't.
+    "publicsuffixlist>=1.1,<2.0",
 ]
 
 [project.optional-dependencies]
