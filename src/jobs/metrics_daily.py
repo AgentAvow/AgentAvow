@@ -9,6 +9,11 @@ nightly traffic snapshot (``ag:metrics:traffic:<day>``).
   ag:metrics:catalog_daily:<day>  safe, review, do_not_connect, unscored, certified, total
   ag:metrics:downloads:<day>      npm_week, pypi_week, pypi_month (missing = fetch failed)
 
+PyPI counts are summed from pypistats' daily series (``/overall?mirrors=false``): the
+last 7 and last 30 days it has, ending on its newest day. The ``/recent`` endpoint is
+only a fallback for the week: its ``last_month`` lags the other two (it read 620 for a
+month while ``last_week`` read 1,242 on 2026-11-12), so it is never stored.
+
 The registry fetches use two fixed public URLs (no user input), a short timeout, and
 never raise.
 """
@@ -24,6 +29,7 @@ DOWNLOADS_PREFIX = "ag:metrics:downloads:"
 PACKAGE = "agentavow-trust"
 NPM_URL = f"https://api.npmjs.org/downloads/point/last-week/{PACKAGE}"
 PYPI_URL = f"https://pypistats.org/api/packages/{PACKAGE}/recent"
+PYPI_DAILY_URL = f"https://pypistats.org/api/packages/{PACKAGE}/overall?mirrors=false"
 DECISIONS = ("safe", "review", "do_not_connect")
 
 
@@ -57,8 +63,36 @@ async def current_catalog_mix(db) -> dict[str, int]:
     return catalog_mix(rows)
 
 
+def pypi_window_sums(data: list) -> dict[str, int]:
+    """``{pypi_week, pypi_month}`` from pypistats' daily rows: the downloads without
+    mirrors over the last 7 and 30 days, ending on the newest day in the series. {} when
+    the series has no usable rows."""
+    from datetime import date, timedelta
+
+    by_day: dict[date, int] = {}
+    for row in data or []:
+        if not isinstance(row, dict) or row.get("category") != "without_mirrors":
+            continue
+        try:
+            day = date.fromisoformat(str(row.get("date")))
+        except ValueError:
+            continue
+        n = row.get("downloads")
+        if isinstance(n, int) and n >= 0:
+            by_day[day] = by_day.get(day, 0) + n
+    if not by_day:
+        return {}
+    last = max(by_day)
+
+    def since(n_days: int) -> int:
+        start = last - timedelta(days=n_days - 1)
+        return sum(n for d, n in by_day.items() if d >= start)
+
+    return {"pypi_week": since(7), "pypi_month": since(30)}
+
+
 async def fetch_registry_downloads() -> dict[str, int]:
-    """Weekly npm downloads and recent PyPI downloads of agentavow-trust. A source
+    """Weekly npm downloads and 7- / 30-day PyPI downloads of agentavow-trust. A source
     that fails is left out of the result (never a zero that was not measured)."""
     import httpx
 
@@ -74,14 +108,22 @@ async def fetch_registry_downloads() -> dict[str, int]:
         except Exception:
             logger.debug("npm downloads fetch failed", exc_info=True)
         try:
-            r = await client.get(PYPI_URL)
+            r = await client.get(PYPI_DAILY_URL)
             if r.status_code == 200:
-                data = r.json().get("data") or {}
-                for src_key, dst in (("last_week", "pypi_week"), ("last_month", "pypi_month")):
-                    if isinstance(data.get(src_key), int):
-                        out[dst] = data[src_key]
+                out.update(pypi_window_sums(r.json().get("data") or []))
         except Exception:
-            logger.debug("pypi downloads fetch failed", exc_info=True)
+            logger.debug("pypi daily downloads fetch failed", exc_info=True)
+        if "pypi_week" not in out:
+            # Fallback: the week only. /recent's last_month is not consistent with its
+            # last_week, so it is not stored.
+            try:
+                r = await client.get(PYPI_URL)
+                if r.status_code == 200:
+                    week = (r.json().get("data") or {}).get("last_week")
+                    if isinstance(week, int):
+                        out["pypi_week"] = week
+            except Exception:
+                logger.debug("pypi downloads fetch failed", exc_info=True)
     return out
 
 

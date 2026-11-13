@@ -398,18 +398,32 @@ def _x402_summary(rows: list) -> dict:
     }
 
 
-async def _aggregate(db: AsyncSession, window: str) -> dict:
+def window_days(n_days: int, include_today: bool = True) -> list:
+    """The window's UTC dates, oldest first. With ``include_today`` False the window is
+    the ``n_days`` COMPLETE days ending yesterday, so no number in it covers a partial
+    day (the dashboard's default; a partial today makes every line fall at the end)."""
+    end = datetime.now(timezone.utc).date()
+    if not include_today:
+        end -= timedelta(days=1)
+    return [end - timedelta(days=i) for i in range(n_days - 1, -1, -1)]
+
+
+async def _aggregate(db: AsyncSession, window: str, include_today: bool = True) -> dict:
     n_days = _WINDOW_DAYS[window]
-    # Site-wide distinct checkers over the window (HLL union) — real reach, no raw IPs.
-    try:
-        from src.scanner.adoption_sources import get_global_unique_checkers
-        unique_checkers_window = await get_global_unique_checkers(n_days)
-    except Exception:
-        unique_checkers_window = 0
-    today = datetime.now(timezone.utc).date()
-    days = [today - timedelta(days=i) for i in range(n_days - 1, -1, -1)]  # ascending
+    days = window_days(n_days, include_today)  # ascending
     day_strs = [d.isoformat() for d in days]
     cutoff = datetime(days[0].year, days[0].month, days[0].day, tzinfo=timezone.utc)
+    # Exclusive upper bound: the start of the day after the window's last day. With
+    # today included it is tomorrow 00:00 UTC, so it changes nothing.
+    end = datetime(days[-1].year, days[-1].month, days[-1].day,
+                   tzinfo=timezone.utc) + timedelta(days=1)
+    # Site-wide distinct checkers over the window (HLL union over the window's days, so a
+    # real window-unique count, no raw IPs).
+    try:
+        from src.scanner.adoption_sources import get_global_unique_checkers_for_days
+        unique_checkers_window = await get_global_unique_checkers_for_days(day_strs)
+    except Exception:
+        unique_checkers_window = 0
 
     # --- Scans (community_scans: one upserted row per repo) ---
     scans_total_alltime = await db.scalar(
@@ -420,12 +434,14 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
     ) or 0
     repos_scanned_window = await db.scalar(
         select(func.count()).select_from(CommunityScan).where(
-            CommunityScan.last_scanned_at >= cutoff
+            CommunityScan.last_scanned_at >= cutoff,
+            CommunityScan.last_scanned_at < end,
         )
     ) or 0
     new_repos_window = await db.scalar(
         select(func.count()).select_from(CommunityScan).where(
-            CommunityScan.first_scanned_at >= cutoff
+            CommunityScan.first_scanned_at >= cutoff,
+            CommunityScan.first_scanned_at < end,
         )
     ) or 0
 
@@ -452,7 +468,8 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
 
     # --- Watches ---
     watches_created_window = await db.scalar(
-        select(func.count()).select_from(ToolWatch).where(ToolWatch.created_at >= cutoff)
+        select(func.count()).select_from(ToolWatch).where(
+            ToolWatch.created_at >= cutoff, ToolWatch.created_at < end)
     ) or 0
     watches_active = await db.scalar(
         select(func.count()).select_from(ToolWatch).where(ToolWatch.active.is_(True))
@@ -466,12 +483,14 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         select(func.count()).select_from(APIKey).where(APIKey.is_active.is_(True))
     ) or 0
     api_keys_created_window = await db.scalar(
-        select(func.count()).select_from(APIKey).where(APIKey.created_at >= cutoff)
+        select(func.count()).select_from(APIKey).where(
+            APIKey.created_at >= cutoff, APIKey.created_at < end)
     ) or 0
 
     # --- Repo claims ---
     claims_created_window = await db.scalar(
-        select(func.count()).select_from(RepoClaim).where(RepoClaim.created_at >= cutoff)
+        select(func.count()).select_from(RepoClaim).where(
+            RepoClaim.created_at >= cutoff, RepoClaim.created_at < end)
     ) or 0
     claims_verified_total = await db.scalar(
         select(func.count()).select_from(RepoClaim).where(RepoClaim.status == "verified")
@@ -513,6 +532,7 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         select(func.count()).select_from(FormalAttestation).where(
             FormalAttestation.is_revoked.is_(False),
             FormalAttestation.created_at >= cutoff,
+            FormalAttestation.created_at < end,
         )
     ) or 0
     attestations_total = await db.scalar(
@@ -655,7 +675,7 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         rows = (
             await db.execute(
                 select(day_expr.label("d"), func.count().label("cnt"))
-                .where(date_col >= cutoff)
+                .where(date_col >= cutoff, date_col < end)
                 .group_by(day_expr)
             )
         ).all()
@@ -771,6 +791,7 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
 
     return {
         "window": window,
+        "include_today": include_today,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "days": day_strs,
         "headline": {
@@ -902,6 +923,7 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
 @router.get("/metrics", dependencies=[Depends(rate_limit_reads)])
 async def engagement_metrics(
     window: str = Query("7d", pattern="^(today|7d|30d)$"),
+    include_today: bool = Query(True),
     current_entity: Entity = Depends(get_current_entity),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -910,18 +932,21 @@ async def engagement_metrics(
     Every number is backed by stored data (community_scans, tool_watches,
     repo_claims, alert_webhooks, api_keys, formal_attestations) except badge
     fetches / API-key calls, which come from best-effort Redis day counters.
-    Read-only admin viewers may read it, with personal data masked.
+    ``include_today=false`` makes the window the complete UTC days ending yesterday
+    (``today`` always covers today). Read-only admin viewers may read it, with
+    personal data masked.
     """
     viewer = require_admin_or_viewer(current_entity)
 
     from src import cache
 
-    cache_key = f"admin:metrics:{window}"
+    include_today = include_today or window == "today"
+    cache_key = f"admin:metrics:{window}" + ("" if include_today else ":complete")
     cached = await cache.get(cache_key)
     if cached is not None:
         return viewer_safe(cached, viewer)
 
-    result = await _aggregate(db, window)
+    result = await _aggregate(db, window, include_today)
     await cache.set(cache_key, result, ttl=cache.TTL_SHORT)
     return viewer_safe(result, viewer)
 
@@ -1056,10 +1081,10 @@ async def _behavioral_live() -> dict:
             "queue_depth": await slots.queue_depth()}
 
 
-async def _behavioral_aggregate(window: str) -> dict:
+async def _behavioral_aggregate(window: str, include_today: bool = True) -> dict:
     from src.config import settings
 
-    day_strs = window_day_strs(_WINDOW_DAYS[window])
+    day_strs = [d.isoformat() for d in window_days(_WINDOW_DAYS[window], include_today)]
     daily, _ = await read_behavioral_counters(day_strs, behavioral_daily_names())
 
     def tot(name: str) -> int:
@@ -1073,6 +1098,7 @@ async def _behavioral_aggregate(window: str) -> dict:
     duration_max = max(daily.get("duration_max", []) or [0.0])
     return {
         "window": window,
+        "include_today": include_today,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "days": day_strs,
         "runs": runs,
@@ -1133,9 +1159,11 @@ async def _eval_corpus() -> list[dict]:
 @router.get("/metrics/behavioral", dependencies=[Depends(rate_limit_reads)])
 async def behavioral_metrics(
     window: str = Query("7d", pattern="^(today|7d|30d)$"),
+    include_today: bool = Query(True),
     current_entity: Entity = Depends(get_current_entity),
 ) -> dict:
-    """Behavioral sandbox health over a window. Admin only.
+    """Behavioral sandbox health over a window. Admin only. ``include_today=false``:
+    the complete UTC days ending yesterday, as on /admin/metrics.
 
     Runs, exercised servers, findings, canary leaks, slot rejections (runs turned
     away because every sandbox slot was busy), killed runs, cache hit rate,
@@ -1143,7 +1171,8 @@ async def behavioral_metrics(
     ``scaling_hint`` ('add capacity' | 'watch memory' | 'ok'). One Redis MGET.
     """
     viewer = require_admin_or_viewer(current_entity)
-    return viewer_safe(await _behavioral_aggregate(window), viewer)
+    include_today = include_today or window == "today"
+    return viewer_safe(await _behavioral_aggregate(window, include_today), viewer)
 
 
 _TRAFFIC_PREFIX = f"{_METRICS_PREFIX}traffic:"
@@ -1405,8 +1434,11 @@ async def growth_metrics(
             "catalog_daily is written by the 6-hour scheduler job (src/jobs/metrics_daily) "
             "from the PR 2 deploy on; days before it are absent, not zero. x402 listings "
             "are excluded, as on the site.",
-            "downloads: npm last-week downloads and PyPI recent downloads (pypistats) of "
-            "agentavow-trust, fetched by the same job. A source that failed is absent.",
+            "downloads: npm last-week downloads, and PyPI downloads over the last 7 and 30 "
+            "days summed from pypistats' daily series (mirrors excluded), of "
+            "agentavow-trust, fetched by the same job. A source that failed is absent. "
+            "pypi_month stored before 2026-11-13 came from pypistats /recent, whose month "
+            "lagged its week; read those days' pypi_month as unreliable.",
             "referrals: landing sessions (lp_view, bots left out) by the host of the page "
             "that sent them. Only the host is stored. Counted from the PR 2 deploy.",
             "indexnow_runs: the newest IndexNow pings, newest first (when, outcome, URLs "

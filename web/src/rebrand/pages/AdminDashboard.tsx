@@ -1,12 +1,13 @@
 /**
  * AgentAvow admin dashboard — Kenne's day-to-day ops tool, rebrand-styled.
  *
- * Tabs: Metrics (product/adoption + traffic funnel, with today/7d/30d + trends),
- * Marketing (health, weekly campaign planner, interactive draft queue, reply-guy,
- * cost, recent posts), Posts (review and track hand-posted drafts) and Radar. Consumes the SAME existing admin endpoints as the legacy admin,
- * which is left fully intact (footer Community → /feed → /admin, and a link here).
+ * Tabs: Metrics (product/adoption + traffic funnel, under ONE page-level time window
+ * of 7 / 30 / 90 complete UTC days), Marketing (health, weekly campaign planner,
+ * interactive draft queue, reply-guy, cost, recent posts), Posts (review and track
+ * hand-posted drafts) and Radar. Consumes the SAME existing admin endpoints as the
+ * legacy admin, which is left fully intact (footer Community → /feed → /admin, and a
+ * link here).
  */
-import type { ReactNode } from 'react'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -19,10 +20,17 @@ import StartHerePanel from './AdminStartHere'
 import CampaignPanel from './AdminCampaignPanel'
 import PostStudioTab from './AdminPostStudio'
 import { AdminAccessPanel, useAdminAccess, ViewOnlyNotice } from './adminAccess'
+import { BarList, Section, Stat, TrendChart, WindowBar } from './adminMetricsKit'
+import type { TrendLine } from './adminMetricsKit'
+import {
+  completeDays, dayLabel, DashWindowContext, fmt, fmtOrDash, metricsWindow, pctOf, rangeLabel,
+  usd, useDashWindow, useMetricsScope, useWindowLabel, utcDay,
+} from './adminMetricsUtil'
+import type { PageWin } from './adminMetricsUtil'
 
 // ── shared types (loose — endpoints already validated server-side) ──────────
-type Win = 'today' | '7d' | '30d'
 interface Metrics {
+  include_today?: boolean
   headline?: Record<string, number>
   series?: Record<string, number[]>
   days?: string[]
@@ -61,8 +69,6 @@ interface ReplyRow { id: string; platform: string; post_uri?: string; reply_url?
 const REPLY_TTL_H = 48
 
 // ── helpers ─────────────────────────────────────────────────────────────────
-const fmt = (n: number | undefined | null) => (n ?? 0).toLocaleString()
-const usd = (n: number | undefined | null) => `$${(n ?? 0).toFixed(2)}`
 const ago = (iso?: string | null) => {
   if (!iso) return '—'
   const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
@@ -71,125 +77,32 @@ const ago = (iso?: string | null) => {
   return `${Math.floor(s / 86400)}d`
 }
 
-function Sparkline({ data }: { data?: number[] }) {
-  if (!data || data.length < 2) return null
-  const max = Math.max(...data, 1)
-  const w = 100, h = 24
-  const pts = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - (v / max) * h}`).join(' ')
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-6 mt-2" preserveAspectRatio="none">
-      <polyline points={pts} fill="none" stroke="url(#spark)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-      <defs><linearGradient id="spark" x1="0" x2="1"><stop offset="0" stopColor="#2dd4bf" /><stop offset="1" stopColor="#818cf8" /></linearGradient></defs>
-    </svg>
-  )
-}
-
-interface TrendLine { key: string; label: string; color: string; data?: number[]; dashed?: boolean }
-
-/** A daily multi-line chart with axes, so a trend is readable at a glance (the
- *  Sparkline above is a 24px hint; this is the real thing). Pure SVG, no library.
- *  Every line is listed in the legend with its latest value and window total, so a
- *  flat zero line still says what it is. Hover a point for the exact day/value. */
-function TrendChart({ days, lines, empty }: { days?: string[]; lines: TrendLine[]; empty: string }) {
-  const n = days?.length ?? 0
-  const live = lines.map((l) => ({ ...l, data: (l.data ?? []).slice(-n) }))
-  const max = Math.max(1, ...live.flatMap((l) => l.data))
-  if (!n || n < 2 || max <= 1 && live.every((l) => l.data.every((v) => v === 0))) {
-    return <p className="text-[12.5px] text-text-muted/70 py-6 text-center">{empty}</p>
-  }
-  // Nice y-axis ceiling: 1-2-5 steps so gridlines land on round numbers.
-  const mag = Math.pow(10, Math.floor(Math.log10(max)))
-  const step = [1, 2, 5, 10].map((m) => m * mag).find((v) => v * 4 >= max) ?? mag * 10
-  const top = step * 4
-  const W = 640, H = 200, L = 36, R = 12, T = 10, B = 26
-  const x = (i: number) => L + (i / (n - 1)) * (W - L - R)
-  const y = (v: number) => T + (1 - v / top) * (H - T - B)
-  const every = n > 14 ? Math.ceil(n / 7) : n > 7 ? 2 : 1
-  const day = (d: string) => d.slice(5)
-  return (
-    <div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="Daily trend">
-        {[0, 1, 2, 3, 4].map((k) => (
-          <g key={k}>
-            <line x1={L} x2={W - R} y1={y(k * step)} y2={y(k * step)} stroke="currentColor" strokeOpacity={k === 0 ? 0.25 : 0.08} />
-            <text x={L - 6} y={y(k * step) + 3.5} textAnchor="end" fontSize="10" fill="currentColor" fillOpacity="0.55" fontFamily="ui-monospace, monospace">{k * step}</text>
-          </g>
-        ))}
-        {days!.map((d, i) => (i % every === 0 || i === n - 1) && (
-          <text key={d} x={x(i)} y={H - 8} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fontSize="10" fill="currentColor" fillOpacity="0.55" fontFamily="ui-monospace, monospace">{day(d)}</text>
-        ))}
-        {live.map((l) => (
-          <g key={l.key}>
-            <polyline points={l.data.map((v, i) => `${x(i)},${y(v)}`).join(' ')} fill="none" stroke={l.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" strokeDasharray={l.dashed ? '4 4' : undefined} />
-            {l.data.map((v, i) => (
-              <circle key={i} cx={x(i)} cy={y(v)} r={v > 0 ? 2.5 : 1.5} fill={l.color} fillOpacity={v > 0 ? 1 : 0.4}>
-                <title>{`${l.label} · ${days![i]} · ${v.toLocaleString()}`}</title>
-              </circle>
-            ))}
-          </g>
-        ))}
-      </svg>
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11.5px]">
-        {live.map((l) => {
-          const total = l.data.reduce((a, b) => a + b, 0)
-          const last = l.data[l.data.length - 1] ?? 0
-          return (
-            <span key={l.key} className={`inline-flex items-center gap-1.5 tabular-nums${total === 0 ? ' opacity-50' : ''}`}>
-              <span className="inline-block w-3 h-0.5 rounded" style={{ background: l.color }} />
-              <span className="text-text-muted">{l.label}</span>
-              <span className="text-text">{fmt(last)}</span>
-              <span className="text-text-muted/60">({fmt(total)} total)</span>
-            </span>
-          )
-        })}
-      </div>
-    </div>
-  )
+/** The day each newer counter started, for the plain "counted from" notes. */
+const COUNTED_FROM = {
+  answers: 'Nov 11', ourClients: 'Nov 11', kinds: 'Nov 11', alerts: 'Nov 11', installTimeHook: 'Nov 11',
+  installSplit: 'Nov 12', pageActions: '2026-11-12', growthRows: 'Nov 11',
 }
 
 const INSTALL_CLIENT_LABEL: Record<string, string> = { cursor: 'Cursor', vscode: 'VS Code', goose: 'Goose' }
-/** "Cursor 3 · VS Code 1 · Goose 0": one-click installs by client (split from Nov 12; older clicks are in the total only). */
+/** "Cursor 3 · VS Code 1 · Goose 0": one-click installs by app (split from Nov 12; older clicks are in the total only). */
 const installSplit = (by?: Record<string, number>) =>
   by ? Object.entries(INSTALL_CLIENT_LABEL).map(([k, label]) => `${label} ${fmt(by[k])}`).join(' · ') : undefined
 
-function Stat({ label, value, sub, series }: { label: string; value: string | number; sub?: string; series?: number[] }) {
-  return (
-    <div className="glass rounded-2xl p-5 min-w-0">
-      <div className="text-[24px] font-extrabold leading-none tabular-nums gradient-text">{value}</div>
-      <div className="mt-1.5 text-[11.5px] font-mono uppercase tracking-wide text-text-muted">{label}</div>
-      {sub && <div className="mt-0.5 text-[11px] text-text-muted/70">{sub}</div>}
-      <Sparkline data={series} />
-    </div>
-  )
-}
-
-function Section({ title, note, right, children }: { title: string; note?: string; right?: ReactNode; children: ReactNode }) {
-  return (
-    <Reveal>
-      <section className="mt-10">
-        <div className="flex items-baseline justify-between gap-3 flex-wrap">
-          <div>
-            <h2 className="text-lg font-bold">{title}</h2>
-            {note && <p className="mt-1 text-text-muted text-[13px] max-w-[64ch]">{note}</p>}
-          </div>
-          {right}
-        </div>
-        <div className="mt-4">{children}</div>
-      </section>
-    </Reveal>
-  )
-}
-
-function WindowToggle({ win, setWin }: { win: Win; setWin: (w: Win) => void }) {
-  return (
-    <div className="flex gap-1 font-mono text-[12px]">
-      {(['today', '7d', '30d'] as Win[]).map((w) => (
-        <button key={w} onClick={() => setWin(w)} className={`px-2.5 py-1 rounded-lg transition-colors ${win === w ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>
-          {w === 'today' ? 'L1' : w === '7d' ? 'L7' : 'L30'}
-        </button>
-      ))}
-    </div>
-  )
+/** /admin/metrics for the page window (complete days), plus today's partial day when
+ *  the page asks to show it. */
+function useMetricsData() {
+  const w = useDashWindow()
+  const m = metricsWindow(w.days)
+  const main = useQuery<Metrics>({
+    queryKey: ['admin-dash-metrics', m.param, 'complete'],
+    queryFn: async () => (await api.get('/admin/metrics', { params: { window: m.param, include_today: false } })).data,
+  })
+  const today = useQuery<Metrics>({
+    queryKey: ['admin-dash-metrics', 'today'],
+    queryFn: async () => (await api.get('/admin/metrics', { params: { window: 'today' } })).data,
+    enabled: w.includeToday,
+  })
+  return { data: main.data, today: w.includeToday ? today.data : undefined }
 }
 
 
@@ -221,35 +134,20 @@ interface EvalReport {
 interface CorpusEntry { key: string; surface: string; name: string; expect_rules?: string[]; note?: string; source: 'file' | 'admin'; removed?: boolean }
 const START_LABEL: Record<string, string> = {
   started: 'Started', needs_credentials: 'Needs credentials', needs_arguments: 'Needs arguments',
-  missing_binary: 'Missing binary', install_failed: 'Install failed', resource_limit: 'Resource limit',
-  no_entrypoint: 'No entrypoint', timeout: 'Timeout', crashed: 'Crashed', unknown: 'Unknown',
-  not_applicable: 'Install-only (n/a)',
+  missing_binary: 'Missing program', install_failed: 'Install failed', resource_limit: 'Hit a resource limit',
+  no_entrypoint: 'Nothing to start', timeout: 'Timed out', crashed: 'Crashed', unknown: 'Unknown',
+  not_applicable: 'Nothing to run (install-only package)',
 }
 const RULE_LABEL: Record<string, string> = {
-  behavioral_undeclared_egress: 'Undeclared egress', annotation_readonly_violated: 'Read-only annotation violated',
-  annotation_open_world_violated: 'Open-world annotation violated', credential_canary_exfiltrated: 'Canary credential exfiltrated',
-  canary_echoed_in_result: 'Canary echoed in result', tool_call_crashed_server: 'Tool call crashed server',
+  behavioral_undeclared_egress: 'Network call it didn\'t declare', annotation_readonly_violated: 'Wrote data though marked read-only',
+  annotation_open_world_violated: 'Reached outside though marked closed', credential_canary_exfiltrated: 'Sent a fake credential out (canary leak)',
+  canary_echoed_in_result: 'Repeated a fake credential in its reply', tool_call_crashed_server: 'A tool call crashed the server',
+  cloud_metadata_probe: 'Probed cloud metadata',
 }
-
-function BarList({ title, rows, labels, empty, gradient }: { title: string; rows: Record<string, number>; labels: Record<string, string>; empty: string; gradient: string }) {
-  const entries = Object.entries(rows).sort((a, b) => b[1] - a[1])
-  const total = entries.reduce((a, [, n]) => a + n, 0)
-  const max = Math.max(...entries.map(([, n]) => n), 1)
-  return (
-    <div className="glass rounded-2xl p-5 min-w-0">
-      <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-3">{title}</div>
-      {total > 0 ? entries.map(([k, n]) => (
-        <div key={k} className={`mb-2${n === 0 ? ' opacity-50' : ''}`}>
-          <div className="flex justify-between text-[12.5px] mb-1"><span className="text-text-muted truncate">{labels[k] || k}</span><span className="tabular-nums text-text-muted/70 ml-3">{fmt(n)} <span className="text-[11px]">({Math.round((n / total) * 100)}%)</span></span></div>
-          <div className="h-2 rounded-full bg-surface overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(n / max) * 100}%`, background: gradient }} /></div>
-        </div>
-      )) : <p className="text-[12.5px] text-text-muted/70">{empty}</p>}
-    </div>
-  )
-}
+const evalDate = (iso?: string | null) => (iso ? new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—')
 
 // ── Scheduled eval tile (weekly corpus run; POST /admin/metrics/behavioral/eval) ──
-function EvalTile({ report, corpus, win }: { report?: EvalReport | null; corpus: CorpusEntry[]; win: Win }) {
+function EvalTile({ report, corpus, queryKey }: { report?: EvalReport | null; corpus: CorpusEntry[]; queryKey: unknown[] }) {
   const { isAdmin } = useAdminAccess() // a viewer reads the report; no run / corpus edits
   const qc = useQueryClient()
   const [msg, setMsg] = useState<string | null>(null)
@@ -257,7 +155,7 @@ function EvalTile({ report, corpus, win }: { report?: EvalReport | null; corpus:
   const [addSurface, setAddSurface] = useState<'npm' | 'pypi' | 'skill'>('npm')
   const [addName, setAddName] = useState('')
   const [addRules, setAddRules] = useState('')
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['admin-dash-behavioral', win] })
+  const invalidate = () => qc.invalidateQueries({ queryKey })
   const run = useMutation({
     mutationFn: async () => (await api.post('/admin/metrics/behavioral/eval')).data,
     onSuccess: () => { setMsg('queued — the report lands here when the run finishes'); invalidate() },
@@ -277,6 +175,7 @@ function EvalTile({ report, corpus, win }: { report?: EvalReport | null; corpus:
   const d = r?.diff || {}
   const fpCount = (kg.false_positives || []).length
   const regressed = !!d.regression
+  const finished = !!r?.ran_at
   const diffLines: { tone: 'bad' | 'good' | 'muted'; text: string }[] = []
   for (const l of d.fixture_regressions || []) diffLines.push({ tone: 'bad', text: `fixture now failing: ${l}` })
   for (const f of d.new_false_positives || []) diffLines.push({ tone: 'bad', text: `new false positive: ${f.surface}:${f.name} (${f.rules.join(', ')})` })
@@ -291,7 +190,10 @@ function EvalTile({ report, corpus, win }: { report?: EvalReport | null; corpus:
     <div className="glass rounded-2xl p-5 mt-3">
       <div className="flex items-baseline justify-between gap-3 flex-wrap">
         <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted">
-          Eval — weekly corpus run {r?.ran_at ? <span className="normal-case tracking-normal">· last {ago(r.ran_at)} ago ({new Date(r.ran_at).toLocaleDateString()}, {r.reason || 'scheduled'}{r.duration_s != null ? `, ${Math.round(r.duration_s / 60)} min` : ''})</span> : <span className="normal-case tracking-normal">· never run</span>}
+          Eval — known-good corpus run <span className="normal-case tracking-normal">· runs weekly on a schedule, or by hand</span>
+          {finished
+            ? <span className="normal-case tracking-normal"> · last finished run: {evalDate(r!.ran_at)} ({ago(r!.ran_at)} ago, {r!.reason === 'admin' ? 'started by hand' : r!.reason || 'scheduled'}{r!.duration_s != null ? `, took ${Math.round(r!.duration_s / 60)} min` : ''})</span>
+            : <span className="normal-case tracking-normal"> · never finished a run</span>}
         </div>
         <div className="flex items-center gap-2">
           {msg && <span className="text-[11.5px] text-text-muted">{msg}</span>}
@@ -301,29 +203,30 @@ function EvalTile({ report, corpus, win }: { report?: EvalReport | null; corpus:
               disabled={run.isPending || !!r?.running}
               className="px-2.5 py-1 rounded-lg text-[12px] font-mono bg-primary/15 text-primary-light hover:bg-primary/25 disabled:opacity-50 transition-colors"
             >
-              {r?.running ? 'running…' : 'Run eval now'}
+              {r?.running ? 'new run in progress…' : 'Run eval now'}
             </button>
-          ) : r?.running ? <span className="text-[12px] font-mono text-text-muted">running…</span> : null}
+          ) : r?.running ? <span className="text-[12px] font-mono text-text-muted">new run in progress…</span> : null}
         </div>
       </div>
-      {r ? (
+      {r?.running && finished && <p className="mt-2 text-[12px] text-text-muted">A new run is in progress. Everything below is from the run that finished {evalDate(r.ran_at)}; it updates when the new run ends.</p>}
+      {finished ? (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
             <div>
               <div className={`text-[20px] font-extrabold tabular-nums ${(fx.failed || []).length ? 'text-danger' : 'gradient-text'}`}>{fmt(fx.passed)}/{fmt(fx.total)}</div>
-              <div className="text-[11px] font-mono uppercase tracking-wide text-text-muted">fixtures passed</div>
+              <div className="text-[11px] font-mono uppercase tracking-wide text-text-muted">test fixtures passed</div>
             </div>
             <div>
               <div className="text-[20px] font-extrabold tabular-nums gradient-text">{fmt(kg.exercised)}/{fmt(kg.total)}</div>
-              <div className="text-[11px] font-mono uppercase tracking-wide text-text-muted">known-good exercised{d.exercised_delta ? ` (${d.exercised_delta > 0 ? '+' : ''}${d.exercised_delta})` : ''}</div>
+              <div className="text-[11px] font-mono uppercase tracking-wide text-text-muted">known-good tools exercised{d.exercised_delta ? ` (${d.exercised_delta > 0 ? '+' : ''}${d.exercised_delta})` : ''}</div>
             </div>
             <div>
               <div className={`text-[20px] font-extrabold tabular-nums ${fpCount > 0 ? 'text-danger' : 'gradient-text'}`}>{fmt(fpCount)}</div>
-              <div className="text-[11px] font-mono uppercase tracking-wide text-text-muted">false positives</div>
+              <div className="text-[11px] font-mono uppercase tracking-wide text-text-muted">false alarms</div>
             </div>
             <div>
-              <div className={`text-[20px] font-extrabold tabular-nums ${regressed ? 'text-danger' : 'text-success'}`}>{d.first_run ? 'first run' : regressed ? 'regressed' : 'stable'}</div>
-              <div className="text-[11px] font-mono uppercase tracking-wide text-text-muted">vs previous{d.previous_ran_at ? ` (${ago(d.previous_ran_at)} ago)` : ''}</div>
+              <div className={`text-[20px] font-extrabold tabular-nums ${regressed ? 'text-danger' : 'text-success'}`}>{d.first_run ? 'first run' : regressed ? 'got worse' : 'no worse'}</div>
+              <div className="text-[11px] font-mono uppercase tracking-wide text-text-muted">vs the run before{d.previous_ran_at ? ` (${evalDate(d.previous_ran_at)})` : ''}</div>
             </div>
           </div>
           {(fx.failed || []).length > 0 && <p className="mt-2 text-[12px] text-danger">Failing fixtures: {(fx.failed || []).join(', ')}</p>}
@@ -333,11 +236,11 @@ function EvalTile({ report, corpus, win }: { report?: EvalReport | null; corpus:
             </ul>
           )}
           <div className="mt-3">
-            <div className="text-[11px] font-mono uppercase tracking-wide text-text-muted mb-1">Diff vs previous</div>
+            <div className="text-[11px] font-mono uppercase tracking-wide text-text-muted mb-1">What changed since the run before</div>
             {diffLines.length ? (
               <ul className="text-[12px] space-y-0.5">{diffLines.map((l, i) => <li key={i} className={toneCls[l.tone]}>{l.text}</li>)}</ul>
             ) : (
-              <p className="text-[12px] text-text-muted/70">{d.first_run ? 'No previous report to compare against.' : 'No change.'}</p>
+              <p className="text-[12px] text-text-muted/70">{d.first_run ? 'No earlier run to compare against.' : 'Nothing changed.'}</p>
             )}
           </div>
           {(kg.not_started || []).length > 0 && (
@@ -345,7 +248,7 @@ function EvalTile({ report, corpus, win }: { report?: EvalReport | null; corpus:
           )}
         </>
       ) : (
-        <p className="mt-2 text-[12.5px] text-text-muted/70">No eval report yet. The job runs weekly (first run an hour after startup) when the behavioral tier is enabled; or start one now.</p>
+        <p className="mt-2 text-[12.5px] text-text-muted/70">No eval report yet. The job runs weekly (first run an hour after startup) when the sandbox tier is enabled; or start one now.</p>
       )}
       <div className="mt-3 border-t border-border/40 pt-3">
         <button onClick={() => setShowCorpus(!showCorpus)} className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted hover:text-text transition-colors">
@@ -388,10 +291,18 @@ function EvalTile({ report, corpus, win }: { report?: EvalReport | null; corpus:
   )
 }
 
-function BehavioralPanel({ win }: { win: Win }) {
+function BehavioralPanel() {
+  const w = useDashWindow()
+  const scope = useMetricsScope()
+  const queryKey = ['admin-dash-behavioral', scope.param, 'complete']
   const { data } = useQuery<Behavioral>({
-    queryKey: ['admin-dash-behavioral', win],
-    queryFn: async () => (await api.get('/admin/metrics/behavioral', { params: { window: win } })).data,
+    queryKey,
+    queryFn: async () => (await api.get('/admin/metrics/behavioral', { params: { window: scope.param, include_today: false } })).data,
+  })
+  const todayQ = useQuery<Behavioral>({
+    queryKey: ['admin-dash-behavioral', 'today'],
+    queryFn: async () => (await api.get('/admin/metrics/behavioral', { params: { window: 'today' } })).data,
+    enabled: w.includeToday,
   })
   const b = data || {}
   const s = b.series || {}
@@ -399,51 +310,60 @@ function BehavioralPanel({ win }: { win: Win }) {
   const attempts = runs + (b.slot_rejected ?? 0)
   const hint = b.scaling_hint || 'ok'
   const hintCls = hint === 'ok' ? 'text-success border-success/40' : 'text-warning border-warning/40'
-  const days = b.days || []
-  const runSeries = s.runs || []
-  const smax = Math.max(...runSeries, ...(s.slot_rejected || []), 1)
+  const ts = w.includeToday ? todayQ.data?.series : undefined
+  const perDay = [
+    ...(b.days || []).map((d, i) => ({ d, label: d.slice(5), today: false, r: s.runs?.[i] ?? 0, e: s.exercised?.[i] ?? 0, rj: s.slot_rejected?.[i] ?? 0 })),
+    ...(ts ? [{ d: w.today, label: 'today*', today: true, r: ts.runs?.[0] ?? 0, e: ts.exercised?.[0] ?? 0, rj: ts.slot_rejected?.[0] ?? 0 }] : []),
+  ]
+  const smax = Math.max(...perDay.map((p) => p.r + p.rj), 1)
   return (
     <Section
       title="Behavioral sandbox"
-      note="Sandbox runs from the public scan path (gVisor, every tool called with synthetic args, canary credentials). 'Slot rejected' = a run turned away because every concurrent slot was busy. Counters are best-effort Redis day keys; no backfill."
-      right={<span className={`font-mono text-[11.5px] px-2.5 py-1 rounded-lg border ${hintCls}`}>scaling: {hint} · limit {fmt(b.concurrency_limit)}</span>}
+      scope={scope.label}
+      note="Sandbox runs from the public scan path: each server is started in an isolated sandbox (gVisor), every tool is called with made-up arguments, and fake 'canary' credentials are planted to see if it sends them anywhere. Day counters are kept 45 days; nothing is backfilled."
+      right={<span className={`font-mono text-[11.5px] px-2.5 py-1 rounded-lg border ${hintCls}`} title="'add capacity' when more than 5% of attempts were turned away; 'watch memory' when more than 10% of runs were killed">capacity: {hint} · {fmt(b.concurrency_limit)} runs at once</span>}
     >
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-        <Stat label="Runs" value={fmt(runs)} series={s.runs} />
-        <Stat label="Servers exercised" value={fmt(b.exercised)} sub={runs ? `${Math.round(((b.exercised ?? 0) * 100) / runs)}% of runs` : undefined} series={s.exercised} />
+        <Stat label="Sandbox runs" value={fmt(runs)} series={s.runs} />
+        <Stat label="Servers actually exercised" value={fmt(b.exercised)} sub={runs ? `${pctOf(b.exercised ?? 0, runs)} of runs: it started and its tools were called` : undefined} series={s.exercised} />
         <Stat label="Runs with findings" value={fmt(b.with_findings)} />
-        <Stat label="Canary leaks" value={fmt(b.canary_leaks)} />
-        <Stat label="Slot rejected" value={fmt(b.slot_rejected)} sub={attempts ? `${Math.round(((b.slot_rejected ?? 0) * 100) / attempts)}% of attempts` : undefined} series={s.slot_rejected} />
-        <Stat label="Killed" value={fmt(b.killed)} sub={runs ? `${Math.round(((b.killed ?? 0) * 100) / runs)}% of runs` : undefined} />
-        <Stat label="Cache hit rate" value={b.cache_hit_rate != null ? `${Math.round(b.cache_hit_rate * 100)}%` : '—'} sub={`${fmt(b.cache_hits)} hit · ${fmt(b.cache_misses)} miss`} />
-        <Stat label="Duration avg / max" value={b.avg_duration_s != null ? `${b.avg_duration_s}s` : '—'} sub={b.max_duration_s != null ? `max ${b.max_duration_s}s` : undefined} />
+        <Stat label="Canary leaks" value={fmt(b.canary_leaks)} sub="a fake credential was sent out over the network" />
+        <Stat label="Turned away (all slots busy)" value={fmt(b.slot_rejected)} sub={attempts ? `${pctOf(b.slot_rejected ?? 0, attempts)} of attempts` : undefined} series={s.slot_rejected} />
+        <Stat label="Killed (out of time or memory)" value={fmt(b.killed)} sub={runs ? `${pctOf(b.killed ?? 0, runs)} of runs` : undefined} />
+        <Stat label="Re-used a recent result" value={b.cache_hit_rate != null ? `${Math.round(b.cache_hit_rate * 100)}%` : '—'} sub={`${fmt(b.cache_hits)} re-used · ${fmt(b.cache_misses)} ran fresh`} />
+        <Stat label="Run time avg / max" value={b.avg_duration_s != null ? `${b.avg_duration_s}s` : '—'} sub={b.max_duration_s != null ? `max ${b.max_duration_s}s` : undefined} />
       </div>
+      <p className="mt-3 text-[12px] text-text-muted max-w-[80ch]"><span className="font-semibold">Canary leaks vs “repeated a fake credential in its reply”:</span> a leak means the server sent one of the planted fake credentials out over the network, the serious case. Repeating it in its own reply (in Findings by rule) is milder: it is flagged, but nothing left the sandbox. That is why leaks can be 0 while repeats are not.</p>
       <div className="grid md:grid-cols-2 gap-3 mt-3">
-        <BarList title="Start reason" rows={b.start_reasons || {}} labels={START_LABEL} empty="No sandbox runs recorded in this window." gradient="linear-gradient(90deg,#2dd4bf,#818cf8)" />
-        <BarList title="Findings by rule" rows={b.findings_by_rule || {}} labels={RULE_LABEL} empty="No behavioral findings in this window." gradient="linear-gradient(90deg,#f59e0b,#e879f9)" />
+        <BarList title="Why a run did or didn't start" rows={b.start_reasons || {}} labels={START_LABEL} empty="No sandbox runs recorded in this window." gradient="linear-gradient(90deg,#2dd4bf,#818cf8)" />
+        <BarList title="Findings by rule" rows={b.findings_by_rule || {}} labels={RULE_LABEL} empty="No sandbox findings in this window." gradient="linear-gradient(90deg,#f59e0b,#e879f9)" />
       </div>
-      {days.length > 1 && (
+      {perDay.length > 1 && (
         <div className="glass rounded-2xl p-5 mt-3">
-          <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-3">Per day — runs · exercised · slot rejected</div>
-          <div className="space-y-1">
-            {days.map((d, i) => {
-              const r = runSeries[i] ?? 0, e = s.exercised?.[i] ?? 0, rj = s.slot_rejected?.[i] ?? 0
-              return (
-                <div key={d} className="flex items-center gap-3 text-[12px]">
-                  <span className="font-mono text-text-muted/70 w-[5.5rem] shrink-0">{d.slice(5)}</span>
-                  <div className="flex-1 h-2 rounded-full bg-surface overflow-hidden flex">
-                    <div className="h-full" style={{ width: `${(r / smax) * 100}%`, background: 'linear-gradient(90deg,#2dd4bf,#818cf8)' }} />
-                    <div className="h-full bg-warning/70" style={{ width: `${(rj / smax) * 100}%` }} />
-                  </div>
-                  <span className="tabular-nums text-text-muted/70 w-28 text-right shrink-0">{fmt(r)} · {fmt(e)} · {fmt(rj)}</span>
-                </div>
-              )
-            })}
+          <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-1">Per UTC day — runs · of which exercised · turned away</div>
+          <div className="mb-3 flex flex-wrap gap-x-4 text-[11.5px] text-text-muted">
+            <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 h-2 rounded-sm" style={{ background: '#2dd4bf' }} />runs</span>
+            <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 h-2 rounded-sm" style={{ background: '#6366f1' }} />of which exercised (inside the runs bar)</span>
+            <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 h-2 rounded-sm bg-warning/70" />turned away</span>
           </div>
-          <p className="mt-2 text-[11px] text-text-muted/60">Bar: runs (teal) then slot rejections (amber), scaled to the busiest day.</p>
+          <div className="space-y-1">
+            {perDay.map((p) => (
+              <div key={p.d} className={`flex items-center gap-3 text-[12px]${p.today ? ' opacity-60' : ''}`}>
+                <span className="font-mono text-text-muted/70 w-[5.5rem] shrink-0">{p.label}</span>
+                <div className={`flex-1 h-2.5 rounded-full bg-surface overflow-hidden flex${p.today ? ' border border-dashed border-text-muted/50' : ''}`}>
+                  <div className="h-full relative" style={{ width: `${(p.r / smax) * 100}%`, background: '#2dd4bf' }}>
+                    <div className="absolute inset-y-0 left-0" style={{ width: p.r ? `${(Math.min(p.e, p.r) / p.r) * 100}%` : 0, background: '#6366f1' }} />
+                  </div>
+                  <div className="h-full bg-warning/70" style={{ width: `${(p.rj / smax) * 100}%` }} />
+                </div>
+                <span className="tabular-nums text-text-muted/70 w-28 text-right shrink-0">{fmt(p.r)} · {fmt(p.e)} · {fmt(p.rj)}</span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-text-muted/60">Bars are scaled to the busiest day.{ts ? ' today* = today so far (partial).' : ''}</p>
         </div>
       )}
-      <EvalTile report={b.last_eval} corpus={b.corpus || []} win={win} />
+      <EvalTile report={b.last_eval} corpus={b.corpus || []} queryKey={queryKey} />
     </Section>
   )
 }
@@ -459,24 +379,42 @@ interface TrafficRow {
   preinstall_machines?: number | null; preinstall_reqs?: number | null
   gate_machines?: number | null; tool_gate_machines?: number | null; tool_gate_reqs?: number | null
   a2a_card_fetches?: number | null; a2a_card_fetchers?: number | null
+  [col: string]: number | string | null | undefined
 }
-interface Traffic { days?: string[]; rows?: TrafficRow[]; series?: Record<string, (number | null)[]>; latest?: TrafficRow | null; covered_days?: number; notes?: string[] }
+interface Traffic { days?: string[]; rows?: TrafficRow[]; latest?: TrafficRow | null; covered_days?: number; notes?: string[] }
+
+/** The nightly traffic snapshot for the page window: one row per complete UTC day that
+ *  has a snapshot (today never does; the cron writes each day after it ends). */
+function useTraffic() {
+  const w = useDashWindow()
+  const q = useQuery<Traffic>({
+    queryKey: ['admin-dash-claude-traffic', w.days + 1],
+    queryFn: async () => { try { return (await api.get('/admin/metrics/traffic', { params: { days: w.days + 1 } })).data } catch { return {} } },
+  })
+  const inWindow = new Set(w.complete)
+  const rows = (q.data?.rows || []).filter((r) => inWindow.has(r.day))
+  const byDay = Object.fromEntries(rows.map((r) => [r.day, r]))
+  /** A column aligned to the window's days; null where there is no snapshot or no value. */
+  const col = (name: string) => w.complete.map((d) => { const v = byDay[d]?.[name]; return typeof v === 'number' ? v : null })
+  return { rows, byDay, col, latest: rows[rows.length - 1] }
+}
 
 // ── Scan requests by kind (GET /admin/metrics → scan_kinds) ─────────────────
 const KIND_LABEL: Record<string, string> = {
   repo: 'GitHub repo', package: 'Package (npm, PyPI, …)', mcp: 'MCP server', skill: 'Skill', a2a: 'A2A agent card',
   erc8004: 'ERC-8004 agent', wallet: 'Wallet', submit: 'Submit a tool', x402: 'x402 (catalog lookups)',
-  badge: 'Badge SVG', card: 'Card SVG', og: 'OG image', verdict_json: 'verdict.json',
+  badge: 'Badge image', card: 'Card image', og: 'Link preview image', verdict_json: 'verdict.json',
   preflight: 'Preflight runs', drift_feed: 'Drift feed reads', registry_snippet: 'Registry snippet', catalog: 'Catalog / Browse', read: 'History, checks, adoption', beacon: 'Beacons',
 }
 
 function ScanKindsPanel({ data }: { data?: Metrics }) {
+  const scope = useMetricsScope()
   const k = data?.scan_kinds || {}
   return (
-    <Section title="Scan requests by kind" note="Answered public scan-API requests (this window), by what was asked: checks per kind, with README badge / card / OG renders and other reads split out. Preflight runs and drift-feed reads are counted here too. Counted from the PR 2 deploy; 'Public scan requests by caller type' above still mixes all of them.">
+    <Section title="Scan requests by kind" scope={scope.label} note={`Answered public scan-API requests, by what was asked: checks per kind, with README badge / card / link-preview images and other reads split out. Preflight runs and drift-feed reads are counted here too. Counted from ${COUNTED_FROM.kinds}; the "Public scan requests by caller type" chart above still mixes all of them.`}>
       <div className="grid md:grid-cols-3 gap-3">
         <BarList title="Checks" rows={k.checks || {}} labels={KIND_LABEL} empty="No checks counted yet." gradient="linear-gradient(90deg,#2dd4bf,#818cf8)" />
-        <BarList title="Renders" rows={k.renders || {}} labels={KIND_LABEL} empty="No renders counted yet." gradient="linear-gradient(90deg,#fbbf24,#f59e0b)" />
+        <BarList title="Images (badges, cards, previews)" rows={k.renders || {}} labels={KIND_LABEL} empty="No images counted yet." gradient="linear-gradient(90deg,#fbbf24,#f59e0b)" />
         <BarList title="Other (Preflight, feeds, catalog)" rows={k.other || {}} labels={KIND_LABEL} empty="Nothing counted yet." gradient="linear-gradient(90deg,#64748b,#94a3b8)" />
       </div>
     </Section>
@@ -486,20 +424,21 @@ function ScanKindsPanel({ data }: { data?: Metrics }) {
 // ── Watch alerts by trigger (GET /admin/metrics → watch_alerts) ─────────────
 const ALERT_LABEL: Record<string, string> = {
   answer_worse: 'Answer got worse', certified_lost: 'Certified lost', score_drop: 'Score dropped', definition_change: 'Signed definition changed',
-  sandbox_change: 'Sandbox behavior changed', icon_change: 'Icons changed', good_news: 'Good news', held: 'Held (planned re-score)',
+  sandbox_change: 'Sandbox behavior changed', icon_change: 'Icons changed', good_news: 'Good news', held: 'Held (alerts paused for a planned re-score)',
 }
 const ALERT_COLOR: Record<string, string> = {
   answer_worse: '#f87171', certified_lost: '#fb923c', score_drop: '#fbbf24', definition_change: '#e879f9',
   sandbox_change: '#818cf8', icon_change: '#94a3b8', good_news: '#22c55e', held: '#64748b',
 }
 
-function WatchAlertsPanel({ data }: { data?: Metrics }) {
+function WatchAlertsPanel({ data, today }: { data?: Metrics; today?: Metrics }) {
+  const scope = useMetricsScope()
   const a = data?.watch_alerts || {}
   const s = data?.series || {}
   const codes = Object.keys(ALERT_LABEL)
-  const lines: TrendLine[] = codes.map((c) => ({ key: c, label: ALERT_LABEL[c], color: ALERT_COLOR[c], dashed: c === 'held', data: s[`watch_alert:${c}`] }))
+  const lines: TrendLine[] = codes.map((c) => ({ key: c, label: ALERT_LABEL[c], color: ALERT_COLOR[c], kind: 'flow', data: s[`watch_alert:${c}`], today: today?.series?.[`watch_alert:${c}`]?.[0] }))
   return (
-    <Section title="Watch alerts by trigger" note="One count per trigger per alert (an alert can carry several), public watches vs private repos connected through the GitHub App, this window. The series starts with the PR 2 deploy, after the #292 reset: the first re-scan cycle after t28 re-seeds answers silently, so alerts before it are not counted. 'Held' = a move absorbed while watch_alert_hold was on.">
+    <Section title="Watch alerts by trigger" scope={scope.label} note={`One count per trigger per alert (one alert can carry several), for public watches and for private repos connected through the GitHub App. Counted from ${COUNTED_FROM.alerts}: the first re-check after every stored answer was re-set ran silently on purpose, so nothing before it is counted.`}>
       <div className="glass rounded-2xl p-5 overflow-x-auto">
         <table className="w-full text-[12.5px]">
           <thead><tr className="text-left font-mono text-[11px] uppercase tracking-wide text-text-muted/70"><th className="py-1 pr-3">Trigger</th><th className="py-1 pr-3 text-right">Public</th><th className="py-1 pr-3 text-right">Private</th><th className="py-1 text-right">Total</th></tr></thead>
@@ -519,8 +458,8 @@ function WatchAlertsPanel({ data }: { data?: Metrics }) {
         </table>
       </div>
       <div className="glass rounded-2xl p-5 mt-3">
-        <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Alerts per day · series starts after the #292 reset</div>
-        <TrendChart days={data?.days} lines={lines} empty="No watch alerts counted in this window yet." />
+        <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Alerts per day, stacked by trigger</div>
+        <TrendChart bars days={data?.days} lines={lines} yLabel="Alerts per day" empty="No watch alerts counted in this window yet." />
       </div>
     </Section>
   )
@@ -539,70 +478,81 @@ interface Growth {
 const INDEXNOW_OUTCOME: Record<string, string> = {
   sent: 'sent', not_confirmed: 'not confirmed', nothing_changed: 'nothing changed', http_error: 'HTTP error', skipped: 'skipped (error)',
 }
-type GrowthTrafficRow = Record<string, number | string | null | undefined>
 const EP_LABEL: Record<string, string> = { desktop: 'Desktop app', cli: 'CLI + IDE extensions', sdk: 'Agent SDK', cloud: 'Anthropic cloud (remote)', other: 'Other / unknown' }
 
+/** The newest day in `days` (oldest first) that has a row in `byDay`. */
+const newestWithRow = (days: string[], byDay: Record<string, unknown>) => [...days].reverse().find((d) => byDay[d])
+
 function GrowthPanel() {
-  const [days, setDays] = useState<30 | 90>(30)
+  const w = useDashWindow()
+  const label = useWindowLabel()
   const { data } = useQuery<Growth>({
-    queryKey: ['admin-dash-growth', days],
-    queryFn: async () => { try { return (await api.get('/admin/metrics/growth', { params: { days } })).data } catch { return {} } },
+    queryKey: ['admin-dash-growth', w.days + 1],
+    queryFn: async () => { try { return (await api.get('/admin/metrics/growth', { params: { days: w.days + 1 } })).data } catch { return {} } },
   })
-  const traffic = useQuery<{ rows?: GrowthTrafficRow[] }>({
-    queryKey: ['admin-dash-claude-traffic', 14],
-    queryFn: async () => { try { return (await api.get('/admin/metrics/traffic', { params: { days: 14 } })).data } catch { return {} } },
+  // Referrals are a rolling count up to now; ask for exactly the window's length.
+  const refQ = useQuery<Growth>({
+    queryKey: ['admin-dash-growth', w.days],
+    queryFn: async () => { try { return (await api.get('/admin/metrics/growth', { params: { days: w.days } })).data } catch { return {} } },
   })
+  const traffic = useTraffic()
   const g = data || {}
-  const dayList = g.days || []
+  const dayList = w.complete
   const cat = g.catalog_daily || {}
+  const catToday = cat[w.today]
   const catLines: TrendLine[] = [
-    { key: 'certified', label: 'Certified', color: '#22c55e', data: dayList.map((d) => cat[d]?.certified ?? 0) },
-    ...DECISIONS.map((d) => ({ key: d.value, label: d.phrase, color: d.color, dashed: true, data: dayList.map((day) => cat[day]?.[d.value] ?? 0) })),
+    { key: 'certified', label: 'Certified', color: '#22c55e', kind: 'stock', data: dayList.map((d) => cat[d]?.certified ?? null), today: catToday?.certified },
+    ...DECISIONS.map((d) => ({ key: d.value, label: d.phrase, color: d.color, dashed: true, kind: 'stock' as const, data: dayList.map((day) => cat[day]?.[d.value] ?? null), today: catToday?.[d.value] })),
   ]
   const dl = g.downloads_daily || {}
   const dlLines: TrendLine[] = [
-    { key: 'npm', label: 'npm · last 7 days', color: '#f87171', data: dayList.map((d) => dl[d]?.npm_week ?? 0) },
-    { key: 'pypi', label: 'PyPI · last 7 days', color: '#818cf8', data: dayList.map((d) => dl[d]?.pypi_week ?? 0) },
+    { key: 'npm', label: 'npm · last 7 days', color: '#f87171', kind: 'rolling', data: dayList.map((d) => dl[d]?.npm_week ?? null), today: dl[w.today]?.npm_week },
+    { key: 'pypi', label: 'PyPI · last 7 days', color: '#818cf8', kind: 'rolling', data: dayList.map((d) => dl[d]?.pypi_week ?? null), today: dl[w.today]?.pypi_week },
   ]
-  const week = (traffic.data?.rows || []).slice(-7)
-  const tsum = (col: string) => week.reduce((a, r) => a + (typeof r[col] === 'number' ? (r[col] as number) : 0), 0)
-  const hasEp = week.some((r) => r.cc_machines_cli != null)
+  const firstRow = dayList.find((d) => cat[d])
+  const snapDay = newestWithRow(dayList, cat)
+  const snap = snapDay ? cat[snapDay] : undefined
+  const dlDay = newestWithRow(dayList, dl)
+  const dlRow = dlDay ? dl[dlDay] : undefined
+  const tsum = (c: string) => traffic.col(c).reduce<number>((a, v) => a + (v ?? 0), 0)
+  const hasEp = traffic.rows.some((r) => r.cc_machines_cli != null)
   const newSeen = tsum('cc_new_machines_30d')
   const newChecked = tsum('new_checked_same_day')
   const d7Cohort = tsum('d7_cohort'), d7Checked = tsum('d7_cohort_checked')
   const now = g.catalog_now
-  const ref = g.referrals || {}
-  const toggle = (
-    <div className="flex gap-1 font-mono text-[12px]">
-      {([30, 90] as const).map((d) => (
-        <button key={d} onClick={() => setDays(d)} className={`px-2.5 py-1 rounded-lg transition-colors ${days === d ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>{d}d</button>
-      ))}
-    </div>
-  )
+  const ref = refQ.data?.referrals || {}
+  const pypiMonthBad = dlRow?.pypi_month != null && dlRow?.pypi_week != null && dlRow.pypi_month < dlRow.pypi_week
   return (
-    <Section title="Growth — Certified, activation, downloads, search" note="Daily series kept by the 6-hour job from the PR 2 deploy on (days before it are blank, not zero). x402 is excluded from the catalog mix, as on the site." right={toggle}>
+    <Section title="Growth — Certified, activation, downloads, search" scope={`${label}${firstRow && firstRow > dayList[0] ? ` · daily rows exist from ${dayLabel(firstRow)} (days before are blank, not zero)` : ''}`} note="Daily rows written by the 6-hour job from Nov 11 on. x402 is left out of the catalog mix, as on the site.">
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <Stat label="Certified (now)" value={now ? fmt(now.certified) : '—'} sub={now ? `of ${fmt(now.total)} tools` : undefined} />
-        {DECISIONS.map((d) => <Stat key={d.value} label={d.phrase} value={now ? fmt(now[d.value]) : '—'} sub={now && now.total ? `${Math.round(((now[d.value] ?? 0) * 100) / now.total)}%` : undefined} />)}
-        <Stat label="npm downloads (7d)" value={g.downloads_latest?.npm_week != null ? fmt(g.downloads_latest.npm_week) : '—'} sub="agentavow-trust" />
-        <Stat label="PyPI downloads (7d)" value={g.downloads_latest?.pypi_week != null ? fmt(g.downloads_latest.pypi_week) : '—'} sub={g.downloads_latest?.pypi_month != null ? `${fmt(g.downloads_latest.pypi_month)} last 30 days` : 'agentavow-trust'} />
+        <Stat label={`Certified · ${dayLabel(snapDay)}`} value={snap ? fmt(snap.certified) : '—'} sub={<>{snap ? `of ${fmt(snap.total)} tools` : 'no daily row yet'}{now ? ` · right now: ${fmt(now.certified)}` : ''}</>} tip="The card and the chart legend read the same daily row (the last complete day). 'Right now' is the live count, which can be a few tools apart." />
+        {DECISIONS.map((d) => <Stat key={d.value} label={`${d.phrase} · ${dayLabel(snapDay)}`} value={snap ? fmt(snap[d.value]) : '—'} sub={<>{snap && snap.total ? pctOf(snap[d.value] ?? 0, snap.total) : ''}{now ? ` · right now: ${fmt(now[d.value])}` : ''}</>} />)}
+        <Stat label={`npm downloads · 7 days to ${dayLabel(dlDay)}`} value={fmtOrDash(dlRow?.npm_week)} sub={<>agentavow-trust{g.downloads_latest?.npm_week != null ? ` · newest fetch: ${fmt(g.downloads_latest.npm_week)}` : ''}</>} />
+        <Stat
+          label={`PyPI downloads · 7 days to ${dayLabel(dlDay)}`}
+          value={fmtOrDash(dlRow?.pypi_week)}
+          sub={pypiMonthBad
+            ? `last 30 days: ${fmt(dlRow?.pypi_month)} (wrong: pypistats' 30-day figure lagged; fixed for days from Nov 13)`
+            : dlRow?.pypi_month != null ? `last 30 days: ${fmt(dlRow.pypi_month)}` : 'agentavow-trust'}
+          tip={g.downloads_latest?.pypi_week != null ? `Newest fetch: ${fmt(g.downloads_latest.pypi_week)} in 7 days${g.downloads_latest.pypi_month != null ? `, ${fmt(g.downloads_latest.pypi_month)} in 30` : ''}.` : undefined}
+        />
       </div>
       <div className="grid md:grid-cols-2 gap-3 mt-3">
         <div className="glass rounded-2xl p-5">
-          <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Certified and the answer mix · per day (x402 excluded)</div>
-          <TrendChart days={dayList} lines={catLines} empty="No daily catalog rows yet. The 6-hour job writes the first one after deploy." />
+          <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Certified and the answer mix · tools on each day (x402 left out)</div>
+          <TrendChart days={dayList} lines={catLines} yLabel="Tools" empty="No daily catalog rows yet. The 6-hour job writes the first one after deploy." />
         </div>
         <div className="glass rounded-2xl p-5">
-          <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Registry downloads · weekly total, sampled daily</div>
-          <TrendChart days={dayList} lines={dlLines} empty="No download counts yet. The 6-hour job fetches them from npm and pypistats." />
+          <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Registry downloads · 7-day total, read once a day</div>
+          <TrendChart days={dayList} lines={dlLines} yLabel="Downloads in the 7 days before" empty="No download counts yet. The 6-hour job fetches them from npm and pypistats." />
         </div>
       </div>
       <div className="grid md:grid-cols-2 gap-3 mt-3">
         <div className="glass rounded-2xl p-5">
-          <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Claude Code activation by entrypoint · last 7 snapshot days</div>
+          <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Claude Code activation by entrypoint · {rangeLabel(dayList)}</div>
           {hasEp ? (
             <table className="w-full text-[12.5px]">
-              <thead><tr className="text-left font-mono text-[11px] uppercase tracking-wide text-text-muted/70"><th className="py-1 pr-3">Entrypoint</th><th className="py-1 pr-3 text-right">Machine-days connecting</th><th className="py-1 pr-3 text-right">Checked</th><th className="py-1 text-right">Share</th></tr></thead>
+              <thead><tr className="text-left font-mono text-[11px] uppercase tracking-wide text-text-muted/70"><th className="py-1 pr-3">Entrypoint</th><th className="py-1 pr-3 text-right">Connecting (days of use)</th><th className="py-1 pr-3 text-right">Checked (days of use)</th><th className="py-1 text-right">Share</th></tr></thead>
               <tbody>
                 {Object.keys(EP_LABEL).map((ep) => {
                   const c = tsum(`cc_machines_${ep}`), k = tsum(`checked_machines_${ep}`)
@@ -611,36 +561,36 @@ function GrowthPanel() {
                       <td className="py-1.5 pr-3">{EP_LABEL[ep]}</td>
                       <td className="py-1.5 pr-3 tabular-nums text-right">{fmt(c)}</td>
                       <td className="py-1.5 pr-3 tabular-nums text-right">{fmt(k)}</td>
-                      <td className="py-1.5 tabular-nums text-right">{c ? `${Math.round((k * 100) / c)}%` : '—'}</td>
+                      <td className="py-1.5 tabular-nums text-right">{c ? pctOf(k, c) : '—'}</td>
                     </tr>
                   )
                 })}
               </tbody>
             </table>
-          ) : <p className="text-[12.5px] text-text-muted/70">No entrypoint columns yet: the nightly snapshot adds them from the PR 2 deploy.</p>}
+          ) : <p className="text-[12.5px] text-text-muted/70">No entrypoint columns yet: the nightly snapshot adds them from Nov 11.</p>}
           <p className="mt-3 text-[12.5px]">
-            New machines that saw a verdict on day one: <span className="font-semibold tabular-nums">{newSeen ? `${Math.round((newChecked * 100) / newSeen)}%` : '—'}</span> <span className="text-text-muted">({fmt(newChecked)} of {fmt(newSeen)})</span>
-            {' · '}within their first week: <span className="font-semibold tabular-nums">{d7Cohort && week.some((r) => r.d7_cohort_checked != null) ? `${Math.round((d7Checked * 100) / d7Cohort)}%` : '—'}</span> <span className="text-text-muted">(D7 cohort, complete 7 days after deploy)</span>
+            New machines that got a verdict on their first day: <span className="font-semibold tabular-nums">{newSeen ? pctOf(newChecked, newSeen) : '—'}</span> <span className="text-text-muted">({fmt(newChecked)} of {fmt(newSeen)})</span>
+            {' · '}within their first week: <span className="font-semibold tabular-nums">{d7Cohort && traffic.rows.some((r) => r.d7_cohort_checked != null) ? pctOf(d7Checked, d7Cohort) : '—'}</span> <span className="text-text-muted">(machines first seen a week earlier; counted from Nov 11, so the first full week ends Nov 18)</span>
           </p>
-          <p className="mt-1 text-[11px] text-text-muted/60">Daily distinct machines summed over the days (a machine on two days counts twice; on two entrypoints, in both). Owner machines excluded.</p>
+          <p className="mt-1 text-[11px] text-text-muted/60">A day of use is one machine on one day: a machine seen on two days counts twice, and on two entrypoints, in both. Owner machines excluded.</p>
         </div>
         <div className="glass rounded-2xl p-5">
-          <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Landing sessions by referrer · last {days} days</div>
+          <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Landing visits by referrer · last {w.days} × 24 hours up to now</div>
           <div className="grid grid-cols-3 gap-3 mb-3">
             <Stat label="Search" value={fmt(ref.search_total)} />
             <Stat label="AI assistants" value={fmt(ref.ai_total)} />
             <Stat label="Other sites" value={fmt(ref.other_total)} />
           </div>
-          <BarList title="Search engines" rows={ref.search || {}} labels={{}} empty="No search referrals yet (counted from the PR 2 deploy)." gradient="linear-gradient(90deg,#2dd4bf,#818cf8)" />
+          <BarList title="Search engines" rows={ref.search || {}} labels={{}} empty="No search referrals yet (counted from Nov 11)." gradient="linear-gradient(90deg,#2dd4bf,#818cf8)" />
           {Object.keys(ref.ai || {}).length > 0 && <div className="mt-3"><BarList title="AI assistants" rows={ref.ai || {}} labels={{}} empty="" gradient="linear-gradient(90deg,#818cf8,#e879f9)" /></div>}
           {Object.keys(ref.other_top || {}).length > 0 && <div className="mt-3"><BarList title="Top other sites" rows={ref.other_top || {}} labels={{}} empty="" gradient="linear-gradient(90deg,#64748b,#94a3b8)" /></div>}
-          <p className="mt-2 text-[11px] text-text-muted/60">Only the referrer's host is stored, never its path or search terms. Direct visits and visits from our own pages carry no referrer. Search Console and Bing Webmaster stay manual.</p>
+          <p className="mt-2 text-[11px] text-text-muted/60">Only the referring site's name is stored, never its page or search terms. Direct visits and visits from our own pages carry no referrer. Search Console and Bing Webmaster stay manual.</p>
           <div className="mt-3 pt-3 border-t border-border/40 text-[12.5px]">
-            <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-1">IndexNow pings · after each deploy</div>
+            <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-1">Search-engine pings (IndexNow) · after each deploy, newest first</div>
             {(g.indexnow_runs || []).length ? (
               <ul className="space-y-0.5 tabular-nums">
                 {(g.indexnow_runs || []).map((r) => (
-                  <li key={r.at}><span className="font-mono text-text-muted">{r.at.slice(0, 16).replace('T', ' ')}</span> · {INDEXNOW_OUTCOME[r.outcome] ?? r.outcome} · {fmt(r.submitted)} URL{r.submitted === 1 ? '' : 's'}{r.status != null ? ` · HTTP ${r.status}` : ''}</li>
+                  <li key={r.at}><span className="font-mono text-text-muted">{r.at.slice(0, 16).replace('T', ' ')} UTC</span> · {INDEXNOW_OUTCOME[r.outcome] ?? r.outcome} · {fmt(r.submitted)} URL{r.submitted === 1 ? '' : 's'}{r.status != null ? ` · HTTP ${r.status}` : ''}</li>
                 ))}
               </ul>
             ) : <p className="text-text-muted/70">No ping recorded yet. The next production deploy stores one.</p>}
@@ -652,123 +602,110 @@ function GrowthPanel() {
 }
 
 function ClaudeTrafficPanel() {
-  const [days, setDays] = useState<14 | 30 | 90>(14)
+  const w = useDashWindow()
+  const label = useWindowLabel()
   const [mode, setMode] = useState<'machines' | 'calls'>('machines')
-  const { data } = useQuery<Traffic>({
-    queryKey: ['admin-dash-claude-traffic', days],
-    queryFn: async () => { try { return (await api.get('/admin/metrics/traffic', { params: { days } })).data } catch { return {} } },
-  })
-  const s = data?.series || {}
-  const num = (a?: (number | null)[]) => (a ?? []).map((v) => v ?? 0)
+  const { rows, col, latest } = useTraffic()
   const lines: TrendLine[] = mode === 'machines'
     ? [
-        { key: 'checked', label: 'Machines AgentAvow checked something for · excl. owner', color: '#22c55e', data: num(s.checked_machines_excl_owner) },
-        { key: 'cc', label: 'Claude Code machines connecting', color: '#2dd4bf', data: num(s.cc_machines) },
-        { key: 'new', label: 'New machines (30d)', color: '#fbbf24', data: num(s.cc_new_machines_30d) },
-        { key: 'hook', label: 'Plugin hook machines', color: '#94a3b8', dashed: true, data: num(s.hook_machines_nginx) },
-        { key: 'ccx', label: 'Claude Code machines · excl. owner', color: '#818cf8', dashed: true, data: num(s.cc_machines_excl_owner) },
+        { key: 'checked', label: 'Machines AgentAvow checked something for · owner excluded', color: '#22c55e', kind: 'distinct', data: col('checked_machines_excl_owner') },
+        { key: 'cc', label: 'Claude Code machines connecting', color: '#2dd4bf', kind: 'distinct', data: col('cc_machines') },
+        { key: 'new', label: 'New machines (not seen in 30 days)', color: '#fbbf24', kind: 'flow', data: col('cc_new_machines_30d') },
+        { key: 'hook', label: 'Plugin hook machines', color: '#94a3b8', dashed: true, kind: 'distinct', data: col('hook_machines_nginx') },
+        { key: 'ccx', label: 'Claude Code machines · owner excluded', color: '#818cf8', dashed: true, kind: 'distinct', data: col('cc_machines_excl_owner') },
       ]
     : [
-        { key: 'cai', label: 'claude.ai connector requests', color: '#818cf8', data: num(s.claudeai_reqs) },
-        { key: 'cc-calls', label: 'Claude Code tool calls', color: '#2dd4bf', data: num(s.calls_claude_code) },
-        { key: 'claude-calls', label: 'claude.ai tool calls', color: '#e879f9', data: num(s.calls_claude) },
-        { key: 'hook-scans', label: 'Plugin hook scans', color: '#94a3b8', dashed: true, data: num(s.hook_reqs) },
+        { key: 'cai', label: 'claude.ai connector requests (every HTTP request)', color: '#818cf8', kind: 'flow', data: col('claudeai_reqs') },
+        { key: 'cc-calls', label: 'Claude Code tool calls', color: '#2dd4bf', kind: 'flow', data: col('calls_claude_code') },
+        { key: 'claude-calls', label: 'claude.ai tool calls', color: '#e879f9', kind: 'flow', data: col('calls_claude') },
+        { key: 'hook-scans', label: 'Plugin hook scans', color: '#94a3b8', dashed: true, kind: 'flow', data: col('hook_reqs') },
       ]
-  const rows = (data?.rows || []).slice(-10).reverse()
-  const latest = data?.latest
+  const covered = rows.length
+  const day = dayLabel(latest?.day)
   const toggle = (
-    <div className="flex items-center gap-3 font-mono text-[12px]">
-      <div className="flex gap-1">
-        {(['machines', 'calls'] as const).map((m) => (
-          <button key={m} onClick={() => setMode(m)} className={`px-2.5 py-1 rounded-lg transition-colors ${mode === m ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>
-            {m === 'machines' ? 'Machines' : 'Requests & calls'}
-          </button>
-        ))}
-      </div>
-      <div className="flex gap-1">
-        {([14, 30, 90] as const).map((d) => (
-          <button key={d} onClick={() => setDays(d)} className={`px-2.5 py-1 rounded-lg transition-colors ${days === d ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>L{d}</button>
-        ))}
-      </div>
+    <div className="flex gap-1 font-mono text-[12px]">
+      {(['machines', 'calls'] as const).map((m) => (
+        <button key={m} onClick={() => setMode(m)} className={`px-2.5 py-1 rounded-lg transition-colors ${mode === m ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>
+          {m === 'machines' ? 'Machines' : 'Requests & calls'}
+        </button>
+      ))}
     </div>
   )
   return (
-    <Section title="Claude traffic — day by day" note="Traffic that originates in Anthropic surfaces, one row per UTC day, written by the nightly snapshot and kept without expiry (the nginx log itself only holds four days). 'Machines checked' is the headline usage number: distinct machines where the plugin checked something on its own that day — at session start or when a tool was being installed — excluding the owner's test machines. 'Machines connecting' is distinct IPs that opened the plugin's MCP server from Claude Code (installs, not use). Both are nginx-origin counts, NOT the tool-call counters in the panels above. A row marked partial did not cover all 24 hours." right={toggle}>
+    <Section title="Claude traffic — day by day" scope={`${label} · snapshot rows for ${covered} of the ${w.days} days`} note="Traffic that starts in Anthropic's apps, one row per UTC day, written by the nightly snapshot at 00:40 UTC for the day before and kept for good (the server log itself only holds four days). Today never appears: its row is written after it ends. 'Machines checked' is the headline usage number: distinct machines where the plugin checked something on its own that day, at session start or when a tool was being installed, leaving out the owner's test machines. 'Machines connecting' is distinct addresses that opened the plugin's MCP server from Claude Code (installs, not use). Both come from the server log, NOT the tool-call counters in the panels above. A row marked partial did not cover all 24 hours." right={toggle}>
+      <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Latest complete day with a snapshot: {day}{latest?.log_complete === 0 ? ' (partial)' : ''}</div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-3">
-        <Stat label="Machines checked" value={fmt(latest?.checked_machines_excl_owner)} sub={`${fmt(latest?.preinstall_machines)} at install time · excl. owner`} series={num(s.checked_machines_excl_owner)} />
-        <Stat label="Machines connecting" value={fmt(latest?.cc_machines)} sub={`${fmt(latest?.cc_new_machines_30d)} new · ${latest?.day ?? '—'}${latest?.log_complete === 0 ? ' (partial)' : ''}`} series={num(s.cc_machines)} />
-        <Stat label="claude.ai connector reqs" value={fmt(latest?.claudeai_reqs)} sub="via Anthropic's proxy" series={num(s.claudeai_reqs)} />
-        <Stat label="Hook machines" value={fmt(latest?.hook_machines_nginx)} sub={`${fmt(latest?.hook_reqs)} scans · top ${latest?.hook_top_version ?? '—'}`} series={num(s.hook_machines_nginx)} />
-        <Stat label="Claude Code tool calls" value={fmt(latest?.calls_claude_code)} sub={`${fmt(latest?.callers_claude_code)} distinct machines`} series={num(s.calls_claude_code)} />
-        <Stat label="Days covered" value={fmt(data?.covered_days)} sub={`of last ${days}`} />
-        <Stat label="Plugin gate machines" value={fmt(latest?.gate_machines)} sub="agentavow-gate/ UA" series={num(s.gate_machines)} />
-        <Stat label="npm tool gate machines" value={fmt(latest?.tool_gate_machines)} sub={`${fmt(latest?.tool_gate_reqs)} requests · agentavow-tool-gate/ UA, from Nov 12`} series={num(s.tool_gate_machines)} />
-        <Stat label="A2A card fetches" value={fmt(latest?.a2a_card_fetches)} sub={`${fmt(latest?.a2a_card_fetchers)} distinct IPs · our /.well-known/agent-card.json, from Nov 12`} series={num(s.a2a_card_fetches)} />
+        <Stat label={`Machines checked · ${day}`} value={fmt(latest?.checked_machines_excl_owner)} sub={`${fmt(latest?.preinstall_machines)} at install time · owner excluded`} series={col('checked_machines_excl_owner')} />
+        <Stat label={`Machines connecting · ${day}`} value={fmt(latest?.cc_machines)} sub={`${fmt(latest?.cc_new_machines_30d)} new`} series={col('cc_machines')} />
+        <Stat label={`claude.ai connector requests · ${day}`} value={fmt(latest?.claudeai_reqs)} sub="every HTTP request through Anthropic's proxy: handshakes, tool lists and calls" series={col('claudeai_reqs')} />
+        <Stat label={`Hook machines · ${day}`} value={fmt(latest?.hook_machines_nginx)} sub={`${fmt(latest?.hook_reqs)} scans · most common plugin version ${latest?.hook_top_version ?? '—'}`} series={col('hook_machines_nginx')} />
+        <Stat label={`Claude Code tool calls · ${day}`} value={fmt(latest?.calls_claude_code)} sub={`${fmt(latest?.callers_claude_code)} distinct machines`} series={col('calls_claude_code')} />
+        <Stat label="Days with a snapshot" value={fmt(covered)} sub={`of the ${w.days} complete days in the window`} />
+        <Stat label={`Plugin gate machines · ${day}`} value={fmt(latest?.gate_machines)} sub="the plugin's gate (agentavow-gate)" series={col('gate_machines')} />
+        <Stat label={`npm tool gate machines · ${day}`} value={fmt(latest?.tool_gate_machines)} sub={`${fmt(latest?.tool_gate_reqs)} requests · the npm SDK's tool gate, counted from Nov 12`} series={col('tool_gate_machines')} />
+        <Stat label={`A2A card fetches · ${day}`} value={fmt(latest?.a2a_card_fetches)} sub={`${fmt(latest?.a2a_card_fetchers)} distinct addresses · our agent card, counted from Nov 12`} series={col('a2a_card_fetches')} />
       </div>
       <div className="glass rounded-2xl p-5">
         <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">{mode === 'machines' ? 'Machines per day' : 'Requests and tool calls per day'}</div>
-        <TrendChart days={data?.days} lines={lines} empty="No snapshot rows yet. The nightly cron writes the first row at 00:40 UTC." />
+        <TrendChart days={w.complete} lines={lines} yLabel={mode === 'machines' ? 'Machines per day (distinct)' : 'Requests or tool calls per day'} empty="No snapshot rows yet. The nightly cron writes the first row at 00:40 UTC." />
       </div>
-      {rows.length > 0 && (
-        <div className="glass rounded-2xl p-5 mt-3 overflow-x-auto">
-          <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Last {rows.length} days</div>
-          <table className="w-full text-[12.5px] tabular-nums">
-            <thead>
-              <tr className="text-[11px] font-mono uppercase tracking-wide text-text-muted/60">
-                <th className="text-left py-1">Day</th><th className="text-right">Machines</th><th className="text-right">New</th><th className="text-right">Sessions</th>
-                <th className="text-right">claude.ai reqs</th><th className="text-right">Hook machines</th><th className="text-right">Hook scans</th>
-                <th className="text-right">CC calls / machines</th><th className="text-right">claude.ai calls</th><th className="text-right">ChatGPT</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.day} className={`border-t border-border/40${r.log_complete === 0 ? ' opacity-70' : ''}`}>
+      <div className="glass rounded-2xl p-5 mt-3 overflow-x-auto max-h-[28rem] overflow-y-auto">
+        <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Day by day · {rangeLabel(w.complete)} (UTC), newest first</div>
+        <table className="w-full text-[12.5px] tabular-nums">
+          <thead>
+            <tr className="text-[11px] font-mono uppercase tracking-wide text-text-muted/60">
+              <th className="text-left py-1">Day</th><th className="text-right">Machines connecting</th><th className="text-right">New</th><th className="text-right">Sessions</th>
+              <th className="text-right" title="Every HTTP request from claude.ai: handshakes, tool lists and tool calls">claude.ai requests (all)</th><th className="text-right">Hook machines</th><th className="text-right">Hook scans</th>
+              <th className="text-right">Claude Code tool calls / machines</th><th className="text-right" title="Only actual tool calls (checks) from claude.ai">claude.ai tool calls</th><th className="text-right">ChatGPT tool calls</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...w.complete].reverse().map((d) => {
+              const r = rows.find((x) => x.day === d)
+              if (!r) return <tr key={d} className="border-t border-border/40 opacity-50"><td className="py-1 font-mono text-text-muted">{d}</td><td colSpan={9} className="text-text-muted/70 text-right">no snapshot</td></tr>
+              return (
+                <tr key={d} className={`border-t border-border/40${r.log_complete === 0 ? ' opacity-70' : ''}`}>
                   <td className="py-1 font-mono text-text-muted">{r.day}{r.log_complete === 0 ? ' *' : ''}</td>
                   <td className="text-right text-text">{fmt(r.cc_machines)}</td><td className="text-right">{fmt(r.cc_new_machines_30d)}</td><td className="text-right">{fmt(r.cc_sessions)}</td>
                   <td className="text-right">{fmt(r.claudeai_reqs)}</td><td className="text-right">{fmt(r.hook_machines_nginx)}</td><td className="text-right">{fmt(r.hook_reqs)}</td>
                   <td className="text-right">{fmt(r.calls_claude_code)} / {fmt(r.callers_claude_code)}</td><td className="text-right">{fmt(r.calls_claude)}</td><td className="text-right">{fmt(r.calls_chatgpt)}</td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="text-[11px] text-text-muted/60 mt-2">* partial day (log did not cover all 24 hours)</p>
-        </div>
-      )}
+              )
+            })}
+          </tbody>
+        </table>
+        <p className="text-[11px] text-text-muted/60 mt-2">* partial day (the log did not cover all 24 hours). claude.ai requests count every request the connector makes; claude.ai tool calls count only the checks it actually ran, so a day can have thousands of requests and no tool calls.</p>
+      </div>
     </Section>
   )
 }
 
-// ── Landing trend: lp_view and copy_plugin_cmd per day, paid vs organic ─────
+// ── Landing trend: landings and install-command copies per day, ads vs organic ──
 interface LandingDay { date: string; lp_view: number; lp_view_paid: number; copy_plugin_cmd: number; copy_plugin_cmd_paid: number }
 
 function LandingTrendPanel() {
-  const [days, setDays] = useState<14 | 30 | 90>(30)
+  const w = useDashWindow()
+  const label = useWindowLabel()
   const { data } = useQuery<{ landing?: LandingDay[] }>({
-    queryKey: ['admin-dash-landing-daily', days],
-    queryFn: async () => { try { return (await api.get('/analytics/conversion/daily', { params: { days } })).data } catch { return {} } },
+    queryKey: ['admin-dash-landing-daily', w.days + 1],
+    queryFn: async () => { try { return (await api.get('/analytics/conversion/daily', { params: { days: w.days + 1 } })).data } catch { return {} } },
   })
-  // Every UTC day in the window, oldest first, so a day with nothing reads as zero.
-  const [now] = useState(() => Date.now())
-  const dayList = Array.from({ length: days }, (_, i) => new Date(now - (days - 1 - i) * 86_400_000).toISOString().slice(0, 10))
   const byDay = Object.fromEntries((data?.landing || []).map((d) => [d.date, d]))
-  const col = (k: keyof Omit<LandingDay, 'date'>) => dayList.map((d) => byDay[d]?.[k] ?? 0)
+  // Every complete UTC day in the window: a day with no landings really is zero here.
+  const dayList = w.complete
+  const get = (d: string, k: keyof Omit<LandingDay, 'date'>) => byDay[d]?.[k] ?? 0
+  const organic = (d: string, k: 'lp_view' | 'copy_plugin_cmd') => get(d, k) - get(d, `${k}_paid`)
+  const t = w.today
   const lines: TrendLine[] = [
-    { key: 'lp', label: 'Landed (lp_view) · organic', color: '#2dd4bf', data: dayList.map((d) => (byDay[d]?.lp_view ?? 0) - (byDay[d]?.lp_view_paid ?? 0)) },
-    { key: 'lp-paid', label: 'Landed · paid', color: '#818cf8', data: col('lp_view_paid') },
-    { key: 'copy', label: 'Copied plugin command · organic', color: '#22c55e', dashed: true, data: dayList.map((d) => (byDay[d]?.copy_plugin_cmd ?? 0) - (byDay[d]?.copy_plugin_cmd_paid ?? 0)) },
-    { key: 'copy-paid', label: 'Copied · paid', color: '#f59e0b', dashed: true, data: col('copy_plugin_cmd_paid') },
+    { key: 'lp', label: 'Landed · organic', color: '#2dd4bf', data: dayList.map((d) => organic(d, 'lp_view')), today: organic(t, 'lp_view') },
+    { key: 'lp-paid', label: 'Landed · from ads', color: '#818cf8', data: dayList.map((d) => get(d, 'lp_view_paid')), today: get(t, 'lp_view_paid') },
+    { key: 'copy', label: 'Copied install command · organic', color: '#22c55e', dashed: true, data: dayList.map((d) => organic(d, 'copy_plugin_cmd')), today: organic(t, 'copy_plugin_cmd') },
+    { key: 'copy-paid', label: 'Copied install command · from ads', color: '#f59e0b', dashed: true, data: dayList.map((d) => get(d, 'copy_plugin_cmd_paid')), today: get(t, 'copy_plugin_cmd_paid') },
   ]
-  const toggle = (
-    <div className="flex gap-1 font-mono text-[12px]">
-      {([14, 30, 90] as const).map((d) => (
-        <button key={d} onClick={() => setDays(d)} className={`px-2.5 py-1 rounded-lg transition-colors ${days === d ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>{d}d</button>
-      ))}
-    </div>
-  )
   return (
-    <Section title="Landings and plugin-command copies — day by day" note="Distinct sessions per UTC day that landed (lp_view) and that copied the /plugin command (copy_plugin_cmd), split by whether the session's first campaign tags were paid (utm_medium paid-social / paid / cpc / ppc / display, or utm_source reddit / meta / facebook / instagram). Bots left out. For before/after reads around the ad test; read it next to protected machines." right={toggle}>
+    <Section title="Landings and install-command copies — day by day" scope={label} note="Visits per UTC day that landed on a landing page, and that copied the /plugin install command, split by whether the visit first arrived from an ad (its link tags say paid / cpc / ppc / display / paid-social, or it came from reddit, meta, facebook or instagram). Bots left out. Read it next to machines protected.">
       <div className="glass rounded-2xl p-5">
-        <TrendChart days={dayList} lines={lines} empty="No landings in this window yet." />
+        <TrendChart days={dayList} lines={lines} yLabel="Visits per day" empty="No landings in this window yet." />
       </div>
     </Section>
   )
@@ -777,27 +714,24 @@ function LandingTrendPanel() {
 const ACTION_AREAS: [string, string][] = [['browse', 'Browse'], ['trust_index', 'Trust Index'], ['certified', 'Certified'], ['preflight', 'Preflight'], ['dev', 'For developers']]
 
 function PageActionsPanel() {
-  const [days, setDays] = useState<7 | 30>(30)
+  const w = useDashWindow()
   const { data } = useQuery<{ views?: Record<string, number>; actions?: Record<string, number> }>({
-    queryKey: ['admin-dash-page-actions', days],
-    queryFn: async () => { try { return (await api.get('/analytics/page-actions', { params: { days } })).data } catch { return {} } },
+    queryKey: ['admin-dash-page-actions', w.days],
+    queryFn: async () => { try { return (await api.get('/analytics/page-actions', { params: { days: w.days } })).data } catch { return {} } },
   })
   const actions = data?.actions || {}
-  const toggle = (
-    <div className="flex gap-1 font-mono text-[12px]">
-      {([7, 30] as const).map((d) => (
-        <button key={d} onClick={() => setDays(d)} className={`px-2.5 py-1 rounded-lg transition-colors ${days === d ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>{d}d</button>
-      ))}
-    </div>
-  )
+  // Counting started on COUNTED_FROM.pageActions; say how much of the window it covers.
+  const sinceStart = Math.round((Date.parse(w.today) - Date.parse(COUNTED_FROM.pageActions)) / 86_400_000)
+  const covered = Math.min(w.days, Math.max(0, sinceStart))
+  const scope = `Last ${w.days} × 24 hours up to now (this section can't be split by UTC day) · counting started ${dayLabel(COUNTED_FROM.pageActions)}${covered < w.days ? `, so it covers ${covered === 0 ? 'only today so far' : `${covered} full day${covered === 1 ? '' : 's'} plus today so far`}` : ''}`
   return (
-    <Section title="Catalog and developer pages — views and actions" note="Distinct sessions that viewed each page and that took each main action on it (searches and filters, opening a tool, copies, claim / private-scan starts, gate checks, Preflight runs). What someone typed is never sent. Bots left out. Counted from the Nov 12 deploy." right={toggle}>
+    <Section title="Catalog and developer pages — views and actions" scope={scope} note="Visits that viewed each page and that took each main action on it (searches and filters, opening a tool, copies, claim / private-scan starts, gate checks, Preflight runs). What someone typed is never sent. Bots left out.">
       <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
-        {ACTION_AREAS.map(([area, label]) => {
+        {ACTION_AREAS.map(([area, areaLabel]) => {
           const rows = Object.fromEntries(Object.entries(actions).filter(([k]) => k.startsWith(`${area}:`)).map(([k, n]) => [k.slice(area.length + 1).replace(/_/g, ' '), n]))
           return (
             <div key={area} className="min-w-0">
-              <Stat label={label} value={fmt(data?.views?.[area])} sub="sessions viewing" />
+              <Stat label={areaLabel} value={fmt(data?.views?.[area])} sub="visits viewing" />
               <div className="mt-2"><BarList title="Actions" rows={rows} labels={{}} empty="No actions yet." gradient="linear-gradient(90deg,#2dd4bf,#818cf8)" /></div>
             </div>
           )
@@ -809,13 +743,23 @@ function PageActionsPanel() {
 
 // ── METRICS TAB ──────────────────────────────────────────────────────────────
 function MetricsTab() {
+  const [days, setDays] = useState<PageWin>(7)
+  const [includeToday, setIncludeToday] = useState(false)
+  const [now] = useState(() => Date.now())
+  const win = { days, includeToday, complete: completeDays(days, now), today: utcDay(0, now) }
+  return (
+    <DashWindowContext.Provider value={win}>
+      <WindowBar days={days} setDays={setDays} includeToday={includeToday} setIncludeToday={setIncludeToday} />
+      <MetricsBody />
+    </DashWindowContext.Provider>
+  )
+}
+
+function MetricsBody() {
   const { isAdmin } = useAdminAccess()
-  const [win, setWin] = useState<Win>('7d')
+  const scope = useMetricsScope()
   const [trend, setTrend] = useState<'callers' | 'calls'>('callers')
-  const { data } = useQuery<Metrics>({
-    queryKey: ['admin-dash-metrics', win],
-    queryFn: async () => (await api.get('/admin/metrics', { params: { window: win } })).data,
-  })
+  const { data, today } = useMetricsData()
   const flagged = useQuery<{ pct: number | null; flagged: number; scanned: number }>({
     queryKey: ['admin-dash-flagged'],
     queryFn: async () => { try { return (await api.get('/public/scan-catalog/flagged-stat')).data } catch { return { pct: null, flagged: 0, scanned: 0 } } },
@@ -823,40 +767,48 @@ function MetricsTab() {
   const h = data?.headline || {}
   const s = data?.series || {}
   const f = data?.funnel || {}
+  const th = today?.headline
+  const ts = today?.series
+  /** " · today so far N" on a windowed tile when the page shows today. */
+  const tsf = (key: string) => (th && th[key] != null ? ` · today so far ${fmt(th[key])}` : '')
   const board = data?.badges?.leaderboard || []
   const grades = data?.scans?.grade_distribution || {}
   const decisions = data?.scans?.decision_distribution || {}
   const surfaces = data?.catalog?.by_surface || {}
-  const funnelSteps: [string, number][] = [['Scanned', f.scanned ?? 0], ['Watched', f.watched ?? 0], ['Claimed', f.claimed ?? 0], ['Installed', f.installs ?? 0]]
+  const funnelSteps: [string, number][] = [['Scanned (repos checked)', f.scanned ?? 0], ['Watched (watches created)', f.watched ?? 0], ['Claimed (ownership claims)', f.claimed ?? 0]]
   const fmax = Math.max(...funnelSteps.map(([, n]) => n), 1)
+  const bySurface = data?.mcp?.by_surface || {}
+  const crawlerCallers = bySurface.other?.callers ?? 0
+  const realCallers = Object.entries(bySurface).filter(([k]) => k !== 'other').reduce((a, [, v]) => a + (v.callers ?? 0), 0)
+  const communityTotal = Object.values(decisions).reduce((a, b) => a + b, 0)
 
   return (
     <>
       <StartHerePanel />
       <CampaignPanel />
       <LandingTrendPanel />
-      <Section title="Product & adoption" note="Everything the product surfaces — the full set, not a slice." right={<WindowToggle win={win} setWin={setWin} />}>
+      <Section title="Product & adoption" scope={scope.label} note="Everything the product counts: the full set, not a slice. Tiles marked 'right now' or 'all time' are not limited to the window.">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          <Stat label="Repos scanned" value={fmt(h.repos_scanned)} sub={`${fmt(h.new_repos)} new`} series={s.repos_scanned} />
-          <Stat label="Badge fetches" value={fmt(h.badge_fetches)} sub={`${fmt(h.readme_renders)} in READMEs`} series={s.badge_fetches} />
-          <Stat label="Watches created" value={fmt(h.watches_created)} series={s.watches_created} />
-          <Stat label="Unique checkers" value={fmt(h.unique_checkers)} />
-          <Stat label="Unique humans" value={fmt(h.unique_humans)} sub="browser UA · per-day salted HLL" />
-          <Stat label="Adoption lookups" value={fmt(h.adoption_hits)} series={s.adoption_hits} />
-          <Stat label="Install clicks" value={fmt(h.install_clicks)} sub={installSplit(data?.installs_by_client)} series={s.install_clicks} />
-          <Stat label="Fresh re-scans" value={fmt(h.force_rescans)} series={s.force_rescans} />
-          <Stat label="API calls" value={fmt(h.api_calls)} series={s.api_calls} />
-          <Stat label="Attestations" value={fmt(h.attestations_issued)} />
-          <Stat label="Active watches" value={fmt(data?.watches?.active)} sub={`${fmt(data?.watches?.total)} all-time`} />
-          <Stat label="Verified claims" value={fmt(data?.claims?.verified_total)} sub={`${fmt(data?.claims?.public)} public · ${fmt(data?.claims?.private)} private`} />
-          <Stat label="Active badges" value={fmt(data?.attestations?.verification_badges_active)} />
-          <Stat label="MCP connector calls" value={fmt(h.mcp_calls)} sub={`${fmt(data?.mcp?.checks_window)} hand-run checks · ${fmt(data?.mcp?.errors_window)} err`} series={s.mcp_calls} />
-          <Stat label="MCP distinct callers" value={fmt(h.mcp_callers)} sub="machines that invoked a tool · per-day" series={s.mcp_callers} />
-          <Stat label="Plugin hook scans" value={fmt(h.hook_scans)} sub={`${fmt(h.hook_machines)} machines · session-start + install-time hooks (install-time from Nov 11)`} series={s.hook_scans} />
-          <Stat label="Private repo scans (GitHub App)" value={fmt(data?.private_repos?.app_scans)} sub={`${fmt(data?.private_repos?.app_installs_active)} installs · ${fmt(data?.private_repos?.published_to_search)} published`} />
-          <Stat label="One-time private scans" value={fmt(data?.private_repos?.onetime_scans_window)} sub="token scans (window)" />
-          <Stat label="Alert webhooks" value={fmt(data?.alert_webhooks?.active)} sub="active" />
-          <Stat label="Redirects (not usage)" value={fmt(h.requests_redirected)} sub="301/302/308 + old-domain hosts" series={s.requests_redirected} />
+          <Stat label="Repos scanned" value={fmt(h.repos_scanned)} sub={`${fmt(h.new_repos)} scanned for the first time${tsf('repos_scanned')}`} series={s.repos_scanned} />
+          <Stat label="Badge fetches" value={fmt(h.badge_fetches)} sub={`${fmt(h.readme_renders)} in READMEs${tsf('badge_fetches')}`} series={s.badge_fetches} />
+          <Stat label="Watches created" value={fmt(h.watches_created)} sub={tsf('watches_created').replace(/^ · /, '') || undefined} series={s.watches_created} />
+          <Stat label="Unique checkers" value={fmt(h.unique_checkers)} sub={`distinct people and agents who ran a check, each counted once over the window${tsf('unique_checkers')}`} />
+          <Stat label="Browser visits (one per person per day)" value={fmt(h.unique_humans)} sub={`not unique people: a person on 3 days counts 3 times. Counted privately, nothing identifying stored${tsf('unique_humans')}`} />
+          <Stat label="Adoption score lookups" value={fmt(h.adoption_hits)} sub={tsf('adoption_hits').replace(/^ · /, '') || undefined} series={s.adoption_hits} />
+          <Stat label="One-click install clicks" value={fmt(h.install_clicks)} sub={`${installSplit(data?.installs_by_client) ?? ''} · split by app from ${COUNTED_FROM.installSplit}; earlier clicks are in the total only${tsf('install_clicks')}`} series={s.install_clicks} />
+          <Stat label="Forced re-scans" value={fmt(h.force_rescans)} sub={`someone asked for a fresh result instead of the 1-hour cache${tsf('force_rescans')}`} series={s.force_rescans} />
+          <Stat label="API-key requests" value={fmt(h.api_calls)} sub="requests signed in with an API key. The public scan API needs no key, so scans don't count here" series={s.api_calls} />
+          <Stat label="Formal attestations stored" value={fmt(h.attestations_issued)} sub="agent-to-agent attestations. Every scan's signed result is made per request and not stored, so scans don't count here" />
+          <Stat label="Active watches" value={fmt(data?.watches?.active)} sub={`right now · ${fmt(data?.watches?.total)} ever created`} />
+          <Stat label="Verified claims" value={fmt(data?.claims?.verified_total)} sub={`all time · ${fmt(data?.claims?.public)} public · ${fmt(data?.claims?.private)} private`} />
+          <Stat label="Active verification badges" value={fmt(data?.attestations?.verification_badges_active)} sub="right now" />
+          <Stat label="MCP connector calls" value={fmt(h.mcp_calls)} sub={`${fmt(data?.mcp?.checks_window)} hand-run checks · ${fmt(data?.mcp?.errors_window)} errors${tsf('mcp_calls')}`} series={s.mcp_calls} />
+          <Stat label="MCP callers · days of use" value={fmt(h.mcp_callers)} sub={`${fmt(realCallers)} people and agents · ${fmt(crawlerCallers)} crawlers and monitors. Each machine counts once per day it called`} series={s.mcp_callers} />
+          <Stat label="Plugin hook scans" value={fmt(h.hook_scans)} sub={`${fmt(h.hook_machines)} days of use · session-start and install-time hooks (install-time counted from ${COUNTED_FROM.installTimeHook})${tsf('hook_scans')}`} series={s.hook_scans} />
+          <Stat label="Private repo scans (GitHub App)" value={fmt(data?.private_repos?.app_scans)} sub={`all time · ${fmt(data?.private_repos?.app_installs_active)} installs · ${fmt(data?.private_repos?.published_to_search)} published`} />
+          <Stat label="One-time private scans" value={fmt(data?.private_repos?.onetime_scans_window)} sub="scans with a token supplied once, in the window" />
+          <Stat label="Alert webhooks" value={fmt(data?.alert_webhooks?.active)} sub="active right now" />
+          <Stat label="Redirects (not usage)" value={fmt(h.requests_redirected)} sub="301/302/308 and old-domain requests, kept out of every count above" series={s.requests_redirected} />
         </div>
       </Section>
 
@@ -866,10 +818,10 @@ function MetricsTab() {
         const ok = mcp.ok_window ?? 0
         const err = mcp.errors_window ?? 0
         const answers = mcp.answers_window || {}
-        const errRate = calls ? Math.round((err * 100) / calls) : 0
         const answered = DECISIONS.reduce((a, d) => a + (answers[d.value] ?? 0), 0)
         // "unlisted" = calls to a tool name we do not serve; shown only when non-zero so
         // the rows always add up to Total calls.
+        const toolLabel = (t: string) => (t === 'unlisted' ? 'Unknown tool name (not one we serve)' : t)
         const tools = Object.entries(mcp.by_tool || {}).filter(([t, n]) => t !== 'unlisted' || n > 0).sort((a, b) => b[1] - a[1])
         const anyTool = tools.some(([, n]) => n > 0)
         // "other" is what the User-Agent bucketer could not place: in practice the MCP
@@ -879,20 +831,20 @@ function MetricsTab() {
           claude: 'Claude Directory', chatgpt: 'ChatGPT', 'claude-code': 'Claude Code',
           cursor: 'Cursor', vscode: 'VS Code', codex: 'Codex', other: 'Crawlers / unknown',
         }
-        const surfaces = Object.entries(mcp.by_surface || {})
-          .map(([s, d]) => ({ s, label: surfaceLabels[s] || s, ...d, calls: d.calls ?? 0 }))
+        const rowsBySurface = Object.entries(bySurface)
+          .map(([k, d]) => ({ s: k, label: surfaceLabels[k] || k, ...d, calls: d.calls ?? 0 }))
           .sort((a, b) => (a.s === 'other' ? 1 : b.s === 'other' ? -1 : b.calls - a.calls))
-        const anySurface = surfaces.some((r) => r.calls > 0)
+        const anySurface = rowsBySurface.some((r) => r.calls > 0)
         return (
-          <Section title="MCP connector — usage by surface" note="Usage of the remote MCP server at agentavow.com/mcp across every place it's installed (Claude Directory, ChatGPT, the Claude Code plugin, Cursor, VS Code, Codex). Surface is derived from the request User-Agent and sums back to the total. Every surface is listed, so a zero means that channel has sent nothing yet. 'Crawlers / unknown' is the MCP directory crawlers and uptime monitors — not users. The three answers are counted from Nov 11.">
+          <Section title="MCP connector — usage by surface" scope={scope.label} note={`Use of the remote MCP server at agentavow.com/mcp from every place it's installed (Claude Directory, ChatGPT, the Claude Code plugin, Cursor, VS Code, Codex). The surface comes from the request's User-Agent and the rows add up to the total. Every surface is listed, so a zero means that channel has sent nothing yet. 'Crawlers / unknown' is MCP directory crawlers and uptime monitors, not users. The three answers are counted from ${COUNTED_FROM.answers}.`}>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-              <Stat label="Total calls" value={fmt(calls)} sub={`${fmt(ok)} ok · ${errRate}% errors`} />
+              <Stat label="Total calls" value={fmt(calls)} sub={`${fmt(ok)} ok · ${pctOf(err, calls)} errors`} />
               <Stat label="Errors" value={fmt(err)} />
               {DECISIONS.map((d) => {
                 const n = answers[d.value] ?? 0
-                return <Stat key={d.value} label={d.phrase} value={fmt(n)} sub={answered ? `${Math.round((n * 100) / answered)}% of answers` : undefined} />
+                return <Stat key={d.value} label={d.phrase} value={fmt(n)} sub={answered ? `${pctOf(n, answered)} of answers` : undefined} />
               })}
-              <Stat label="Hand-run checks" value={fmt(mcp.checks_window)} sub="calls minus about_agentavow + owner machines" />
+              <Stat label="Hand-run checks" value={fmt(mcp.checks_window)} sub="calls minus about_agentavow overviews and owner machines" />
             </div>
             <div className="glass rounded-2xl p-5 mt-3">
               <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Calls by tool</div>
@@ -900,7 +852,7 @@ function MetricsTab() {
                 <div className="space-y-1">
                   {tools.map(([t, n]) => (
                     <div key={t} className="flex justify-between text-[12.5px] py-0.5">
-                      <span className="font-mono text-text-muted truncate">{t}</span>
+                      <span className="font-mono text-text-muted truncate">{toolLabel(t)}</span>
                       <span className="tabular-nums text-text-muted/70 ml-3">{fmt(n)}</span>
                     </div>
                   ))}
@@ -915,14 +867,14 @@ function MetricsTab() {
                 <div className="space-y-1">
                   <div className="flex justify-between text-[11px] font-mono uppercase tracking-wide text-text-muted/60 pb-1">
                     <span>Surface</span>
-                    <span className="flex gap-4"><span className="w-16 text-right">Calls</span><span className="w-16 text-right">Callers</span><span className="w-16 text-right">Errors</span><span className="w-28 text-right">Safe/Rev/No</span></span>
+                    <span className="flex gap-4"><span className="w-16 text-right">Calls</span><span className="w-20 text-right" title="Distinct callers per day, added up over the window">Callers (days of use)</span><span className="w-16 text-right">Errors</span><span className="w-28 text-right">Safe/Review/No</span></span>
                   </div>
-                  {surfaces.map((r) => (
+                  {rowsBySurface.map((r) => (
                     <div key={r.s} className={`flex justify-between text-[12.5px] py-0.5${r.calls === 0 ? ' opacity-50' : ''}`}>
                       <span className="text-text-muted truncate">{r.label}</span>
                       <span className="flex gap-4 tabular-nums text-text-muted/70">
                         <span className="w-16 text-right">{fmt(r.calls)}</span>
-                        <span className="w-16 text-right">{fmt(r.callers ?? 0)}</span>
+                        <span className="w-20 text-right">{fmt(r.callers ?? 0)}</span>
                         <span className="w-16 text-right">{fmt(r.errors ?? 0)}</span>
                         <span className="w-28 text-right">{fmt(r.answer_safe ?? 0)}/{fmt(r.answer_review ?? 0)}/{fmt(r.answer_do_not_connect ?? 0)}</span>
                       </span>
@@ -939,21 +891,24 @@ function MetricsTab() {
 
       {(() => {
         const key = (sfc: string) => `mcp_${trend}:${sfc}`
+        const kind = trend === 'callers' ? 'distinct' as const : 'flow' as const
+        const line = (k: string, label: string, color: string): TrendLine => ({ key: k, label, color, kind, data: s[key(k)], today: ts?.[key(k)]?.[0] })
         const surfaceLines: TrendLine[] = [
-          { key: 'claude-code', label: 'Claude Code', color: '#2dd4bf', data: s[key('claude-code')] },
-          { key: 'claude', label: 'Claude Directory', color: '#818cf8', data: s[key('claude')] },
-          { key: 'chatgpt', label: 'ChatGPT', color: '#e879f9', data: s[key('chatgpt')] },
-          { key: 'cursor', label: 'Cursor', color: '#fbbf24', data: s[key('cursor')] },
-          { key: 'vscode', label: 'VS Code', color: '#f87171', data: s[key('vscode')] },
-          { key: 'codex', label: 'Codex', color: '#a3e635', data: s[key('codex')] },
-          { key: 'hook', label: trend === 'callers' ? 'Plugin hook (machines)' : 'Plugin hook (scans)', color: '#94a3b8', dashed: true, data: trend === 'callers' ? s.hook_machines : s.hook_scans },
+          line('claude-code', 'Claude Code', '#2dd4bf'),
+          line('claude', 'Claude Directory', '#818cf8'),
+          line('chatgpt', 'ChatGPT', '#e879f9'),
+          line('cursor', 'Cursor', '#fbbf24'),
+          line('vscode', 'VS Code', '#f87171'),
+          line('codex', 'Codex', '#a3e635'),
+          { key: 'hook', label: trend === 'callers' ? 'Plugin hook (machines)' : 'Plugin hook (scans)', color: '#94a3b8', dashed: true, kind, data: trend === 'callers' ? s.hook_machines : s.hook_scans, today: (trend === 'callers' ? ts?.hook_machines : ts?.hook_scans)?.[0] },
         ]
+        const cl = (k: string, label: string, color: string, dashed?: boolean): TrendLine => ({ key: k, label, color, dashed, kind: 'flow', data: s[`scan_requests:${k}`], today: ts?.[`scan_requests:${k}`]?.[0] })
         const callerLines: TrendLine[] = [
-          { key: 'human', label: 'People (browser)', color: '#2dd4bf', data: s['scan_requests:human'] },
-          { key: 'agent', label: 'Agents (Claude, ChatGPT, Cursor)', color: '#818cf8', data: s['scan_requests:agent'] },
-          { key: 'agentavow', label: 'AgentAvow clients (hooks, gates, SDKs)', color: '#e879f9', data: s['scan_requests:agentavow'] },
-          { key: 'automated', label: 'Automated (crawlers, scripts)', color: '#94a3b8', dashed: true, data: s['scan_requests:automated'] },
-          { key: 'badge', label: 'Badge fetches', color: '#fbbf24', data: s.badge_fetches },
+          cl('human', 'People (browser)', '#2dd4bf'),
+          cl('agent', 'Agents (Claude, ChatGPT, Cursor)', '#818cf8'),
+          cl('agentavow', 'AgentAvow clients (hooks, gates, SDKs)', '#e879f9'),
+          cl('automated', 'Automated (crawlers, scripts)', '#94a3b8', true),
+          { key: 'badge', label: 'Badge fetches', color: '#fbbf24', kind: 'flow', data: s.badge_fetches, today: ts?.badge_fetches?.[0] },
         ]
         const toggle = (
           <div className="flex gap-1 font-mono text-[12px]">
@@ -965,14 +920,14 @@ function MetricsTab() {
           </div>
         )
         return (
-          <Section title="Adoption trend — day by day" note={win === 'today' ? 'Pick L7 or L30 above to see a trend; one day is a point, not a line.' : `Who is actually using the connector, per UTC day. "Machines" is distinct callers (salted per-day hash of IP + User-Agent, nothing identifying stored) — the honest adoption number; "Calls" is raw tool invocations. Claude Directory traffic arrives through Anthropic's proxy, so its machine count is a floor. The plugin hook is the session-start auto-scan: it never touches the MCP counters, so it is drawn on its own (dashed). Crawlers are left out.`} right={toggle}>
+          <Section title="Adoption trend — day by day" scope={scope.label} note={`Who is actually using the connector, per UTC day. "Machines" is distinct callers each day (counted privately, nothing identifying stored): the honest adoption number. "Calls" is raw tool calls. Claude Directory traffic arrives through Anthropic's proxy, so its machine count is a floor. The plugin hook is the session-start auto-check: it never touches the MCP counters, so it is drawn on its own (dashed). Crawlers are left out.`} right={toggle}>
             <div className="glass rounded-2xl p-5">
               <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Connector use by surface · {trend === 'callers' ? 'distinct machines' : 'tool calls'} per day</div>
-              <TrendChart days={data?.days} lines={surfaceLines} empty="No connector use in this window yet. Lines appear once a surface invokes a tool." />
+              <TrendChart days={data?.days} lines={surfaceLines} yLabel={trend === 'callers' ? 'Machines per day (distinct)' : 'Tool calls per day'} empty="No connector use in this window yet. Lines appear once a surface calls a tool." />
             </div>
             <div className="glass rounded-2xl p-5 mt-3">
               <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Public scan requests by caller type · per day</div>
-              <TrendChart days={data?.days} lines={callerLines} empty="No scan requests recorded in this window." />
+              <TrendChart days={data?.days} lines={callerLines} yLabel="Requests per day" empty="No scan requests recorded in this window." />
             </div>
           </Section>
         )
@@ -984,13 +939,13 @@ function MetricsTab() {
 
       <ScanKindsPanel data={data} />
 
-      <WatchAlertsPanel data={data} />
+      <WatchAlertsPanel data={data} today={today} />
 
       <GrowthPanel />
 
-      <BehavioralPanel win={win} />
+      <BehavioralPanel />
 
-      <Section title="Who is calling — people, agents, our clients, automation" note="Public scan requests and badge fetches split by the caller's User-Agent (this window). 'AgentAvow clients' is our own plugin hooks, npm/Python gates and SDK adapters (their own row from Nov 11; before that the plugin hook counted as an agent and the rest as automated). The GitHub Action sends a bare curl User-Agent, so it still lands in 'automated'. 'Automated' is crawlers, uptime monitors and scripts and is not usage. Honest usage = people + agents + our clients.">
+      <Section title="Who is calling — people, agents, our clients, automation" scope={scope.label} note={`Public scan requests and badge fetches split by the caller's User-Agent. 'AgentAvow clients' is our own plugin hooks, npm/Python gates and SDK adapters (their own row from ${COUNTED_FROM.ourClients}; before that the plugin hook counted as an agent and the rest as automated). The GitHub Action sends a bare curl User-Agent, so it still lands in 'automated'. 'Automated' is crawlers, uptime monitors and scripts and is not usage. Honest usage = people + agents + our clients.`}>
         <div className="grid md:grid-cols-2 gap-4">
           {([['scan_requests', 'Scan requests'], ['badge_fetches', 'Badge fetches']] as const).map(([key, title]) => {
             const q = data?.traffic_quality?.[key] || {}
@@ -1008,13 +963,13 @@ function MetricsTab() {
                   <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted">{title}</div>
                   <div className="text-[12.5px] tabular-nums text-text-muted">{fmt(real)} real <span className="text-text-muted/60">of {fmt(total)}</span></div>
                 </div>
-                {total > 0 ? rows.map(([label, n, bg]) => (
-                  <div key={label} className="mb-2">
-                    <div className="flex justify-between text-[12.5px] mb-1"><span className="text-text-muted">{label}</span><span className="tabular-nums text-text-muted/70">{fmt(n)} <span className="text-[11px]">({Math.round((n / total) * 100)}%)</span></span></div>
+                {total > 0 ? rows.map(([rowLabel, n, bg]) => (
+                  <div key={rowLabel} className="mb-2">
+                    <div className="flex justify-between text-[12.5px] mb-1"><span className="text-text-muted">{rowLabel}</span><span className="tabular-nums text-text-muted/70">{fmt(n)} <span className="text-[11px]">({pctOf(n, total)})</span></span></div>
                     <div className="h-2 rounded-full bg-surface overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(n / total) * 100}%`, background: bg }} /></div>
                   </div>
                 )) : (
-                  <p className="text-[12.5px] text-text-muted/70">No classified requests yet in this window.</p>
+                  <p className="text-[12.5px] text-text-muted/70">No classified requests in this window yet.</p>
                 )}
               </div>
             )
@@ -1037,30 +992,32 @@ function MetricsTab() {
         ) : null}
       </Section>
 
-      <Section title="Traffic funnel — where users drop off" note="Scan → watch → claim → install, with step-to-step conversion (this window).">
+      <Section title="Product funnel — where users drop off" scope={scope.label} note="Repos scanned → watches created → ownership claims, with the share that made it from each step to the next.">
         <div className="glass rounded-2xl p-6 flex flex-col gap-3">
-          {funnelSteps.map(([label, n], i) => {
+          {funnelSteps.map(([stepLabel, n], i) => {
             const prev = i === 0 ? n : funnelSteps[i - 1][1]
-            const conv = prev > 0 ? Math.round((n / prev) * 100) : 0
             return (
-              <div key={label}>
-                <div className="flex justify-between text-[12.5px] mb-1"><span className="font-mono">{label}</span><span className="tabular-nums text-text-muted">{fmt(n)}{i > 0 && <span className="ml-2 text-[11px]">({conv}%)</span>}</span></div>
+              <div key={stepLabel}>
+                <div className="flex justify-between text-[12.5px] mb-1"><span className="font-mono">{stepLabel}</span><span className="tabular-nums text-text-muted">{fmt(n)}{i > 0 && <span className="ml-2 text-[11px]">({pctOf(n, prev)} of the step before)</span>}</span></div>
                 <div className="h-2.5 rounded-full bg-surface overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(n / fmax) * 100}%`, background: 'linear-gradient(90deg,#2dd4bf,#818cf8)' }} /></div>
               </div>
             )
           })}
-          <p className="text-[11.5px] text-text-muted/70 mt-1">Product-action funnel (scan → watch → claim → install).</p>
+          <p className="text-[12.5px] mt-1 pt-3 border-t border-border/40">
+            <span className="font-mono">One-click install clicks</span> <span className="tabular-nums font-semibold">{fmt(f.installs)}</span>
+            <span className="text-text-muted"> — shown on its own, not as a step: an install click doesn't come after a claim (people install without claiming anything).</span>
+          </p>
         </div>
       </Section>
 
       <div className="grid md:grid-cols-2 gap-4">
-        <Section title="Answer distribution" note="Live scanned corpus, all-time: the three-phrase answer each tool leads with, then the trust tiers underneath as detail.">
+        <Section title="Answers for community-scanned repos" scope={`Right now · the ${fmt(communityTotal)} repos people have scanned on demand`} note="Not the whole catalog: the full catalog's answer mix is in Growth. The three-phrase answer each tool leads with, then the trust tiers underneath as detail.">
           <div className="glass rounded-2xl p-5 flex flex-col gap-2">
             {/* The headline: Safe to connect / Review before you connect / Do not connect
                 (metrics_dashboard_router._DECISION_CASE, from the stored critical/high counts + score). */}
             {DECISIONS.map((d) => {
               const n = decisions[d.value] ?? 0
-              const tot = Object.values(decisions).reduce((a, b) => a + b, 0) || 1
+              const tot = communityTotal || 1
               return <div key={d.value} className="flex items-center gap-3 text-[13px]"><span className="w-[12rem] shrink-0 flex items-center gap-2"><span className="inline-block w-2 h-2 rounded-full" style={{ background: d.color }} /><span className="font-semibold">{d.phrase}</span></span><div className="flex-1 h-2 rounded-full bg-surface overflow-hidden"><div className="h-full" style={{ width: `${(n / tot) * 100}%`, background: d.color }} /></div><span className="tabular-nums text-text-muted w-16 text-right">{fmt(n)}</span></div>
             })}
             <div className="mt-2 font-mono text-[10.5px] uppercase tracking-wide text-text-muted">Trust tiers (detail)</div>
@@ -1074,27 +1031,27 @@ function MetricsTab() {
             })}
           </div>
         </Section>
-        <Section title="Badges in READMEs" note="Adoption proof + warmest re-outreach list.">
+        <Section title="Badges in READMEs" scope="All time" note="Proof of adoption, and the warmest list for re-outreach. Count = times the badge was shown.">
           <div className="glass rounded-2xl p-5">
             {board.length ? <div className="flex flex-col divide-y divide-border/40">{board.slice(0, 10).map((r) => (<div key={r.repo} className="flex justify-between py-1.5 text-[12.5px]"><a href={`https://github.com/${r.repo}`} target="_blank" rel="noopener" className="font-mono text-text hover:text-primary-light truncate">{r.repo}</a><span className="font-mono tabular-nums text-text-muted ml-3">{fmt(r.renders)}</span></div>))}</div> : <p className="text-text-muted text-[13px]">No README renders yet.</p>}
           </div>
         </Section>
       </div>
 
-      <Section title="Catalog risk" note="Share of scanned tools carrying a high/critical finding — the headline safety signal (and content angle).">
+      <Section title="Catalog risk" scope="Right now" note="Share of scanned tools carrying a high or critical finding: the headline safety signal (and content angle).">
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <Stat label="Flagged (high/critical)" value={flagged.data?.pct != null ? `${flagged.data.pct}%` : '—'} sub={`${fmt(flagged.data?.flagged)} of ${fmt(flagged.data?.scanned)}`} />
         </div>
-        <p className="mt-2 text-[11.5px] text-text-muted/70">Per-finding-category breakdown (which types are most common) needs category tallies stored on scan — staged.</p>
+        <p className="mt-2 text-[11.5px] text-text-muted/70">A breakdown by finding category (which kinds are most common) needs category tallies stored on each scan: not built yet.</p>
       </Section>
 
-      <Section title="Catalog by surface" note="Static launch corpus plus community scans. x402 listings are left out, as on the site; they have their own panel below.">
+      <Section title="Catalog by surface" scope="Right now" note="Launch catalog plus community scans. x402 listings are left out, as on the site; they have their own panel below.">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {Object.entries(surfaces).filter(([k]) => k !== 'x402').sort((a, b) => b[1] - a[1]).map(([k, v]) => <Stat key={k} label={k} value={fmt(v)} />)}
         </div>
       </Section>
 
-      <Section title="x402 listings" note="Paid x402 endpoints, scored from their public Bazaar listing alone (never the code). Kept out of every catalog total. The answer mix covers listings the site shows; testnet-only listings can't take real payment and are hidden from default views.">
+      <Section title="x402 listings" scope="Right now" note="Paid x402 endpoints, scored from their public Bazaar listing alone (never the code). Kept out of every catalog total. The answer mix covers listings the site shows; testnet-only listings can't take real payment and are hidden from default views.">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           <Stat label="Listings" value={fmt(data?.x402?.listings)} />
           <Stat label="Scored" value={fmt(data?.x402?.scored)} />
