@@ -164,8 +164,21 @@ def test_catalog_mix_excludes_x402_and_counts_certified():
     ]
     assert metrics_daily.catalog_mix(rows) == {
         "safe": 1, "review": 1, "do_not_connect": 1, "unscored": 1, "certified": 1,
-        "total": 4,
+        "flagged": 0, "total": 4,
     }
+
+
+def test_catalog_mix_flagged_counts_answered_rows_with_high_or_critical():
+    def row(decision, critical=0, high=0, score=50, surface="mcp"):
+        return SimpleNamespace(surface=surface, decision=decision, trust_score=score,
+                               certified_mark=False, critical=critical, high=high)
+
+    rows = [row("do_not_connect", critical=2, high=1), row("review", high=1),
+            row("safe"), row(None, critical=3, score=None), row("safe", critical=1,
+                                                                 surface="x402")]
+    mix = metrics_daily.catalog_mix(rows)
+    assert mix["flagged"] == 2  # unscored and x402 rows never count
+    assert mix["safe"] + mix["review"] + mix["do_not_connect"] == 3
 
 
 @pytest.mark.asyncio

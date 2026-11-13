@@ -12,12 +12,13 @@ import { useAdminAccess } from './adminAccess'
 import { Info } from './AdminGlossary'
 import { useDashWindow } from './adminMetricsUtil'
 
-const DEFAULT_CAMPAIGN = '2026-11-test-dev'
+/** The dropdown opens on every campaign added up; each campaign is still a choice. */
+const ALL = '__all__'
+const DEFAULT_CAMPAIGN = ALL
 /** The campaign name each channel's ad links carry (utm_campaign), used as the default
  *  when entering that channel's spend. */
 const CAMPAIGN_BY_CHANNEL: Record<string, string> = { reddit: '2026-11-test-dev', x: '2026-11-test-x', google: '2026-11-test-google' }
-const CHANNEL_LABEL: Record<string, string> = { reddit: 'Reddit', x: 'X', google: 'Google', '(no utm_source)': 'No channel tag' }
-const ALL = '__all__'
+const CHANNEL_LABEL: Record<string, string> = { reddit: 'Reddit', x: 'X', google: 'Google', '(no utm_source)': 'No channel tag', agentgraph_bot: 'Our bot posts (agentgraph_bot)' }
 
 interface CampaignRow {
   source: string | null; medium: string | null; campaign: string | null
@@ -32,7 +33,7 @@ interface CostRow {
   cost_per_lp_view: number | null; cost_per_copy_plugin_cmd: number | null
 }
 interface CostView { rows: CostRow[]; total: Omit<CostRow, 'utm_content' | 'impressions' | 'clicks'> }
-type ChannelRow = Omit<CostRow, 'utm_content'> & { channel: string }
+type ChannelRow = Omit<CostRow, 'utm_content'> & { channel: string; label?: string }
 interface ChannelView { rows: ChannelRow[]; total: CostView['total']; previous?: CostView['total'] }
 interface SpendRow { id: string; day: string; utm_source: string | null; utm_campaign: string; utm_content: string | null; spend_usd: number; impressions: number | null; clicks: number | null; source: string }
 
@@ -108,7 +109,7 @@ export default function CampaignPanel() {
           <tbody>
             {(channels.data?.rows || []).map((r) => (
               <tr key={r.channel} className={`border-t border-border/40${!r.spend_usd && !r.sessions ? ' opacity-50' : ''}`}>
-                <td className="py-1.5 pr-3">{CHANNEL_LABEL[r.channel] ?? <span className="font-mono">{r.channel}</span>}</td>
+                <td className="py-1.5 pr-3">{CHANNEL_LABEL[r.channel] ?? (r.label && r.label !== r.channel ? r.label : <span className="font-mono">{r.channel}</span>)}</td>
                 <td className={`${td} text-right`}>{usd(r.spend_usd)}</td>
                 <td className={`${td} text-right text-text-muted`}>{fmt(r.impressions)}</td>
                 <td className={`${td} text-right text-text-muted`}>{fmt(r.clicks)}</td>
@@ -166,7 +167,7 @@ export default function CampaignPanel() {
       </div>
 
       <div className="glass rounded-2xl p-5 mt-3 overflow-x-auto">
-        <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Cost per result · by ad</div>
+        <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Cost per result · by ad · {campaign === ALL ? 'all campaigns' : campaign}</div>
         {cost.data?.rows.length ? (
           <table className="w-full text-[12.5px]">
             <thead><tr>
@@ -194,7 +195,7 @@ export default function CampaignPanel() {
               </tr>
             </tbody>
           </table>
-        ) : <p className="text-[12.5px] text-text-muted/70">No spend or visits for this campaign in the window.{isAdmin ? ' Enter spend below.' : ''}</p>}
+        ) : <p className="text-[12.5px] text-text-muted/70">No spend or visits {campaign === ALL ? 'for any campaign' : 'for this campaign'} in the window.{isAdmin ? ' Enter spend below.' : ''}</p>}
         <p className="mt-2 text-[11px] text-text-muted/60">Spend is summed over the last {days} UTC days, today included; the funnel covers visits active in the last {days} × 24 hours. A cost shows once its count is above zero.</p>
       </div>
 
