@@ -206,6 +206,61 @@ export default function CampaignPanel() {
 
 const CHANNELS = ['reddit', 'x', 'google'] as const
 const OTHER = '__other__'
+/** The header row each channel's export usually has, as the paste box's hint. */
+const CSV_PLACEHOLDER: Record<string, string> = {
+  reddit: 'Date,Campaign Name,Ad Group Name,Ad Name,Impressions,Clicks,Amount Spent (USD)',
+  x: 'Time period,Campaign name,Ad name,Impressions,Link clicks,Spend',
+  google: 'Day,Campaign,Ad group,Impr.,Clicks,Cost',
+}
+
+interface CsvPreview {
+  rows: { day: string; utm_source: string | null; utm_campaign: string; utm_content: string | null; spend_usd: number; impressions: number | null; clicks: number | null }[]
+  row_count: number
+  errors: string[]
+}
+
+/** What the pasted CSV will save, before it is saved: the rows the server read, and
+ *  every line it could not read (an unrecognised header row is one error that lists
+ *  the columns it looks for). */
+function CsvPreviewTable({ preview, saving, onSave }: { preview: CsvPreview; saving: boolean; onSave: () => void }) {
+  const total = preview.rows.reduce((a, r) => a + r.spend_usd, 0)
+  return (
+    <div className="mt-2 rounded-lg border border-border/60 p-2 text-[12px]">
+      {preview.errors.length > 0 && (
+        <ul className="mb-2 list-disc pl-5 text-danger">
+          {preview.errors.slice(0, 10).map((e, i) => <li key={i}>{e}</li>)}
+          {preview.errors.length > 10 && <li>…and {preview.errors.length - 10} more</li>}
+        </ul>
+      )}
+      {preview.rows.length > 0 ? (
+        <>
+          <table className="w-full">
+            <thead><tr>
+              <th className={th}>Day</th><th className={th}>Campaign</th><th className={th}>Ad tag</th>
+              <th className={`${th} text-right`}>Spend</th><th className={`${th} text-right`}>Impressions</th><th className={`${th} text-right`}>Clicks</th>
+            </tr></thead>
+            <tbody>
+              {preview.rows.map((r, i) => (
+                <tr key={i} className="border-t border-border/40">
+                  <td className="py-1 pr-3 font-mono">{r.day}</td>
+                  <td className="py-1 pr-3 font-mono">{r.utm_campaign}</td>
+                  <td className="py-1 pr-3 font-mono">{r.utm_content || '(no ad tag)'}</td>
+                  <td className={`${td} text-right`}>{usd(r.spend_usd)}</td>
+                  <td className={`${td} text-right text-text-muted`}>{r.impressions != null ? fmt(r.impressions) : ''}</td>
+                  <td className={`${td} text-right text-text-muted`}>{r.clicks != null ? fmt(r.clicks) : ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="mt-2 flex items-center gap-2 text-text-muted">
+            <button onClick={onSave} disabled={saving} className="px-2.5 py-1 rounded-lg font-mono bg-primary/15 text-primary-light hover:bg-primary/25 disabled:opacity-50">save {preview.row_count} rows</button>
+            <span>{usd(total)} in all{preview.row_count > preview.rows.length ? ` (first ${preview.rows.length} shown)` : ''}. A row replaces the stored one for the same day, campaign and ad tag.</span>
+          </div>
+        </>
+      ) : <p className="text-text-muted">No rows to save.</p>}
+    </div>
+  )
+}
 
 function SpendEditor({ rows, onChange }: { rows: SpendRow[]; onChange: () => void }) {
   const [day, setDay] = useState(todayUtc())
@@ -236,9 +291,20 @@ function SpendEditor({ rows, onChange }: { rows: SpendRow[]; onChange: () => voi
       setMsg(r?.status === 409 && typeof r.data?.detail === 'string' ? r.data.detail : 'could not save: check the date, campaign and amount')
     },
   })
+  const csvBody = () => ({ csv, utm_campaign: utmCampaign.trim() || null, utm_source: channel })
+  // Step 1: the server parses the paste and sends the rows back; nothing is saved.
+  // The preview is shown only while the paste, channel and campaign are the ones it read.
+  const [preview, setPreview] = useState<{ data: CsvPreview; key: string } | null>(null)
+  const csvKey = JSON.stringify(csvBody())
+  const previewCsv = useMutation<CsvPreview>({
+    mutationFn: async () => (await api.post('/admin/ad-spend/import', { ...csvBody(), dry_run: true })).data,
+    onSuccess: (d) => setPreview({ data: d, key: csvKey }),
+    onError: () => { setPreview(null); setMsg('could not read the CSV') },
+  })
+  // Step 2: save what the preview showed (same paste, same channel and campaign).
   const importCsv = useMutation<{ imported: number; errors: string[] }>({
-    mutationFn: async () => (await api.post('/admin/ad-spend/import', { csv, utm_campaign: utmCampaign.trim() || null, utm_source: channel })).data,
-    onSuccess: (d) => { setMsg(`imported ${d.imported} rows${d.errors.length ? `; skipped: ${d.errors.slice(0, 3).join(' ')}` : ''}`); if (d.imported) setCsv(''); onChange() },
+    mutationFn: async () => (await api.post('/admin/ad-spend/import', csvBody())).data,
+    onSuccess: (d) => { setMsg(`imported ${d.imported} rows${d.errors.length ? `; skipped: ${d.errors.slice(0, 3).join(' ')}` : ''}`); if (d.imported) { setCsv(''); setPreview(null) } onChange() },
     onError: () => setMsg('could not import the CSV'),
   })
   const del = useMutation({ mutationFn: (id: string) => api.delete(`/admin/ad-spend/${id}`), onSuccess: onChange })
@@ -265,11 +331,12 @@ function SpendEditor({ rows, onChange }: { rows: SpendRow[]; onChange: () => voi
       </form>
       {showCsv && (
         <div className="mt-2">
-          <textarea value={csv} onChange={(e) => setCsv(e.target.value)} rows={5} placeholder="Date,Campaign Name,Ad Group Name,Ad Name,Impressions,Clicks,Amount Spent (USD)" className="w-full text-[12px] rounded-lg bg-surface border border-border p-2 font-mono" />
+          <textarea value={csv} onChange={(e) => setCsv(e.target.value)} rows={5} placeholder={CSV_PLACEHOLDER[channel] ?? CSV_PLACEHOLDER.reddit} className="w-full text-[12px] rounded-lg bg-surface border border-border p-2 font-mono" />
           <div className="mt-1 flex items-center gap-2 text-[11.5px] text-text-muted">
-            <button onClick={() => { setMsg(null); importCsv.mutate() }} disabled={importCsv.isPending || !csv.trim() || !channel} className="px-2.5 py-1 rounded-lg font-mono bg-primary/15 text-primary-light hover:bg-primary/25 disabled:opacity-50">import</button>
-            <span>Reads a Reddit Ads export, or any CSV with Date, Ad name and Spend (or Cost) columns. Each row is one day of one ad: the ad name becomes the ad tag, and every row gets the channel and campaign above. Pasting the same export twice changes nothing.</span>
+            <button onClick={() => { setMsg(null); previewCsv.mutate() }} disabled={previewCsv.isPending || !csv.trim() || !channel} className="px-2.5 py-1 rounded-lg font-mono bg-primary/15 text-primary-light hover:bg-primary/25 disabled:opacity-50">preview</button>
+            <span>Reads a Reddit Ads export, an X Ads Manager export (by day, ad level), a Google Ads ad group report, or any CSV with a date column and a spend column. Each row is one day of one ad: the ad name (Google: the ad group) becomes the ad tag, X and Google names are matched to our tags (x1-archived, rsa-scanner, …), and every row gets the channel and campaign above. Pasting the same export twice changes nothing.</span>
           </div>
+          {preview?.key === csvKey && <CsvPreviewTable preview={preview.data} saving={importCsv.isPending} onSave={() => { setMsg(null); importCsv.mutate() }} />}
         </div>
       )}
       {rows.length > 0 && (

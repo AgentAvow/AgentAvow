@@ -530,6 +530,10 @@ class Settings(BaseSettings):
     # AI-slop phrases into the approval queue without a full admin login. Empty = the
     # ingest endpoint is disabled. Set via env SLOP_PROPOSAL_SECRET.
     slop_proposal_secret: str = ""
+    # Shared secret for POST /admin/ad-spend/ingest (the nightly Google Ads Script sends
+    # it in the X-Ad-Spend-Token header). Empty = the endpoint answers 404. Set via env
+    # AD_SPEND_INGEST_TOKEN (prod: .env.secrets), 32+ random characters.
+    ad_spend_ingest_token: str = ""
 
     # Email rate limiting & retry
     email_rate_limit_per_minute: int = 30
