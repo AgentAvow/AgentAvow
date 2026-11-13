@@ -10,7 +10,7 @@ your setup in a directory review. You opt in; you stay in control.
 
 ## The plugin (easiest)
 
-The **AgentAvow Trust** plugin bundles the connector, a `/scan` command, a skill
+The **AgentAvow Trust** plugin bundles the connector, a scan command (`/agentavow-trust:scan`), a skill
 that scans a server or package before Claude adds it (the same idea as Option 1),
 the SessionStart hook described under Option 2, and the per-call gate described
 below it. Find it in the Anthropic plugin directory, or install it from the repo:
@@ -20,7 +20,7 @@ below it. Find it in the Anthropic plugin directory, or install it from the repo
 /plugin install agentavow-trust@agentavow
 ```
 
-**Test it:** run `/scan npm chalk`. Then add an MCP server and start a new session;
+**Test it:** ask Claude to "scan npm chalk", or run `/agentavow-trust:scan npm chalk`. Then add an MCP server and start a new session;
 its answer appears in context.
 
 Every line the plugin shows leads with one of three answers and its reason, then the
@@ -196,6 +196,12 @@ Silence means allow. A deny or a confirmation comes back as a JSON object with a
   before it is sent to AgentAvow. The gate talks only to the server being called,
   with the `Authorization` header from your config if there is one, as Claude Code
   itself does; that header is never stored or printed.
+- **One random install ID.** The session-start and install-time hooks send
+  a random install ID with each check, a code made up once on your machine
+  (`~/.cache/agentavow/install_id`) that isn't tied to you, your account or your
+  files. It is used only to count how many installs keep using the plugin, and is
+  stored only as a one-way hash, never with an IP address. To turn it off, set
+  `AGENTAVOW_ANON_ID=off`. The gate never sends it.
 - **Quiet.** Each server is scanned once. One AgentAvow can't read (it needs
   sign-in, for example) is reported once as "not scanned" and left alone for a week.
 

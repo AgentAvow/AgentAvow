@@ -65,6 +65,11 @@ network are never sent anywhere, a URL whose path looks like it carries a secret
 withheld, and credentials and query strings are stripped from a URL before it leaves
 your machine.
 
+What leaves your machine: the server URL or package name being checked, and a random
+install ID, a code made up once on your machine that isn't tied to you, your account or
+your files. We use it only to count how many installs keep using the plugin. To turn it
+off, set `AGENTAVOW_ANON_ID=off`.
+
 ---
 
 ## The per-call gate (`agentavow_pretool_gate.py`)

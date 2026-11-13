@@ -66,6 +66,27 @@ def _is_mcp_client_disconnect(event: dict, exc: BaseException | None) -> bool:
     return any(m in message for m in _MCP_DISCONNECT_MESSAGES)
 
 
+# Request headers never sent to Sentry: the Claude Code plugin's random install ID is
+# kept only as a keyed hash per day (src/install_activity), never in an error report.
+_DROPPED_HEADERS = frozenset({"x-agentavow-install"})
+
+
+def _drop_private_headers(event: dict) -> None:
+    request = event.get("request")
+    if not isinstance(request, dict):
+        return
+    headers = request.get("headers")
+    if isinstance(headers, dict):
+        for k in [k for k in headers if str(k).lower() in _DROPPED_HEADERS]:
+            del headers[k]
+    elif isinstance(headers, list):  # [[name, value], ...]
+        request["headers"] = [
+            h for h in headers
+            if not (isinstance(h, (list, tuple)) and h
+                    and str(h[0]).lower() in _DROPPED_HEADERS)
+        ]
+
+
 def before_send(event: dict, hint: dict | None) -> dict | None:
     exc_info = hint.get("exc_info") if hint else None
     exc = exc_info[1] if exc_info else None
@@ -75,4 +96,17 @@ def before_send(event: dict, hint: dict | None) -> dict | None:
         or _is_unattributed_disconnect(event, exc)
     ):
         return None
+    try:
+        _drop_private_headers(event)
+    except Exception:
+        event.pop("request", None)  # cannot vouch for it: send the error without it
+    return event
+
+
+def before_send_transaction(event: dict, hint: dict | None) -> dict | None:
+    """Performance traces carry the request headers too: strip the same ones."""
+    try:
+        _drop_private_headers(event)
+    except Exception:
+        event.pop("request", None)
     return event

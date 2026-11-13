@@ -33,6 +33,7 @@ from src.api.rate_limit import (
 )
 from src.config import settings
 from src.database import get_db
+from src.install_activity import install_activity
 from src.scanner.behavioral import slots as _behavioral_slots
 from src.scanner.categories import (
     DETECTION_CATEGORIES,
@@ -2163,7 +2164,9 @@ async def package_verdict(
 @router.get(
     "/package/{surface}/{name:path}",
     response_model=PublicScanResponse,
-    dependencies=[Depends(rate_limit_reads), Depends(rate_limit_scans)],
+    # install_activity first, so a rate-limited hook request still counts as active.
+    dependencies=[Depends(install_activity), Depends(rate_limit_reads),
+                  Depends(rate_limit_scans)],
 )
 async def scan_package_endpoint(
     surface: str,
@@ -2508,7 +2511,8 @@ async def list_detection_categories() -> dict:
 @router.get(
     "/mcp",
     response_model=PublicScanResponse,
-    dependencies=[Depends(rate_limit_reads), Depends(rate_limit_scans)],
+    dependencies=[Depends(install_activity), Depends(rate_limit_reads),
+                  Depends(rate_limit_scans)],
 )
 async def scan_mcp_endpoint(
     endpoint: str = Query(..., description="The MCP server's Streamable-HTTP URL"),
