@@ -21,9 +21,36 @@ def _day(offset: int = 0) -> str:
     ("reddit", "reddit"), ("Reddit", "reddit"), ("twitter", "x"), ("X", "x"),
     ("google", "google"), ("  ", "(no utm_source)"), (None, "(no utm_source)"),
     ("newsletter", "newsletter"),
+    # Our marketing bot's links, whole or cut short: one channel.
+    ("agentgraph_bot", "agentgraph_bot"), ("agentgraph_bot_bluesky", "agentgraph_bot"),
+    ("agentgraph_", "agentgraph_bot"), ("agentgraph_bot…", "agentgraph_bot"),
+    ("AgentGraph_Bot...", "agentgraph_bot"), ("  agentgraph_x…  ", "agentgraph_bot"),
+    ("agentgraph", "agentgraph"), ("my_agentgraph_bot", "my_agentgraph_bot"),
 ])
 def test_channel_of(raw, channel):
     assert channel_of(raw) == channel
+
+
+@pytest.mark.asyncio
+async def test_bot_sources_are_one_channel_row(client, db):  # noqa: F811
+    """utm_source agentgraph_bot / agentgraph_ / agentgraph_bot… (truncated by the
+    platforms) show as ONE channel row, labelled for people; events stay as stored."""
+    token = await _token(client, db, admin=True)
+    for src in ("agentgraph_bot", "agentgraph_", "agentgraph_bot…", "agentgraph_bot_x"):
+        await _visit(client, {"utm_source": src, "utm_campaign": "bot"}, copy=src == "agentgraph_")
+    out = (await client.get(f"{URL}/cost-per-action", headers=_auth(token),
+                            params={"days": 7, "group_by": "source"})).json()
+    bot = [r for r in out["rows"] if r["channel"].startswith("agentgraph")]
+    assert len(bot) == 1
+    assert bot[0]["channel"] == "agentgraph_bot"
+    assert bot[0]["label"] == "Our bot posts (agentgraph_bot)"
+    assert bot[0]["lp_view"] == 4 and bot[0]["copy_plugin_cmd"] == 1
+    assert {r["channel"]: r["label"] for r in out["rows"]}["reddit"] == "Reddit"
+    # The funnel by campaign still reports each stored utm_source as it arrived.
+    funnel = (await client.get("/api/v1/analytics/attribution/campaigns",
+                               headers=_auth(token), params={"days": 7})).json()
+    sources = {r["source"] for r in funnel["campaigns"] if r["campaign"] == "bot"}
+    assert {"agentgraph_bot", "agentgraph_", "agentgraph_bot…"} <= sources
 
 
 async def _visit(client, utm: dict, copy: bool = False) -> None:  # noqa: F811

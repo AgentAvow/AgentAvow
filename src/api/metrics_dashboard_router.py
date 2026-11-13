@@ -1450,6 +1450,14 @@ async def growth_metrics(
             "catalog_daily is written by the 6-hour scheduler job (src/jobs/metrics_daily) "
             "from the PR 2 deploy on; days before it are absent, not zero. x402 listings "
             "are excluded, as on the site.",
+            "catalog_now and catalog_daily rows that carry all_rows count the rows the "
+            "public Browse list holds (one row per page, community scans merged in, a "
+            "skill collection's plain GitHub row dropped), so safe + review + "
+            "do_not_connect equals the site's total. total adds the listed rows with no "
+            "answer yet; flagged is the answered rows with a high or critical finding. "
+            "all_rows is the older, larger count: corpus rows plus every community scan "
+            "before merging (a page with both counts twice). Daily rows without all_rows "
+            "were written before 2026-11-13 and used that older count.",
             "downloads: npm last-week downloads, and PyPI downloads over the last 7 and 30 "
             "days summed from pypistats' daily series (mirrors excluded), of "
             "agentavow-trust, fetched by the same job. A source that failed is absent. "

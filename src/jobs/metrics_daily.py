@@ -6,7 +6,10 @@ day's last run wins and a missed run leaves a gap rather than a wrong number. Th
 hashes carry no TTL: they are the durable copy the dashboard reads, like the
 nightly traffic snapshot (``ag:metrics:traffic:<day>``).
 
-  ag:metrics:catalog_daily:<day>  safe, review, do_not_connect, unscored, certified, total
+  ag:metrics:catalog_daily:<day>  safe, review, do_not_connect, unscored, certified, total,
+                                  flagged, all_rows (the last two from 2026-11-13; days
+                                  before counted corpus + every community scan, see
+                                  current_catalog_mix)
   ag:metrics:downloads:<day>      npm_week, pypi_week, pypi_month (missing = fetch failed)
 
 PyPI counts are summed from pypistats' daily series (``/overall?mirrors=false``): the
@@ -39,8 +42,11 @@ def _today() -> str:
 
 def catalog_mix(rows) -> dict[str, int]:
     """Answer mix and Certified count over catalog rows, x402 left out (as on the
-    site: ~33k listing-only Safe rows would swamp the mix)."""
-    out = {d: 0 for d in DECISIONS} | {"unscored": 0, "certified": 0, "total": 0}
+    site: ~33k listing-only Safe rows would swamp the mix). ``flagged`` counts the rows
+    with an answer that carry a high or critical finding (the Catalog risk numerator;
+    its denominator is safe + review + do_not_connect)."""
+    out = {d: 0 for d in DECISIONS} | {"unscored": 0, "certified": 0, "flagged": 0,
+                                       "total": 0}
     for r in rows:
         if getattr(r, "surface", None) == "x402":
             continue
@@ -50,17 +56,30 @@ def catalog_mix(rows) -> dict[str, int]:
             out["unscored"] += 1
         else:
             out[d] += 1
+            if (getattr(r, "critical", None) or 0) > 0 or (getattr(r, "high", None) or 0) > 0:
+                out["flagged"] += 1
         if getattr(r, "certified_mark", None) is True:
             out["certified"] += 1
     return out
 
 
 async def current_catalog_mix(db) -> dict[str, int]:
-    """The mix right now: the static launch corpus plus community scans."""
-    from src.api.scan_catalog_router import _community_rows, _get_catalog
+    """The mix right now, counted the way the public site counts it: the rows the
+    all-kinds Browse list holds (one row per page, community scans merged in, x402
+    left out), so safe + review + do_not_connect equals the sum of
+    ``/public/scan-catalog?decision=...`` totals. ``all_rows`` keeps the older, larger
+    count (corpus + every community scan, before one-row-per-page merging) as a
+    labelled figure."""
+    from src.api.scan_catalog_router import (
+        _community_rows,
+        _get_catalog,
+        browse_listed_rows,
+        raw_row_count,
+    )
 
-    rows = list(_get_catalog()["rows"]) + list(await _community_rows(db))
-    return catalog_mix(rows)
+    mix = catalog_mix(await browse_listed_rows(db))
+    mix["all_rows"] = raw_row_count(_get_catalog(), await _community_rows(db))
+    return mix
 
 
 def pypi_window_sums(data: list) -> dict[str, int]:
