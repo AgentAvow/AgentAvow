@@ -19,7 +19,7 @@ router = APIRouter(prefix="/legal", tags=["legal"])
 
 _PRIVACY_CLAUSES: list[tuple[str, str]] = [
     ('1. Overview',
-     'Effective November 11, 2026. AgentAvow checks whether a software tool is '
+     'Effective November 12, 2026. AgentAvow checks whether a software tool is '
      'safe for an AI agent to connect to: a GitHub repository, a published '
      'package, a live MCP server, an agent skill, or an A2A agent card. This policy explains what we receive when '
      'you use agentavow.com, our public API, or our connector for AI '
@@ -68,7 +68,16 @@ _PRIVACY_CLAUSES: list[tuple[str, str]] = [
      'assistant product). To count distinct callers we store a one-way hash of '
      'the IP address and User-Agent combined with a salt that changes every '
      'day, not the IP address itself. Metrics are kept for up to 90 '
-     'days.</li><li><strong>Cloudflare Web Analytics</strong> measures page '
+     'days.</li>'
+     '<li><strong>Claude Code plugin install ID:</strong> The Claude Code '
+     "plugin sends a random install ID with each check. It's generated on "
+     'your device, contains no personal information, and is used only to '
+     "count active installs and how many return. We don't link it to IP "
+     "addresses, accounts or anything else, and we don't share it. You can "
+     'disable it with <code>AGENTAVOW_ANON_ID=off</code>. We store only a '
+     'one-way hash of it for each day it was seen, and delete those records '
+     'after 40 days.</li>'
+     '<li><strong>Cloudflare Web Analytics</strong> measures page '
      'loads and does not use cookies. It receives the address of the pages you '
      'view, without the query string. It never receives the address of a check '
      'result page (any page under /check/, whose address names the tool you '

@@ -118,6 +118,9 @@ if settings.sentry_dsn:
         from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 
         from src.sentry_filters import before_send as _sentry_before_send
+        from src.sentry_filters import (
+            before_send_transaction as _sentry_before_send_transaction,
+        )
 
         sentry_sdk.init(
             dsn=settings.sentry_dsn,
@@ -125,6 +128,7 @@ if settings.sentry_dsn:
             traces_sample_rate=0.1,
             environment="production" if not settings.debug else "development",
             before_send=_sentry_before_send,
+            before_send_transaction=_sentry_before_send_transaction,
         )
     except ImportError:
         logging.getLogger(__name__).warning(

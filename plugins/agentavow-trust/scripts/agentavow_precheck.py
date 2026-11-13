@@ -66,7 +66,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.39"
+__version__ = "0.1.40"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -1296,9 +1296,84 @@ def _user_agent() -> str:
     return f"{UA_PRODUCT}/{__version__} ({_install_source()})"
 
 
+# A random install ID, made once per machine, so AgentAvow can count how many installs
+# keep using the plugin (an IP address changes and is shared, so it undercounts). It is
+# a UUIDv4 from the standard library: nothing about the person, the machine or its files
+# goes into it. It rides only on this hook's own requests to agentavow.com (never to an
+# MCP server) as one header. AGENTAVOW_ANON_ID=off: no file is made and no header is
+# sent. Silent by design: nothing about it is ever printed, and any error means no header.
+INSTALL_ID_NAME = "install_id"  # beside scanned.json in ~/.cache/agentavow
+INSTALL_ID_ENV = "AGENTAVOW_ANON_ID"
+INSTALL_ID_HEADER = "X-AgentAvow-Install"
+_UUID4 = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
+_install_id_memo: list[str | None] = []  # one lookup per run
+
+
+def _install_id_off() -> bool:
+    return os.environ.get(INSTALL_ID_ENV, "").strip().lower() in ("off", "0", "false", "no")
+
+
+def _install_id_file() -> pathlib.Path:
+    return CACHE.with_name(INSTALL_ID_NAME)
+
+
+def _read_install_id() -> str | None:
+    try:
+        text = _install_id_file().read_text(encoding="ascii").strip().lower()
+    except Exception:
+        return None
+    return text if _UUID4.fullmatch(text) else None
+
+
+def _install_id() -> str | None:
+    """This machine's install ID, made on first use (0600, written to a temp file and
+    hard-linked into place, so two hooks starting at once agree on one ID and a reader
+    never sees half a file). None when switched off or anything fails."""
+    if _install_id_off():
+        return None
+    if _install_id_memo:
+        return _install_id_memo[0]
+    value = None
+    path = _install_id_file()
+    try:
+        if path.exists():
+            value = _read_install_id()  # unreadable or garbled: send nothing, keep the file
+        else:
+            import uuid
+
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                with os.fdopen(fd, "w", encoding="ascii") as fh:
+                    fh.write(str(uuid.uuid4()) + "\n")
+                try:
+                    os.link(tmp, path)  # fails if another hook got there first
+                except FileExistsError:
+                    pass
+            finally:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+            value = _read_install_id()
+    except Exception:
+        value = None
+    _install_id_memo.append(value)
+    return value
+
+
+def _headers() -> dict:
+    headers = {"User-Agent": _user_agent()}
+    iid = _install_id()
+    if iid:
+        headers[INSTALL_ID_HEADER] = iid
+    return headers
+
+
 def _fetch(path: str, params: dict) -> dict:
     url = f"{API}{path}?{urllib.parse.urlencode(params)}" if params else f"{API}{path}"
-    req = urllib.request.Request(url, headers={"User-Agent": _user_agent()})
+    req = urllib.request.Request(url, headers=_headers())
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:  # noqa: S310 (https only)
             data = json.load(resp)
