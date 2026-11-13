@@ -2207,6 +2207,7 @@ _TOOLS: list[types.Tool] = [
 
 # Attach the MCP Apps trust-card view to the scan tools. Set on the field (the
 # constructor silently drops an unknown `meta=` kwarg; the field alias is _meta).
+_TOOL_NAMES = frozenset(t.name for t in _TOOLS)
 _SCAN_TOOLS = ("scan_repo", "scan_package", "scan_mcp_server")
 for _t in _TOOLS:
     if _t.name in _SCAN_TOOLS:
@@ -2646,6 +2647,12 @@ server.middleware.append(_session_counter)
 async def _run_tool(
     name: str, arguments: dict
 ) -> list[types.TextContent] | tuple[list[types.TextContent], dict]:
+    if name not in _TOOL_NAMES:
+        # A name we do not serve is a directory or uptime monitor probing how the
+        # server handles a bad call (__verifymcp_auth_probe_*, __mcp_index_nonexistent__,
+        # ...), not a person: count it on its own, never as usage or a check.
+        await _bump("probe:unknown_tool")
+        return _text(f"Unknown tool: {name}")
     await _bump_s("calls:total")
     await _bump(f"tool:{name}")
     # Hand-run checks: every tool call except the about_agentavow overview (not a
