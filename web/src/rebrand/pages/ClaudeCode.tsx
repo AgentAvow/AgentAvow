@@ -160,7 +160,7 @@ export default function RebrandClaudeCode() {
           <p className="mt-2 text-[13px] text-text-muted">0 tokens per check · under 1,000 tokens a session. <a href={`${rp('/rebrand/faq')}#context-tokens`} className="text-primary-light hover:underline">How we measured →</a></p>
           <p className="mt-3 text-[14px] text-text-muted">Run each line in Claude Code, then start a new session. Or open <code className="font-mono text-[13px] text-primary-light">/plugin</code> and find AgentAvow Trust under Discover (the directory can lag behind the latest version).</p>
           <div className="flex flex-wrap gap-x-[18px] gap-y-1.5 mt-3.5 text-[13.5px] text-text-muted">
-            {['Free, no account', 'The plugin is MIT licensed', 'Sends only the tool being checked and a random install ID'].map((f) => (
+            {['Free, no account', 'The plugin is MIT licensed', 'Sends only the tool being checked and a random install ID (once a day, with the plugin version and app type)'].map((f) => (
               <span key={f}><span className="text-primary-light font-bold mr-1.5" aria-hidden="true">✓</span>{f}</span>
             ))}
           </div>

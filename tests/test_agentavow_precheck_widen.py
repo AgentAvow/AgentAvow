@@ -40,6 +40,7 @@ def home(tmp_path, monkeypatch):
 def hook(tmp_path, home, monkeypatch):
     mod = _load(PRECHECK, "precheck_widen")
     monkeypatch.setattr(mod, "CACHE", home / ".cache" / "agentavow" / "scanned.json")
+    monkeypatch.setattr(mod, "_start_active", lambda: None)  # no daily active request
     monkeypatch.setattr("sys.stdin", io.StringIO("{}"))
     proj = tmp_path / "proj"
     proj.mkdir()

@@ -20,6 +20,10 @@ export const GLOSSARY = {
     term: 'Machines protected',
     def: 'Unique machines where the Claude Code plugin checked a tool on its own (at session start or when a tool was being installed) at least once in the 7 days. Hand-run checks and the npm / Python gates are not in it.',
   },
+  active_installs: {
+    term: 'Machines protected (active installs)',
+    def: 'Plugin installs that sent the once-a-day active signal: the plugin (0.1.41 and later) sends its anonymous install ID, version and app type on the first session start of each UTC day, even when it has nothing new to check. Counted by install ID, not internet address, so a laptop that moves networks counts once. Counting starts the day the first signal arrived; installs that have not updated to 0.1.41 are not in it yet, so it grows as people update. Owner machines are left out. An Anthropic cloud session starts on a fresh machine, so each one can count as its own install.',
+  },
   connecting: {
     term: 'Machines connecting',
     def: 'Unique machines that opened the plugin\'s connection from Claude Code. A machine connecting has the plugin installed; it is protected once a check runs.',

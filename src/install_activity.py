@@ -12,7 +12,11 @@ What is stored, and nothing else:
     raw ID);
   * ``ag:metrics:install:new:<YYYY-MM-DD>``: the subset seen that day and in none of the
     previous ``LOOKBACK_DAYS`` days ("new installs").
-Both expire 40 days after their day ends (``RETENTION_DAYS``). No IP address, User-Agent,
+  * from plugin 0.1.41, the once-a-day "active" request (see the section at the end):
+    ``ag:metrics:install:ping:<YYYY-MM-DD>[:<app type>]`` sets of the same hashes, a
+    per-day count of installs per plugin version, and the first day one arrived.
+All of these (bar the first-day date) expire 40 days after their day ends
+(``RETENTION_DAYS``). No IP address, User-Agent,
 path, tool name or time of day is stored with a hash, and the ID is never logged: the
 nginx log format names only fixed fields, the app's request log records no headers, and
 Sentry events have the header removed (src/sentry_filters.py).
@@ -26,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import json
 import logging
 import re
 from datetime import date, datetime, timedelta, timezone
@@ -215,3 +220,156 @@ async def install_series(day_strs: list[str], today: date | None = None) -> dict
         else:
             out["installs_d7_returned_week"].append(None)
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Once-a-day "active" request (plugin 0.1.41 and later)
+# --------------------------------------------------------------------------- #
+# Most session starts answer from the plugin's cache and send no scan request, so the
+# scan-route counts above only see machines that scanned something that day. From
+# 0.1.41 the session-start hook also sends, at most once per UTC day, one POST to
+# /api/v1/public/plugin/active with the same install ID header, its own User-Agent
+# (agentavow-active/<version>) and a JSON body of {"version", "app"}. Stored, and nothing
+# else: the same keyed hash in a per-day set overall and per app type, plus a per-day
+# count of distinct installs per plugin version, all expiring with the sets above; and
+# the first day any was recorded. No IP, no time of day. Owner machines
+# (settings.metrics_owner_ips) are not recorded.
+ACTIVE_UA_PREFIX = "agentavow-active/"
+APP_TYPES = ("desktop", "cli", "sdk", "cloud", "other")
+PING_PREFIX = "ag:metrics:install:ping:"  # <day> and <day>:<app>
+PING_VERSIONS_PREFIX = "ag:metrics:install:ping_versions:"  # <day> -> {version: installs}
+PING_FIRST_DAY_KEY = "ag:metrics:install:ping_first_day"  # first day any was recorded
+PING_MAX_BODY = 512
+_VERSION = re.compile(r"\d{1,4}\.\d{1,4}\.\d{1,4}")
+
+
+def parse_app_type(value: object) -> str:
+    return value if isinstance(value, str) and value in APP_TYPES else "other"
+
+
+def parse_version(value: object) -> str | None:
+    return value if isinstance(value, str) and _VERSION.fullmatch(value) else None
+
+
+async def record_active_ping(hashed: str, app: str, version: str | None,
+                             today: date | None = None) -> None:
+    """Add a hashed install ID to today's active sets (overall and for its app type) and
+    count its version once a day. Best-effort: never raises."""
+    try:
+        from src.redis_client import get_redis
+
+        r = get_redis()
+        day = today or datetime.now(timezone.utc).date()
+        ds = day.isoformat()
+        when = _expire_at(day)
+        key = f"{PING_PREFIX}{ds}"
+        added = await r.sadd(key, hashed)
+        await r.expireat(key, when)
+        app_key = f"{PING_PREFIX}{ds}:{parse_app_type(app)}"
+        await r.sadd(app_key, hashed)
+        await r.expireat(app_key, when)
+        if added and version:
+            vkey = f"{PING_VERSIONS_PREFIX}{ds}"
+            await r.hincrby(vkey, version, 1)
+            await r.expireat(vkey, when)
+        await r.setnx(PING_FIRST_DAY_KEY, ds)
+    except Exception:
+        logger.debug("active ping not recorded", exc_info=False)
+
+
+def _is_owner_ip(ip: str | None) -> bool:
+    try:
+        from src.config import settings
+
+        raw = getattr(settings, "metrics_owner_ips", "") or ""
+        return bool(ip) and ip in {x.strip() for x in raw.split(",") if x.strip()}
+    except Exception:
+        return False
+
+
+async def handle_active_ping(headers, body: bytes, client_ip: str | None) -> bool:
+    """Validate and record one active request; True when recorded. The raw ID is only
+    ever hashed; the IP is used only to leave owner machines out and is never stored."""
+    ua = (headers.get("user-agent") or "").lower()
+    if not ua.startswith(ACTIVE_UA_PREFIX):
+        return False
+    iid = parse_install_id(headers.get(INSTALL_HEADER))
+    if not iid or _is_owner_ip(client_ip):
+        return False
+    data: object = {}
+    if body and len(body) <= PING_MAX_BODY:
+        try:
+            data = json.loads(body)
+        except Exception:
+            data = {}
+    if not isinstance(data, dict):
+        data = {}
+    await record_active_ping(hash_install_id(iid), parse_app_type(data.get("app")),
+                             parse_version(data.get("version")))
+    return True
+
+
+ACTIVE_COLUMNS = ("active_installs", "active_installs_7d",
+                  *(f"active_installs_{a}" for a in APP_TYPES))
+
+ACTIVE_NOTES = [
+    "active_installs = distinct Claude Code plugin installs that sent the plugin's "
+    "once-a-day active request that UTC day (plugin 0.1.41 and later). The hook sends it "
+    "on the first session start of the day even when it has nothing new to check, so this "
+    "counts machines the plugin protected that day, not only the ones that scanned. It "
+    "carries only the install ID (kept as a keyed hash for 40 days), the plugin version "
+    "and the app type. active_installs_7d = distinct installs over the 7 days ending that "
+    "day (fewer days until counting_from + 6). active_installs_<app> splits by app type: "
+    "desktop, cli, sdk, cloud, other. Owner machines (METRICS_OWNER_IPS) are left out. "
+    "Days before counting_from read empty. Installs still on 0.1.40 or earlier never send "
+    "it, so the count grows as people update. A cloud session starts from a fresh machine "
+    "and makes a new install ID, so cloud can count once per session.",
+]
+
+
+async def active_ping_series(day_strs: list[str], today: date | None = None) -> dict:
+    """``{"counting_from", "seven_day_complete_from", "series": {column: [per day]}}``
+    for ACTIVE_COLUMNS over ``day_strs`` (oldest first). A day before counting began or
+    outside the 40-day retention is None, never a made-up zero. Fail-open: all None."""
+    empty = {"counting_from": None, "seven_day_complete_from": None,
+             "series": {c: [None] * len(day_strs) for c in ACTIVE_COLUMNS}}
+    try:
+        from src.redis_client import get_redis
+
+        r = get_redis()
+        raw_first = await r.get(PING_FIRST_DAY_KEY)
+        if not raw_first:
+            return empty
+        first = date.fromisoformat(
+            raw_first.decode() if isinstance(raw_first, bytes) else str(raw_first))
+        now = today or datetime.now(timezone.utc).date()
+        floor = max(first, now - timedelta(days=RETENTION_DAYS))
+        days = [date.fromisoformat(d) for d in day_strs]
+        need = {d - timedelta(days=k) for d in days for k in range(7)}
+        overall: dict[date, set[str]] = {}
+        for d in sorted(x for x in need if floor <= x <= now):
+            overall[d] = await _smembers(r, f"{PING_PREFIX}{d.isoformat()}")
+        per_app: dict[tuple[date, str], int] = {}
+        for d in days:
+            if d in overall:
+                for a in APP_TYPES:
+                    per_app[(d, a)] = int(await r.scard(f"{PING_PREFIX}{d.isoformat()}:{a}")
+                                          or 0)
+    except Exception:
+        logger.exception("active ping series unavailable")
+        return empty
+
+    out: dict[str, list] = {c: [] for c in ACTIVE_COLUMNS}
+    for d in days:
+        if d not in overall:
+            for c in ACTIVE_COLUMNS:
+                out[c].append(None)
+            continue
+        out["active_installs"].append(len(overall[d]))
+        week = [w for w in (d - timedelta(days=k) for k in range(7)) if w in overall]
+        out["active_installs_7d"].append(len(set().union(*(overall[w] for w in week))))
+        for a in APP_TYPES:
+            out[f"active_installs_{a}"].append(per_app[(d, a)])
+    return {"counting_from": first.isoformat(),
+            "seven_day_complete_from": (first + timedelta(days=6)).isoformat(),
+            "series": out}

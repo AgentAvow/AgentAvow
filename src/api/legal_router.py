@@ -70,7 +70,9 @@ _PRIVACY_CLAUSES: list[tuple[str, str]] = [
      'day, not the IP address itself. Metrics are kept for up to 90 '
      'days.</li>'
      '<li><strong>Claude Code plugin install ID:</strong> The Claude Code '
-     "plugin sends a random install ID with each check. It's generated on "
+     "plugin sends a random install ID with each check, and once a day "
+     'with only the plugin version and app type (desktop, CLI, SDK or cloud), '
+     "nothing about your tools or code. It's generated on "
      'your device, contains no personal information, and is used only to '
      "count active installs and how many return. We don't link it to IP "
      "addresses, accounts or anything else, and we don't share it. You can "

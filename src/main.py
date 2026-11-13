@@ -73,6 +73,7 @@ from src.api.notification_router import router as notification_router
 from src.api.og_router import router as og_router
 from src.api.onboarding_router import router as onboarding_router
 from src.api.org_router import router as org_router
+from src.api.plugin_active_router import router as plugin_active_router
 from src.api.post_studio_router import router as post_studio_router
 from src.api.preflight_router import router as preflight_router
 from src.api.profile_router import router as profile_router
@@ -872,6 +873,8 @@ app.include_router(sandbox_stats_router, prefix=settings.api_v1_prefix)
 # generic /public/scan/{owner}/{repo}/... routes.
 app.include_router(erc8004_router, prefix=settings.api_v1_prefix)
 app.include_router(public_scan_router, prefix=settings.api_v1_prefix)
+# The Claude Code plugin's once-a-day active request (counts protected machines).
+app.include_router(plugin_active_router, prefix=settings.api_v1_prefix)
 app.include_router(preflight_router, prefix=settings.api_v1_prefix)
 app.include_router(watch_router, prefix=settings.api_v1_prefix)
 app.include_router(account_keys_router, prefix=settings.api_v1_prefix)
