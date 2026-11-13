@@ -538,6 +538,23 @@ _CLIENT_UA: contextvars.ContextVar[str] = contextvars.ContextVar(
 _HEALTH_PROBE: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "agentavow_mcp_health_probe", default=False
 )
+# True when the request URL carries ?via=plugin: the Claude Code plugin's connector
+# (plugins/agentavow-trust/.mcp.json) tags every request it sends that way. Read in
+# mcp_asgi_app; only the plugin tip below uses it.
+_VIA_PLUGIN: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "agentavow_mcp_via_plugin", default=False
+)
+
+
+def _is_via_plugin(query_string: bytes | str | None) -> bool:
+    """True when a request's query string has via=plugin (exact value)."""
+    from urllib.parse import parse_qs
+
+    if not query_string:
+        return False
+    if isinstance(query_string, bytes):
+        query_string = query_string.decode("latin-1", "replace")
+    return "plugin" in parse_qs(query_string).get("via", [])
 
 # Order matters: "claude-code" must be tested before "claude" (it contains it), and
 # "codex" before "chatgpt" (a Codex client may also name OpenAI). The Codex needle is
@@ -620,6 +637,77 @@ async def _record_caller() -> None:
         await record_unique(f"mcp:callers:{_SURFACE.get()}", ip, ua)
     except Exception:
         pass
+
+
+# Once-a-week "make this automatic" tip. Most Claude Code machines that use the
+# connector added it by hand and never get the plugin's automatic checks; this line,
+# after a scan answer, tells them how. Shown only when ALL hold: the surface is
+# 'claude-code', the request is not ?via=plugin, it is not the health probe, the
+# AGENTAVOW_PLUGIN_TIP kill switch is on, and this machine has not seen it in 7 days.
+# Any other surface (ChatGPT above all: its published app pins the response bytes) never
+# reaches Redis and gets its content back unchanged. Text content only: structuredContent
+# is never touched.
+PLUGIN_TIP = (
+    "Make this automatic: in Claude Code run `/plugin marketplace add AgentAvow/AgentAvow`, "
+    "then `/plugin install agentavow-trust@agentavow`. It checks each new MCP server and "
+    "package before Claude uses it, and costs Claude zero tokens per check."
+)
+_PLUGIN_TIP_PREFIX = "mcp:plugin_tip:"
+_PLUGIN_TIP_TTL = 7 * 24 * 3600
+
+
+def _plugin_tip_machine_key(ip: str) -> str | None:
+    """sha256(server-side secret salt | client IP) — stable across days, unlike the
+    metrics HLLs' daily salt, so the 7-day window holds. The salt is derived from the
+    server's JWT secret (never stored in Redis); the raw IP is never stored."""
+    import hashlib
+    import hmac
+
+    from src.config import settings
+
+    if not ip:
+        return None
+    secret = (settings.jwt_secret or "").encode()
+    if not secret:
+        return None
+    salt = hmac.new(secret, b"agentavow-mcp-plugin-tip-v1", hashlib.sha256).hexdigest()
+    return hashlib.sha256(f"{salt}|{ip}".encode("utf-8", "ignore")).hexdigest()
+
+
+async def _should_show_plugin_tip() -> bool:
+    """See the block comment above. Fails closed: any error means no tip."""
+    try:
+        if _SURFACE.get() != "claude-code" or _VIA_PLUGIN.get() or _HEALTH_PROBE.get():
+            return False
+        from src.config import settings
+
+        if not settings.agentavow_plugin_tip:
+            return False
+        machine = _plugin_tip_machine_key(_CLIENT_IP.get())
+        if machine is None:
+            return False
+        from src.redis_client import get_redis
+
+        # SET NX EX: one atomic round trip; only the first call in the window wins.
+        return bool(await get_redis().set(f"{_PLUGIN_TIP_PREFIX}{machine}", "1",
+                                          nx=True, ex=_PLUGIN_TIP_TTL))
+    except Exception:  # noqa: BLE001 — Redis down or anything else: no tip
+        return False
+
+
+async def _with_plugin_tip(content: list) -> list:
+    """`content` with PLUGIN_TIP appended (after a blank line) to its last text block,
+    when _should_show_plugin_tip says so; otherwise `content` itself, unchanged."""
+    if not content or getattr(content[-1], "text", None) is None:
+        return content
+    if not await _should_show_plugin_tip():
+        return content
+    last = content[-1]
+    tipped = types.TextContent(
+        type="text", text=last.text + "\n\n" + PLUGIN_TIP,
+        **({"annotations": last.annotations} if getattr(last, "annotations", None) else {}))
+    await _bump_s("plugin_tip_shown")
+    return [*content[:-1], tipped]
 
 
 def _trust_bar(score: int) -> str:
@@ -2355,6 +2443,8 @@ async def _call_tool(
         # also keeps a model from reading "not scanned" as an answer.
         return types.CallToolResult(content=out, isError=True)
     content, struct = out
+    # A scan answer (never an error): the once-a-week plugin tip, Claude Code only.
+    content = await _with_plugin_tip(content)
     try:
         jsonschema.validate(instance=struct, schema=_SCAN_OUTPUT_SCHEMA)
     except jsonschema.ValidationError as e:
@@ -2363,7 +2453,7 @@ async def _call_tool(
         logger.error("scan structuredContent does not match its outputSchema (%s): %s",
                      name, e.message)
         return types.CallToolResult(content=content, structuredContent=struct)
-    return out
+    return content, struct
 
 
 def _tool_error(text: str) -> types.CallToolResult:
@@ -2811,6 +2901,7 @@ async def mcp_asgi_app(scope, receive, send) -> None:
         client = scope.get("client")
         _CLIENT_IP.set(str(client[0]) if client else "")
         _HEALTH_PROBE.set(probe)
+        _VIA_PLUGIN.set(_is_via_plugin(scope.get("query_string")))
     except Exception:
         pass
     if scope.get("type") != "http":

@@ -27,12 +27,14 @@ can be verified offline, so you do not have to take AgentAvow's word for it.
 
 Scanning is free and needs no account.
 
+**Cost to Claude:** zero tokens per check (the hooks run as scripts on your machine, and Safe says nothing), and under 1,000 tokens a session for the connector's tool names and instructions, the command and the skill. Run `/context` with the plugin on and off to see it.
+
 ## What the plugin adds
 
 | Component | What it does | Where it runs |
 | --- | --- | --- |
 | MCP connector | The AgentAvow tools: `scan_mcp_server`, `scan_package`, `scan_repo`, and identity lookups. All read-only, no sign-in. | Chat, Cowork, Claude Code |
-| `/scan` command | `/scan npm chalk`, `/scan owner/repo`, `/scan https://mcp.example.com/mcp` | Chat, Cowork, Claude Code |
+| Scan command | Ask in plain words ("scan npm chalk", "is this MCP server safe?"), or use the command: `/agentavow-trust:scan npm chalk`, `/agentavow-trust:scan owner/repo`, `/agentavow-trust:scan https://mcp.example.com/mcp`. Claude Code puts the plugin's name in front of plugin commands, so a plain `/scan` is not found. | Chat, Cowork, Claude Code |
 | `scan-before-connect` skill | When you ask Claude to add an MCP server or install a package you name, Claude scans it first and tells you the answer before it goes ahead. | Chat, Cowork, Claude Code |
 | Install-time hook | When a server is about to be added (`claude mcp add …`, or a write to `.mcp.json`), grades it first. "Do not connect": Claude Code asks you, with the answer as the reason. Anything else (Safe to connect; Review before you connect; not scannable): a one-line answer and the add proceeds. Never denies. | Claude Code, Cowork |
 | Package installs | When Claude runs `npm`/`pnpm`/`yarn`/`bun` add or install, `pip`/`python -m pip` install, `uv add`, `uv pip install`, `pipx install` or `poetry add` with named packages (up to 5 per command), each is checked against its stored grade. Safe to connect: silent, unless part of the package could not be read (a file past the read cap or past the unpack budget), which gets one quiet note. Deprecated by its maintainer: a one-line note that it is deprecated (not a security finding). Review before you connect: a one-line note and the install proceeds. Do not connect: Claude Code asks you first. Lockfile installs (`npm install`, `npm ci`, `uv sync`), requirements files, local paths and repository or URL installs are left alone; a package AgentAvow could not grade (not found, not scannable, or the service is busy) gets a one-line "not checked" note; an offline or slow check stays silent. The next session start mentions once how many installs were checked. Turn it off with `AGENTAVOW_INSTALL_CHECKS=off`. | Claude Code, Cowork |
@@ -129,8 +131,10 @@ Settings, all optional, read from the environment and never sent anywhere:
 
 ## Try it
 
+Ask Claude to "scan npm chalk", or run:
+
 ```
-/scan npm chalk
+/agentavow-trust:scan npm chalk
 ```
 
 Then add an MCP server and start a new session. The hook reports a line such as:
@@ -158,7 +162,7 @@ includes that result in one clause when it exists:
   "Review before you connect".
 
 The hook makes no extra request for it and nothing from your machine is run in the
-sandbox. The `/scan` command and the scan-before-connect skill report the full sandbox
+sandbox. The `/agentavow-trust:scan` command and the scan-before-connect skill report the full sandbox
 observation (tools called, network, file writes, credentials) as its own section.
 
 ## What the hook reads and what leaves your machine

@@ -57,7 +57,7 @@ JWKS — you don't have to trust AgentAvow. See [Verify an attestation](/docs/ve
 - **ChatGPT:** add AgentAvow from the
   [ChatGPT plugin directory](https://chatgpt.com/plugins/plugin_asdk_app_6ac830ccc2d48191ac27974dec7d8344). No sign-in.
 - **Claude Code:** `claude mcp add --transport http agentavow https://agentavow.com/mcp`,
-  or install the AgentAvow Trust plugin, which adds a `/scan` command and scans each
+  or install the AgentAvow Trust plugin, which adds a scan command (`/agentavow-trust:scan`) and scans each
   new MCP server at session start. See
   [Auto-scan in Claude Code](/docs/auto-scan-claude-code).
 - **Cursor:** [Add to Cursor](https://cursor.com/install-mcp?name=agentavow&config=eyJ1cmwiOiJodHRwczovL2FnZW50YXZvdy5jb20vbWNwIn0%3D)
