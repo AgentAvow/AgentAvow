@@ -4,6 +4,7 @@
 import type { ReactNode } from 'react'
 
 import { Reveal } from '../components/motion'
+import { Info } from './AdminGlossary'
 import { avgOf, dayLabel, fmt, fmtAvg, PAGE_WINDOWS, rangeLabel, sumOf, useDashWindow } from './adminMetricsUtil'
 import type { PageWin } from './adminMetricsUtil'
 
@@ -208,13 +209,13 @@ export function WindowBar({ days, setDays, includeToday, setIncludeToday }: { da
   const w = useDashWindow()
   return (
     <div className="mt-6 glass rounded-2xl px-4 py-3 flex items-center gap-x-4 gap-y-2 flex-wrap">
-      <span className="text-[12.5px] font-semibold">Time window</span>
+      <span className="text-[12.5px] font-semibold">Time window<Info k="window" /></span>
       <div className="flex gap-1 font-mono text-[12px]" role="group" aria-label="Time window">
         {PAGE_WINDOWS.map((d) => (
           <button key={d} onClick={() => setDays(d)} aria-pressed={days === d} className={`px-2.5 py-1 rounded-lg transition-colors ${days === d ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>{d} days</button>
         ))}
       </div>
-      <span className="text-[13px] font-semibold tabular-nums">Last {w.days} days: {rangeLabel(w.complete)} (UTC)</span>
+      <span className="text-[13px] font-semibold tabular-nums">Last {w.days} days: {rangeLabel(w.complete)} (UTC)<Info k="utc_day" /></span>
       <label className="ml-auto inline-flex items-center gap-2 text-[12.5px] text-text-muted cursor-pointer">
         <input type="checkbox" checked={includeToday} onChange={(e) => setIncludeToday(e.target.checked)} />
         Include today so far ({dayLabel(w.today)}, partial, drawn dashed)
