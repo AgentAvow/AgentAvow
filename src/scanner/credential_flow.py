@@ -263,10 +263,12 @@ _FILTERED_RE = re.compile(r"\s*\)?\s*\.\s*filter\s*\(")
 # The bare mapping as a whole argument / body of a send (`axios.post(url, process.env)`).
 _BARE_ENV_ARG_RE = re.compile(
     r"(?:^\(|,|\b(?:body|json|data)\s*[:=])\s*(?:process\.env|os\.environ)\s*[,)}]")
-# Child-process launches: the environment handed to them is not sent anywhere.
+# Child-process launches: the environment handed to them is not sent anywhere. A
+# bundler renames an imported binding with a number (esbuild's `execFileSync7`,
+# `spawn2`): the same function.
 _JS_CHILD_CALL_RE = re.compile(
     r"(?<![\w$])(?:spawn|spawnSync|exec|execSync|execFile|execFileSync|fork|execa|execaSync"
-    r"|execaCommand|execaCommandSync|execaNode)\s*\(|\bnew\s+Worker\s*\(")
+    r"|execaCommand|execaCommandSync|execaNode)\d{0,3}\s*\(|\bnew\s+Worker\s*\(")
 _PY_CHILD_CALL_RE = re.compile(
     r"\bsubprocess\.\w+\s*\(|(?<![\w.])(?:Popen|check_output|check_call|run|call)\s*\("
     r"|\bos\.(?:exec\w*|spawn\w*|system|popen|posix_spawnp?)\s*\("
@@ -816,9 +818,17 @@ class _Analyzer:
         self.sinks: dict[str, _Sink] = {}
         self.sink_params: dict[str, tuple[list[str], dict[str, list[tuple[list[str], bool]]]]] = {}
         self.sources: dict[str, str] = {}
+        # Where each source helper is defined (the scopes of its headers): a bare call
+        # resolves to it only where that definition is in lexical scope. A bundle
+        # reuses one-letter names in every module (eve's compiled @vercel/queue: an
+        # execa-style `S` returning `{...process.env, ...e}` made every other `S(…)` in
+        # the bundle a source of the whole environment, 2026-11-13).
+        self.source_scopes: dict[str, list[tuple[int, ...]]] = {}
         # Function headers: index -> offset (in the statement) where the header ends,
         # so a method NAMED `fetch` / `post` is not read as a call of one.
         self.header_end: dict[int, int] = {}
+        # Function headers: index -> the function's own name (bound outside it).
+        self.header_name: dict[int, str] = {}
         self.lit_kinds = ([None] * len(self.stmts) if dump
                           else [self._lit_kind(st) for st in self.stmts])
         self.dump_kinds = [(_ENV_DUMP if dump and _dump_in(st.code, python) else None)
@@ -832,6 +842,21 @@ class _Analyzer:
         self.vendor_uses: list[tuple[int, str]] = []
 
     # -- per-statement facts ------------------------------------------------
+    def _source_kind_in(self, text: str, scope: tuple[int, ...]) -> str | None:
+        """The kind a call of a known source helper in ``text`` returns, for code at
+        ``scope``. A bare call (``S(x)``) or a private-member call (``this.#S(x)``)
+        counts only where a definition of that helper is in lexical scope; a method
+        call through an object (``obj.collect()``) counts wherever it is, as before."""
+        for nm, k in self.sources.items():
+            scopes = self.source_scopes.get(nm)
+            for m in _call_re(nm).finditer(text):
+                before = text[:m.start()].rstrip()
+                if scopes is None or before.endswith("."):
+                    return k
+                if any(scope[:len(sc)] == sc for sc in scopes):
+                    return k
+        return None
+
     def _lit_kind(self, st: _Stmt, a: int = -1, b: int = -1) -> str | None:
         lits = [v for s, _e, v in st.lits if a < 0 or a <= s < b]
         parts = [v.strip() for v in lits if v.strip() and not _NOT_PATH_PART_RE.search(v)]
@@ -957,8 +982,7 @@ class _Analyzer:
             path_kind = lit_kind or next(
                 (k for nm, k in vis_p.items() if _ref_re(nm).search(code)), None)
             has_read = bool(self.read_re.search(code))
-            src_kind = next((k for nm, k in self.sources.items()
-                             if _call_re(nm).search(code)), None)
+            src_kind = self._source_kind_in(code, st.scope)
             # A value handed to a child process (`spawn(cmd, {env: {...process.env}})`,
             # `subprocess.run(cmd, env=env)`) is not carried by what the call returns.
             ref_code = _blank_child_calls(code, self.python) if self.dump else code
@@ -987,9 +1011,15 @@ class _Analyzer:
                     taint[rm.group(1)] = (_pick(arg_kinds), st.scope)
 
             targets = self._targets(code)
+            # A function header binds its parameters (`function f(env = {...process.env})
+            # {`) inside the function, not in the enclosing scope: tainting them there
+            # made every later `env` / `flags` in a bundle carry the whole environment
+            # (@swmansion/argent 0.33.0, 2026-11-13). The function's own name stays outside.
+            inner = st.scope + (idx,) if idx in self.header_end else st.scope
             if carried:
                 for nm in targets:
-                    taint[nm] = (carried, st.scope)
+                    taint[nm] = (carried, st.scope if nm == self.header_name.get(idx)
+                                 else inner)
                 if _is_keyobj_ctor(code):
                     for nm in targets:
                         keyobjs[nm] = (carried, st.scope)
@@ -1003,7 +1033,7 @@ class _Analyzer:
                         for p in _params(next(g for g in m.groups() if g is not None)
                                          if any(m.groups()) else ""):
                             if p not in ("err", "error", "e"):
-                                taint[p] = (value_kind, st.scope)
+                                taint[p] = (value_kind, inner)
                 # `cp.read(path)` (configparser) loads the file into the receiver.
                 if path_kind and self.python:
                     for m in re.finditer(r"(?<![\w.])(\w+)\.read\s*\(", code):
@@ -1022,7 +1052,7 @@ class _Analyzer:
                 elif path_kind and not value_kind:
                     # `for p in glob.glob(expanduser('~/.ssh/*')):`
                     pathvars[m.group(1)] = (path_kind, st.scope)
-            vis_t = visible(taint, st.scope)
+            vis_t = visible(taint, inner)
 
             if carried and _RETURN_RE.search(code):
                 returns = returns or carried
@@ -1081,10 +1111,7 @@ class _Analyzer:
                                        or _BARE_ENV_ARG_RE.search(span)):
             kind = _ENV_DUMP
         if not kind:
-            for nm, k in self.sources.items():
-                if _call_re(nm).search(span):
-                    kind = k
-                    break
+            kind = self._source_kind_in(span, st.scope)
         if not kind:
             for nm, k in vis_t.items():
                 found = [st.start + a + mm.start() for mm in _ref_re(nm).finditer(span)]
@@ -1139,7 +1166,7 @@ class _Analyzer:
         for off, arg in _split_args(code, a, b):
             kw = re.match(r"\s*([A-Za-z_]\w*)\s*=(?!=)", arg) if self.python else None
             carries = (any(_ref_re(nm).search(arg) for nm in names)
-                       or any(_call_re(s).search(arg) for s in self.sources)
+                       or self._source_kind_in(arg, st.scope) is not None
                        or bool(self.read_re.search(arg)))
             if kw:
                 p = kw.group(1)
@@ -1205,6 +1232,7 @@ class _Analyzer:
             if not m:
                 continue
             self.header_end[idx] = m.end()
+            self.header_name[idx] = m.group(1)
             out.append((m.group(1), _params(m.group(2)), idx, bodies.get(idx, [])))
         return out
 
@@ -1231,13 +1259,15 @@ class _Analyzer:
                     self.sink_params[name] = (params, {
                         p: self.run(idxs, {p: ("param", st.scope)})[1] for p in params})
                     self.sinks[name] = own
-            if name not in self.sources and (
+            if st.scope not in self.source_scopes.get(name, []) and (
                     any(self.lit_kinds[j] or self.dump_kinds[j] for j in idxs)
                     or any(_call_re(s).search(self.stmts[j].code)
                            for s in self.sources for j in idxs)):
                 _h, _ph, ret = self.run(idxs)
                 if ret and ret != "param":
-                    self.sources[name] = ret
+                    old = self.sources.get(name)
+                    self.sources[name] = _pick([k for k in (old, ret) if k]) or ret
+                    self.source_scopes.setdefault(name, []).append(st.scope)
 
 
 # Cheap pre-check: some credential path word in the file.

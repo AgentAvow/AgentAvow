@@ -631,8 +631,8 @@ def _binding_spec(text: str, name: str) -> str | None:
         + r"""(?![\w$])[^}]*\}\s*from\s*['"]([^'"]+)['"]|\bimport\s+""" + r
         + r"""\b[^;'"]*?from\s*['"]([^'"]+)['"]|\bimport\s*\*\s*as\s+""" + r
         + r"""\s+from\s*['"]([^'"]+)['"]|(?<![\w$.])""" + r
-        + r"""\s*=\s*(?:__toESM\s*\(\s*)?require\s*\(\s*['"]([^'"]+)['"]|\{[^}]*"""
-        + r"""(?<![\w$])""" + r + r"""(?![\w$])[^}]*\}\s*=\s*require\s*\(\s*['"]"""
+        + r"""\s*=\s*(?:__toESM\s*\(\s*)?require\s*\(\s*['"]([^'"]+)['"]|\{[^{}]*"""
+        + r"""(?<![\w$])""" + r + r"""(?![\w$])[^{}]*\}\s*=\s*require\s*\(\s*['"]"""
         + r"""([^'"]+)['"]""", text)
     return next((g for g in m.groups() if g), None) if m else None
 
@@ -1300,11 +1300,18 @@ class _JsFlow:
         """Name of the function whose body opens at ``o``; "" if anonymous; None
         if the block is not a function body."""
         j = o - 1
-        if t.is_p(j, ":") and t.typ[j - 1] == "id":  # TS return type `): T {`
-            k = j - 1
-            while k >= 0 and not t.is_p(k, ")"):
+        if t.is_id(j) or t.is_p(j, ">", "]"):
+            # TS return type `): T {`, `): Promise<T> {`, `): A | B {`, `): T[] {`: walk
+            # back over a plain type (names, `.`, `<>`, `[]`, `|`, `&`, `,`) to the `:`
+            # right after the parameter list. Anything else (an object type with
+            # braces, a `=>`) leaves j where it was: not recognised, finding kept.
+            k = j
+            while (k > 0 and o - k <= 24
+                   and (t.typ[k] == "id" or t.is_p(k, ".", "<", ">", "[", "]", "|", "&",
+                                                    ","))):
                 k -= 1
-            j = k
+            if t.is_p(k, ":") and t.is_p(k - 1, ")"):
+                j = k - 1
         if t.is_p(j, "=>"):
             return self.arrow_binding(t, j)
         if not t.is_p(j, ")"):
