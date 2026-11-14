@@ -153,6 +153,14 @@ Ranked by expected yield. None is narrow enough to ship blind.
    to bindings that are reachable from the hint's file rather than the whole package
    (pi-coding-agent, 6.2M/wk); (c) in shell, treat `$(f …)` captured into an argument of
    a print-only function as shown (OpenMausBot).
+   **Status: addressed** by "Scanner: install commands only shown to a person are not
+   critical (audit class 1)". 7 of the 9 tools no longer read Do not connect on a local
+   static re-scan (openclaw, freellmapi, coder, sem, OpenClawInstaller: Safe;
+   OpenMausBot, openclaw101: Review on unrelated high findings). Two remain. pi-coding-agent:
+   the vendored SDKs in its CLI bundle pass `console` around as a logger value
+   (`this._logger = console`, `filterLogger(console, …)`), and proving that harmless needs
+   alias analysis. firebase-tools: its other critical is a maintainer `pretest:e2e`
+   script, not a shown hint.
 2. **Exfil host as data in bundles (class 2).** Allow the existing domain-list test on a
    contiguous run of 200+ bare-host elements inside a larger file, and read
    `allowedHosts: a ?? b ?? [ … ]` defaults as an allowlist.
