@@ -616,10 +616,15 @@ MANIFEST_EXEC_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
 ]
 
 # Dangerous content inside an npm lifecycle install hook (#5).
+# A redirect to a device (`> /dev/tcp/host/port`, `>& /dev/sda`) counts; silencing
+# output (`> /dev/null 2>&1`, `2>/dev/null`, `>/dev/stderr`) does not. yarn 1.22.22's
+# preinstall `node ./preinstall.js > /dev/null 2>&1` and `npm rebuild x 2>/dev/null ||
+# true` hooks read as "runs remote/shell/eval content" (verdict accuracy audit,
+# 2026-11-14: docs/research/verdict-accuracy-audit-2026-11.md).
 INSTALL_SCRIPT_DANGER_RE = re.compile(
     r"""(?:curl|wget)\b|\|\s*(?:ba)?sh\b|\bnode\s+(?:-e|--eval|-p|--print|-pe|-ep)\b|"""
     r"""\bpython3?\s+-c\b|base64\s+(?:-d|--decode|-D)\b|\beval\b|"""
-    r"""https?://|\bchmod\s+\+x\b|>\s*/dev/""",
+    r"""https?://|\bchmod\s+\+x\b|>&?\s*/dev/(?!(?:null|stdout|stderr)(?![\w/.-]))""",
     re.IGNORECASE,
 )
 # npm lifecycle hooks that auto-run on `npm install` (the supply-chain entry point).
