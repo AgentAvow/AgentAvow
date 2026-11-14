@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src import tool_checks as _tool_checks
 from src.api.rate_limit import (
     rate_limit_history_reads,
     rate_limit_reads,
@@ -2168,6 +2169,7 @@ async def package_verdict(
     dependencies=[Depends(install_activity), Depends(rate_limit_reads),
                   Depends(rate_limit_scans)],
 )
+@_tool_checks.counted(_tool_checks.package_key)
 async def scan_package_endpoint(
     surface: str,
     name: str,
@@ -2298,6 +2300,7 @@ async def scan_package_endpoint(
     response_model=PublicScanResponse,
     dependencies=[Depends(rate_limit_reads), Depends(rate_limit_scans)],
 )
+@_tool_checks.counted(_tool_checks.skill_key)
 async def scan_skill_endpoint(
     owner: str,
     repo: str,
@@ -2514,6 +2517,7 @@ async def list_detection_categories() -> dict:
     dependencies=[Depends(install_activity), Depends(rate_limit_reads),
                   Depends(rate_limit_scans)],
 )
+@_tool_checks.counted(_tool_checks.mcp_key)
 async def scan_mcp_endpoint(
     endpoint: str = Query(..., description="The MCP server's Streamable-HTTP URL"),
     request: Request = None,
@@ -2920,6 +2924,7 @@ async def scan_by_wallet(
     response_model=PublicScanResponse,
     dependencies=[Depends(rate_limit_reads), Depends(rate_limit_scans)],
 )
+@_tool_checks.counted(_tool_checks.repo_key)
 async def public_scan(
     owner: str,
     repo: str,

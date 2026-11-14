@@ -20,6 +20,7 @@ import StartHerePanel from './AdminStartHere'
 import SummaryStrip from './AdminSummaryStrip'
 import { GlossarySection, Info } from './AdminGlossary'
 import CampaignPanel from './AdminCampaignPanel'
+import DncReviewPanel from './AdminDncReview'
 import PostStudioTab from './AdminPostStudio'
 import { AdminAccessPanel, useAdminAccess, ViewOnlyNotice } from './adminAccess'
 import { BarList, Section, Stat, TrendChart, WindowBar } from './adminMetricsKit'
@@ -825,6 +826,8 @@ function MetricsBody() {
       <StartHerePanel />
       <CampaignPanel />
       <LandingTrendPanel />
+      {/* full admins only: confirming a Do not connect puts it in front of the public */}
+      {isAdmin && <DncReviewPanel />}
       <Section title="Product & adoption" scope={scope.label} note="Everything the product counts: the full set, not a slice. Tiles marked 'right now' or 'all time' are not limited to the window.">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           <Stat label="Repos scanned" value={fmt(h.repos_scanned)} sub={`${fmt(h.new_repos)} scanned for the first time${tsf('repos_scanned')}`} series={s.repos_scanned} />

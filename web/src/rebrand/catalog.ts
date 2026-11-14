@@ -155,6 +155,42 @@ export interface RecentItem {
   at: string | null
 }
 
+/** One tool on a Trust Index weekly card. `page_path` has no /rebrand prefix. */
+export interface WeeklyTool {
+  page_path: string
+  surface: string
+  name: string
+  full_name: string | null
+  endpoint_url: string | null
+}
+
+/** "Do not connect this week": answers a person confirmed in the last 7 days. */
+export interface DncWeekItem extends WeeklyTool {
+  decision: 'do_not_connect'
+  decision_reason: string | null
+  confirmed_at: string
+}
+
+/** "Most checked this week": the answer, the Certified mark and the 7-day check count. */
+export interface MostCheckedItem extends WeeklyTool {
+  trust_score: number
+  decision: 'safe' | 'review' | 'do_not_connect'
+  certified_mark: boolean
+  critical: number | null
+  high: number | null
+  checks: number
+}
+
+export async function fetchDncWeek(): Promise<DncWeekItem[]> {
+  const { data } = await publicApi.get<{ items: DncWeekItem[] }>('/public/trust-index/do-not-connect-week')
+  return data.items || []
+}
+
+export async function fetchMostChecked(): Promise<MostCheckedItem[]> {
+  const { data } = await publicApi.get<{ items: MostCheckedItem[] }>('/public/trust-index/most-checked-week')
+  return data.items || []
+}
+
 export async function fetchRecent(limit: number): Promise<RecentItem[]> {
   const { data } = await publicApi.get<{ items: RecentItem[] }>('/public/scan-catalog/recent', { params: { limit } })
   return data.items || []
