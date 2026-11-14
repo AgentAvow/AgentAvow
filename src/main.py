@@ -97,6 +97,8 @@ from src.api.token_router import router as token_router
 from src.api.trust_aggregate_router import router as trust_aggregate_router
 from src.api.trust_explainer_router import router as trust_explainer_router
 from src.api.trust_gateway_router import router as trust_gateway_router
+from src.api.trust_index_router import admin_router as trust_index_admin_router
+from src.api.trust_index_router import public_router as trust_index_public_router
 from src.api.trust_router import router as trust_router
 from src.api.watch_router import router as watch_router
 from src.api.webhook_router import router as webhook_router
@@ -884,6 +886,9 @@ app.include_router(github_app_router, prefix=settings.api_v1_prefix)
 
 # Public scan catalog — browseable index of every launch scan (no auth required)
 app.include_router(scan_catalog_router, prefix=settings.api_v1_prefix)
+# Trust Index weekly cards + the Do not connect review queue (admin only)
+app.include_router(trust_index_public_router, prefix=settings.api_v1_prefix)
+app.include_router(trust_index_admin_router, prefix=settings.api_v1_prefix)
 
 # OG meta tags for social crawler previews (no auth required)
 app.include_router(og_router, prefix=settings.api_v1_prefix)

@@ -1,11 +1,11 @@
-import { useEffect } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { rp } from '../basePath'
 import { Reveal } from '../components/motion'
-import { ScorePairMini, TrustOrCertifiedMini } from '../components/TrustMark'
+import { DecisionLine, ScorePairMini, TrustOrCertifiedMini } from '../components/TrustMark'
 import { CtaBand, PageHeader, SECTION_CLASS, SectionH2 } from '../components/PageBits'
-import { fetchCatalog, fetchFlaggedStat, fetchRecent, rowIdentity, type CatalogRow, type FlaggedStat } from '../catalog'
+import { fetchCatalog, fetchDncWeek, fetchFlaggedStat, fetchMostChecked, fetchRecent, rowIdentity, type CatalogRow, type FlaggedStat } from '../catalog'
 import { AnswerMixBar, StatCards } from '../components/AnswerMix'
 import { SandboxFindingsBlock } from '../components/SandboxStats'
 import SEOHead from '../../components/SEOHead'
@@ -50,6 +50,82 @@ function RecentFeed() {
         })}
       </div>
     </div>
+  )
+}
+
+/** "today" / "yesterday" / "3 days ago" for a weekly card. */
+function daysAgo(iso: string): string {
+  const d = Math.floor(Math.max(0, Date.now() - new Date(iso).getTime()) / 86_400_000)
+  return d === 0 ? 'today' : d === 1 ? 'yesterday' : `${d} days ago`
+}
+
+/** Placeholder while a weekly card loads, and in the prerender: these lists change by
+ * the hour, so the build never bakes them (their queries are not in BUILD_QUERIES). */
+function WeeklyPlaceholder() {
+  return <div className="glass rounded-2xl p-5 min-w-0 h-[220px] animate-pulse" aria-hidden="true" />
+}
+
+function WeeklyCard({ title, note, children }: { title: string; note: string; children: ReactNode }) {
+  return (
+    <div className="glass rounded-2xl p-5 min-w-0 h-full flex flex-col">
+      <h2 className="text-[16px] font-bold">{title}</h2>
+      <div className="mt-3 flex flex-col divide-y divide-border/40">{children}</div>
+      <p className="mt-auto pt-3 text-[11.5px] text-text-muted">{note}</p>
+    </div>
+  )
+}
+
+/** "Do not connect this week": only answers a person read and confirmed (owner rule
+ * 2026-11-11), re-checked by the API at read time. Hidden when there are none. */
+function DncThisWeek() {
+  const { data, isLoading } = useQuery({
+    queryKey: ['weekly-dnc'], queryFn: fetchDncWeek, staleTime: 300_000, refetchInterval: 600_000,
+  })
+  if (import.meta.env.SSR || isLoading) return <WeeklyPlaceholder />
+  const items = data || []
+  if (!items.length) return null
+  return (
+    <WeeklyCard title="Do not connect this week" note="Tools whose Do not connect answer a person read and confirmed in the last 7 days, newest first. A tool leaves the list when a new check changes its answer.">
+      {items.map((it) => (
+        <Link key={it.page_path} to={rp(`/rebrand${it.page_path}`)} onClick={() => trackPageAction('trust_index', 'open_dnc_week')} className="block py-2 px-2 rounded-lg hover:bg-surface-hover/50 transition-colors min-w-0">
+          <div className="flex items-baseline justify-between gap-3 min-w-0">
+            <span className="font-mono text-[12.5px] truncate">{rowIdentity(it as unknown as CatalogRow).display}</span>
+            <span className="font-mono text-[10px] text-text-muted/70 shrink-0">confirmed {daysAgo(it.confirmed_at)}</span>
+          </div>
+          <div className="font-mono text-[10px] text-text-muted/70">{SURFACE_LABEL[it.surface] || it.surface}</div>
+          <DecisionLine row={{ trust_score: 0, decision: it.decision, decision_reason: it.decision_reason || '' }} className="mt-0.5 break-words" />
+        </Link>
+      ))}
+    </WeeklyCard>
+  )
+}
+
+/** "Most checked this week": the top 5 by checks from people and agents in 7 days. The
+ * API hides the list until at least 3 tools have 3+ checks. */
+function MostCheckedThisWeek() {
+  const { data, isLoading } = useQuery({
+    queryKey: ['weekly-most-checked'], queryFn: fetchMostChecked, staleTime: 300_000, refetchInterval: 600_000,
+  })
+  if (import.meta.env.SSR || isLoading) return <WeeklyPlaceholder />
+  const items = data || []
+  if (items.length < 3) return null
+  return (
+    <WeeklyCard title="Most checked this week" note="Checks of each tool in the last 7 days by people and agents: result-page views and scan requests. Crawlers, scripts and our own machines are not counted, and a Do not connect answer is listed only after a person confirmed it.">
+      {items.map((it) => {
+        // The stored answer leads; an empty reason makes the helpers keep it as given.
+        const row = { ...it, decision_reason: '' } as unknown as Record<string, unknown> & { trust_score: number }
+        return (
+          <Link key={it.page_path} to={rp(`/rebrand${it.page_path}`)} onClick={() => trackPageAction('trust_index', 'open_most_checked')} className="flex items-center gap-3 py-2 px-2 rounded-lg hover:bg-surface-hover/50 transition-colors min-w-0">
+            <div className="min-w-0 flex-1">
+              <div className="font-mono text-[12.5px] truncate">{rowIdentity(it as unknown as CatalogRow).display}</div>
+              <DecisionLine row={{ ...it, decision_reason: '' }} className="text-[11.5px]" />
+            </div>
+            <TrustOrCertifiedMini row={row} />
+            <span className="w-[62px] text-right font-mono text-[11px] text-text-muted tabular-nums shrink-0">{it.checks.toLocaleString()} {it.checks === 1 ? 'check' : 'checks'}</span>
+          </Link>
+        )
+      })}
+    </WeeklyCard>
   )
 }
 
@@ -245,12 +321,20 @@ export default function RebrandTrustIndex() {
         </div>
       </Reveal>
 
-      {/* the highlight cards. "Do not connect this week", "Most checked this week" and
-          the share-with-a-serious-finding headline wait on their data (spec 2026-11-07). */}
+      {/* the highlight cards (spec 2026-11-07). The share-with-a-serious-finding headline
+          still waits on its data. */}
       <Reveal>
         <div className="mt-4 grid md:grid-cols-12 gap-4">
           <div className="md:col-span-8 min-w-0"><WhereTheRiskIs stat={stat} /></div>
           <div className="md:col-span-4 min-w-0"><RecentFeed /></div>
+        </div>
+      </Reveal>
+
+      {/* this week: each card hides itself when it has nothing to show (no zero states) */}
+      <Reveal>
+        <div className="mt-4 grid md:grid-cols-2 gap-4 empty:hidden">
+          <MostCheckedThisWeek />
+          <DncThisWeek />
         </div>
       </Reveal>
 

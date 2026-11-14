@@ -2697,5 +2697,38 @@ class PrivateScanResult(Base):
     )
 
 
+class DncReview(Base):
+    """A person's read of one tool's Do not connect answer (owner rule 2026-11-11: no Do
+    not connect result is highlighted to the public until a person has read its
+    finding). One row per result page (``page_key``, the catalog's page identity); a
+    later review of the same page replaces it. The Trust Index's "Do not connect this
+    week" card lists only ``confirmed`` rows that still read Do not connect, for the
+    same reason, at read time. Written only by a full admin."""
+
+    __tablename__ = "dnc_reviews"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    page_key = Column(String(1024), nullable=False, unique=True)
+    page_path = Column(String(1024), nullable=False)
+    surface = Column(String(16), nullable=False)
+    name = Column(String(512), nullable=False)
+    # The answer and its reason as the reviewer saw them. A later scan with a different
+    # reason is a different finding: it needs a new review before it is shown.
+    decision_at_review = Column(String(16), nullable=False)
+    reason_at_review = Column(Text, nullable=True)
+    verdict = Column(String(16), nullable=False)  # confirmed | not_confirmed
+    note = Column(Text, nullable=True)
+    reviewed_by = Column(
+        UUID(as_uuid=True), ForeignKey("entities.id", ondelete="SET NULL"), nullable=True,
+    )
+    reviewed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False,
+                         index=True)
+
+    __table_args__ = (
+        CheckConstraint("verdict IN ('confirmed', 'not_confirmed')",
+                        name="ck_dnc_reviews_verdict"),
+    )
+
+
 # Import marketing models so Alembic can discover them
 from src.marketing.models import MarketingCampaign, MarketingPost  # noqa: E402, F401
