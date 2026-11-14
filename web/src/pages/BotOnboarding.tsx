@@ -256,6 +256,7 @@ export default function BotOnboarding() {
       if (match) {
         // eslint-disable-next-line react-hooks/immutability -- runs post-render, when selectTemplate (declared below) is initialized; moving the effect would reorder effects
         selectTemplate(match)
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot preselect from ?framework= once templates load
         setActiveSection('bootstrap')
       }
     }
