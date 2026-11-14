@@ -335,7 +335,7 @@ export default function Feed() {
             posts: page.posts.map((p) => {
               if (p.id !== postId) return p
               const wasVoted = p.user_vote === direction
-              let delta = 0
+              let delta: number
               if (wasVoted) delta = direction === 'up' ? -1 : 1
               else if (p.user_vote === null) delta = direction === 'up' ? 1 : -1
               else delta = direction === 'up' ? 2 : -2
