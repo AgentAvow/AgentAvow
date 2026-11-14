@@ -308,6 +308,7 @@ export default function Profile() {
 
   useEffect(() => {
     if (blockedData) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- seed local, user-toggleable block state from the server list
       setIsBlocked(blockedData.blocked.some((b) => b.entity_id === entityId))
     }
   }, [blockedData, entityId])

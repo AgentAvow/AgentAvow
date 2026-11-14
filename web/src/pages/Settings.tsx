@@ -383,6 +383,7 @@ export default function Settings() {
 
   useEffect(() => {
     if (trustWeightsData) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- seed editable form state from fetched trust weights
       setLocalWeights({
         verification: trustWeightsData.verification,
         age: trustWeightsData.age,

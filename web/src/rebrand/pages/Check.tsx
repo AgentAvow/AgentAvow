@@ -1580,6 +1580,7 @@ function Erc8004Result({ chain, agentId }: { chain: string; agentId: string }) {
     // Tools not cached yet are checked in the background: re-read until they land.
     refetchInterval: (q) => (q.state.data?.tools.some((t) => t.state === 'checking') && polls < 12 ? 10_000 : false),
   })
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- count refetches to cap background polling
   useEffect(() => { if (dataUpdatedAt) setPolls((n) => n + 1) }, [dataUpdatedAt])
   const qc = useQueryClient()
   const re = useMutation({ mutationFn: () => fetchErc8004(chain, agentId, true), onSuccess: (d) => { setPolls(0); qc.setQueryData(key, d) } })

@@ -35,6 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (token) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- session bootstrap: fetchMe syncs user/loading state from the API whenever the token changes
       fetchMe()
     } else {
       setIsLoading(false)
