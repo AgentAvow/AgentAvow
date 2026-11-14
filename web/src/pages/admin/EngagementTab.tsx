@@ -402,7 +402,7 @@ function TargetsSection() {
       <div className="flex justify-between items-center">
         <h3 className="text-sm font-semibold">Monitored Accounts</h3>
         <button
-          onClick={() => { showForm ? resetForm() : setShowForm(true) }}
+          onClick={() => { if (showForm) resetForm(); else setShowForm(true) }}
           className="bg-primary text-white px-3 py-1.5 rounded text-sm cursor-pointer"
         >
           {showForm ? 'Cancel' : 'Add Target'}
