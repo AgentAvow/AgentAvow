@@ -71,7 +71,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.41"
+__version__ = "0.1.42"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -106,7 +106,7 @@ class _QueuedError(Exception):
 # first scan can take the API ~100 s) is reported as "still being checked" and NOT
 # recorded as graded, so the next session start asks again and reports the real answer.
 # It is retried at most PENDING_MAX_TRIES times or for PENDING_MAX_AGE, then reported
-# once as "not graded: check timed out" and left alone like an unscannable server.
+# once as "not checked: check timed out" and left alone like an unscannable server.
 PENDING_MAX_TRIES = 5
 PENDING_MAX_AGE = 24 * 3600
 
@@ -773,7 +773,7 @@ def _dep_lines_and_graded(cache: dict, deps: list[dict], now: float, started: fl
             unscannable += 1
     _UNSCANNABLE_COUNT[0] = unscannable
     if queued and not lines:
-        lines.append(f"⏳ {queued} dependenc{'y' if queued == 1 else 'ies'} not graded yet: "
+        lines.append(f"⏳ {queued} dependenc{'y' if queued == 1 else 'ies'} not checked yet: "
                      "AgentAvow has queued the scans; they are reported at a later session start.")
     return lines, graded, throttled, queued
 
@@ -783,7 +783,7 @@ _UNSCANNABLE_COUNT = [0]  # dependencies AgentAvow refused (set by _dep_lines_an
 
 def _deps_clause(graded: list[tuple[str, dict]], total: int, throttled: bool = False,
                  queued: int = 0) -> str:
-    """' Dependencies: graded 12 of 38 — 11 Safe, 1 Review (needs attention: ...).'"""
+    """' Dependencies: checked 12 of 38 — 11 Safe, 1 Review (needs attention: ...).'"""
     if not total:
         return ""
     paused = " (paused: rate limited; continues next session)" if throttled else ""
@@ -791,12 +791,12 @@ def _deps_clause(graded: list[tuple[str, dict]], total: int, throttled: bool = F
         paused += f" ({queued} queued for grading)"
     nos = _UNSCANNABLE_COUNT[0]
     if nos:
-        paused += f" ({nos} could not be graded)"
+        paused += f" ({nos} could not be checked)"
     done = len(graded) + nos
     if not done:
-        return f" Dependencies: 0 of {total} graded yet{paused}."
+        return f" Dependencies: 0 of {total} checked yet{paused}."
     of = f"{done} of {total}" if done < total else f"all {total}"
-    out = f" Dependencies: graded {of} — " + _counts(graded)
+    out = f" Dependencies: checked {of} — " + _counts(graded)
     worst = _worst(graded)
     if worst:
         name, r = worst
@@ -841,7 +841,7 @@ def _previously_graded(cache: dict, targets: list[dict], deps: list[dict],
         if "score" in e:
             out.append(f"  {_flag(e)} MCP '{t['name']}': {_answer(e)}")
         elif e.get("reason"):
-            out.append(f"  ➖ MCP '{t['name']}': not graded ({e['reason']})")
+            out.append(f"  ➖ MCP '{t['name']}': not checked ({e['reason']})")
     for t in deps:
         e = cache.get(t["name"])
         if any(f"dependency '{t['pkg']}'" in ln for ln in new_lines):
@@ -849,7 +849,7 @@ def _previously_graded(cache: dict, targets: list[dict], deps: list[dict],
         if isinstance(e, dict) and e.get("id") == t["id"] and "score" in e:
             out.append(f"  {_flag(e)} dependency '{t['pkg']}': {_answer(e)}")
         elif isinstance(e, dict) and e.get("id") == t["id"] and e.get("reason"):
-            out.append(f"  ➖ dependency '{t['pkg']}': not graded ({e['reason']})")
+            out.append(f"  ➖ dependency '{t['pkg']}': not checked ({e['reason']})")
     return out
 
 
@@ -858,7 +858,7 @@ _LEGEND = ("Legend: each line leads with one of three answers and its reason. �
            "version, deprecation, or a score under 51). ⛔ Do not "
            "connect (a critical finding, a planted credential leaving the sandbox, or a "
            "known-malicious package). '· Certified' marks a tool that passed the full "
-           "Certified gate. ➖ not graded, with the reason. ⏳ still being checked: no "
+           "Certified gate. ➖ not checked, with the reason. ⏳ still being checked: no "
            "answer yet, asked again next session; its tools run without a grade until then. "
            "Dependencies are already "
            "installed: their answer is advice, never a stop. Do not interpret the raw cache "
@@ -1518,8 +1518,8 @@ def _intro_message() -> str:
             "package.json, requirements.txt, pyproject.toml or Cargo.toml in this folder. "
             "Add a server (for example "
             "`claude mcp add <name> <https url>` or `claude mcp add <name> -- npx <package>`) "
-            "and it is graded before it is added and again at your next session start; open "
-            "a project and its direct dependencies are graded too. To check any tool right "
+            "and it is checked before it is added and again at your next session start; open "
+            "a project and its direct dependencies are checked too. To check any tool right "
             f"now, {how}.")
 
 
@@ -1653,7 +1653,7 @@ def _waiting_clause(pending: int, timed_out: int, alone: bool) -> str:
                      "next session")
     if timed_out:
         noun = f"MCP server{'' if timed_out == 1 else 's'} " if alone else ""
-        parts.append(f"{timed_out} {noun}not graded: check timed out")
+        parts.append(f"{timed_out} {noun}not checked: check timed out")
     return "; ".join(parts)
 
 
@@ -1668,7 +1668,7 @@ def _summary(graded: list[tuple[str, dict]], elsewhere: int = 0, deps: str = "",
     the line is about dependencies only."""
     n = len(graded)
     tail = (f" {elsewhere} more MCP server{'' if elsewhere == 1 else 's'} configured for other "
-            "projects, graded when you open them." if elsewhere else "")
+            "projects, checked when you open them." if elsewhere else "")
     if not servers_present:
         return ("AgentAvow pre-check: no MCP servers in this project." + deps
                 + " Ask for the AgentAvow pre-check for details." + tail)
@@ -1682,7 +1682,7 @@ def _summary(graded: list[tuple[str, dict]], elsewhere: int = 0, deps: str = "",
     if not n:
         return ("AgentAvow pre-check: a configured MCP server could not be scanned; "
                 "ask for the AgentAvow pre-check for details." + deps + tail)
-    parts = [f"AgentAvow pre-check: graded {n} MCP server{'' if n == 1 else 's'} — "
+    parts = [f"AgentAvow pre-check: checked {n} MCP server{'' if n == 1 else 's'} — "
              + _counts(graded)]
     worst = _worst(graded)
     if worst:
@@ -1749,7 +1749,7 @@ def _pending(cache: dict, t: dict, entry: object, now: float, asked: bool,
     if tries >= PENDING_MAX_TRIES or now - since >= PENDING_MAX_AGE:
         cache[t["name"]] = {"id": t["id"], "retry_after": now + RETRY_UNSCANNABLE,
                             "reason": "check timed out"}
-        lines.append(f"➖ MCP '{t['name']}' ({coord}): not graded: check timed out — "
+        lines.append(f"➖ MCP '{t['name']}' ({coord}): not checked: check timed out — "
                      "AgentAvow had no answer after several session starts; it is checked "
                      "again in a week. Scan it on demand at https://agentavow.com/check.")
         return "timed_out"
@@ -1849,7 +1849,7 @@ def _main() -> None:
         if refresh and _dval(result) == _dval(entry):
             continue  # routine re-check, same answer: nothing to say
         graded.append((t["name"], result))
-        changed = ("its tool definitions changed since the last grade; re-graded: "
+        changed = ("its tool definitions changed since the last grade; re-checked: "
                    if regraded else
                    f"updated grade (was: {_answer(entry)}): " if refresh else "")
         sandbox = f"; {result['sandbox']}" if result.get("sandbox") else ""
@@ -1895,10 +1895,10 @@ def _main() -> None:
     except Exception:
         earlier = []
     if earlier:
-        lines.append("Graded at an earlier session start (unchanged since):")
+        lines.append("Checked at an earlier session start (unchanged since):")
         lines += earlier
     context = (
-        "AgentAvow pre-check — new MCP servers and direct dependencies graded before you "
+        "AgentAvow pre-check — new MCP servers and direct dependencies checked before you "
         "rely on them.\n"
         "The user has NOT seen this (hook output is not displayed to them). At the very "
         "start of your first reply in this session, before anything else, tell them in one "

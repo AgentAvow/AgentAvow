@@ -137,7 +137,7 @@ def test_deps_are_graded_reported_and_summarized(hook, monkeypatch, capsys, tmp_
     out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: scores[t["pkg"]])
     msg = out["systemMessage"]
     assert msg.startswith("AgentAvow pre-check: no MCP servers in this project.")
-    assert ("Dependencies: graded all 3 — 2 Safe, 1 Review (needs attention: 'left-pad' Review "
+    assert ("Dependencies: checked all 3 — 2 Safe, 1 Review (needs attention: 'left-pad' Review "
             "before you connect — the maintainer has deprecated this package).") in msg
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert ("⚠️ dependency 'left-pad' (npm:left-pad@1.3.0): Review before you connect — the "
@@ -158,13 +158,13 @@ def test_cap_per_session_and_the_rest_next_time(hook, monkeypatch, capsys, tmp_p
 
     out = _run(hook, monkeypatch, capsys, scan)
     assert len(calls) == hook.DEPS_CAP == 8
-    assert "Dependencies: graded 8 of 20 — 8 Safe, 0 Review." in out["systemMessage"]
+    assert "Dependencies: checked 8 of 20 — 8 Safe, 0 Review." in out["systemMessage"]
     out2 = _run(hook, monkeypatch, capsys, scan)
     assert len(calls) == 16
-    assert "Dependencies: graded 16 of 20 — 16 Safe, 0 Review." in out2["systemMessage"]
+    assert "Dependencies: checked 16 of 20 — 16 Safe, 0 Review." in out2["systemMessage"]
     out3 = _run(hook, monkeypatch, capsys, scan)
     assert len(calls) == 20
-    assert "Dependencies: graded all 20 — 20 Safe, 0 Review." in out3["systemMessage"]
+    assert "Dependencies: checked all 20 — 20 Safe, 0 Review." in out3["systemMessage"]
     assert _run(hook, monkeypatch, capsys, scan) == {}  # nothing new: silent
     assert len(calls) == 20
 
@@ -182,7 +182,7 @@ def test_rate_limit_stops_the_pass_and_says_so(hook, monkeypatch, capsys, tmp_pa
 
     out = _run(hook, monkeypatch, capsys, scan)
     assert calls == ["a", "b"]  # stopped at the 429; 'c' waits for next session
-    assert "Dependencies: graded 1 of 3 — 1 Safe, 0 Review (paused: rate limited; continues next session)." in out["systemMessage"]
+    assert "Dependencies: checked 1 of 3 — 1 Safe, 0 Review (paused: rate limited; continues next session)." in out["systemMessage"]
     out2 = _run(hook, monkeypatch, capsys, scan)
     assert calls == ["a", "b", "b"]  # 'b' retried first next time (still 429 here)
     assert "paused: rate limited" in out2["systemMessage"]
@@ -220,7 +220,7 @@ def test_unscannable_and_transient_failures_fail_open(hook, monkeypatch, capsys,
     assert "➖ dependency 'a'" in ctx and "not scanned" in ctx
     assert "dependency 'b'" not in ctx  # transient: silent, retried next session
     # A refused dependency counts as done (it will not become gradable by waiting).
-    assert "Dependencies: graded 2 of 3 — 1 Safe, 0 Review (1 could not be graded)." in out["systemMessage"]
+    assert "Dependencies: checked 2 of 3 — 1 Safe, 0 Review (1 could not be checked)." in out["systemMessage"]
     cache = json.loads(hook.CACHE.read_text())
     assert "retry_after" in cache["dep:npm:a"] and "dep:npm:b" not in cache
 
@@ -236,8 +236,8 @@ def test_servers_and_deps_share_one_summary_line(hook, monkeypatch, capsys, tmp_
     out = _run(hook, monkeypatch, capsys, scan)
     msg = out["systemMessage"]
     # thin coverage reads Safe (2026-10-08, #19), so nothing needs attention
-    assert msg.startswith("AgentAvow pre-check: graded 1 MCP server — 1 Safe, 0 Review.")
-    assert "Dependencies: graded all 1 — 1 Safe, 0 Review." in msg
+    assert msg.startswith("AgentAvow pre-check: checked 1 MCP server — 1 Safe, 0 Review.")
+    assert "Dependencies: checked all 1 — 1 Safe, 0 Review." in msg
     assert msg.endswith("Ask for the AgentAvow pre-check for details.")
 
 
@@ -246,7 +246,7 @@ def test_dependency_pass_errors_never_break_the_server_report(hook, monkeypatch,
         {"name": "dw", "kind": "mcp", "id": "https://mcp.deepwiki.com/mcp", "url": "https://mcp.deepwiki.com/mcp"}])
     monkeypatch.setattr(hook, "_dependency_targets", lambda: [{"broken": True}])
     out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: _ok(90, "safe"))
-    assert "graded 1 MCP server — 1 Safe" in out["systemMessage"]
+    assert "checked 1 MCP server — 1 Safe" in out["systemMessage"]
 
 
 def test_intro_only_when_neither_servers_nor_manifests(hook, monkeypatch, capsys):
@@ -270,7 +270,7 @@ def test_dependency_lines_lead_with_the_phrase_and_never_block(hook, monkeypatch
     }
     out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: scores[t["pkg"]])
     msg = out["systemMessage"]
-    assert ("Dependencies: graded all 3 — 0 Safe, 2 Review, 1 Don't connect (needs attention: "
+    assert ("Dependencies: checked all 3 — 0 Safe, 2 Review, 1 Don't connect (needs attention: "
             "'evil-pkg' Do not connect — 2 critical findings, including hardcoded key).") in msg
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert ("⚠️ dependency 'fastapi' (pypi:fastapi): Review before you connect — 30 high "
@@ -373,7 +373,7 @@ def test_session_cwd_from_the_hook_payload_wins_over_the_process_cwd(hook, monke
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"hook_event_name": "SessionStart",
                                                              "source": "clear", "cwd": str(project)})))
     out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: _ok(90, "safe"))
-    assert "Dependencies: graded all 1 — 1 Safe, 0 Review." in out["systemMessage"]
+    assert "Dependencies: checked all 1 — 1 Safe, 0 Review." in out["systemMessage"]
     assert hook._cwd() == project
 
 
@@ -448,7 +448,7 @@ def test_queued_dependencies_are_counted_retried_soon_and_never_block(hook, monk
 
     out = _run(hook, monkeypatch, capsys, scan)
     msg = out["systemMessage"]
-    assert "Dependencies: graded 1 of 3 — 1 Safe, 0 Review (2 queued for grading)." in msg
+    assert "Dependencies: checked 1 of 3 — 1 Safe, 0 Review (2 queued for grading)." in msg
     cache = json.loads(hook.CACHE.read_text())
     assert cache["dep:npm:b"]["retry_after"] - hook.time.time() < hook.RETRY_QUEUED + 5
     # Next session (within the retry window): nothing new is asked about, so silence.
@@ -461,8 +461,8 @@ def test_queued_dependencies_are_counted_retried_soon_and_never_block(hook, monk
         raise hook._QueuedError("queued")
 
     out = _run(hook, monkeypatch, capsys, all_queued)
-    assert "1 dependency not graded yet" in out["hookSpecificOutput"]["additionalContext"]
-    assert "Dependencies: 0 of 1 graded yet (1 queued for grading)." in out["systemMessage"]
+    assert "1 dependency not checked yet" in out["hookSpecificOutput"]["additionalContext"]
+    assert "Dependencies: 0 of 1 checked yet (1 queued for grading)." in out["systemMessage"]
 
 
 # --- summary wording ------------------------------------------------------------------
@@ -475,13 +475,13 @@ def test_summary_does_not_claim_a_server_failed_when_only_dependencies_are_new(h
     # Session 1: server + dependency both new.
     out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: _ok(74, "needs review", 0, reason="thin_coverage", decision="review", decision_reason="the maintainer has deprecated this package")
                if t["kind"] == "mcp" and "url" in t else _ok(90, "safe"))
-    assert out["systemMessage"].startswith("AgentAvow pre-check: graded 1 MCP server — 0 Safe, 1 Review (needs attention: 'dw' Review before you connect — the maintainer has deprecated this package).")
-    assert out["systemMessage"].endswith("3 more MCP servers configured for other projects, graded when you open them.")
+    assert out["systemMessage"].startswith("AgentAvow pre-check: checked 1 MCP server — 0 Safe, 1 Review (needs attention: 'dw' Review before you connect — the maintainer has deprecated this package).")
+    assert out["systemMessage"].endswith("3 more MCP servers configured for other projects, checked when you open them.")
     assert "⚠️ MCP 'dw' (https://mcp.deepwiki.com/mcp): Review before you connect — the maintainer has deprecated this package · AgentAvow 74/100." in out["hookSpecificOutput"]["additionalContext"]
     # Session 2: a NEW dependency appears, the server is unchanged → no "could not be scanned".
     (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"chalk": "5", "lodash": "4"}}))
     out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: _ok(90, "safe"))
-    assert out["systemMessage"].startswith("AgentAvow pre-check: MCP servers unchanged. Dependencies: graded all 2 — 2 Safe, 0 Review.")
+    assert out["systemMessage"].startswith("AgentAvow pre-check: MCP servers unchanged. Dependencies: checked all 2 — 2 Safe, 0 Review.")
     assert "could not be scanned" not in out["systemMessage"]
 
 
@@ -499,7 +499,7 @@ def test_refusal_reason_is_shown_and_the_count_completes(hook, monkeypatch, caps
         return _ok(92, "safe")
 
     out = _run(hook, monkeypatch, capsys, scan)
-    assert "Dependencies: graded all 2 — 1 Safe, 0 Review (1 could not be graded)." in out["systemMessage"]
+    assert "Dependencies: checked all 2 — 1 Safe, 0 Review (1 could not be checked)." in out["systemMessage"]
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert ("➖ dependency 'sqlalchemy' (pypi:sqlalchemy): not scanned — AgentAvow couldn't grade it "
             "(artifact exceeds unpacked-size cap (zip bomb?)). Neither safe nor unsafe.") in ctx
@@ -532,10 +532,10 @@ def test_detail_view_includes_items_graded_at_earlier_starts(hook, monkeypatch, 
     out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: scores[t["pkg"]])
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert "✅ dependency 'httpx-like' (npm:httpx-like@2)" in ctx  # the re-graded one, in full
-    assert "Graded at an earlier session start (unchanged since):" in ctx
+    assert "Checked at an earlier session start (unchanged since):" in ctx
     assert "  ✅ dependency 'chalk': Safe to connect — nothing found · AgentAvow 90/100" in ctx
     assert "  ⚠️ dependency 'fastapi-like': Review before you connect — 30 high finding(s) · AgentAvow 40/100" in ctx
-    earlier = ctx.split("Graded at an earlier session start (unchanged since):", 1)[1]
+    earlier = ctx.split("Checked at an earlier session start (unchanged since):", 1)[1]
     assert "httpx-like" not in earlier  # the re-graded one is not repeated in the earlier list
 
 
@@ -556,7 +556,7 @@ def test_quiet_start_is_silent_for_the_person_but_gives_claude_the_full_list(hoo
     assert "  ✅ dependency 'uvicorn': Safe to connect — nothing found · AgentAvow 92/100" in ctx
     assert "  ⚠️ dependency 'fastapi': Review before you connect — 30 high finding(s) · AgentAvow 40/100" in ctx
     assert "Safe to connect" in ctx and "Do not connect" in ctx  # the legend names all three
-    assert "  ➖ dependency 'sqlalchemy': not graded (artifact exceeds unpacked-size cap (zip bomb?))" in ctx
+    assert "  ➖ dependency 'sqlalchemy': not checked (artifact exceeds unpacked-size cap (zip bomb?))" in ctx
     assert "Do not interpret the raw cache file" in ctx
 
 
