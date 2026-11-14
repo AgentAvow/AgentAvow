@@ -1448,6 +1448,7 @@ function ReplyConsideringCard({ r, onDone }: { r: ReplyRow; onDone: () => void }
     mutationFn: (body: { action: string; draft_content?: string }) => api.post(`/admin/engagement/queue/${r.id}/action`, body),
     onSuccess: onDone,
   })
+  // eslint-disable-next-line react-hooks/purity -- relative age is meant to reflect the time of render
   const ageH = r.drafted_at ? (Date.now() - new Date(r.drafted_at).getTime()) / 3.6e6 : 0
   const leftH = Math.max(0, REPLY_TTL_H - ageH)
   return (
