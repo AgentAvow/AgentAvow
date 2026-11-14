@@ -26,6 +26,7 @@ export const SANDBOX_RULE_LABEL: Record<string, string> = {
   credential_canary_exfiltrated: 'Canary credential sent off the machine',
   canary_echoed_in_result: 'Tool returned a secret in its output',
   tool_call_crashed_server: 'Tool call crashed the server',
+  cloud_metadata_probe: 'Probed cloud metadata',
 }
 
 async function fetchSandboxStats(): Promise<SandboxStats | null> {

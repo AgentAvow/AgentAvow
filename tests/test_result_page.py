@@ -244,9 +244,12 @@ def test_every_result_type_renders_through_one_result_page():
     # Certified shows once, as the badge in the trust-score slot: no CERTIFIED tag.
     assert 'data-testid="certified-mark"' not in page and "CertifiedBadge" in page
     # The old per-surface score labels are gone: every page says "Trust score".
-    for rel in ("web/src/rebrand/pages/Check.tsx", "web/src/rebrand/components/ResultPage.tsx"):
+    for rel in ("web/src/rebrand/pages/Check.tsx", "web/src/rebrand/components/ResultPage.tsx",
+                "web/src/rebrand/pages/HowItWorks.tsx", "web/src/rebrand/pages/FAQ.tsx",
+                "web/src/rebrand/lib/scoreCard.ts", "src/api/public_scan_router.py"):
         text = (ROOT / rel).read_text()
         assert "Attestation Trust" not in text and "Capability Trust" not in text, rel
+        assert "ATTESTATION TRUST" not in text, rel
 
 
 def test_severe_row_fails_when_the_sandbox_found_a_high(results):

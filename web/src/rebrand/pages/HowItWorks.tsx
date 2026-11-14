@@ -85,7 +85,7 @@ export default function RebrandHowItWorks() {
       <Reveal>
         <div className="mt-10 glass rounded-2xl p-7">
           <h2 className="text-xl font-bold">Two axes, one signed record.</h2>
-          <p className="mt-2 text-text-muted text-[14px] max-w-[62ch]"><strong className="text-text">Attestation Trust</strong> is the signed safety score from our scanner — live and verifiable now. <strong className="text-text">Adoption</strong> reflects how much the ecosystem actually uses a tool. Together they tell you both "is it safe?" and "is it real?"</p>
+          <p className="mt-2 text-text-muted text-[14px] max-w-[62ch]"><strong className="text-text">The trust score</strong> (0–100) is the signed safety score from our scanner, and anyone can verify it. <strong className="text-text">Adoption</strong> reflects how much the ecosystem actually uses a tool. Together they tell you both "is it safe?" and "is it real?"</p>
           <div className="mt-5 rounded-xl border border-border/60 bg-surface/30 overflow-hidden relative">
             {/* specimen framing — an illustrative example, distinct from the live readout on a score page */}
             <div className="flex items-center justify-between px-4 py-2 border-b border-border/50 bg-surface/40">
@@ -99,7 +99,7 @@ export default function RebrandHowItWorks() {
               <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(340px 130px at 25% 0%, rgba(34,197,94,0.10), transparent 70%), radial-gradient(340px 130px at 78% 0%, rgba(45,212,191,0.10), transparent 70%)' }} />
               <div className="relative p-6 text-center flex flex-col items-center border-r border-border/50">
                 <div className="min-h-[100px] sm:min-h-[132px] flex items-center justify-center"><TrustBar score={94} /></div>
-                <div className="mt-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-success">Attestation Trust</div>
+                <div className="mt-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-success">Trust score</div>
               </div>
               <div className="relative p-6 text-center flex flex-col items-center">
                 <div className="min-h-[100px] sm:min-h-[132px] flex items-center justify-center"><AdoptionNeedle count={12400} unit="stars" /></div>

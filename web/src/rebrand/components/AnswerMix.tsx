@@ -114,7 +114,7 @@ export function StatCards({ set }: { set: 'home' | 'index' }) {
         { n: runs, label: 'sandbox runs', to: '/rebrand/docs/behavioral-sandbox' },
         { n: mix?.certified, label: 'Certified', to: '/rebrand/certified', tone: 'grad' },
         // The detection categories are a fixed part of the scanner, not a catalog count.
-        { n: 12, label: 'detection categories', to: '/rebrand/how-it-works' },
+        { n: 14, label: 'detection categories', to: '/rebrand/how-it-works' },
       ]
     : [
         { n: mix?.dnc, label: 'Do not connect', to: DNC_LIST, tone: 'bad' },
