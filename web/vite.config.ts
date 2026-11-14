@@ -62,11 +62,15 @@ export default defineConfig(({ mode, isSsrBuild }) => {
     ssr: { noExternal: true },
     build: {
       copyPublicDir: !isSsrBuild,
-      rollupOptions: {
+      // Vite 8 bundles with Rolldown: object-form `manualChunks` is gone, so the same
+      // vendor/query split is expressed as codeSplitting groups.
+      rolldownOptions: {
         output: isSsrBuild ? {} : {
-          manualChunks: {
-            vendor: ['react', 'react-dom', 'react-router-dom'],
-            query: ['@tanstack/react-query'],
+          codeSplitting: {
+            groups: [
+              { name: 'vendor', test: /[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/ },
+              { name: 'query', test: /[\\/]node_modules[\\/]@tanstack[\\/](react-query|query-core)[\\/]/ },
+            ],
           },
         },
       },
