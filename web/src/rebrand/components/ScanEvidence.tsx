@@ -172,6 +172,7 @@ function pickTools(scan: ScanLike): { rows: ToolRow[]; source: ToolSource } | nu
 }
 
 /** Whether the result holds any tool list (live, sandbox, code or bare digests). */
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper co-located with the component it serves; HMR falls back to a full reload here
 export function hasToolList(scan: unknown): boolean {
   return !!pickTools(scan as ScanLike)
 }
@@ -308,6 +309,7 @@ export function PackageFacts({ scan: raw, surface }: { scan: unknown; surface: s
 
 /** The badge URL for a published package. ``/package/<surface>/<name>/badge`` takes
  * names with a slash too (scoped npm ``@scope/name``, Hugging Face ``org/model``). */
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper co-located with the component it serves; HMR falls back to a full reload here
 export function packageBadgeUrl(origin: string, surface: string, name: string): string {
   return `${origin}/api/v1/public/scan/package/${surface}/${name.split('/').map(encodeURIComponent).join('/')}/badge`
 }

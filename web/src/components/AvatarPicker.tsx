@@ -73,4 +73,5 @@ export default function AvatarPicker({ entityId, entityType, currentUrl, onSelec
   )
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- avatar lists are shared with the picker page; HMR falls back to a full reload here
 export { HUMAN_AVATARS, AGENT_AVATARS }
