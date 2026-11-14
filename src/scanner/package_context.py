@@ -764,11 +764,15 @@ def _lower_shown_in_tree(findings: list, texts: dict[str, str], hints: Hints,
     * a JSON data field (``"install": "curl … | bash"`` in an agent catalog, an attack
       prompt in an eval dataset) whose key no code hands to an exec sink
       (``src.scanner.shown_text``);
+    * a Go / Rust string that only reaches a print, a log line or an error value
+      (``src.scanner.shown_native``; package and repository scans alike);
     * ``code_hints``: a JS / TS / Python string the per-file walk could not finish
       because its value leaves the file (a ``logger`` module, a module constant read in
       error messages) and that, followed through the whole tree, only reaches
       print / log / error-message output (``src.scanner.printed_hint``). Never while
       any file replaces the output (``output_replaced``)."""
+    from src.scanner.shown_native import is_supported as native_supported
+    from src.scanner.shown_native import why_not as native_why_not
     from src.scanner.shown_text import WHY_SHOWN, json_data_key, json_key_executed
     pat = None
     for f in findings:
@@ -791,6 +795,12 @@ def _lower_shown_in_tree(findings: list, texts: dict[str, str], hints: Hints,
         if key is not None:
             if not json_key_executed(key, path, texts):
                 _lower(f, WHY_SHOWN)
+            continue
+        if native_supported(path):
+            # Go / Rust: a message built with fmt.Sprintf / format! that only reaches a
+            # print, a log line or an error value (``src.scanner.shown_native``).
+            if native_why_not(texts, path, f.line_number, pat) is None:
+                _lower(f, WHY_HINT)
             continue
         if not code_hints or not is_supported(path):
             continue

