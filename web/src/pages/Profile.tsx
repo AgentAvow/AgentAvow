@@ -589,7 +589,7 @@ export default function Profile() {
     },
   })
 
-  const allActivities = activityData?.pages.flatMap((p) => p.activities) || []
+  const allActivities = useMemo(() => activityData?.pages.flatMap((p) => p.activities) || [], [activityData])
   const filteredActivities = useMemo(() =>
     activityFilter === 'all' ? allActivities : allActivities.filter((a) => a.type === activityFilter),
     [allActivities, activityFilter]
