@@ -144,3 +144,40 @@ def test_env_sent_stays_critical(code, lang):
 ])
 def test_env_key_lookup_or_child_env_is_not_a_dump(code, lang):
     assert env_dump_exfil_hits(code, lang) == []
+
+
+# --- the tree pass for a membership-only suffix Set ---------------------------------
+
+def _tree_sevs(registry: str, importer: str) -> list[str]:
+    from src.scanner import npm_scripts
+
+    path = "dist/provider-api/custom-registry.js"
+    findings, _, _ = _scan_content(registry, path)
+    texts = {path: registry, "dist/provider-api/index.js": importer}
+    npm_scripts.restore_signature_hosts(findings, texts)
+    return [f.severity for f in findings if f.name == EXFIL]
+
+
+_IMPORTER = 'import { validateAllowedHostSuffixes } from "./custom-registry.js";\n'
+
+
+def test_private_membership_set_stays_low_when_module_is_imported():
+    reg = (FIX / "agent_native_custom_registry.js.txt").read_text()
+    assert _tree_sevs(reg, _IMPORTER) == ["low", "low"]
+
+
+@pytest.mark.parametrize("change", [
+    # exported, re-exported, or read beyond a membership test: an importer may send it
+    lambda s: s.replace("const FORBIDDEN_HOST_SUFFIXES", "export const FORBIDDEN_HOST_SUFFIXES"),
+    lambda s: s + "export {\n  FORBIDDEN_HOST_SUFFIXES,\n};\n",
+    lambda s: s + "export function suffixes() { return [...FORBIDDEN_HOST_SUFFIXES]; }\n",
+    lambda s: s + "module.exports = { validateAllowedHostSuffixes };\n",
+])
+def test_reachable_suffix_set_is_restored(change):
+    reg = change((FIX / "agent_native_custom_registry.js.txt").read_text())
+    assert "critical" in _tree_sevs(reg, _IMPORTER)
+
+
+def test_other_file_naming_the_set_restores():
+    reg = (FIX / "agent_native_custom_registry.js.txt").read_text()
+    assert "critical" in _tree_sevs(reg, "fetch('https://' + [...FORBIDDEN_HOST_SUFFIXES][0]);\n")

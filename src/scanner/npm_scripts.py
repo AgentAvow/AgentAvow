@@ -888,6 +888,27 @@ def mark_signature(finding: object, severity: str, arrays: set[str]) -> None:
     finding.remediation = SIGNATURE_WHY  # type: ignore[attr-defined]
 
 
+def _membership_only(text: str, path: str, arrays: set[str]) -> bool:
+    """In JS / TS module ``text``, every array is declared once (``const NAME = new
+    Set([``, not exported), every other use is a membership test (``NAME.has(x)`` /
+    ``NAME.includes(x)``), and the module has no CommonJS export: nothing that imports
+    the module can read the array (@agent-native/core's FORBIDDEN_HOST_SUFFIXES)."""
+    if not text or not path.lower().endswith(
+            (".js", ".mjs", ".ts", ".mts", ".jsx", ".tsx")):
+        return False
+    if re.search(r"\bmodule\.exports\b|(?<![\w$.])exports\s*[.\[]|\bexport\s+default\b", text):
+        return False
+    for name in arrays:
+        n = re.escape(name)
+        decls = re.findall(r"(?m)^[ \t]*(?:const|let|var)\s+" + n + r"\s*=", text)
+        uses = len(re.findall(r"(?<![\w$])" + n + r"(?![\w$])", text))
+        tests = len(re.findall(r"(?<![\w$.])" + n + r"\s*\.\s*(?:has|includes)\s*\(", text))
+        if len(decls) != 1 or uses != 1 + tests or re.search(
+                r"\bexport\b(?:\s*\{[^}]*|[^\n;]*)(?<![\w$])" + n + r"(?![\w$])", text):
+            return False
+    return True
+
+
 def restore_signature_hosts(findings: list, texts: dict[str, str]) -> None:
     """Another code file of the tree that names the array, or loads this file into its
     own process (``source`` / ``.`` / import / require / from naming it), may send the
@@ -899,11 +920,14 @@ def restore_signature_hosts(findings: list, texts: dict[str, str]) -> None:
         sev, arrays = f._signature_restore
         stem = re.escape(f.file_path.rsplit("/", 1)[-1].rsplit(".", 1)[0])
         alt = "|".join(re.escape(a) for a in sorted(arrays))
-        rx = re.compile(
-            r"(?<![\w$])(?:" + alt + r")(?![\w$])|"
-            r"(?:^|[;&|]\s*|\bthen\s+|\bdo\s+)(?:source|\.)\s+[^\n;]*" + stem + r"|"
+        named = r"(?<![\w$])(?:" + alt + r")(?![\w$])"
+        loads = (
+            r"|(?:^|[;&|]\s*|\bthen\s+|\bdo\s+)(?:source|\.)\s+[^\n;]*" + stem + r"|"
             r"(?:\bimport\b|\brequire\s*\(|\bfrom\b|\bimportlib\b|\brunpy\b)[^\n]*"
-            r"(?<![\w$])" + stem + r"(?![\w$])", re.M)
+            r"(?<![\w$])" + stem + r"(?![\w$])")
+        if _membership_only(texts.get(f.file_path) or "", f.file_path, arrays):
+            loads = ""      # importing the module cannot reach a private membership Set
+        rx = re.compile(named + loads, re.M)
         if f.file_path not in texts or any(
                 p != f.file_path and t and _is_code_file(p) and rx.search(t)
                 for p, t in texts.items()):
