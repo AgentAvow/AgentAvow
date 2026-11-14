@@ -240,7 +240,7 @@ def test_drifted_server_is_regraded_with_force_and_reported_again(hook, monkeypa
     }}))
     out = _run(hook, monkeypatch, capsys, [_mcp("a", url)], scan)
     assert calls == [True]
-    assert ("tool definitions changed since the last grade; re-graded: Safe to connect — "
+    assert ("tool definitions changed since the last grade; re-checked: Safe to connect — "
             "nothing found · AgentAvow 61/100") in out
     rec = json.loads(hook.CACHE.read_text())["a"]
     assert rec["tool_digests"] == {"tool:a": "sha256:new"} and "last_seen" not in rec
@@ -411,7 +411,7 @@ def test_graded_servers_produce_a_visible_summary_and_a_first_reply_instruction(
               "https://c.example/mcp": _ok(74, "needs review", 0)}
     out = _run_raw(hook, monkeypatch, capsys, targets, lambda t, force=False: scores[t["id"]])
     msg = out["systemMessage"]
-    assert msg.startswith("AgentAvow pre-check: graded 3 MCP servers — 2 Safe, 0 Review, 1 Don't connect")
+    assert msg.startswith("AgentAvow pre-check: checked 3 MCP servers — 2 Safe, 0 Review, 1 Don't connect")
     assert "(needs attention: 'b' Do not connect — one critical finding: eval)" in msg
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert "has NOT seen this" in ctx and "first reply" in ctx
@@ -422,9 +422,9 @@ def test_graded_servers_produce_a_visible_summary_and_a_first_reply_instruction(
 
 def test_summary_wording_for_one_safe_server_and_for_none_graded(hook):
     assert hook._summary([("a", _ok(90, "safe", 0))]).startswith(
-        "AgentAvow pre-check: graded 1 MCP server — 1 Safe, 0 Review.")
+        "AgentAvow pre-check: checked 1 MCP server — 1 Safe, 0 Review.")
     assert hook._summary([("a", _ok(40, "needs review", 0))]) == (
-        "AgentAvow pre-check: graded 1 MCP server — 0 Safe, 1 Review "
+        "AgentAvow pre-check: checked 1 MCP server — 0 Safe, 1 Review "
         "(needs attention: 'a' Review before you connect — trust score 40/100 is under 51). "
         "Ask for the AgentAvow pre-check for details.")
     cert = _ok(98, "safe", 0, decision="safe", certified=True,
@@ -497,8 +497,8 @@ def test_elsewhere_is_zero_without_projects_or_on_error(hook, monkeypatch, tmp_p
 
 def test_summary_mentions_servers_in_other_projects(hook):
     s = hook._summary([("a", _ok(90, "safe", 0))], elsewhere=2)
-    assert s.endswith("2 more MCP servers configured for other projects, graded when you open them.")
-    assert "graded 1 MCP server — 1 Safe" in s
+    assert s.endswith("2 more MCP servers configured for other projects, checked when you open them.")
+    assert "checked 1 MCP server — 1 Safe" in s
     assert "other projects" not in hook._summary([("a", _ok(90, "safe", 0))])
 
 
@@ -675,7 +675,7 @@ def test_slow_scan_is_still_being_checked_then_reported_next_session(
     targets = [_mcp("deepwiki", "https://mcp.deepwiki.com/mcp"), _pkg("mem", "claude-mem")]
     first = _run_raw(hook, monkeypatch, capsys, targets, scan)
     assert first["systemMessage"].startswith(
-        "AgentAvow pre-check: graded 1 MCP server — 1 Safe, 0 Review; "
+        "AgentAvow pre-check: checked 1 MCP server — 1 Safe, 0 Review; "
         "1 still being checked; its answer shows next session.")
     ctx = first["hookSpecificOutput"]["additionalContext"]
     assert "⏳ MCP 'mem' (npm:claude-mem): still being checked" in ctx
@@ -754,8 +754,8 @@ def test_still_checking_gives_up_after_max_tries_and_says_so_once(hook, monkeypa
         assert "still being checked" in out["systemMessage"]
     last = _run_raw(hook, monkeypatch, capsys, targets, scan)
     assert last["systemMessage"].startswith(
-        "AgentAvow pre-check: 1 MCP server not graded: check timed out.")
-    assert "not graded: check timed out" in last["hookSpecificOutput"]["additionalContext"]
+        "AgentAvow pre-check: 1 MCP server not checked: check timed out.")
+    assert "not checked: check timed out" in last["hookSpecificOutput"]["additionalContext"]
     entry = json.loads(hook.CACHE.read_text())["a"]
     assert entry["reason"] == "check timed out" and "approved_at" not in entry
     # Shown once: the next start shows the person nothing new.
@@ -772,7 +772,7 @@ def test_still_checking_gives_up_after_a_day(hook, monkeypatch, capsys):
     cache["a"]["pending_since"] -= hook.PENDING_MAX_AGE + 1
     hook.CACHE.write_text(json.dumps(cache))
     out = _run_raw(hook, monkeypatch, capsys, targets, scan)
-    assert "not graded: check timed out" in out["systemMessage"]
+    assert "not checked: check timed out" in out["systemMessage"]
 
 
 def test_routine_recheck_that_times_out_keeps_the_old_grade_quietly(hook, monkeypatch, capsys):

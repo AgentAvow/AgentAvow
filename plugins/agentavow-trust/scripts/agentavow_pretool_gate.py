@@ -85,7 +85,7 @@ import time
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.41"
+__version__ = "0.1.42"
 
 CACHE = pathlib.Path.home() / ".cache" / "agentavow" / "scanned.json"
 META_KEY = "_agentavow"  # cache entry holding hook state; never a server name
@@ -813,7 +813,7 @@ def drift_decision(name: str, record: dict, cfg: dict | None, tool: str,
     expected = approved.get(key)
     if expected is None:
         return "ask", (f"AgentAvow: '{tool}' on MCP '{name}' was not among the tools AgentAvow "
-                       f"graded ({score}/100); the server added it since. Review before "
+                       f"checked ({score}/100); the server added it since. Review before "
                        f"running. Report: {report}")
     if live == UNBOUND_DIGEST:
         return "ask", (f"AgentAvow: the definition of '{tool}' on MCP '{name}' holds text "
@@ -821,8 +821,8 @@ def drift_decision(name: str, record: dict, cfg: dict | None, tool: str,
                        f"would not show. Review before running. Report: {report}")
     if expected != live:
         return "ask", (f"AgentAvow: the definition of '{tool}' on MCP '{name}' changed since "
-                       f"AgentAvow graded this server ({score}/100). Review before running; "
-                       f"it is re-graded at your next session start. Report: {report}")
+                       f"AgentAvow checked this server ({score}/100). Review before running; "
+                       f"it is re-checked at your next session start. Report: {report}")
     return None
 
 
@@ -845,7 +845,7 @@ def decide(payload: dict, cache: dict) -> tuple | None:
             _note_once_per_session(cache, payload.get("session_id"), (
                 f"AgentAvow gate: MCP '{server}' has no grade on file"
                 + (" yet (AgentAvow is still checking it)" if checking else "")
-                + ", so its tools run unchecked. It is graded at your next session start."))
+                + ", so its tools run unchecked. It is checked at your next session start."))
         return None
     name, record = found
     cfg = _server_config(name)
@@ -860,7 +860,7 @@ def decide(payload: dict, cache: dict) -> tuple | None:
             why = f" — {record['decision_reason']}" if record.get("decision_reason") else ""
             # Never " · Certified" here: the mark only ever sits beside Safe to connect.
             return ("deny", (f"AgentAvow: {DECISION_PHRASES['do_not_connect']}{why}. "
-                             f"MCP '{name}' is graded {record.get('score')}/100 (tier {tier}); "
+                             f"MCP '{name}' scored {record.get('score')}/100 (tier {tier}); "
                              f"'{tool}' was not run. Report: {report}\n"
                              + allow_instructions(name)),
                     allow_message(name, record))
@@ -895,7 +895,7 @@ def allow_line_cli(argv: list[str]) -> int:
     found = find_record(_load_cache(), argv[0].strip())
     if not found:
         print(f"AgentAvow: no grade on file for an MCP server named '{argv[0].strip()}'. Use "
-              "the name from the gate's refusal; servers are graded at session start.",
+              "the name from the gate's refusal; servers are checked at session start.",
               file=sys.stderr)
         return 2
     name, record = found

@@ -388,7 +388,7 @@ def test_tool_the_grade_never_saw_asks(gate, monkeypatch, capsys, fake_server):
         digests={"tool:ask": gate.tool_digest(_FakeMCP.tools[0])})}))
     _wire(gate, monkeypatch, fake_server)
     decision, reason = _decision(_run(gate, monkeypatch, capsys, _call(tool="delete")))
-    assert decision == "ask" and "not among the tools AgentAvow graded" in reason
+    assert decision == "ask" and "not among the tools AgentAvow checked" in reason
 
 
 def test_tool_no_longer_served_allows(gate, monkeypatch, capsys, fake_server):

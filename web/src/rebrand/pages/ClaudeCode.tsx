@@ -171,10 +171,14 @@ export default function RebrandClaudeCode() {
         <div className="max-w-[860px] mx-auto px-6">
           <h2 className={h2}>Your first session opens with one line.</h2>
           <div className="mt-5 bg-background border border-border rounded-xl px-[18px] py-4 font-mono text-[13.5px] leading-relaxed overflow-x-auto">
-            <span className="text-primary-light">AgentAvow pre-check:</span> graded 8 MCP servers. 5 Safe, 2 Review, <span className="text-danger">1 Do not connect</span>.<br />
-            <span className="text-text-muted">Needs attention:</span> <span className="text-danger">&apos;example-server&apos; Do not connect</span>, one critical finding.<br />
-            <span className="text-text-muted">Dependencies:</span> graded 12 of 38. 11 Safe, <span className="text-warning">1 Review</span>.
+            <span className="text-primary-light">AgentAvow pre-check:</span> MCP servers unchanged. <span className="text-text-muted">Dependencies:</span> checked 8 of 27 — <span className="text-success">8 Safe</span>, 0 Review. Ask for the AgentAvow pre-check for details. Since the last session AgentAvow checked 4 package installs — all <span className="text-success">Safe to connect</span>.
           </div>
+          <p className="mt-4 text-[14.5px] text-text-muted max-w-[60ch]">Ask for the details and each server and dependency gets its own line:</p>
+          <div className="mt-2.5 bg-background border border-border rounded-xl px-[18px] py-4 font-mono text-[13.5px] leading-relaxed overflow-x-auto grid gap-2">
+            <p>✅ dependency &apos;uvicorn&apos; (pypi:uvicorn@&gt;=0.24.0,&lt;1.0): <span className="text-success">Safe to connect · Certified</span> — nothing found in 39 files · AgentAvow 90/100; sandbox: installed, no network beyond the registry.</p>
+            <p>✅ MCP &apos;context7&apos;: <span className="text-success">Safe to connect</span> — no critical or high findings in 30 files · AgentAvow 83/100</p>
+          </div>
+          <p className="mt-2 text-[12.5px] text-text-muted">Real output from a Claude Code session, November 2026</p>
 
           <h2 className={`${h2} mt-11`}>It stays quiet until it matters.</h2>
           <div className="mt-[22px] glass rounded-[14px] border border-border/60 overflow-hidden">
