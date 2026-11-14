@@ -60,7 +60,7 @@ export function scoreCardSvg(d: ScoreCardData): string {
   <text x="600" y="176" text-anchor="middle" fill="#CBD5E1" font-size="34" font-weight="800">${esc(d.tier)}</text>
 
   <!-- two co-equal rings -->
-  <!-- Attestation Trust -->
+  <!-- Trust score -->
   <g transform="translate(415,360)">
     <circle r="${R}" fill="none" stroke="#1b2b2b" stroke-width="20"/>
     <circle r="${R}" fill="none" stroke="${tHex}" stroke-width="20" stroke-linecap="round"
@@ -69,7 +69,7 @@ export function scoreCardSvg(d: ScoreCardData): string {
     <text x="0" y="40" text-anchor="middle" fill="#94A3B8" font-size="20" font-family="monospace">/100</text>
     <text x="0" y="66" text-anchor="middle" fill="${tHex}" font-size="22" font-weight="700">${esc(t.name)}</text>
   </g>
-  <text x="415" y="500" text-anchor="middle" fill="${tHex}" font-size="18" font-weight="700" font-family="monospace" letter-spacing="1">ATTESTATION TRUST</text>
+  <text x="415" y="500" text-anchor="middle" fill="${tHex}" font-size="18" font-weight="700" font-family="monospace" letter-spacing="1">TRUST SCORE</text>
   <text x="415" y="528" text-anchor="middle" fill="#94A3B8" font-size="18">signed · verifiable now</text>
 
   <!-- Adoption (progress bar — reads distinct from the trust gauge) -->

@@ -4610,7 +4610,7 @@ def _render_og_svg(
 
   <!-- Ring label -->
   <text x="600" y="500" text-anchor="middle" fill="{color}"
-        font-family="monospace" font-size="18">ATTESTATION TRUST</text>
+        font-family="monospace" font-size="18">TRUST SCORE</text>
   <text x="600" y="528" text-anchor="middle" fill="#94A3B8"
         font-family="system-ui,-apple-system,sans-serif"
         font-size="18">signed &#183; verifiable now</text>

@@ -81,7 +81,7 @@ const GROUPS: { title: string; sub: string; items: Item[] }[] = [
     sub: 'Find us in a directory you already use.',
     items: [
       { name: 'Glama', text: 'MCP server directory.', actions: [{ kind: 'link', label: 'Open ↗', href: 'https://glama.ai/mcp/servers/AgentAvow/AgentAvow' }] },
-      { name: 'awesome-mcp-servers', text: 'Community list on GitHub.', actions: [{ kind: 'link', label: 'Open ↗', href: 'https://github.com/punkpeye/awesome-mcp-servers' }] },
+      { name: 'awesome-mcp-servers', text: 'Community list on GitHub.', actions: [{ kind: 'link', label: 'Open ↗', href: 'https://github.com/punkpeye/awesome-mcp-servers#security' }] },
     ],
   },
 ]
