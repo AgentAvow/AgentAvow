@@ -65,10 +65,11 @@ _NET_RE = re.compile(
 _DYNAMIC_RE = re.compile(
     r"""(?<![\w-])eval\b|\$\{!|\bglobals\s*\(|\bvars\s*\(|\bgetattr\s*\(|\b__dict__\b|\bimportlib\b"""
     r"""|\bnew\s+Function\s*\(|\bReflect\.|\bexec\s*\(""")
-# A use of the array / an element as a pattern.
+# A use of the array / an element as a pattern, or a membership test of a Set
+# (`FORBIDDEN_HOST_SUFFIXES.has(suffix)`: @agent-native/core's validation list).
 _MATCHER_RE = re.compile(
     r"""\b(?:e?grep|fgrep|rg|ag)\b|=~|\bre\s*\.\s*(?:compile|search|match|fullmatch|findall"""
-    r"""|finditer|sub|split)\s*\(|\bRegExp\s*\(|\.(?:test|match|matchAll|search|includes"""
+    r"""|finditer|sub|split)\s*\(|\bRegExp\s*\(|\.(?:test|match|matchAll|search|includes|has"""
     r"""|startswith|endswith|startsWith|endsWith)\s*\(|\bfnmatch\b|\bin\s+[\w$.]+""")
 # Calls / commands a tainted value may go through without leaving the process.
 _SAFE_SH_CMDS = frozenset({

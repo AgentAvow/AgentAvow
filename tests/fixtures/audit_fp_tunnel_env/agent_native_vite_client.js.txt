@@ -1,0 +1,18 @@
+            try {
+              const res = await fetch(location.href, {
+                cache: "no-store",
+        },
+        server: {
+            ...(userConfig.server ?? {}),
+            host: userConfig.server?.host ?? "::",
+            port: options.port ?? userConfig.server?.port ?? 8080,
+            allowedHosts: options.allowedHosts ??
+                userConfig.server?.allowedHosts ?? [
+                ".ngrok-free.dev",
+                ".ngrok-free.app",
+                ".ngrok.io",
+                ".trycloudflare.com",
+            ],
+            watch: {
+                ...userWatch,
+                ignored: [

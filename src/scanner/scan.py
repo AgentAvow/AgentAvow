@@ -3430,9 +3430,101 @@ def _exfil_host_not_destination(line: str, pattern: re.Pattern[str]) -> bool:
         in_suffix = any(a < m.start() and m.end() < b for a, b in spans)
         placeholder = bool(_TUNNEL_HOST_RE.match(m.group(0))
                            and _PLACEHOLDER_SUB_RE.search(line[:m.start()]))
-        if not (in_suffix or placeholder):
+        if not (in_suffix or placeholder or _tunnel_host_example(line, m)):
             return False
     return True
+
+
+# A prompt's placeholder value (`placeholder: 'cezar.ngrok.app'`) or an example in a
+# message (`'enter a bare hostname, e.g. cezar.ngrok.app'`): text shown to a person in
+# an ngrok-setup wizard (@open-mercato/cezar 0.19.0, 2026-11-14).
+_PLACEHOLDER_KEY_RE = re.compile(r"""(?<![\w$])placeholder['"]?\s*[:=]\s*$""", re.IGNORECASE)
+_EXAMPLE_LEAD_RE = re.compile(
+    r"""(?:\be\.g\.|\bfor example|\bsuch as|\bexample:)\s*,?\s*(?:[\w-]+\.)*$""", re.IGNORECASE)
+
+
+def _tunnel_host_example(line: str, m: re.Match[str]) -> bool:
+    """Tunnel host ``m`` sits in a string literal that is shown, not dialled: the whole
+    value of a ``placeholder`` key, or an example after "e.g." / "for example" /
+    "such as" in a message with no URL scheme and no interpolation. Tunnel hosts
+    only: a shared collector keeps its critical."""
+    if not _TUNNEL_HOST_RE.match(m.group(0)):
+        return False
+    for lm in re.finditer(_STR_LIT, line):
+        if not (lm.start() < m.start() and m.end() < lm.end()):
+            continue
+        body = lm.group(0)[1:-1]
+        if re.fullmatch(r"(?:[\w-]+\.)*" + re.escape(m.group(0)), body):
+            return bool(_PLACEHOLDER_KEY_RE.search(line[:lm.start()]))
+        if "://" in body or "${" in body or "{" in body:
+            return False
+        return bool(_EXAMPLE_LEAD_RE.search(line[lm.start() + 1:m.start()]))
+    return False
+
+
+# `allowedHosts: options.allowedHosts ?? userConfig.server?.allowedHosts ?? [` (a
+# bundled Vite config, @agent-native/core 0.228.2): an allowlist key whose value, or
+# whose `??` / `||` fallback, is a list literal opened at the end of the line.
+_CHAIN_OPERAND = r"""[\w$.?\[\]"']+"""
+_SUFFIX_ALLOWLIST_OPEN_RE = re.compile(
+    r"""^\s*(?P<key>[A-Za-z_$][\w$]*|"[^"\n]+"|'[^'\n]+')\s*[:=]\s*"""
+    r"""(?:""" + _CHAIN_OPERAND + r"""\s*(?:\?\?|\|\|)\s*)*\[\s*$""")
+# One leading-dot suffix element (`".ngrok.io",` / `'*.ngrok.app'`) per line.
+_SUFFIX_ELEM_LINE_RE = re.compile(r"""^\s*(["'`])\*?\.(?:[\w-]+\.)+[\w-]+\1\s*,?\s*$""")
+
+
+def _suffix_allowlist_default(lines: list[str], idx: int, pattern: re.Pattern[str]) -> bool:
+    """Line ``idx`` is one leading-dot host suffix (`".ngrok.io",`) of a multi-line
+    list that is the value (or the `??` / `||` default) of a host-allowlist key. A
+    suffix pattern is what a server matches incoming Host headers against; it names no
+    host to send to, so this holds even in a bundle that has network sinks elsewhere
+    (where :func:`_host_allowlist_entry` gives up)."""
+    if not (pattern.search(lines[idx]) and _SUFFIX_ELEM_LINE_RE.match(lines[idx])):
+        return False
+    for j in range(idx - 1, max(-1, idx - 40), -1):
+        if _SUFFIX_ELEM_LINE_RE.match(lines[j]) or _ALLOWLIST_CONT_LINE_RE.match(lines[j]):
+            continue
+        head = lines[j]
+        # A `??` chain that starts on the line(s) above: `allowedHosts: a ??` / `b ?? [`.
+        k = j - 1
+        while k >= max(0, j - 3) and re.search(r"(?:\?\?|\|\|)\s*$", lines[k]):
+            head = lines[k].rstrip() + " " + head.lstrip()
+            k -= 1
+        om = _SUFFIX_ALLOWLIST_OPEN_RE.match(head)
+        return bool(om) and _allowlist_key_ok(om.group("key"), lines, idx)
+    return False
+
+
+_ONE_TOKEN_ELEM_RE = re.compile(r"""^\s*(['"])[^\s'"\\]+\1\s*,?\s*$""")
+
+
+def _bundled_domain_list_entry(lines: list[str], idx: int, pattern: re.Pattern[str]) -> bool:
+    """Line ``idx`` is one bare tunnel-host element (`"ngrok.io",`) of an array literal
+    holding at least :data:`_DOMAIN_LIST_MIN_ELEMS` bare-host elements in an unbroken
+    run: a domain-list data module bundled into a file that also holds code (the Public
+    Suffix List inside @mastra/core's dist/test-utils/llm-mock.js, 2026-11-14), where
+    :func:`_domain_list_entry` refuses for the file's sinks. Tunnel hosts only (they
+    are Public Suffix List entries); a shared collector keeps its critical."""
+    line = lines[idx]
+    if not _BARE_HOST_ELEM_RE.match(line):
+        return False
+    if not all(_TUNNEL_HOST_RE.match(m.group(0)) for m in pattern.finditer(line)):
+        return False
+    # The run: lines holding one quoted token and nothing else (a Devanagari IDN entry
+    # has combining marks that are not `\w`, so it is no bare host, yet still data).
+    a = idx
+    while a > 0 and _ONE_TOKEN_ELEM_RE.match(lines[a - 1]):
+        a -= 1
+    b = idx
+    while b + 1 < len(lines) and _ONE_TOKEN_ELEM_RE.match(lines[b + 1]):
+        b += 1
+    if a == 0 or b + 1 >= len(lines) or b - a + 1 < _DOMAIN_LIST_MIN_ELEMS:
+        return False
+    hosts = sum(1 for k in range(a, b + 1) if _BARE_HOST_ELEM_RE.match(lines[k]))
+    if hosts < max(_DOMAIN_LIST_MIN_ELEMS, _DOMAIN_LIST_MIN_SHARE * (b - a + 1)):
+        return False
+    return (lines[a - 1].rstrip().endswith("[")
+            and re.match(r"\s*\]", lines[b + 1]) is not None)
 
 
 # A bare hostname (or a single label: a TLD such as `'ac'`, an IDN label) as a whole
@@ -4315,8 +4407,12 @@ def _scan_content(
                             snippet=stripped[:120]))
                         continue
                     # A bare host in a domain-list data file (the Public Suffix List)
-                    # is data. Low, kept visible; see _domain_list_entry.
-                    if _domain_list_entry(lines, idx):
+                    # or a long domain-list array bundled with code, or a leading-dot
+                    # suffix in a host allowlist's (default) list, is data. Low, kept
+                    # visible; see _domain_list_entry and the two helpers.
+                    if (_domain_list_entry(lines, idx)
+                            or _bundled_domain_list_entry(lines, idx, pattern)
+                            or _suffix_allowlist_default(lines, idx, pattern)):
                         findings.append(Finding(
                             category="exfiltration", name=name, severity="low",
                             file_path=file_path, line_number=line_num,
