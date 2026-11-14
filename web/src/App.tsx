@@ -154,7 +154,9 @@ const queryClient = new QueryClient({
     },
   },
 })
-hydrate(queryClient, snapshotQueryState())
+// hydrate() no longer tolerates undefined, so only call it when a snapshot shipped state.
+const prerenderedQueryState = snapshotQueryState()
+if (prerenderedQueryState) hydrate(queryClient, prerenderedQueryState)
 
 function PageLoader() {
   return (
