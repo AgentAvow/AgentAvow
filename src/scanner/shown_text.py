@@ -19,7 +19,12 @@ keeps the critical.
   in this file (or the file sources another one); when ``echo`` / ``printf`` is
   redefined or the script's stdout is redirected (``exec > >(sh)``); and when the
   function that holds the line has its output piped, captured or ``eval``-ed anywhere
-  in the file (followed through every caller).
+  in the file (followed through every caller, up to ``_MAX_CALLERS`` functions). One
+  capture is allowed (audit class 1): ``fail "… like this: $(command_line "$@")"``,
+  where ``$(f …)`` sits inside the double-quoted argument of another print command and
+  nothing in it pipes or chains ``f``'s output. A mention inside text an earlier line
+  opened (a ``python3 -c "…"`` body) or in a one-line ``case`` arm's pattern is not a
+  call.
 * :func:`html_shown` (``.html`` pages): the line is page text or a plain attribute
   (``<span>``, ``data-copy``, ``title``), outside any ``<script>`` element a browser
   runs and with no ``on…=`` handler / ``javascript:`` URL / ``srcdoc`` on the line.
@@ -79,6 +84,9 @@ _ECHO_REDEFINED_RE = re.compile(
     r"^\s*(?:function\s+)?(?:echo|printf)\s*\(\s*\)|^\s*function\s+(?:echo|printf)\b|"
     r"\balias\s+(?:echo|printf)\s*=|\benable\s+-n\s+(?:echo|printf)\b", re.M)
 _STDOUT_REDIRECTED_RE = re.compile(r"\bexec\s+(?:\d*>|&>|>)")
+# Functions followed up the call chain before giving up (a menu-driven installer's
+# `main` reaches 40+ menu functions).
+_MAX_CALLERS = 200
 
 
 class _Tok:
@@ -391,19 +399,188 @@ class _ShellFile:
             if name in seen:
                 continue
             seen.add(name)
-            if len(seen) > 40:
+            if len(seen) > _MAX_CALLERS:
                 return False
             rx = re.compile(r"(?<![\w.:-])" + re.escape(name) + r"(?![\w.:-])")
             own = [(s, e) for n, s, e in self.funcs if n == name]
             for idx, line in enumerate(self.lines):
                 if not rx.search(line) or any(s <= idx <= e for s, e in own):
                     continue
+                if not self.starts[idx] and "$(" not in line and "`" not in line:
+                    continue  # text inside a string / heredoc an earlier line opened
+                arm = _CASE_ARM_RE.match(line)
+                if arm and not rx.search(line[:arm.end()]):
+                    line = " " * arm.end() + line[arm.end():]  # `a|A) name ;;`
                 toks = _lex(line)
-                if toks is None or _line_runs(toks) or any(
+                if toks is None and "$(" in line:
+                    # `fail "… like this: $(command_line "$@")"`: the output is captured
+                    # straight into the quoted message of another print command.
+                    if not self._captured_into_print(line, name):
+                        return False
+                elif toks is None or _line_runs(toks) or any(
                         t.kind == "op" and t.text in ("|", "|&") for t in toks):
                     return False
                 work.extend(self.enclosing(idx))
         return True
+
+    def _captured_into_print(self, line: str, name: str) -> bool:
+        """Every mention of ``name`` on ``line`` opens a ``$(name …)`` substitution
+        that sits inside a double-quoted argument of ``echo`` / ``printf`` / a
+        print-only function of this file, with nothing in the substitution that pipes,
+        redirects or chains ``name``'s output; and the line, with each ``$(…)`` inside
+        double quotes read as plain text, runs nothing and pipes nothing."""
+        subs = _dq_substitutions(line)
+        if subs is None:
+            return False
+        rx = re.compile(r"(?<![\w.:-])" + re.escape(name) + r"(?![\w.:-])")
+        mine: list[tuple[int, int]] = []
+        for m in rx.finditer(line):
+            hit = next(((a, b, body) for a, b, body in subs if a <= m.start() < b), None)
+            if hit is None:
+                return False  # a mention outside any quoted substitution
+            a, b, body = hit
+            head = re.match(r"\s*([A-Za-z_][\w.:-]*)", body)
+            if head is None:
+                return False
+            rest = body[head.end():]
+            if _top_level_ops(rest):
+                return False
+            if head.group(1) == name and m.start() == a + 2 + head.start(1):
+                mine.append((a, b))
+                continue
+            # `$(command_line uninstall)`: the name is only a word handed to another
+            # print-only function, not a call.
+            if "$(" not in rest and (head.group(1) in _PRINTERS or (
+                    head.group(1) not in _RUNNERS and self.print_only(head.group(1)))):
+                continue
+            return False
+        flat = list(line)
+        for a, b, _body in subs:
+            for i in range(a, b):
+                flat[i] = "x"
+        flat_line = "".join(flat)
+        toks = _lex(flat_line)
+        if toks is None or _line_runs(toks) or any(
+                t.kind == "op" and t.text in ("|", "|&") for t in toks):
+            return False
+        cmds = _commands(toks)
+        for a, b in mine:
+            cmd = next((c for c in cmds for t in c if t.kind == "word" and any(
+                qs < a and b - 1 < qe for qs, qe in t.quotes)), None)
+            if cmd is None:
+                return False
+            word = next(t for t in cmd if t.kind == "word" and any(
+                qs < a and b - 1 < qe for qs, qe in t.quotes))
+            h = _head(cmd)
+            if h is None or h is word or h.quotes:
+                return False
+            if cmd[-1].kind == "op" and cmd[-1].text in ("|", "|&", "&"):
+                return False
+            if h.text not in _PRINTERS and (_SOURCES_RE.search(self.text)
+                                            or not self.print_only(h.text)):
+                return False
+        return True
+
+
+# A `case` arm's pattern list at the start of a line (`a|A)`, `-*)`, `*)`).
+# Only a one-line arm (`… ;;`) or a pattern alone on its line: `a|sh)` cannot end a
+# subshell then.
+_CASE_ARM_RE = re.compile(
+    r"^\s*[^\s()|;&<>$`'\"]+(?:\s*\|\s*[^\s()|;&<>$`'\"]+)*\s*\)(?=(?:[^\n]*;;&?|;&)\s*$|\s*$)")
+
+
+def _dq_substitutions(line: str) -> list[tuple[int, int, str]] | None:
+    """Outermost ``$( … )`` spans inside double quotes on ``line``: (start of ``$``,
+    end after ``)``, body). None when the line has a backtick, a substitution outside
+    double quotes, or quotes / parentheses that do not balance."""
+    if "`" in line:
+        return None
+    out: list[tuple[int, int, str]] = []
+    i, n = 0, len(line)
+    quote: str | None = None
+    while i < n:
+        c = line[i]
+        if quote == "'":
+            if c == "'":
+                quote = None
+            i += 1
+            continue
+        if c == "\\":
+            i += 2
+            continue
+        if line.startswith("$(", i):
+            if quote != '"':
+                return None
+            j = _subst_end(line, i + 2)
+            if j is None:
+                return None
+            out.append((i, j, line[i + 2:j - 1]))
+            i = j
+            continue
+        if c == '"':
+            quote = None if quote == '"' else '"'
+        elif c == "'" and quote is None:
+            quote = "'"
+        i += 1
+    return out if quote is None else None
+
+
+def _subst_end(line: str, i: int) -> int | None:
+    """Index after the ``)`` closing a substitution whose body starts at ``i``. A
+    nested ``$(`` starts a fresh quoting context (``"$(a "$(b)")"``)."""
+    saved: list[str | None] = []  # quote state outside each open substitution
+    quote: str | None = None
+    n = len(line)
+    while i < n:
+        c = line[i]
+        if quote == "'":
+            if c == "'":
+                quote = None
+        elif c == "\\":
+            i += 1
+        elif line.startswith("$(", i):
+            saved.append(quote)
+            quote = None
+            i += 1
+        elif c == '"':
+            quote = None if quote == '"' else '"'
+        elif c == "'" and quote is None:
+            quote = "'"
+        elif c == ")" and quote is None:
+            if not saved:
+                return i + 1
+            quote = saved.pop()
+        i += 1
+    return None
+
+
+def _top_level_ops(s: str) -> bool:
+    """Does ``s`` (a substitution's arguments) hold a pipe, chain, redirect or
+    background operator outside quotes and nested substitutions?"""
+    saved: list[str | None] = []
+    quote: str | None = None
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if quote == "'":
+            if c == "'":
+                quote = None
+        elif c == "\\":
+            i += 1
+        elif s.startswith("$(", i):
+            saved.append(quote)
+            quote = None
+            i += 1
+        elif c == '"':
+            quote = None if quote == '"' else '"'
+        elif c == "'" and quote is None:
+            quote = "'"
+        elif c == ")" and quote is None and saved:
+            quote = saved.pop()
+        elif not saved and quote is None and c in "|;&<>()":
+            return True
+        i += 1
+    return bool(saved) or quote is not None
 
 
 def shell_shown(lines: list[str], idx: int, matches: list[tuple[int, int]],
@@ -705,6 +882,32 @@ _PROSE_SUFFIXES = (".md", ".markdown", ".mdx", ".txt", ".rst", ".html", ".htm", 
 _EVAL_BEFORE_RE = re.compile(r"\b(?:eval|source|Invoke-Expression|iex)\b|(?:^|[;&|]\s*)\.\s")
 
 
+_QUOTED_HEREDOC_RE = re.compile(r"<<-?\s*(?:(['\"])([A-Za-z_]\w*)\1|\\([A-Za-z_]\w*))")
+
+
+def _quoted_heredoc_lines(text: str) -> set[int]:
+    """0-based lines inside the body of a heredoc whose delimiter is quoted
+    (``<<'EOF'``, ``<<"EOF"``, ``<<\\EOF``): the shell never expands them, so a
+    backtick or ``$(`` there is text (an installer writing a Markdown guide)."""
+    out: set[int] = set()
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines):
+        m = _QUOTED_HEREDOC_RE.search(lines[i])
+        if m and "#" not in lines[i][:m.start()]:
+            delim = m.group(2) or m.group(3)
+            j = i + 1
+            while j < len(lines) and lines[j].strip() != delim:
+                out.add(j)
+                j += 1
+            if j >= len(lines):
+                return set()  # never closed: read every line as code
+            i = j + 1
+            continue
+        i += 1
+    return out
+
+
 def script_output_run(path: str, texts: dict[str, str]) -> tuple[str, int] | None:
     """Where some file of ``texts`` (another script, package.json, a Makefile, a
     Dockerfile …) runs the OUTPUT of the shell script ``path``: its name followed by a
@@ -717,8 +920,9 @@ def script_output_run(path: str, texts: dict[str, str]) -> tuple[str, int] | Non
     for fp, text in texts.items():
         if not text or base not in text or fp.lower().endswith(_PROSE_SUFFIXES):
             continue
+        literal = _quoted_heredoc_lines(text)
         for i, line in enumerate(text.split("\n")):
-            if base not in line:
+            if base not in line or i in literal:
                 continue
             for m in rx.finditer(line):
                 before, after = line[:m.start()], line[m.end():]
