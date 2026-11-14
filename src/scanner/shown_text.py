@@ -942,3 +942,194 @@ def script_output_run(path: str, texts: dict[str, str]) -> tuple[str, int] | Non
                 if _EVAL_BEFORE_RE.search(before):
                     return fp, i + 1
     return None
+
+
+# ---------------------------------------------------------------------------------
+# A field of an object literal in code (audit class 1, 2026-11-14)
+# ---------------------------------------------------------------------------------
+
+# Languages where a shell word (`source`, `| sh`, `$(`) outside a string is not a
+# command: only their calls and process modules count as sinks.
+_CODE_LANG_SUFFIXES = frozenset({".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts",
+                                 ".cts", ".py", ".go", ".rs", ".java", ".kt", ".cs",
+                                 ".swift", ".vue", ".svelte"})
+_CODE_SINK_RE = re.compile(
+    r"\b(?:exec\w*|spawn\w*|fork|system|popen|Popen|call|check_call|check_output|"
+    r"getoutput|getstatusoutput|run\w*|shell_exec|passthru|proc_open|eval|Function|"
+    r"ShellExecute|execa\w*|shell|Command|command)\s*(?:\.\s*[A-Za-z_]\w*\s*)?[(!]|"
+    r"(?<![\w}$])\$\s*`|\b[\w$]*[Ss]pawn\w*\s*\.\s*\w+\s*\(|"
+    r"\b(?:subprocess|child_process|shelljs|os/exec|std::process)\b")
+# Helpers only tests import (`x.test-support.ts`, `test-utils/…`, `testing/helpers.ts`).
+_TEST_SUPPORT_RE = re.compile(
+    r"(?i)(?:^|/)(?:__mocks__|__fixtures__|test-?utils?|test-?helpers?|testing)/|"
+    r"\.test-(?:support|helpers?|utils?|fixtures?|harness)\.[cm]?[jt]sx?$|"
+    r"(?:^|/)test-?(?:support|helpers?|utils?|harness)\.[cm]?[jt]sx?$")
+_QUOTED_RE = re.compile(r"'(?:[^'\\\n]|\\.)*'|\"(?:[^\"\\\n]|\\.)*\"")
+
+
+def _blank_quoted(m: re.Match) -> str:
+    q = m.group(0)
+    return q[0] + " " * (len(q) - 2) + q[-1]
+
+
+# Names a line declares: `const x`, `let { a, b }`, `for (const n of …)`.
+_DECLARED_RE = re.compile(
+    r"\b(?:const|let|var)\s+(?:\{([^}]*)\}|\[([^\]]*)\]|([A-Za-z_$][\w$]*))")
+_JS_IDENT_RE = re.compile(r"[A-Za-z_$][\w$]*")
+_LINE_COMMENT_PREFIXES = ("#", "//", "*", "/*")
+
+
+# A call on a quote-blanked line: its callee (`helper`, `console.log`, `notes.map`).
+_CALLEE_RE = re.compile(r"([A-Za-z_$][\w$]*(?:\s*\??\.\s*[A-Za-z_$][\w$]*)*)\s*\(")
+_NOT_CALL_WORDS = frozenset({"if", "for", "while", "switch", "catch", "return",
+                             "typeof", "function", "await", "yield", "in", "of"})
+# Callees that only show text or build it.
+_SHOW_CALLEE_RE = re.compile(
+    r"console\.\w+|process\.std(?:out|err)\.write|String|Number|Boolean|JSON\.stringify|"
+    r"chalk(?:\.\w+)*")
+# Methods that call nothing given a value (they may take an inline arrow, whose body is
+# on the line and checked too). Handed a function NAME (`notes.forEach(run)`), the
+# callback ones pass the elements on.
+_PURE_METHODS = frozenset({
+    "join", "trim", "trimStart", "trimEnd", "includes", "startsWith", "endsWith",
+    "split", "replace", "replaceAll", "slice", "toString", "padStart", "padEnd",
+    "toUpperCase", "toLowerCase", "indexOf", "concat", "at", "repeat",
+    "forEach", "map", "flatMap", "filter", "some", "every", "find"})
+_CALLBACK_METHODS = frozenset({"forEach", "map", "flatMap", "filter", "some", "every",
+                               "find"})
+_ARROW_PARAMS_RE = re.compile(r"\(\s*([\w$,\s{}]*)\)\s*=>|([A-Za-z_$][\w$]*)\s*=>")
+
+
+def _passes_on(line: str) -> bool:
+    """Does the quote-blanked ``line`` call anything that is not a print / formatting
+    call or a pure method (a helper the value could be handed to)?"""
+    for m in _CALLEE_RE.finditer(line):
+        callee = re.sub(r"\s+", "", m.group(1)).replace("?.", ".")
+        last = callee.rsplit(".", 1)[-1]
+        if callee in _NOT_CALL_WORDS or _SHOW_CALLEE_RE.fullmatch(callee):
+            continue
+        if "." in callee and last in _PURE_METHODS:
+            if last in _CALLBACK_METHODS and re.match(
+                    r"\s*[A-Za-z_$][\w$.]*\s*[,)]", line[m.end():]):
+                return True  # `notes.forEach(run)`: elements handed to a named function
+            continue
+        return True
+    return False
+
+
+def code_key_exec_site(key: str, path: str,
+                       texts: dict[str, str]) -> tuple[str, int] | None:
+    """Where some code file of ``texts`` could hand the field ``key`` of an object
+    literal in ``path`` to an exec sink: (file, 1-based line), else None.
+
+    Deliberately generous (a false match only keeps the critical):
+
+    * everything :func:`json_key_exec_site` checks (``.key`` / ``["key"]`` reads next
+      to a sink or into a variable a sink line uses, and computed reads into a sink in
+      the files that load ``path``);
+    * the bare word ``key`` (a destructuring ``{ key }``, a shorthand, a parameter)
+      within reach of a sink: on the same line within 240 characters, or on an
+      adjacent line;
+    * a line that mentions ``key`` and declares names (``const``/``let``/``var``, a
+      destructuring, ``for (const n of …)``, an arrow's parameters): any of those
+      names, or ``key`` itself, on a sink line of that file;
+    * in code, a line that mentions ``key`` or one of those names and calls anything
+      but a print / formatting call or a pure method (:func:`_passes_on`): the value
+      may be handed to a helper that runs it (``helper(cfg.notes)``)."""
+    from src.scanner.test_files import is_test_code, judged
+    # A test module runs only in the maintainer's test runner.
+    texts = {fp: t for fp, t in texts.items()
+             if fp == path or not (t and ((judged(fp) and is_test_code(fp, t))
+                                          or _TEST_SUPPORT_RE.search(fp)))}
+    site = _code_computed_exec_site(texts)
+    if site is not None:
+        return site
+    word = re.compile(r"(?<![\w$])" + re.escape(key) + r"(?![\w$])")
+    for fp, text in texts.items():
+        if not text or key not in text or fp.lower().endswith(_NOT_CODE_SUFFIXES):
+            continue
+        low = fp.lower()
+        lines = text.split("\n")
+        code = Path(low).suffix in _CODE_LANG_SUFFIXES
+        if code:
+            # The words inside a quoted string are not a sink (the hint's own
+            # `… | bash`). Backtick templates stay as written: `${…}` holds code.
+            lines = [_QUOTED_RE.sub(_blank_quoted, ln) for ln in lines]
+        tick = low.endswith(_BACKTICK_LANG_SUFFIXES) or "." not in Path(low).name
+        sink_re = _CODE_SINK_RE if code else _ANY_SINK_RE
+
+        def sink(x: str) -> bool:
+            return bool(sink_re.search(x)) or (tick and "`" in x)
+
+        sink_lines: list[str] | None = None
+        for i, ln in enumerate(lines):
+            if ln.lstrip().startswith(_LINE_COMMENT_PREFIXES):
+                continue
+            hits = list(word.finditer(ln))
+            if not hits:
+                continue
+            around = [lines[i - 1][-_NEAR_CHARS:] if i else "",
+                      lines[i + 1][:_NEAR_CHARS] if i + 1 < len(lines) else ""]
+            around += [ln[max(0, m.start() - _NEAR_CHARS): m.end() + _NEAR_CHARS]
+                       for m in hits]
+            if any(sink(x) for x in around):
+                return fp, i + 1
+            names = {key}
+            for m in _DECLARED_RE.finditer(ln):
+                body = m.group(1) or m.group(2) or m.group(3) or ""
+                names.update(n for n in _JS_IDENT_RE.findall(body)
+                             if n not in ("const", "let", "var"))
+            am = _ASSIGN_LHS_RE.match(ln)
+            if am:
+                names.add(am.group(1))
+            if code:
+                for pm in _ARROW_PARAMS_RE.finditer(ln):
+                    names.update(_JS_IDENT_RE.findall(pm.group(1) or pm.group(2) or ""))
+                if _passes_on(ln):
+                    return fp, i + 1
+                for n in names - {key}:
+                    rx = re.compile(r"(?<![\w$])" + re.escape(n) + r"(?![\w$])")
+                    for j, other in enumerate(lines):
+                        if j != i and rx.search(other) and _passes_on(other) and not \
+                                other.lstrip().startswith(_LINE_COMMENT_PREFIXES):
+                            return fp, j + 1
+            if sink_lines is None:
+                sink_lines = [x for x in lines if sink(x)
+                              and not x.lstrip().startswith(_LINE_COMMENT_PREFIXES)]
+            for n in names:
+                rx = re.compile(r"(?<![\w$])\$?\{?" + re.escape(n) + r"(?![\w$])")
+                if any(rx.search(x) for x in sink_lines):
+                    return fp, i + 1
+    return None
+
+
+def _code_computed_exec_site(texts: dict[str, str]) -> tuple[str, int] | None:
+    """A read by computed key handed to a sink in code (``exec(cfg[k])``,
+    ``Object.values(o).forEach(run)``, ``spawn(cmd, [...Object.values(o)])``): it may
+    read any field, so it counts for every key. String contents are blanked first."""
+    for fp, text in texts.items():
+        if not text or fp.lower().endswith(_NOT_CODE_SUFFIXES):
+            continue
+        code = Path(fp.lower()).suffix in _CODE_LANG_SUFFIXES
+        sink_re = _CODE_SINK_RE if code else _ANY_SINK_RE
+        call_re = _CODE_SINK_RE if code else _SINK_CALL_RE
+        for i, ln in enumerate(text.split("\n")):
+            if ln.lstrip().startswith(_LINE_COMMENT_PREFIXES):
+                continue
+            if code:
+                ln = _QUOTED_RE.sub(_blank_quoted, ln)
+            if _PASS_RUNNER_RE.search(ln):
+                return fp, i + 1
+            for m in call_re.finditer(ln):
+                if _COMPUTED_INDEX_RE.search(ln[m.end(): m.end() + 200]):
+                    return fp, i + 1
+            for m in _ITER_VALUES_RE.finditer(ln):
+                if sink_re.search(ln[max(0, m.start() - _NEAR_CHARS): m.end() + _NEAR_CHARS]):
+                    return fp, i + 1
+    return None
+
+
+def shown_field_key(key: str) -> bool:
+    """A plain field name that is not command-shaped (``notes``, ``fixHint``,
+    ``message``; not ``command``, ``install_cmd``, ``run``, ``steps``)."""
+    return bool(re.fullmatch(r"[A-Za-z_$][\w$]{0,63}", key)) and not _EXEC_KEY_RE.match(key)

