@@ -6112,7 +6112,12 @@
    },
    "wheel": null,
    "id": "pypi/av",
-   "source": "verdict-audit-2026-11"
+   "source": "verdict-audit-2026-11",
+   "known_fp": {
+    "label": "do_not_connect",
+    "class": "builtin looked up on __builtins__ by a computed key",
+    "detail": "av/error.py:199 getattr(__builtins__, name, OSError) subclasses a builtin exception named by a parameter. The exemption requires a literal exception-class key: a computed key can name any builtin (eval), so recall wins over this one package."
+   }
   },
   {
    "ecosystem": "pypi",

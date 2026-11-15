@@ -4028,20 +4028,22 @@
   },
   "pypi/av": {
    "version": "19.0.2",
-   "score": 86,
-   "label": "safe",
-   "reason": "nothing found in 59 files",
+   "score": 45,
+   "label": "do_not_connect",
+   "reason": "one critical finding in its code: obfuscated eval (Python)",
    "files_scanned": 59,
    "severity": {
-    "critical": 0,
+    "critical": 1,
     "high": 0,
     "medium": 0,
     "low": 0,
     "info": 0
    },
-   "capabilities": 3,
+   "capabilities": 2,
    "not_installed": 0,
-   "rules": {}
+   "rules": {
+    "critical: Obfuscated eval (Python)": 1
+   }
   },
   "pypi/azure-core": {
    "version": "1.41.0",

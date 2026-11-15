@@ -21,7 +21,7 @@ list decides the installed surface (``_pypi_sdist_and_wheel``), each with its sh
 downloadable files, or whose archive exceeds the production download cap are excluded
 (listed under ``excluded`` with the reason) and the next package backfills.
 
-``expect`` / ``expect_reason`` written by a human are carried over on a re-pin.
+``expect`` / ``expect_reason`` / ``known_fp`` written by a human are carried over on a re-pin.
 
 Usage (network; downloads into the cache, never executes):
     python -I scripts/corpus/build_manifest.py --cache <dir> [--n 200]
@@ -299,7 +299,7 @@ def main() -> int:
     for p in packages:
         prev = old.get(p["id"])
         if prev:
-            for k in ("expect", "expect_reason", "subset"):
+            for k in ("expect", "expect_reason", "subset", "known_fp"):
                 if k in prev:
                     p[k] = prev[k]
         p["archive"].pop("integrity", None)
