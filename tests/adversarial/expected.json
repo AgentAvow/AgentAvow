@@ -375,6 +375,28 @@
     "shipped_notes_override": "review",
     "tag_bare_beside_code": "review"
   },
+  "cases_skill_secret_flow": {
+    "ctl_env_url_setting_awk_eq": "review",
+    "ctl_table_entries_own_hosts": "review",
+    "ctl_table_entries_own_hosts_js": "review",
+    "env_inverse_awk_ne_sh": "do_not_connect",
+    "env_inverse_grep_v_py": "do_not_connect",
+    "env_inverse_grep_v_sh": "do_not_connect",
+    "env_inverse_not_in_py": "do_not_connect",
+    "env_inverse_sed_d_getoutput_py": "do_not_connect",
+    "env_inverse_sed_d_sh": "do_not_connect",
+    "gap_merged_into_new_name": "review",
+    "gap_spread_into_new_name_js": "review",
+    "table_entry_alias_item_assigned": "do_not_connect",
+    "table_entry_item_assigned_from_other": "do_not_connect",
+    "table_entry_item_assigned_js": "do_not_connect",
+    "table_entry_merged_dict_or": "do_not_connect",
+    "table_entry_merged_dict_unpack": "do_not_connect",
+    "table_entry_object_assign_js": "do_not_connect",
+    "table_entry_redirect_followed": "do_not_connect",
+    "table_entry_spread_merged_js": "do_not_connect",
+    "table_entry_updated_from_other": "do_not_connect"
+  },
   "cases_trifecta": {
     "both_on_line": "review",
     "computed_patch_res": "review",
