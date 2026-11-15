@@ -72,7 +72,7 @@ SCOPE_SAMPLE = [
     ("npm", "lodash"), ("npm", "axios"), ("npm", "chalk"), ("npm", "commander"),
 ]
 REQUIRED_EXTRAS = [("pypi", "mcp")]
-# Verdict-accuracy audit 2026-11 (docs/research/verdict-accuracy-audit-2026-11.md):
+# Verdict-accuracy audit 2026-11:
 # single-tool false positives, pinned to the version that read Do not connect.
 AUDIT_PINNED = [
     ("pypi", "av", "19.0.2"),            # getattr(__builtins__, name, OSError)

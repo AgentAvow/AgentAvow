@@ -1,5 +1,4 @@
-"""Verdict-accuracy audit 2026-11, single-tool false positives
-(docs/research/verdict-accuracy-audit-2026-11.md, rows 3, 9 and 35).
+"""Verdict-accuracy audit 2026-11, single-tool false positives.
 
 * pypi:av 19.0.2 ``av/error.py:199``: ``getattr(__builtins__, name, OSError)`` looks up a
   builtin exception class to subclass. Not obfuscated eval.
