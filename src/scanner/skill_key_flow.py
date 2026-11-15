@@ -600,6 +600,65 @@ _TABLE_ENTRY_END_RE = re.compile(r"^\s*\}\s*,?\s*$")
 _TABLE_CLOSE_RE = re.compile(r"^\s*\}\s*;?\s*$")
 
 
+# An entry can only be trusted to keep its own URL while nothing rewrites it. The table
+# stays one variable (never split) when an entry pick is written to (`T["a"] = …`,
+# `T["a"]["url"] = …`, `T.a.url = …`, `T["a"] |= …`), mutated in place (`.update(`,
+# `.setdefault(`), merged (`{**T["a"]}`, `{...T.a}`, `T["a"] | T["b"]`, any pick inside
+# `Object.assign(` / `.update(` / a merge helper), or when the file follows a redirect
+# (a `Location` header, manual redirects): one entry's response can then send the next
+# request anywhere. Review of #388.
+_PICK_TAIL_WRITE_RE = re.compile(
+    r"(?:\s*\[[^\]\n]*\]|\s*\.[A-Za-z_$][\w$]*)*\s*(?://|\*\*|<<|>>|[-+*/%@&|^])?=(?!=)")
+_PICK_TAIL_MUTATE_RE = re.compile(
+    r"(?:\s*\[[^\]\n]*\]|\s*\.[A-Za-z_$][\w$]*)*?\s*\.(?:update|setdefault|__setitem__|__ior__)"
+    r"\s*\(")
+_PICK_TAIL_MERGE_RE = re.compile(r"\s*\|(?![|=])")
+_PICK_HEAD_MERGE_RE = re.compile(r"(?:\*\*|\.\.\.)\s*$|(?<![|])\|\s*$")
+_MERGE_CALL_RE = re.compile(
+    r"\bObject\.assign\s*\(|\.update\s*\(|\b(?:_|lodash|\$|jQuery)\.(?:merge|assign|extend"
+    r"|defaults|mergeWith|assignIn)\s*\(|\b(?:deepmerge|merge|ChainMap)\s*\(")
+_REDIRECT_RE = re.compile(
+    r"(?i)[\"']location[\"']|\.location\b|\ballow_redirects\s*=\s*False\b"
+    r"|\bfollow_redirects\s*=\s*False\b|\bredirect\s*:\s*[\"']manual[\"']|\bis_redirect\b"
+    r"|\bnext_request\b|\bmaxRedirects\s*:\s*0\b|\bget_redirect_location\b")
+
+
+_ALIAS_BIND_RE = re.compile(r"^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=\s*")
+
+
+def _entry_rewritten(rest: str, pick: re.Pattern[str]) -> bool:
+    """True when any entry pick in ``rest`` is written to, mutated, merged, or the
+    file follows redirects (see above)."""
+    if _REDIRECT_RE.search(rest):
+        return True
+    # A name bound to a whole entry (`cfg = T["a"]`) is that entry: its writes count too.
+    aliases: set[str] = set()
+    for ln in rest.split("\n"):
+        b = _ALIAS_BIND_RE.match(ln)
+        p = b and pick.match(ln, b.end())
+        if p and re.fullmatch(r"\s*;?\s*", ln[p.end():]):
+            aliases.add(b.group(1))
+    targets = [(pick, False)]
+    if aliases:
+        targets.append((re.compile(
+            r"(?<![\w$.])(?:" + "|".join(map(re.escape, aliases)) + r")\b"), True))
+    for rx, alias in targets:
+        for m in rx.finditer(rest):
+            tail = rest[m.end():m.end() + 400]
+            head = rest[max(0, m.start() - 8):m.start()]
+            write = _PICK_TAIL_WRITE_RE.match(tail)
+            if alias and write and not re.match(r"\s*[\[.]", tail):
+                write = None  # rebinding the alias itself writes no entry
+            if (write or _PICK_TAIL_MUTATE_RE.match(tail)
+                    or _PICK_TAIL_MERGE_RE.match(tail) or _PICK_HEAD_MERGE_RE.search(head)):
+                return True
+        for c in _MERGE_CALL_RE.finditer(rest):
+            chunk = _call_text(rest, c.start())
+            if any(re.match(r"\s*[,)}\]]", chunk[p.end():]) for p in rx.finditer(chunk)):
+                return True
+    return False
+
+
 def _depth(s: str) -> int:
     return sum(s.count(c) for c in "([{") - sum(s.count(c) for c in ")]}")
 
@@ -657,6 +716,8 @@ def _split_tables(joined: str) -> str:
         rest = "\n".join(lines[:i] + [""] * (close + 1 - i) + lines[close + 1:])
         if len(use.findall(rest)) != len(pick.findall(rest)):
             continue  # the table is used whole somewhere: keep it one variable
+        if _entry_rewritten(rest, pick):
+            continue  # an entry may carry another entry's URL: keep it one variable
         lines[i] = ""
         lines[close] = ""
         for k, (a, b) in entries.items():
@@ -1498,12 +1559,37 @@ _CRED_URL_WORD_RE = re.compile(
     r"|WEBHOOK|HOOK|SECRET|KEY|TOKEN|PASSWORD|PASS|PWD|AUTH|CRED\w*|SIGNED|PRIVATE)(?:_|$)")
 
 
+# Only a POSITIVE single-key extraction is excused: `$1 == "NAME"`, `^NAME=`,
+# `getenv("NAME")` / `environ["NAME"]`, a literal `["NAME"]` / `.get("NAME")`. Naming
+# the setting in an inverse filter returns every OTHER line of the file (`grep -v NAME`,
+# `sed /NAME/d`, `awk '$1 != "NAME"'`, `if "NAME" not in line`), so any negation in the
+# right-hand side keeps it contents. Review of #388.
+_INVERSE_LOOKUP_RE = re.compile(
+    r"!=|!~|!\s*/|!\s*\(|\(\?!|<>|\bnot\b|\B-ne\b|--invert"
+    r"|\bgrep\b.*?(?<![\w-])-[A-Za-z]*v"        # grep -v / -iv / ["grep", "-v", …]
+    r"|/\s*!?\s*d\b|\bd\s*[;'\"]"                # sed '/NAME/d', '/NAME/!d', 'd;'
+    r"|\bdelete\b|\bdel\b|\.pop\s*\(|\bunset\b|\bfilter\b|\bexclude\b", re.S)
+
+
+def _positive_lookup_re(name: str) -> re.Pattern[str]:
+    n = re.escape(name)
+    q = r"\\?[\"']"
+    return re.compile(
+        r"\$1\s*==\s*" + q + n + q
+        + r"|\^\s*" + n + r"\s*="
+        + r"|\b(?:getenv|env)\s*\(\s*" + q + n + q
+        + r"|\.get\s*\(\s*" + q + n + q
+        + r"|\[\s*" + q + n + q + r"\s*\]")
+
+
 def _url_setting_lookup(rhs: str) -> bool:
     names = set(re.findall(r"(?<![\w$])[A-Z][A-Z0-9_]{2,}\b", rhs))
     if len(names) != 1 or _BULK_RE.search(rhs) or _DOTALL_RE.search(rhs):
         return False
     (name,) = names
-    return bool(_URL_SETTING_RE.match(name)) and not _CRED_URL_WORD_RE.search(name)
+    if not _URL_SETTING_RE.match(name) or _CRED_URL_WORD_RE.search(name):
+        return False
+    return bool(_positive_lookup_re(name).search(rhs)) and not _INVERSE_LOOKUP_RE.search(rhs)
 
 
 def contents_reached(text: str, path_re: re.Pattern[str] = _ENV_CONTENTS_RE,
