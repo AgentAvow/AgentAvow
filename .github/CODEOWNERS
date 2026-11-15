@@ -1,0 +1,11 @@
+# Security-critical paths: changes here request a review from @kenneives.
+/src/scanner/          @kenneives
+/src/signing.py        @kenneives
+/src/attestation/      @kenneives
+/src/bridges/          @kenneives
+/sdk/                  @kenneives
+/plugins/              @kenneives
+/.claude-plugin/       @kenneives
+/.github/workflows/    @kenneives
+/scripts/deploy-prod.sh @kenneives
+/migrations/           @kenneives

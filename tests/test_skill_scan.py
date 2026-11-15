@@ -98,6 +98,7 @@ async def test_scan_skill_builds_graded_result(monkeypatch):
         return "tok"
 
     async def fake_tree(owner, repo, token, meta_out=None):
+        assert token == "tok"  # the get_github_token patch must reach scan_skill
         tree = [
             {"path": "SKILL.md", "type": "blob"},
             {"path": "scripts/go.sh", "type": "blob"},
@@ -111,7 +112,7 @@ async def test_scan_skill_builds_graded_result(monkeypatch):
             return "#!/bin/bash\necho hello\n"
         return None
 
-    monkeypatch.setattr(scan_mod, "get_github_token", fake_token, raising=False)
+    monkeypatch.setattr("src.github_auth.get_github_token", fake_token)
     monkeypatch.setattr(scan_mod, "_fetch_repo_tree", fake_tree)
     monkeypatch.setattr(scan_mod, "_fetch_file_content", fake_content)
 
@@ -134,9 +135,10 @@ async def test_scan_skill_no_skill_md_errors(monkeypatch):
         return "tok"
 
     async def fake_tree(owner, repo, token, meta_out=None):
+        assert token == "tok"  # the get_github_token patch must reach scan_skill
         return [{"path": "README.md", "type": "blob"}], False, True, "main"
 
-    monkeypatch.setattr(scan_mod, "get_github_token", fake_token, raising=False)
+    monkeypatch.setattr("src.github_auth.get_github_token", fake_token)
     monkeypatch.setattr(scan_mod, "_fetch_repo_tree", fake_tree)
 
     res = await scan_mod.scan_skill("acme", "not-a-skill")

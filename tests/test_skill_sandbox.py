@@ -286,6 +286,7 @@ async def test_scan_skill_collects_env_reads_for_canaries(monkeypatch):
         return "tok"
 
     async def fake_tree(owner, repo, token, meta_out=None):
+        assert token == "tok"  # the get_github_token patch must reach scan_skill
         return ([{"path": "SKILL.md", "type": "blob"},
                  {"path": "scripts/sync.py", "type": "blob"}], False, True, "main")
 
@@ -296,7 +297,7 @@ async def test_scan_skill_collects_env_reads_for_canaries(monkeypatch):
             return "import os\ntoken = os.environ['NOTES_API_TOKEN']\nregion = os.getenv('AWS_REGION')\n"
         return None
 
-    monkeypatch.setattr(scan_mod, "get_github_token", fake_token, raising=False)
+    monkeypatch.setattr("src.github_auth.get_github_token", fake_token)
     monkeypatch.setattr(scan_mod, "_fetch_repo_tree", fake_tree)
     monkeypatch.setattr(scan_mod, "_fetch_file_content", fake_content)
     res = await scan_mod.scan_skill("acme", "sync-skill")
