@@ -103,10 +103,7 @@ def test_patch_targets_found():
         assert expected in targets, f"patch target {expected!r} no longer detected"
 
 
-# Already patched with raising=False on a name scan.py never defined at module level
-# (scan imports it inside functions), so these patches do nothing on main today. Fix them
-# in their own PR; listed here so the guard starts green.
-KNOWN_ABSENT = {"get_github_token"}
+KNOWN_ABSENT: set[str] = set()
 
 
 def test_patch_targets_exist_on_scan():
