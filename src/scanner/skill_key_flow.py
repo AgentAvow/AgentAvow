@@ -587,6 +587,91 @@ def _logical_lines(text: str) -> list[str]:
     return out
 
 
+# A per-service config table (audit round 2, WildClawBench): one dict of entries, each
+# with its own URL and key. Pairing works per variable, so the whole table would join
+# every key to every URL in it. When every use of the table picks one entry by a
+# literal name, each entry is its own variable (`T__name`) and a key is paired only
+# with the URL its own entry, or the call that uses it, names. Any other use of the
+# table (passed whole, iterated, serialised) keeps it one variable, as before.
+_TABLE_OPEN_RE = re.compile(
+    r"^(\s*)((?:const|let|var)\s+)?([A-Za-z_$][\w.$]*)\s*(?::\s*[^=\"'`(]+)?=\s*\{\s*$")
+_TABLE_ENTRY_RE = re.compile(r"""^(\s*)(["']?)([A-Za-z_]\w*)\2\s*:\s*\{\s*$""")
+_TABLE_ENTRY_END_RE = re.compile(r"^\s*\}\s*,?\s*$")
+_TABLE_CLOSE_RE = re.compile(r"^\s*\}\s*;?\s*$")
+
+
+def _depth(s: str) -> int:
+    return sum(s.count(c) for c in "([{") - sum(s.count(c) for c in ")]}")
+
+
+def _table_entries(lines: list[str], i: int) -> tuple[dict[str, tuple[int, int]], int] | None:
+    """({entry: (open line, close line)}, closing line) for a table opened on line
+    ``i``, laid out one entry per block; None for any other shape."""
+    entries: dict[str, tuple[int, int]] = {}
+    j = i + 1
+    while j < min(len(lines), i + 400):
+        ln = lines[j]
+        if not ln.strip():
+            j += 1
+            continue
+        if _TABLE_CLOSE_RE.match(ln):
+            return (entries, j) if len(entries) >= 2 else None
+        m = _TABLE_ENTRY_RE.match(ln)
+        if not m or m.group(3) in entries:
+            return None
+        depth, k = 1, j + 1
+        while k < len(lines) and depth > 0:
+            depth += _depth(lines[k])
+            if depth > 0:
+                k += 1
+        if depth != 0 or not _TABLE_ENTRY_END_RE.match(lines[k]):
+            return None
+        entries[m.group(3)] = (j, k)
+        j = k + 1
+    return None
+
+
+def _split_tables(joined: str) -> str:
+    """``joined`` with each per-service config table split into one variable per
+    entry (see above). Line numbers are kept."""
+    lines = joined.split("\n")
+    for i in range(len(lines)):
+        m = _TABLE_OPEN_RE.match(lines[i])
+        if not m:
+            continue
+        found = _table_entries(lines, i)
+        if not found:
+            continue
+        entries, close = found
+        body = "\n".join(lines[i:close + 1])
+        if not (_URL_RE.search(body) and SECRET_ENV_READ_RE.search(body)):
+            continue
+        decl, name = m.group(2) or "", m.group(3)
+        alt = "|".join(re.escape(k) for k in entries)
+        use = re.compile(r"(?<![\w$.])" + re.escape(name) + r"\b")
+        pick = re.compile(
+            r"(?<![\w$.])" + re.escape(name)
+            + r"""(?:\s*\[\s*(["'])(%s)\1\s*\]|\.get\(\s*(["'])(%s)\3\s*\)|\.(%s)\b)"""
+            % (alt, alt, alt))
+        rest = "\n".join(lines[:i] + [""] * (close + 1 - i) + lines[close + 1:])
+        if len(use.findall(rest)) != len(pick.findall(rest)):
+            continue  # the table is used whole somewhere: keep it one variable
+        lines[i] = ""
+        lines[close] = ""
+        for k, (a, b) in entries.items():
+            ind = _TABLE_ENTRY_RE.match(lines[a]).group(1)
+            lines[a] = f"{ind}{decl}{name}__{k} = {{"
+            lines[b] = f"{ind}}}"
+
+        def sub(mm: re.Match[str], name: str = name) -> str:
+            return f"{name}__{mm.group(2) or mm.group(4) or mm.group(5)}"
+
+        for n in range(len(lines)):
+            if not i <= n <= close:
+                lines[n] = pick.sub(sub, lines[n])
+    return "\n".join(lines)
+
+
 def _call_text(text: str, start: int) -> str:
     """The call starting at ``start``: through its balanced closing paren, or the
     rest of the line for a shell command (curl/wget)."""
@@ -767,7 +852,7 @@ class _Flow:
 
 
 def _flow(text: str, path: str | None = None) -> _Flow:
-    joined = "\n".join(_logical_lines(text or ""))
+    joined = _split_tables("\n".join(_logical_lines(text or "")))
     lines = joined.splitlines()
     assigns = _assignments(lines)
     python = (path or "").lower().endswith(".py") or (
@@ -1399,6 +1484,24 @@ _ENV_CONTENTS_RE = re.compile(
     + r"|\bdotenv_values\s*\(|\bdotenv\.parse\s*\(|\bconfig\([^)]*\)\.parsed\b")
 
 
+# One URL setting looked up by name (`PUBLIC_URL=$(awk -F= '$1 == "APP_URL" …' .env)`,
+# audit round 2, emperorclaw): where the app lives, not a secret, so a request sent
+# to it carries none of the file. Credential-bearing URLs (a database / broker DSN, a
+# webhook) and anything with a secret word stay contents.
+_URL_SETTING_RE = re.compile(r"^[A-Z][A-Z0-9_]*_(?:URL|URI|HOST|DOMAIN|ENDPOINT|ORIGIN)$")
+_CRED_URL_WORD_RE = re.compile(
+    r"(?:^|_)(?:DATABASE|DB|DSN|REDIS|MONGO\w*|POSTGRES\w*|PG|MYSQL|AMQP|BROKER|CONN\w*"
+    r"|WEBHOOK|HOOK|SECRET|KEY|TOKEN|PASSWORD|PASS|PWD|AUTH|CRED\w*|SIGNED|PRIVATE)(?:_|$)")
+
+
+def _url_setting_lookup(rhs: str) -> bool:
+    names = set(re.findall(r"(?<![\w$])[A-Z][A-Z0-9_]{2,}\b", rhs))
+    if len(names) != 1 or _BULK_RE.search(rhs) or _DOTALL_RE.search(rhs):
+        return False
+    (name,) = names
+    return bool(_URL_SETTING_RE.match(name)) and not _CRED_URL_WORD_RE.search(name)
+
+
 def contents_reached(text: str, path_re: re.Pattern[str] = _ENV_CONTENTS_RE,
                      path: str | None = None, whole: bool = False,
                      others: list[str] | None = None) -> list[str]:
@@ -1415,6 +1518,8 @@ def contents_reached(text: str, path_re: re.Pattern[str] = _ENV_CONTENTS_RE,
 
     seeds: Taint = {}
     for a in flow.assigns:
+        if _url_setting_lookup(a.rhs):
+            continue
         if path_re.search(_strip_comment(a.rhs)) and not (
                 whole and single(a)):
             seeds.setdefault(a.target, set()).add(flow.scope_of(a.line, a.declared))
