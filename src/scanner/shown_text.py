@@ -612,9 +612,10 @@ _PASS_RUNNER_RE = re.compile(
     r"(?:exec\w*|spawn\w*|run\w*|system|eval|sh|shell)\s*\)")
 
 
-# A whole Python def header on one line (a one-line body `def f(c): run(c[k])` is not).
 # Function.prototype.call on a builtin method, not subprocess.call.
-_PROTO_CALL_RE = re.compile(r"(?:\bprototype\.\w+|\bhasOwnProperty|\bpropertyIsEnumerable)\s*\.\s*$")
+_PROTO_CALL_RE = re.compile(
+    r"(?:\bprototype\.\w+|\bhasOwnProperty|\bpropertyIsEnumerable)\s*\.\s*$")
+# A whole Python def header on one line (a one-line body `def f(c): run(c[k])` is not).
 _DEF_LINE_RE = re.compile(
     r"^\s*(?:async\s+)?def\s+\w+\s*\([^:]*(?::[^:]*)*?\)\s*(?:->[^:]+)?:\s*(?:#.*)?$")
 

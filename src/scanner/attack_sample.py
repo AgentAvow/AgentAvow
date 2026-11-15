@@ -7,18 +7,19 @@ catch, not a command it runs.
 
 A match is a sample (low) only when ALL of these hold:
 
-1. the file is JSON (``.json`` / ``.jsonl``) or Python, not an agent-instruction file
-   and not a JSON file a tool executes (``package.json``, MCP configs …);
+1. the file is JSON (``.json`` / ``.jsonl``) or Python, and not a JSON file a tool
+   executes (``package.json``, MCP configs …) or one an agent is given as instructions;
 2. the match sits inside one string value of a ``"key": "…"`` pair in an object whose
    other keys include test-case vocabulary (``expect`` / ``expected`` / ``category`` /
    ``label`` / ``attack_type`` …);
-3. the value's key is not one a tool runs (``cmd``, ``command``, ``run``, ``script`` …),
-   unless every host it fetches is a reserved name (``evil.example``, ``*.invalid``,
-   ``example.com``): that fetches nobody's script even if something runs it;
-4. Python: no line of the file hands that key (``case["text"]``, ``.get("text")``) to an
-   exec sink. JSON: no code file in view reads that key into an exec sink
-   (``shown_text.json_key_executed``, re-checked by the tree pass in
-   ``restore_attack_samples``) unless rule 3's reserved-host case holds.
+3. JSON: every host the string fetches is a reserved name (``evil.example``,
+   ``*.invalid``, ``example.com``), so it fetches nobody's script even if something
+   runs it (the reasoning of ``pipe_shell.WHY_RESERVED_TEST`` for test files). A JSON
+   attack prompt naming a real host keeps the dataset policy (``npm_scripts.DATASET_WHY``:
+   high in a dataset dir, critical elsewhere), because an agent reading it still sees it;
+4. Python: no line of the file hands that key (``case["text"]``, ``.get("text")``) to
+   an exec sink, and either rule 3 holds or the key is not one a tool runs (``cmd``,
+   ``command``, ``run`` …).
 """
 from __future__ import annotations
 
@@ -80,10 +81,6 @@ def _object_keys(lines: list[str], idx: int) -> set[str]:
     return keys
 
 
-def _hosts_reserved(line: str, pattern: re.Pattern[str], file_path: str) -> bool:
-    return pipe_shell.reserved_hosts_only(line, pattern, file_path)
-
-
 _PY_SINK_RE = re.compile(
     r"\bsubprocess\b|\bos\s*\.\s*(?:system|popen|exec\w*|spawn\w*)\s*\(|"
     r"\b(?:exec|eval|Popen|check_output|check_call|getoutput|getstatusoutput)\s*\(|"
@@ -116,8 +113,7 @@ def _py_key_executed(key: str, content: str) -> bool:
 def sample_key(file_path: str, content: str, lines: list[str], idx: int,
                pattern: re.Pattern[str]) -> str | None:
     """The key of the attack-sample value every pipe-to-shell match on ``lines[idx]``
-    sits in, or None (keep the finding). The key is returned with a leading ``!`` when
-    the reserved-host case decided it (no tree re-check needed)."""
+    sits in, or None (keep the finding)."""
     p = Path(file_path)
     name = p.name.lower()
     if p.suffix.lower() not in _EXTS:
@@ -143,30 +139,10 @@ def sample_key(file_path: str, content: str, lines: list[str], idx: int,
         return None
     if not {k.lower() for k in _object_keys(lines, idx) - {key}} & _CASE_KEYS:
         return None
-    if _hosts_reserved(line, pattern, file_path):
-        return "!" + key
-    if _EXEC_KEY_RE.match(key):
+    py = p.suffix.lower() == ".py"
+    if py and _py_key_executed(key, content):
         return None
-    if p.suffix.lower() == ".py" and _py_key_executed(key, content):
-        return None
-    return key
+    if pipe_shell.reserved_hosts_only(line, pattern, file_path):
+        return key
+    return key if py and not _EXEC_KEY_RE.match(key) else None
 
-
-def restore_attack_samples(findings: list, texts: dict[str, str]) -> list:
-    """Tree pass: a JSON attack sample lowered per file gets its severity back when
-    code in view reads its key into an exec sink (``shown_text.json_key_executed``).
-    Reserved-host samples and Python samples (checked in their own file) are final."""
-    from src.scanner.shown_text import json_key_executed
-    for f in findings:
-        pre = getattr(f, "attack_pre", None)
-        if pre is None or f.severity != "low" or f.remediation != WHY:
-            continue
-        key, sev, payload = pre
-        path = getattr(f, "file_path", "") or ""
-        if key.startswith("!") or Path(path).suffix.lower() == ".py":
-            continue
-        if path not in texts or json_key_executed(key, path, texts):
-            f.severity, f.remediation = sev, ""
-            if hasattr(f, "payload"):
-                f.payload = payload
-    return findings

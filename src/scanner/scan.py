@@ -4440,19 +4440,17 @@ def _scan_content(
                     effective_severity, remote_payload = "low", False
                     reserved_why = pipe_shell.WHY_RESERVED_TEST
                 # An attack sample in a security tool's test / lesson data (a test case
-                # next to an `expect` / `category` key): low, re-checked by the tree pass
-                # (attack_sample.restore_attack_samples). Audit round 2, class N2.
+                # next to an `expect` / `category` key): low (src/scanner/attack_sample.py,
+                # audit round 2, class N2).
                 if (name == pipe_shell.PIPE_TO_SHELL
                         and effective_severity in ("critical", "high", "medium")):
                     from src.scanner import attack_sample
-                    sample = attack_sample.sample_key(file_path, content, lines, idx, pattern)
-                    if sample is not None:
+                    if attack_sample.sample_key(file_path, content, lines, idx,
+                                                pattern) is not None:
                         f_sample = Finding(
                             category="dynamic_remote_load", name=name, severity="low",
                             file_path=file_path, line_number=line_num,
                             snippet=stripped[:120], remediation=attack_sample.WHY)
-                        f_sample.attack_pre = (  # type: ignore[attr-defined]
-                            sample, effective_severity, remote_payload)
                         findings.append(f_sample)
                         break
                 npx_pre = None

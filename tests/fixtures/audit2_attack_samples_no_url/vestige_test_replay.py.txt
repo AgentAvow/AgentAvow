@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""Tests for Operator Lite `replay`. Classification only: no sample command is ever executed.
+Usage: python3 operator-lite/test_replay.py [repo-root]"""
+import importlib.util, json, os, shutil, subprocess, sys, tempfile
+
+p = subprocess.run(wired, shell=True, input=payload, capture_output=True, text=True, env=env2)
+check("lone file: in shadow mode, the owner's choice, the wired hook records and does not block",
+      p.returncode == 0 and not p.stderr, p.stderr[:200])
+p = subprocess.run([sys.executable, installed, "verify"], capture_output=True, text=True, env=env2)
+check("lone file: both verdicts are in the receipt chain", "receipts=2 chain=OK" in p.stdout, p.stdout[:200])
+p = subprocess.run([sys.executable, installed, "corpus", "guardfall"], capture_output=True, text=True, env=env2)
+check("lone file: corpus says where the corpus lives instead of failing with a traceback",
+      p.returncode == 2 and "ships in the repository" in p.stdout and "Traceback" not in p.stdout + p.stderr, p.stdout[:200])

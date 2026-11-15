@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""misaka-verify — Local task verifier using pytest exit codes.
+
+Reads tasks/*.json, runs the verification command for each task locally.
+Uses only subprocess + pytest — no Docker, no LLM, no external API.
+
+Usage:
+    python3 scripts/misaka_verify.py                     # verify all tasks
+    python3 scripts/misaka_verify.py <task_id>            # verify one task
+    python3 scripts/misaka_verify.py --domain security    # filter by domain
+    python3 scripts/misaka_verify.py --list               # list available tasks
+"""
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+TASKS_DIR = REPO_ROOT / "tasks"
+
+PASS = "✅"
+FAIL = "❌"
+SKIP = "⏭️"
+
+
+def load_tasks(filter_domain: str | None = None) -> list[dict]:
+    index = TASKS_DIR / "index.json"
+    if not index.exists():
+        print(f"❌ No tasks/index.json found. Run scripts/extract_tasks.py first.")
+        sys.exit(1)
+    tasks = json.loads(index.read_text(encoding="utf-8"))
+    if filter_domain:
+        tasks = [t for t in tasks if t.get("domain") == filter_domain]
+    return tasks
+
+
+def resolve_task(task_id: str) -> dict | None:
+    """Find a task by ID from the index."""
+    tasks = load_tasks()
+    for t in tasks:
+        if t["task_id"] == task_id:
+            return t
+    return None
+
+
+def run_verification(task: dict) -> tuple[str, str]:
+    """Run the verification command for a task.
+    Returns (status, details).
+    """
+    source_path = REPO_ROOT / task.get("source", "")
+    task_file = TASKS_DIR / f"{task['task_id']}.json"
+
+    # Check source exists
+    if not source_path.exists():
+        return SKIP, f"Source not found: {task['source']}"
+
+    # Read full task for test_cmd
+    task_data = json.loads(task_file.read_text(encoding="utf-8"))
+    test_cmd = task_data.get("test_cmd", "")
+
+    # If we have a pytest command, run it
+    if test_cmd:
+        try:
+            import shlex
+            result = subprocess.run(
+                shlex.split(test_cmd),
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                timeout=120,  # 2 min max per task
+            )
+            if result.returncode == 0:
+                return PASS, f"{test_cmd} → exit 0"
+            else:
+                summary = result.stdout.split("\n")[-3:]
+                return FAIL, f"{test_cmd} → exit {result.returncode}: {' '.join(summary)}"
+        except subprocess.TimeoutExpired:
+            return FAIL, f"{test_cmd} → TIMEOUT (>120s)"
