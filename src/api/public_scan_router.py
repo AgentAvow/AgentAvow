@@ -1294,6 +1294,18 @@ async def _capture_community_scan(
     await _record_scan_history(_full, surface, owner, repo, data, db)
 
 
+_HISTORY_MAX_TOOLS = 500
+
+
+def _history_tool_digests(raw: object) -> dict[str, str] | None:
+    """The per-tool digests kept on a history row: string keys and values only, capped
+    so one huge manifest can't bloat the table. None when there are none."""
+    if not isinstance(raw, dict) or not raw:
+        return None
+    out = {str(k)[:512]: str(v)[:128] for k, v in list(raw.items())[:_HISTORY_MAX_TOOLS]}
+    return out or None
+
+
 async def _record_scan_history(
     full_name: str, surface: str, owner: str, repo: str, data: dict, db: AsyncSession,
 ) -> None:
@@ -1337,6 +1349,7 @@ async def _record_scan_history(
             critical=findings.get("critical"),
             high=findings.get("high"),
             tool_manifest_digest=new_digest,
+            tool_digests=_history_tool_digests(data.get("tool_digests")),
             score_delta=score_delta,
             manifest_drift=manifest_drift,
         ))

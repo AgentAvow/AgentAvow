@@ -18,7 +18,7 @@ def test_tools_list_digest_is_unchanged():
     doc = [t.model_dump(mode="json", by_alias=True, exclude_none=True) for t in tools]
     digest = hashlib.sha256(
         json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:16]
-    assert digest == "a9bc46b5c9f51e1f"  # card v14 + not_checked/coverage_gaps schema (2026-10-28)
+    assert digest == "b59b59fe27926f05"  # tool descriptions: shorter + one example each (2026-11-14)
 
 
 def test_same_resource_uri_and_byte_identical_meta():
