@@ -1281,6 +1281,62 @@ def _pem_has_body(lines: list[str], idx: int, marker_end: int) -> bool:
     return body_lines >= 3
 
 
+_EC_PUBKEY_OID_DER = bytes.fromhex("2a8648ce3d0201")  # id-ecPublicKey
+_EC_PRIV_HDR = b"\x02\x01\x01\x04"  # ECPrivateKey: version 1, then the scalar OCTET STRING
+_PEM_LINE_RE = re.compile(r"[A-Za-z0-9+/]+={0,2}")
+WHY_TRIVIAL_KEY = ("An EC private key whose secret scalar is a tiny number (under 2^32), "
+                   "so anyone can derive it: a placeholder or deliberately public test "
+                   "key, not a leaked secret. Reported for visibility.")
+
+
+def _pem_trivial_ec_key(lines: list[str], idx: int) -> bool:
+    """True when the PEM block opening at ``lines[idx]`` is a well-formed, unencrypted EC
+    private key (SEC1 or PKCS#8) whose private scalar is below 2^32, e.g. mitmproxy's
+    d=4 key for a known-compromised CA in ``certs.py``. A random key's scalar never is.
+    Anything that does not parse exactly (RSA, extra bytes, two keys) returns False."""
+    import base64
+
+    head = lines[idx]
+    if "ENCRYPTED" in head:
+        return False
+    body: list[str] = []
+    for ln in lines[idx + 1: idx + 40]:
+        s = ln.strip().strip("\"',")
+        if s.startswith("-----END"):
+            break
+        if not _PEM_LINE_RE.fullmatch(s):
+            return False
+        body.append(s)
+    else:
+        return False
+    try:
+        der = base64.b64decode("".join(body), validate=True)
+    except ValueError:
+        return False
+    if not 8 < len(der) <= 400 or der[0] != 0x30:
+        return False
+    if der[1] < 0x80:
+        hdr, total = 2, der[1]
+    elif der[1] == 0x81:
+        hdr, total = 3, der[2]
+    elif der[1] == 0x82:
+        hdr, total = 4, int.from_bytes(der[2:4], "big")
+    else:
+        return False
+    if hdr + total != len(der):
+        return False
+    if "EC PRIVATE KEY" not in head and _EC_PUBKEY_OID_DER not in der:
+        return False
+    pos = der.find(_EC_PRIV_HDR)
+    if pos < 0 or der.find(_EC_PRIV_HDR, pos + 1) >= 0:
+        return False
+    n = der[pos + 4] if pos + 4 < len(der) else 0
+    scalar = der[pos + 5: pos + 5 + n]
+    if not 20 <= n <= 72 or len(scalar) != n:
+        return False
+    return int.from_bytes(scalar, "big") < 2 ** 32
+
+
 def _generic_secret_plausible(value: str) -> bool:
     """A generic ``token = "…"`` value counts only if it LOOKS like a credential: letters
     AND digits, Shannon entropy >= 3.5 bits/char, no ``/`` (path- or label-shaped
@@ -3106,9 +3162,14 @@ def _looks_like_oauth(lines: list[str], line_num: int) -> bool:
 
 
 # Emoji tag sequence (UTS #51): WAVING BLACK FLAG + tag digits / lowercase tag letters +
-# CANCEL TAG — the England / Scotland / Wales flags. Data, not smuggled ASCII.
+# CANCEL TAG — the England / Scotland / Wales flags. Data, not smuggled ASCII. Some emoji
+# tables (mitmproxy's utils/emoji.py) write the same flags with a ZWJ before every tag;
+# that form is matched only up to 7 tags (a UTS #51 subdivision tag is 3 to 6 chars),
+# so it carries no more text than a real flag.
 _EMOJI_TAG_SEQ_RE = re.compile(
     "\U0001F3F4[\U000E0030-\U000E0039\U000E0061-\U000E007A]{1,32}\U000E007F"
+    "|\U0001F3F4(?:‍[\U000E0030-\U000E0039\U000E0061-\U000E007A]){1,7}"
+    "‍?\U000E007F"
 )
 
 
@@ -3511,6 +3572,78 @@ def _py_local_fetch_only(line: str, file_lang: str | None) -> bool:
     ``password=os.environ[...]``)."""
     return (file_lang == "python" and not _PY_POST_CALL_RE.search(line)
             and not _PY_FETCH_SECRET_RE.search(line))
+
+
+# `base = getattr(__builtins__, name, OSError)`: a builtin EXCEPTION CLASS looked up by
+# name (PyAV's av/error.py builds FFmpeg error subclasses this way). Only the assignment
+# form with an exception-class default and a non-literal or exception-named key.
+_BUILTIN_CLASS_LOOKUP_RE = re.compile(
+    r"""^\s*(?P<var>[A-Za-z_]\w*)\s*=\s*getattr\s*\(\s*__builtins__\s*,\s*"""
+    r"""(?P<key>[A-Za-z_]\w*|(?P<q>['"])[A-Z]\w*(?:Error|Exception|Warning)(?P=q))\s*,\s*"""
+    r"""(?:[A-Z]\w*(?:Error|Exception|Warning)|BaseException)\s*\)\s*(?:#.*)?$"""
+)
+# Where an exception class is used as a class: a base in `type(…)` / `class X(…)`, or a
+# type test. A call of the name (`base(code)`) is never one of these.
+_EXC_CLASS_USE_RE = re.compile(
+    r"""\btype\s*\(|\bissubclass\s*\(|\bisinstance\s*\(|^\s*except\b|^\s*class\s+\w+\s*\("""
+)
+_BUILTIN_LOOKUP_WINDOW = 20
+
+
+def _builtin_class_lookup(lines: list[str], idx: int) -> bool:
+    """True when ``lines[idx]`` binds a builtin exception class looked up on
+    ``__builtins__`` and every later use of the name (within 20 lines) treats it as a
+    class, never calls or re-binds it. ``getattr(__builtins__, 'ev'+'al')(x)``, a call of
+    the bound name, or handing it on (``f = base``) keep the critical."""
+    m = _BUILTIN_CLASS_LOOKUP_RE.match(lines[idx])
+    if not m:
+        return False
+    var = re.compile(r"(?<![\w.])" + re.escape(m.group("var")) + r"\b")
+    uses = 0
+    for ln in lines[idx + 1: idx + 1 + _BUILTIN_LOOKUP_WINDOW]:
+        for vm in var.finditer(ln):
+            if re.match(r"\s*\(", ln[vm.end():]) or not _EXC_CLASS_USE_RE.search(ln):
+                return False
+            uses += 1
+    return uses > 0
+
+
+# A YAML rule set's documentation block: `code_example: |`, `bad_example: >`, … The
+# block scalar is text a rule shows to a person (agent-audit's `# BAD:` samples).
+_YAML_KEY_LINE_RE = re.compile(r"""^(\s*)(?:-\s+)?([\w.-]+):(?:\s|$)""")
+_YAML_BLOCK_HEADER_RE = re.compile(r"""^\s*(?:-\s+)?([\w.-]+):\s*[|>][-+0-9]*\s*(?:#.*)?$""")
+_YAML_EXAMPLE_KEY_RE = re.compile(
+    r"""(?:^|_)examples?(?:_|$)|^(?:bad|good|vulnerable|insecure|unsafe|safe|secure|"""
+    r"""fixed)(?:_code)?$""", re.IGNORECASE)
+_YAML_RULES_TOP_RE = re.compile(r"^rules:\s*$", re.MULTILINE)
+WHY_RULE_EXAMPLE = ("Example text inside a rule file's documentation block (a YAML "
+                    "`code_example: |` scalar a rule shows to a person); nothing runs it. "
+                    "Reported for visibility.")
+
+
+def _yaml_rule_example(file_path: str, content: str, lines: list[str], idx: int) -> bool:
+    """True when ``lines[idx]`` sits inside an example block scalar of a YAML rule set
+    (a top-level ``rules:`` key or a ``rules/`` directory). The owner is the nearest
+    less-indented YAML key line above; anything else (a ``run: |`` or ``command:``
+    block, a plain mapping) returns False."""
+    if Path(file_path).suffix.lower() not in (".yaml", ".yml"):
+        return False
+    if not (_YAML_RULES_TOP_RE.search(content) or "/rules/" in "/" + file_path.replace("\\", "/")):
+        return False
+    cur = lines[idx]
+    m_ind = len(cur) - len(cur.lstrip())
+    for j in range(idx - 1, -1, -1):
+        ln = lines[j]
+        if not ln.strip():
+            continue
+        ind = len(ln) - len(ln.lstrip())
+        if ind >= m_ind:
+            continue
+        if _YAML_KEY_LINE_RE.match(ln):
+            hm = _YAML_BLOCK_HEADER_RE.match(ln)
+            return bool(hm and _YAML_EXAMPLE_KEY_RE.search(hm.group(1)))
+        m_ind = ind
+    return False
 
 
 def _benign_unicode_only(name: str, pattern: re.Pattern, line: str) -> bool:
@@ -4006,6 +4139,19 @@ def _scan_content(
                         and _is_documented_example(line, match.start())
                         and not _LIVE_KEY_PREFIX_RE.match(val)):
                     sev = "medium"
+                # A PEM EC key whose private scalar is trivially small (mitmproxy's
+                # deliberately compromised d=4 CA key) protects nothing: reported, low.
+                if name == "Private Key block" and _pem_trivial_ec_key(lines, idx):
+                    findings.append(Finding(
+                        category="secret",
+                        name="Private Key block (trivial placeholder EC key)",
+                        severity="low",
+                        file_path=file_path,
+                        line_number=line_num,
+                        snippet=_redact_secret(stripped[:120], match),
+                        remediation=WHY_TRIVIAL_KEY,
+                    ))
+                    break
                 # Precision pass #3: a PEM HEADER with no key body is key-HANDLING code
                 # (marker tuples, startswith(), regexes) — reported as a capability.
                 if name == "Private Key block" and not _pem_has_body(lines, idx, match.end()):
@@ -4414,6 +4560,14 @@ def _scan_content(
                             pre_sev, pre_payload, pipe_shell.why(pipe_class))
                         findings.append(shown)
                         break
+                if (name == pipe_shell.PIPE_TO_SHELL
+                        and _yaml_rule_example(file_path, content, lines, idx)):
+                    # A `# BAD:` sample in a security rule's documentation block.
+                    findings.append(Finding(
+                        category="dynamic_remote_load", name=name, severity="low",
+                        file_path=file_path, line_number=line_num,
+                        snippet=stripped[:120], remediation=WHY_RULE_EXAMPLE))
+                    break
                 # Downgrade in test/doc/infra files like other groups
                 effective_severity, remote_payload = _graded(
                     "defect", effective_severity, name in _PAYLOAD_REMOTE_LOAD_NAMES)
@@ -4598,6 +4752,13 @@ def _scan_content(
                     # Plugin / backend loading by name (pytest, requests.packages) is
                     # what the tool does; next to untrusted input it stays a medium.
                     kind, effective_severity, capability = "capability", "low", "code:eval"
+                if (name == "Obfuscated eval (Python)"
+                        and _builtin_class_lookup(lines, idx)):
+                    # A builtin exception class looked up by name and used only as a
+                    # class (PyAV's error table), never called.
+                    kind, effective_severity, capability = (
+                        "capability", "low", "code:builtin_lookup")
+                    emitted_name = "Builtin exception class looked up by name"
                 if name == "Hex-encoded string execution":
                     # Precision pass #5: a long `\x..` run is only EXECUTION with an
                     # exec/decode sink within 3 lines; Rust/Go/Java byte constants are
