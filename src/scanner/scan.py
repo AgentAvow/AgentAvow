@@ -4396,6 +4396,8 @@ def _scan_content(
                         continue
                     if pipe_class in (pipe_shell.OFFICIAL, pipe_shell.PINNED):
                         effective_severity = "high"
+                    elif pipe_class == pipe_shell.NO_URL:
+                        effective_severity = "low"
                     if _pipe_shown(idx, line, pattern):
                         # Shown, never run (round 2): help / error text of a shell
                         # script, or a web page's display text. Reported, not dropped.

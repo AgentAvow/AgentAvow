@@ -36,7 +36,8 @@ DROP = "drop"
 OFFICIAL = "official"
 PINNED = "pinned"
 CRITICAL = "critical"
-_RANK = {DROP: 0, OFFICIAL: 1, PINNED: 1, CRITICAL: 2}
+NO_URL = "no_url"
+_RANK = {DROP: 0, NO_URL: 1, OFFICIAL: 2, PINNED: 2, CRITICAL: 3}
 
 # A raw GitHub file at a full 40-hex commit SHA: the bytes fetched can never change,
 # which is what the rule's own remediation asks for ("pin remote payloads by commit
@@ -87,6 +88,14 @@ _URL_RE = re.compile(r"""(?:https?|ftp)://[^\s'"`)|>\]]+""", re.IGNORECASE)
 # A target the shell expands: $VAR, ${VAR}, $(cmd), `cmd`, %VAR%, {{ template }}.
 _VAR_RE = re.compile(r"""\$\{?\w|\$\(|`[^`]*\$|%\w+%|\{\{""")
 _PLACEHOLDER_ARG_RE = re.compile(r"""^(?:\.{2,}|…+|<[^>]*>|\[[^\]]*\]|url|URL|\.\.\.\w*)$""")
+# Nothing to fetch as written: a bare installer file name with no host
+# (`curl install.sh | bash`, watch-cli) or a URL whose path is literally elided
+# (`https://raw.githubusercontent.com/.../install.sh`, openclaw-ansible). Only
+# installer stems: `bun.sh` / `get.example.sh` name real hosts and stay critical.
+_SCRIPT_FILE_ARG_RE = re.compile(
+    r"""^(?:install(?:er)?|setup|bootstrap|init|uninstall|update|upgrade)"""
+    r"""\.(?:sh|bash|zsh|ps1)$""", re.IGNORECASE)
+_ELIDED_SEGMENT_RE = re.compile(r"""^(?:\.{3,}|…+)$""")
 _INSECURE_FLAG_RE = re.compile(r"""(?:^|\s)(?:-k|--insecure|--no-check-certificate)\b""")
 _BASE64_RE = re.compile(r"""\bbase64\b|\batob\s*\(|\bb64decode\b""", re.IGNORECASE)
 # Regex syntax around the target: a detection pattern, not a command. Counted only
@@ -129,6 +138,9 @@ _POST_CUE_RE = re.compile(
 WHY_PINNED = ("Pipes a script pinned to an exact commit to a shell. The bytes can't change "
               "after you review them, so read that script once before you run it.")
 
+WHY_NO_URL = ("A pipe-to-shell with nothing to fetch as written: a bare installer file "
+              "name with no host, or a URL whose path is elided (`/.../`). It reads as "
+              "an install hint, not a command that can run. Reported for visibility.")
 WHY_OFFICIAL = ("Pipes a well-known vendor's official installer (HTTPS) to a shell. It "
                 "runs whatever that host serves at install time, so review it, or pin a "
                 "version / checksum.")
@@ -276,8 +288,14 @@ def _last_command_start(line: str, start: int, end: int) -> int:
     return start + tool.start() if tool else start
 
 
+def _elided_url(url: str) -> bool:
+    """The URL's host or a path segment is a literal ellipsis (`/.../`, `/…/`)."""
+    rest = url.split("://", 1)[-1].split("?", 1)[0].split("#", 1)[0]
+    return any(_ELIDED_SEGMENT_RE.match(seg) for seg in rest.split("/"))
+
+
 def classify_match(line: str, start: int, end: int, file_path: str) -> str:
-    """Classify one pipe-to-shell match: DROP, OFFICIAL or CRITICAL."""
+    """Classify one pipe-to-shell match: DROP, NO_URL, OFFICIAL, PINNED or CRITICAL."""
     start = _last_command_start(line, start, end)
     target = _target(line, start, end)
     matched = line[start:end]
@@ -294,6 +312,10 @@ def classify_match(line: str, start: int, end: int, file_path: str) -> str:
         real = [a for a in args if a and not a.startswith("-")]
         if not real or all(_PLACEHOLDER_ARG_RE.match(a) for a in real):
             return DROP
+        if len(real) == 1 and _SCRIPT_FILE_ARG_RE.match(real[0]):
+            return NO_URL
+    elif not has_var and all(_elided_url(u) for u in urls):
+        return NO_URL
     name = Path(file_path).name.lower()
     if Path(file_path).suffix.lower() in _PROSE_EXTS and _prohibited(line, start, end):
         return DROP
@@ -347,7 +369,7 @@ def reserved_hosts_only(line: str, pattern: re.Pattern[str], file_path: str) -> 
 
 def why(cls: str | None) -> str:
     """The remediation text for a lowered class ("" for everything else)."""
-    return {OFFICIAL: WHY_OFFICIAL, PINNED: WHY_PINNED}.get(cls or "", "")
+    return {OFFICIAL: WHY_OFFICIAL, PINNED: WHY_PINNED, NO_URL: WHY_NO_URL}.get(cls or "", "")
 
 
 def classify_line(line: str, pattern: re.Pattern[str], file_path: str) -> str:
