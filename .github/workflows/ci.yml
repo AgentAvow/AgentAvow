@@ -6,9 +6,8 @@ on:
   # Auto-run on pushes to main
   push:
     branches: [main]
-  # Auto-run on PRs targeting main
+  # Auto-run on every PR, including PRs stacked on another PR's branch
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
