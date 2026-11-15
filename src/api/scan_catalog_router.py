@@ -1016,12 +1016,31 @@ async def _refill_community_rows(db: AsyncSession, *, force: bool = False) -> li
         return list(rows)
 
 
+_REFILL_SESSIONS: Any = None
+
+
+def _refill_sessionmaker() -> Any:
+    """Sessions for the background refill on their own unpooled engine: its connection
+    is opened and closed by the refill itself and never handed back to the app's pool,
+    so a refill cut short (a worker shutting down, a test's event loop closing) cannot
+    leave a connection bound to a dead loop for a request to pick up."""
+    global _REFILL_SESSIONS
+    if _REFILL_SESSIONS is None:
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+        from sqlalchemy.pool import NullPool
+
+        from src.config import settings
+
+        engine = create_async_engine(settings.database_url, poolclass=NullPool)
+        _REFILL_SESSIONS = async_sessionmaker(engine, class_=AsyncSession,
+                                              expire_on_commit=False)
+    return _REFILL_SESSIONS
+
+
 async def _background_community_refill() -> None:
     """Refill the community rows off the request path. Never raises."""
     try:
-        from src.database import async_session
-
-        async with async_session() as db:
+        async with _refill_sessionmaker()() as db:
             await _refill_community_rows(db, force=True)
     except Exception:
         logger.warning("community rows background refill failed", exc_info=True)

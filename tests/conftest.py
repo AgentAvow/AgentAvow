@@ -800,18 +800,6 @@ async def _reset_rate_limiter():
     yield
     settings.rate_limit_auth_per_minute = original
     await _limiter.clear_all()
-    # A catalog community-rows refill started in the background during this test must
-    # finish on this test's event loop, or its pooled DB connection outlives the loop.
-    import asyncio
-    import sys
-
-    _catalog = sys.modules.get("src.api.scan_catalog_router")
-    _task = getattr(_catalog, "_COMMUNITY_TASK", None) if _catalog else None
-    if _task is not None and not _task[1].done() and _task[0] is asyncio.get_running_loop():
-        try:
-            await asyncio.wait_for(asyncio.shield(_task[1]), timeout=10)
-        except Exception:
-            _task[1].cancel()
 
 
 @pytest_asyncio.fixture
