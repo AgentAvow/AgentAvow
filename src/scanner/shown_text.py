@@ -612,6 +612,11 @@ _PASS_RUNNER_RE = re.compile(
     r"(?:exec\w*|spawn\w*|run\w*|system|eval|sh|shell)\s*\)")
 
 
+# A whole Python def header on one line (a one-line body `def f(c): run(c[k])` is not).
+_DEF_LINE_RE = re.compile(
+    r"^\s*(?:async\s+)?def\s+\w+\s*\([^:]*(?::[^:]*)*?\)\s*(?:->[^:]+)?:\s*(?:#.*)?$")
+
+
 def _computed_exec_site(json_path: str, texts: dict[str, str]) -> tuple[str, int] | None:
     base = Path(json_path).name
     stem = Path(json_path).stem
@@ -628,6 +633,10 @@ def _computed_exec_site(json_path: str, texts: dict[str, str]) -> tuple[str, int
         lines = text.split("\n")
         for i, ln in enumerate(lines):
             if ln.lstrip().startswith(("#", "//", "*", "/*")):
+                continue
+            if _DEF_LINE_RE.match(ln):
+                # `def run_verification(task: dict) -> tuple[str, str]:` declares a
+                # function; its annotations are not a computed read into a sink.
                 continue
             if _PASS_RUNNER_RE.search(ln):
                 return fp, i + 1

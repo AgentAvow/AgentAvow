@@ -1019,6 +1019,8 @@ def restore_externally_invoked(findings: list, texts: dict[str, str], *,
     restore_signature_hosts(findings, texts)
     restore_signing_relaxed(findings, texts)
     _restore_datasets(findings, texts)
+    from src.scanner.attack_sample import restore_attack_samples
+    restore_attack_samples(findings, texts)
     _restore_helper_scripts(findings, texts)
     _restore_dev_tooling(findings, texts,
                          REGISTRY_ROOTS if registry_artifact else CONSUMER_ROOTS)
