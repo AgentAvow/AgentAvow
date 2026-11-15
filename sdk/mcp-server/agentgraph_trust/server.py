@@ -37,7 +37,7 @@ _BASE_URL = (
 ).rstrip("/")
 _WEB_BASE = _BASE_URL
 
-_VERSION = "0.6.5"
+_VERSION = "0.6.6"
 
 # Package-surface aliases, mirroring the public API + the remote connector.
 _SURFACE_ALIASES = {
@@ -432,110 +432,148 @@ _ABOUT = (
 # --------------------------------------------------------------------------- #
 # tool catalog (mirrors the remote connector; all read-only)
 # --------------------------------------------------------------------------- #
-_RO = {"readOnlyHint": True}
+def _ann(title: str, open_world: bool = True) -> dict:
+    """Every behavioral hint set explicitly: all tools are read-only lookups."""
+    return {"title": title, "readOnlyHint": True, "destructiveHint": False,
+            "idempotentHint": True, "openWorldHint": open_world}
+
+
+_FORCE = {"type": "boolean",
+          "description": "Re-scan now instead of returning the cached result (cached ~1h)."}
+_ENTITY = {"type": "string", "maxLength": 64,
+           "description": "UUID of an AgentAvow entity. Get one from lookup_identity."}
 
 _TOOLS = [
     {
         "name": "scan_repo",
-        "description": "Scan a public GitHub repo ('owner/name') before connecting: Safe "
-                       "to connect / Review before you connect / Do not connect, with "
-                       "the reason and a signed 0-100 trust score.",
-        "annotations": _RO,
+        "title": "Scan a GitHub repo",
+        "description": "Is a public GitHub repo safe for an agent to connect to? Returns Safe "
+                       "to connect, Review before you connect, or Do not connect with the "
+                       "reason, a signed 0-100 trust score, an adoption score and the "
+                       "findings. Read-only; calls agentavow.com. "
+                       "Example: {\"repo\": \"vercel/next.js\"}",
+        "annotations": _ann("Scan a GitHub repo"),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "repo": {"type": "string", "maxLength": 214,
-                         "description": "GitHub repo as 'owner/name'."},
-                "force": {"type": "boolean", "description": "Bypass the cache and re-scan."},
+                         "description": "GitHub repo as 'owner/name', e.g. 'vercel/next.js'."},
+                "force": _FORCE,
             },
             "required": ["repo"],
         },
     },
     {
         "name": "scan_package",
-        "description": "Scan a published npm / PyPI / crates / Docker / Hugging Face package: "
-                       "Safe to connect / Review before you connect / Do not connect, "
-                       "with the reason and a signed 0-100 trust score.",
-        "annotations": _RO,
+        "title": "Scan a package",
+        "description": "Scan a published npm, PyPI, crates, Docker or Hugging Face package. "
+                       "Returns Safe to connect, Review before you connect, or Do not connect "
+                       "with the reason, a signed 0-100 trust score, an adoption score and "
+                       "the findings. Read-only; calls agentavow.com. "
+                       "Example: {\"registry\": \"npm\", \"name\": \"chalk\"}",
+        "annotations": _ann("Scan a package"),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "name": {"type": "string", "maxLength": 214, "description": "Package name."},
+                "name": {"type": "string", "maxLength": 214,
+                         "description": "Package name, e.g. 'chalk' (or 'org/model' for "
+                                        "Hugging Face)."},
                 "registry": {"type": "string", "maxLength": 32,
-                             "description": "npm | pypi | crates | docker | huggingface "
-                                            "(aliases like python/rust/hf accepted)."},
-                "force": {"type": "boolean", "description": "Bypass the cache and re-scan."},
+                             "description": "npm, pypi, crates, docker or huggingface "
+                                            "(python, rust and hf also work)."},
+                "force": _FORCE,
             },
             "required": ["name"],
         },
     },
     {
         "name": "scan_mcp_server",
-        "description": "Scan a live MCP server by its https URL — checks the tool "
-                       "definitions for poisoning / prompt-injection — signed verdict.",
-        "annotations": _RO,
+        "title": "Scan an MCP server",
+        "description": "Scan a live MCP server's tool definitions for tool poisoning, prompt "
+                       "injection and hidden characters before your agent connects. Returns "
+                       "Safe to connect, Review before you connect, or Do not connect with "
+                       "the reason and a signed 0-100 trust score. Read-only; calls "
+                       "agentavow.com. Example: {\"endpoint_url\": "
+                       "\"https://mcp.deepwiki.com/mcp\"}",
+        "annotations": _ann("Scan an MCP server"),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "endpoint_url": {"type": "string", "maxLength": 512,
-                                 "description": "The MCP server's https URL."},
-                "force": {"type": "boolean", "description": "Bypass the cache and re-scan."},
+                                 "description": "The MCP server's https:// URL."},
+                "force": _FORCE,
             },
             "required": ["endpoint_url"],
         },
     },
     {
         "name": "verify_trust",
-        "description": "Resolve an agent identity and return its current trust score "
-                       "before you delegate to it.",
-        "annotations": _RO,
+        "title": "Verify an entity's trust score",
+        "description": "Check an AgentAvow entity's current trust score and tier before you "
+                       "delegate to it. Read-only; calls agentavow.com. "
+                       "Example: {\"entity_id\": \"<uuid from lookup_identity>\"}",
+        "annotations": _ann("Verify an entity's trust score"),
         "inputSchema": {
             "type": "object",
-            "properties": {"entity_id": {"type": "string", "maxLength": 64}},
+            "properties": {"entity_id": _ENTITY},
             "required": ["entity_id"],
         },
     },
     {
         "name": "check_interaction_safety",
-        "description": "Check whether it's safe to perform a given interaction "
-                       "(delegate/trade/…) with an agent.",
-        "annotations": _RO,
+        "title": "Check interaction safety",
+        "description": "Is it safe to do this with another agent? Compares its trust score "
+                       "to the bar for the interaction (delegate 0.6, trade 0.5, collaborate "
+                       "0.4, follow 0.1) and returns is_safe, the risk level and a "
+                       "recommendation. Read-only; calls agentavow.com. Example: "
+                       "{\"target_entity_id\": \"<uuid>\", \"interaction_type\": "
+                       "\"delegate\"}",
+        "annotations": _ann("Check interaction safety"),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "target_entity_id": {"type": "string", "maxLength": 64},
+                "target_entity_id": {**_ENTITY, "description": "UUID of the other agent. "
+                                     "Get one from lookup_identity."},
                 "interaction_type": {"type": "string", "maxLength": 32,
-                                     "description": "e.g. delegate, trade, collaborate, follow."},
+                                     "description": "delegate, trade, collaborate or follow."},
             },
             "required": ["target_entity_id"],
         },
     },
     {
         "name": "lookup_identity",
-        "description": "Resolve a DID (did:web:… / did:key:…) or search agents by name.",
-        "annotations": _RO,
+        "title": "Look up an agent or tool",
+        "description": "Find an AgentAvow entity by DID (did:web:… or did:key:…) or display "
+                       "name. Returns its id, name, type, trust score and tier; use the id "
+                       "with verify_trust or get_trust_badge. Read-only; calls agentavow.com. "
+                       "Example: {\"query\": \"did:web:example.com\"}",
+        "annotations": _ann("Look up an agent or tool"),
         "inputSchema": {
             "type": "object",
-            "properties": {"query": {"type": "string", "maxLength": 200}},
+            "properties": {"query": {"type": "string", "maxLength": 200,
+                                     "description": "A DID or a display name."}},
             "required": ["query"],
         },
     },
     {
         "name": "get_trust_badge",
-        "description": "Get a shields-style trust badge (SVG URL + README markdown) "
-                       "for an agent identity.",
-        "annotations": _RO,
+        "title": "Get a trust badge",
+        "description": "Get an auto-updating AgentAvow trust badge (SVG URL plus Markdown to "
+                       "paste into a README) for an entity. Read-only; calls agentavow.com. "
+                       "Example: {\"entity_id\": \"<uuid>\"}",
+        "annotations": _ann("Get a trust badge"),
         "inputSchema": {
             "type": "object",
-            "properties": {"entity_id": {"type": "string", "maxLength": 64}},
+            "properties": {"entity_id": _ENTITY},
             "required": ["entity_id"],
         },
     },
     {
         "name": "about_agentavow",
-        "description": "What AgentAvow checks, which tool to use for what, and how to "
-                       "read a verdict.",
-        "annotations": _RO,
+        "title": "About AgentAvow",
+        "description": "What AgentAvow checks, which tool to use when, and how to read a "
+                       "verdict. Call it to get started. No input, read-only. Example: {}",
+        "annotations": _ann("About AgentAvow", open_world=False),
         "inputSchema": {"type": "object", "properties": {}},
     },
 ]
