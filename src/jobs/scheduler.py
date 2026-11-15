@@ -1803,6 +1803,11 @@ async def _rescan_catalog_row(surface: str, owner: str, repo: str, db) -> bool:
             result = await scan_mcp(repo)
         elif surface == "openclaw":
             result = await scan_skill(owner, repo)
+            # A launch skill row with no SKILL.md (or a deleted repo) would otherwise
+            # keep its corpus verdict forever: record it so the catalog lists it as
+            # the repo (or drops it). src/api/catalog_skill_rows.py.
+            from src.api.catalog_skill_rows import note_skill_scan
+            await note_skill_scan(owner, repo, getattr(result, "error", None))
         else:
             return False
         if getattr(result, "error", None):
