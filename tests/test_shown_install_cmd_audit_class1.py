@@ -1,5 +1,5 @@
 """Install commands only shown to a person are not critical (verdict accuracy audit,
-class 1, ``docs/research/verdict-accuracy-audit-2026-11.md``).
+class 1).
 
 Each fixture below is built from the tool's own source (the hint lines are verbatim;
 the surrounding code is the part the walk has to read). Each one read critical
