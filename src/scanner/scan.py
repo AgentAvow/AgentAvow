@@ -3413,7 +3413,8 @@ _PLACEHOLDER_SUB_RE = re.compile(r"""<[\w\- ]{1,40}>\.$""")
 _TUNNEL_HOST_RE = re.compile(r"""^ngrok(?:-free)?\.(?:io|app|dev)$""", re.IGNORECASE)
 
 
-def _exfil_host_not_destination(line: str, pattern: re.Pattern[str]) -> bool:
+def _exfil_host_not_destination(line: str, pattern: re.Pattern[str],
+                                lines: list[str] | None = None, idx: int = 0) -> bool:
     """Every webhook/tunnel-host match on ``line`` is either a string argument of a
     suffix test (``.endswith(...)`` / ``.endsWith(...)``: a comparison, not where
     anything is sent) or a tunnel host behind an angle-bracket placeholder subdomain
@@ -3430,24 +3431,124 @@ def _exfil_host_not_destination(line: str, pattern: re.Pattern[str]) -> bool:
         in_suffix = any(a < m.start() and m.end() < b for a, b in spans)
         placeholder = bool(_TUNNEL_HOST_RE.match(m.group(0))
                            and _PLACEHOLDER_SUB_RE.search(line[:m.start()]))
-        if not (in_suffix or placeholder or _tunnel_host_example(line, m)):
+        if not (in_suffix or placeholder
+                or (lines is not None and _tunnel_host_example(lines, idx, m))):
             return False
     return True
 
 
-# A prompt's placeholder value (`placeholder: 'cezar.ngrok.app'`) or an example in a
-# message (`'enter a bare hostname, e.g. cezar.ngrok.app'`): text shown to a person in
-# an ngrok-setup wizard (@open-mercato/cezar 0.19.0, 2026-11-14).
+# A prompt's placeholder value (`placeholder: 'acme.ngrok.app'`) or an example in a
+# message (`'enter a bare hostname, e.g. acme.ngrok.app'`): text shown to a person in
+# a tunnel-setup wizard (audit 2026-11, false-positive class 2).
 _PLACEHOLDER_KEY_RE = re.compile(r"""(?<![\w$])placeholder['"]?\s*[:=]\s*$""", re.IGNORECASE)
 _EXAMPLE_LEAD_RE = re.compile(
     r"""(?:\be\.g\.|\bfor example|\bsuch as|\bexample:)\s*,?\s*(?:[\w-]+\.)*$""", re.IGNORECASE)
 
+# --- does a value listed as data ever reach a network call? -------------------------
+# The three tunnel-host-as-data relaxations below (a placeholder / example string, a
+# bundled suffix list, an allowlist default) hold only when the value can never be
+# dialled. The value is tracked by the name that holds it (its key, variable or list)
+# and every alias assigned from that name; any read that is not a plain comparison or
+# membership test counts as reaching a network call (unsure stays critical).
+_JS_NOT_A_NAME = frozenset({
+    "module", "exports", "undefined", "null", "true", "false", "default", "case",
+    "this", "window", "globalThis", "self", "return", "new", "await", "typeof"})
+_HOLDER_KEY_RE = re.compile(r"""(?<![\w$?])['"]?([A-Za-z_$][\w$]*)['"]?\s*:(?!:)""")
+_HOLDER_DECL_RE = re.compile(r"""\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=(?![=>])""")
+_HOLDER_ASSIGN_RE = re.compile(r"""(?:^|[;{(,]\s*)([A-Za-z_$][\w$.]*)\s*=(?![=>])""")
+# A read that only compares: `x === y`, `x.has(k)`, `k in x`, `typeof x`.
+_BENIGN_AFTER_RE = re.compile(
+    r"""^(?:\??\.(?:has|includes|test|startsWith|endsWith|indexOf|length)\b(?!\s*=[^=])"""
+    r"""|\s*(?:[!=]==?|instanceof\b|[<>]=?(?!=)))""")
+_BENIGN_BEFORE_RE = re.compile(r"""(?:[!=]==?|\btypeof|\bin|!)\s*$""")
+_ALIAS_LHS_RE = re.compile(
+    r"""^\s*(?:(?:export\s+)?(?:const|let|var)\s+)?(?P<lhs>[A-Za-z_$][\w$.]*|\{[^}=]*\}|\[[^\]=]*\])"""
+    r"""\s*=(?![=>])""")
 
-def _tunnel_host_example(line: str, m: re.Match[str]) -> bool:
+
+def _holder_names(text: str) -> set[str]:
+    """The names a line declares or keys: `const X =`, `X:`, `a.X =` (its last part)."""
+    out = set(_HOLDER_DECL_RE.findall(text)) | set(_HOLDER_KEY_RE.findall(text))
+    out |= {n.rsplit(".", 1)[-1] for n in _HOLDER_ASSIGN_RE.findall(text)}
+    return {n for n in out if n not in _JS_NOT_A_NAME}
+
+
+def _enclosing_openers(lines: list[str], idx: int, limit: int = 60) -> list[int]:
+    """Line numbers of the brackets that enclose line ``idx``, innermost first (string
+    contents are not stripped; good enough for list and object literals)."""
+    out: list[int] = []
+    depth = 0
+    for j in range(idx - 1, max(-1, idx - limit), -1):
+        for ch in reversed(lines[j]):
+            if ch in ")]}":
+                depth += 1
+            elif ch in "([{":
+                if depth == 0:
+                    out.append(j)
+                    break
+                depth -= 1
+        if len(out) >= 3:
+            break
+    return out
+
+
+def _value_reaches_network(lines: list[str], names: set[str], span: tuple[int, int]) -> bool:
+    """A value held under one of ``names`` (defined on lines ``span[0]..span[1]``) may
+    reach a network call: some line naming it, or an alias of it, holds a network /
+    exec / navigation sink, or reads it in any way other than a comparison or a
+    membership test (passing it to a call, returning it, interpolating it). No names
+    at all is unsure: True."""
+    names = {n for n in names if n and n not in _JS_NOT_A_NAME}
+    if not names:
+        return True
+    lo, hi = span
+    if any(_NET_SINK_CALL_RE.search(lines[k]) or _OTHER_SINK_RE.search(lines[k])
+           for k in range(max(0, lo), min(len(lines), hi + 1))):
+        return True
+    seen: set[str] = set()
+    todo = list(names)
+    while todo:
+        name = todo.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        if len(seen) > 12:
+            return True
+        name_re = re.compile(r"(?<![\w$])" + re.escape(name) + r"(?![\w$])")
+        for n, ln in enumerate(lines):
+            if lo <= n <= hi or _is_line_comment(ln) or not name_re.search(ln):
+                continue
+            if _NET_SINK_CALL_RE.search(ln) or _OTHER_SINK_RE.search(ln):
+                return True
+            am = _ALIAS_LHS_RE.match(ln)
+            for om in name_re.finditer(ln):
+                before, after = ln[:om.start()], ln[om.end():]
+                # A definition, not a read: `name: …` (a key), `x.name = …`, `name = …`.
+                if re.match(r"""['"]?\s*:(?!:)""", after) and not before.rstrip().endswith("?"):
+                    continue
+                if re.match(r"\s*=(?![=>])", after):
+                    continue
+                if _BENIGN_AFTER_RE.match(after) or _BENIGN_BEFORE_RE.search(before):
+                    continue
+                if am and om.start() >= am.end():
+                    # `const h = name.split(' ')[1]`: follow the alias.
+                    lhs = am.group("lhs")
+                    if lhs[0] in "{[":
+                        todo += re.findall(r"[A-Za-z_$][\w$]*", lhs)
+                    else:
+                        todo.append(lhs.rsplit(".", 1)[-1])
+                    continue
+                return True
+    return False
+
+
+def _tunnel_host_example(lines: list[str], idx: int, m: re.Match[str]) -> bool:
     """Tunnel host ``m`` sits in a string literal that is shown, not dialled: the whole
     value of a ``placeholder`` key, or an example after "e.g." / "for example" /
-    "such as" in a message with no URL scheme and no interpolation. Tunnel hosts
-    only: a shared collector keeps its critical."""
+    "such as" in a message with no URL scheme and no interpolation, and the key or
+    variable holding it never reaches a network call (:func:`_value_reaches_network`).
+    Tunnel hosts only: a shared collector keeps its critical."""
+    line = lines[idx]
     if not _TUNNEL_HOST_RE.match(m.group(0)):
         return False
     for lm in re.finditer(_STR_LIT, line):
@@ -3455,16 +3556,25 @@ def _tunnel_host_example(line: str, m: re.Match[str]) -> bool:
             continue
         body = lm.group(0)[1:-1]
         if re.fullmatch(r"(?:[\w-]+\.)*" + re.escape(m.group(0)), body):
-            return bool(_PLACEHOLDER_KEY_RE.search(line[:lm.start()]))
-        if "://" in body or "${" in body or "{" in body:
+            shown = bool(_PLACEHOLDER_KEY_RE.search(line[:lm.start()]))
+        elif "://" in body or "${" in body or "{" in body:
             return False
-        return bool(_EXAMPLE_LEAD_RE.search(line[lm.start() + 1:m.start()]))
+        else:
+            shown = bool(_EXAMPLE_LEAD_RE.search(line[lm.start() + 1:m.start()]))
+        if not shown:
+            return False
+        names = _holder_names(line[:lm.start()])
+        openers = _enclosing_openers(lines, idx)
+        # `const o = { placeholder: '…' }`: the object itself may be read whole.
+        if openers and re.search(r"=\s*[\[{]\s*$", lines[openers[0]]):
+            names |= _holder_names(lines[openers[0]])
+        return not _value_reaches_network(lines, names, (idx, idx))
     return False
 
 
 # `allowedHosts: options.allowedHosts ?? userConfig.server?.allowedHosts ?? [` (a
-# bundled Vite config, @agent-native/core 0.228.2): an allowlist key whose value, or
-# whose `??` / `||` fallback, is a list literal opened at the end of the line.
+# bundled dev-server config): an allowlist key whose value, or whose `??` / `||`
+# fallback, is a list literal opened at the end of the line.
 _CHAIN_OPERAND = r"""[\w$.?\[\]"']+"""
 _SUFFIX_ALLOWLIST_OPEN_RE = re.compile(
     r"""^\s*(?P<key>[A-Za-z_$][\w$]*|"[^"\n]+"|'[^'\n]+')\s*[:=]\s*"""
@@ -3478,7 +3588,9 @@ def _suffix_allowlist_default(lines: list[str], idx: int, pattern: re.Pattern[st
     list that is the value (or the `??` / `||` default) of a host-allowlist key. A
     suffix pattern is what a server matches incoming Host headers against; it names no
     host to send to, so this holds even in a bundle that has network sinks elsewhere
-    (where :func:`_host_allowlist_entry` gives up)."""
+    (where :func:`_host_allowlist_entry` gives up), as long as the allowlist's key
+    never reaches a network call (`fetch('https://x' + cfg.allowedHosts[0])` keeps
+    its critical; see :func:`_value_reaches_network`)."""
     if not (pattern.search(lines[idx]) and _SUFFIX_ELEM_LINE_RE.match(lines[idx])):
         return False
     for j in range(idx - 1, max(-1, idx - 40), -1):
@@ -3491,7 +3603,10 @@ def _suffix_allowlist_default(lines: list[str], idx: int, pattern: re.Pattern[st
             head = lines[k].rstrip() + " " + head.lstrip()
             k -= 1
         om = _SUFFIX_ALLOWLIST_OPEN_RE.match(head)
-        return bool(om) and _allowlist_key_ok(om.group("key"), lines, idx)
+        if not (om and _allowlist_key_ok(om.group("key"), lines, idx)):
+            return False
+        key = om.group("key").strip("\"'").rsplit(".", 1)[-1]
+        return not _value_reaches_network(lines, {key}, (k + 1, idx))
     return False
 
 
@@ -3501,10 +3616,12 @@ _ONE_TOKEN_ELEM_RE = re.compile(r"""^\s*(['"])[^\s'"\\]+\1\s*,?\s*$""")
 def _bundled_domain_list_entry(lines: list[str], idx: int, pattern: re.Pattern[str]) -> bool:
     """Line ``idx`` is one bare tunnel-host element (`"ngrok.io",`) of an array literal
     holding at least :data:`_DOMAIN_LIST_MIN_ELEMS` bare-host elements in an unbroken
-    run: a domain-list data module bundled into a file that also holds code (the Public
-    Suffix List inside @mastra/core's dist/test-utils/llm-mock.js, 2026-11-14), where
-    :func:`_domain_list_entry` refuses for the file's sinks. Tunnel hosts only (they
-    are Public Suffix List entries); a shared collector keeps its critical."""
+    run that carries real Public Suffix List markers (:func:`_psl_markers`): the PSL
+    bundled into a file that also holds code, where :func:`_domain_list_entry` refuses
+    for the file's sinks. Length alone proves nothing (filler costs an attacker
+    nothing), and the list's holder must never reach a network call
+    (:func:`_value_reaches_network`). Tunnel hosts only (they are PSL entries); a
+    shared collector keeps its critical."""
     line = lines[idx]
     if not _BARE_HOST_ELEM_RE.match(line):
         return False
@@ -3523,8 +3640,44 @@ def _bundled_domain_list_entry(lines: list[str], idx: int, pattern: re.Pattern[s
     hosts = sum(1 for k in range(a, b + 1) if _BARE_HOST_ELEM_RE.match(lines[k]))
     if hosts < max(_DOMAIN_LIST_MIN_ELEMS, _DOMAIN_LIST_MIN_SHARE * (b - a + 1)):
         return False
-    return (lines[a - 1].rstrip().endswith("[")
-            and re.match(r"\s*\]", lines[b + 1]) is not None)
+    if not (lines[a - 1].rstrip().endswith("[")
+            and re.match(r"\s*\]", lines[b + 1]) is not None):
+        return False
+    if not _psl_markers(lines, a, b):
+        return False
+    # The list's holder: `const L = [` / `rules: [`, or for a CommonJS data module
+    # (`module.exports = [`) the bundler's wrapper (`var require_rules = __commonJS(`).
+    names = _holder_names(lines[a - 1])
+    span_lo = a - 1
+    if not names and re.search(r"\b(?:module\.)?exports\s*=\s*\[\s*$", lines[a - 1]):
+        for j in _enclosing_openers(lines, a - 1)[:1]:
+            names = set(_HOLDER_DECL_RE.findall(lines[j])) - _JS_NOT_A_NAME
+            span_lo = j
+    return not _value_reaches_network(lines, names, (span_lo, b + 1))
+
+
+# Public Suffix List markers: its section comments, an exception rule (`"!www.ck"`),
+# or a ccTLD wildcard rule only the PSL carries (`"*.ck"`, `"*.bd"`).
+_PSL_SECTION_RE = re.compile(r"===(?:BEGIN|END) (?:ICANN|PRIVATE) DOMAINS===")
+_PSL_EXCEPTION_ELEM_RE = re.compile(r"""^\s*(['"])![\w-]+(?:\.[\w-]+)+\1\s*,?\s*$""")
+_PSL_WILDCARD_ELEMS = frozenset({
+    "*.bd", "*.ck", "*.er", "*.fk", "*.jm", "*.kh", "*.mm", "*.np", "*.pg",
+    "*.kawasaki.jp", "*.kitakyushu.jp", "*.kobe.jp", "*.nagoya.jp", "*.sapporo.jp",
+    "*.sendai.jp", "*.yokohama.jp"})
+
+
+def _psl_markers(lines: list[str], a: int, b: int) -> bool:
+    """Lines ``a..b`` (an array run) look like the Public Suffix List, not a list
+    padded with filler hosts."""
+    lo, hi = max(0, a - 3), min(len(lines), b + 2)
+    for k in range(lo, hi):
+        ln = lines[k]
+        if _PSL_SECTION_RE.search(ln) or _PSL_EXCEPTION_ELEM_RE.match(ln):
+            return True
+        t = ln.strip().rstrip(",").strip("\"'")
+        if t in _PSL_WILDCARD_ELEMS:
+            return True
+    return False
 
 
 # A bare hostname (or a single label: a TLD such as `'ac'`, an IDN label) as a whole
@@ -4400,7 +4553,7 @@ def _scan_content(
                     # A suffix test (`host.endswith(".ngrok.io")`) or a placeholder
                     # tunnel subdomain (`wss://<sub>.ngrok-free.app`) names no
                     # destination. Low, kept visible.
-                    if _exfil_host_not_destination(line, pattern):
+                    if _exfil_host_not_destination(line, pattern, lines, idx):
                         findings.append(Finding(
                             category="exfiltration", name=name, severity="low",
                             file_path=file_path, line_number=line_num,

