@@ -613,6 +613,8 @@ _PASS_RUNNER_RE = re.compile(
 
 
 # A whole Python def header on one line (a one-line body `def f(c): run(c[k])` is not).
+# Function.prototype.call on a builtin method, not subprocess.call.
+_PROTO_CALL_RE = re.compile(r"(?:\bprototype\.\w+|\bhasOwnProperty|\bpropertyIsEnumerable)\s*\.\s*$")
 _DEF_LINE_RE = re.compile(
     r"^\s*(?:async\s+)?def\s+\w+\s*\([^:]*(?::[^:]*)*?\)\s*(?:->[^:]+)?:\s*(?:#.*)?$")
 
@@ -641,6 +643,8 @@ def _computed_exec_site(json_path: str, texts: dict[str, str]) -> tuple[str, int
             if _PASS_RUNNER_RE.search(ln):
                 return fp, i + 1
             for m in _SINK_CALL_RE.finditer(ln):
+                if _PROTO_CALL_RE.search(ln[:m.start()]):
+                    continue  # `Object.prototype.hasOwnProperty.call(o, k)`
                 if _COMPUTED_INDEX_RE.search(ln[m.end(): m.end() + 200]):
                     return fp, i + 1
             for m in _ITER_VALUES_RE.finditer(ln):
