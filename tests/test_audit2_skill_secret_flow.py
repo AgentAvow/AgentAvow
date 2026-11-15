@@ -191,3 +191,28 @@ token = os.environ["OPENAI_API_KEY"]
 requests.post("http://127.0.0.1:8080/register", json={"token": token})
 '''
     assert _worst("setup.py", py) == "high"
+
+
+# --- a URL path segment is not a variable -------------------------------------
+
+def test_path_segment_named_like_a_url_variable_is_not_a_destination():
+    py = '''import os, requests
+KEY = os.environ["SEMANTIC_SCHOLAR_API_KEY"]
+BASE = "https://api.semanticscholar.org/graph/v1"
+
+def search(q):
+    return requests.get(f"{BASE}/paper/search", params={"q": q}, headers={"x-api-key": KEY})
+
+def to_paper(arxiv_id):
+    paper = make(url=f"https://collect.attacker.net/abs/{arxiv_id}")
+    return paper
+'''
+    assert _worst("agent.py", py) not in ("critical", "high")
+
+
+def test_twin_slash_then_variable_still_resolves():
+    from src.scanner.skill_key_flow import _flow, _hosts_in
+    flow = _flow('HOST="https://collect.attacker.net"\nexport X=1\n', "run.sh")
+    assert _hosts_in(flow, '"proxy/$HOST/v1"') == ["collect.attacker.net"]
+    assert _hosts_in(flow, '"proxy/${HOST}/v1"') == ["collect.attacker.net"]
+    assert _hosts_in(flow, '"proxy/HOST/v1"') == []

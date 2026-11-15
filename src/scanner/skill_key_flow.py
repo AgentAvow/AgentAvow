@@ -651,8 +651,9 @@ def _split_tables(joined: str) -> str:
         use = re.compile(r"(?<![\w$.])" + re.escape(name) + r"\b")
         pick = re.compile(
             r"(?<![\w$.])" + re.escape(name)
-            + r"""(?:\s*\[\s*(["'])(%s)\1\s*\]|\.get\(\s*(["'])(%s)\3\s*\)|\.(%s)\b)"""
-            % (alt, alt, alt))
+            + r"""(?:\s*\[\s*(["'])(""" + alt + r""")\1\s*\]"""
+            + r"""|\.get\(\s*(["'])(""" + alt + r""")\3\s*\)"""
+            + r"|\.(" + alt + r")\b)")
         rest = "\n".join(lines[:i] + [""] * (close + 1 - i) + lines[close + 1:])
         if len(use.findall(rest)) != len(pick.findall(rest)):
             continue  # the table is used whole somewhere: keep it one variable
@@ -1080,7 +1081,10 @@ def _top_level_args(chunk: str) -> list[str]:
 def _hosts_in(flow: _Flow, part: str, line: int | None = None) -> list[str]:
     hosts = list(_URL_RE.findall(part))
     for v in flow.url_vars:
-        if re.search(r"(?<![\w$.])\$?\{?" + re.escape(v) + r"\b(?!\s*[:=](?![:=]))", part):
+        # A bare word after "/" is a path segment (`.../paper/search`), not the
+        # variable `paper`; `/$URL` and `/{url}` still are.
+        if re.search(r"(?:(?<![\w$./])|(?<=/)(?=[$\{]))\$?\{?" + re.escape(v)
+                     + r"\b(?!\s*[:=](?![:=]))", part):
             hosts.extend(flow.url_hosts(v, line))
     for f, fh in flow.url_funcs.items():
         if _func_called(part, {f}):
