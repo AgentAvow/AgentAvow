@@ -54,8 +54,11 @@ logs/
 .task-master/
 .taskmaster/
 
-# Claude Code (settings may contain sensitive operational details)
-.claude/
+# Claude Code: only the shared project settings are tracked.
+# settings.local.json (personal permissions, may hold operational details),
+# worktrees and lock files stay local.
+.claude/*
+!.claude/settings.json
 .playwright-mcp/
 
 # Root-level screenshots (audit artifacts, not source)
@@ -72,8 +75,10 @@ DerivedData/
 *.dSYM.zip
 *.dSYM
 
-# Project instructions (contains sensitive operational details)
-CLAUDE.md
+# Personal agent instructions. Shared instructions live in AGENTS.md
+# (CLAUDE.md just imports it); anything personal goes in CLAUDE.local.md.
+CLAUDE.local.md
+AGENTS.local.md
 
 # Security / credentials
 *.pem

@@ -1,3 +1,5 @@
+import type { DehydratedState } from '@tanstack/react-query'
+
 /**
  * Build-time snapshot of a page (web/scripts/prerender.mjs).
  *
@@ -21,11 +23,12 @@ export function dropSnapshot(): void {
 }
 
 /** Query results the build fetched, so live figures don't blink back to their fallbacks. */
-export function snapshotQueryState(): unknown {
+export function snapshotQueryState(): DehydratedState | undefined {
   const el = document.getElementById('prerender-state')
   if (!el?.textContent) return undefined
   try {
-    return JSON.parse(el.textContent)
+    const state: unknown = JSON.parse(el.textContent)
+    return state !== null && typeof state === 'object' ? (state as DehydratedState) : undefined
   } catch {
     return undefined
   }

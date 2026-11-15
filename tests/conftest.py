@@ -472,6 +472,10 @@ async def _clean_db_once():
             "CREATE INDEX IF NOT EXISTS ix_scan_history_full_name_time "
             "ON scan_history (full_name, scanned_at)"
         ))
+        # scan_history.tool_digests (migration t33): per-tool detail for the feed
+        await conn.execute(text(
+            "ALTER TABLE scan_history ADD COLUMN IF NOT EXISTS tool_digests JSONB"
+        ))
         # alert_webhooks + tool_watches — present in models; the raw-DDL test DB never
         # created them (pre-existing gap surfaced when test_all_tables_exist was fixed
         # to derive from Base.metadata).

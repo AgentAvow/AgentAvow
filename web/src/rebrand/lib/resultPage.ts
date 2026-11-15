@@ -7,7 +7,7 @@
  * answer is the API's decision read through gradeSystem.decisionOf.
  */
 import {
-  coverageGapNotes, decisionOf, isCertified, certifiedMarkNote, cheapCoverageGap,
+  coverageGapNotes, decisionOf, decisionPhrase, isCertified, certifiedMarkNote, cheapCoverageGap,
   CERTIFIED_MARK_MIN_SCORE, type Decision,
 } from '../../components/trust/gradeSystem.ts'
 
@@ -302,4 +302,46 @@ export function sandboxSummary(scan: SandboxScan): string | null {
     : reason && reason !== 'not applicable' && reason !== 'started' ? `Sandbox: installed; server not started (${reason}) — not a finding`
     : partial ? `Sandbox: ran partly (hit its time limit), nothing caught${deltaTxt}`
     : 'Sandbox: installed and imported, clean'
+}
+
+// ── "Fix it with your AI": a prompt a maintainer pastes into their coding agent ──
+
+const SEV_WORD: Record<string, string> = { critical: 'CRITICAL', high: 'HIGH', medium: 'MEDIUM', moderate: 'MEDIUM', low: 'LOW', info: 'INFO' }
+
+/** Defects only (a capability is what the tool does, so there is nothing to fix),
+ * worst first, the way the page lists them. */
+export function fixableFindings(scan: unknown): TopFinding[] {
+  const items = (asObj(asObj(scan).findings).items as TopFinding[] | undefined) ?? []
+  return topFindings(scan, items.length).filter((i) => i.kind !== 'capability')
+}
+
+/** The ready-to-paste prompt: what was checked, the answer and its reason, each finding
+ * with where it is and how to fix it, then how to check again. '' when there is nothing
+ * to fix. Built only from the scan the page already shows. */
+export function fixPrompt(scan: unknown, name: string, reportUrl: string, max = 15): string {
+  const found = fixableFindings(scan)
+  if (!found.length) return ''
+  const o = asObj(scan)
+  const d = decisionOf(scan)
+  const phrase = decisionPhrase(d.decision).phrase
+  const score = typeof o.trust_score === 'number' ? ` (trust score ${o.trust_score}/100)` : ''
+  const lines: string[] = [
+    `AgentAvow checked ${name}. The answer is "${phrase}"${score}.`,
+  ]
+  if (d.reason) lines.push(`Reason: ${cap(d.reason.trim()).replace(/\.?$/, '.')}`)
+  lines.push('', 'Fix these findings in this codebase:')
+  found.slice(0, max).forEach((f, i) => {
+    const sev = SEV_WORD[(f.severity || 'info').toLowerCase()] ?? 'INFO'
+    const where = f.file_path ? ` in ${f.file_path}${f.line_number ? `:${f.line_number}` : ''}${f.shipped === false ? ' (test or example file)' : ''}` : ''
+    lines.push(`${i + 1}. [${sev}] ${f.name || 'Finding'}${where}`)
+    const fix = fixText(f)
+    if (fix) lines.push(`   Fix: ${fix.replace(/\.?$/, '.')}`)
+  })
+  if (found.length > max) lines.push(`(${found.length - max} more on the report page.)`)
+  lines.push(
+    '',
+    'Keep what the tool does the same unless a fix needs it to change. Tell me if a finding is a false positive instead of working around it.',
+    `When the fix is released, open ${reportUrl} and press Re-check to get a fresh answer.`,
+  )
+  return lines.join('\n')
 }

