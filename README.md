@@ -295,6 +295,10 @@ make test
 # Single test file
 .venv/bin/python3 -m pytest tests/test_auth.py -v
 
+# In parallel (up to 8 workers): each worker copies the test database to <name>_gwN
+# and drops it at the end, and uses Redis db 15 - N
+.venv/bin/python3 -m pytest tests/ -n auto
+
 # With coverage
 .venv/bin/python3 -m pytest tests/ --cov=src
 ```

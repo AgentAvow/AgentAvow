@@ -76,7 +76,8 @@ jobs:
           # .env is no longer tracked (004fc83), so CI has to opt into debug itself:
           # without it settings refuse the default JWT_SECRET and every module errors.
           DEBUG: "true"
-        run: pytest tests/ -v
+        # One database and one Redis db per worker (tests/service_guards.py).
+        run: pytest tests/ -n auto -q -rfE --durations=25
 
   frontend:
     name: Frontend (typecheck + build)
