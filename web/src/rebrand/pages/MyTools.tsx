@@ -43,6 +43,7 @@ function ConfettiBurst() {
 interface ClaimProof {
   kind: 'topic' | 'keyword' | 'mcp-challenge'
   topic?: string; keyword?: string; registry?: string; header?: string; value?: string
+  owners_json?: string[]
 }
 interface Claim extends RowArt {
   id: string; surface?: string; owner: string; repo: string; full_name: string; status: string; topic: string
@@ -113,7 +114,7 @@ function claimNextStep(c: Claim): { verified: boolean; text: React.ReactNode } {
   }
   const s = (c.surface || 'github').toLowerCase()
   if (s === 'npm' || s === 'pypi' || s === 'crates') return { verified: false, text: <>Added to <span className="text-text font-medium">Your tools</span> below as <span className="font-mono">{c.full_name}</span>. To verify: either <span className="text-text">claim its source repo</span> (we auto-link it) or <span className="text-text">add the keyword</span> shown on the row — then press <span className="text-text font-medium">Verify</span>.</> }
-  if (s === 'mcp') return { verified: false, text: <>Added to <span className="text-text font-medium">Your tools</span> below. To verify: have your endpoint <span className="text-text">return the challenge</span> shown on the row (an <span className="font-mono">X-AgentAvow-Verify</span> header), then press <span className="text-text font-medium">Verify</span>.</> }
+  if (s === 'mcp') return { verified: false, text: <>Added to <span className="text-text font-medium">Your tools</span> below. To verify: have your endpoint <span className="text-text">return the challenge</span> shown on the row (an <span className="font-mono">X-AgentAvow-Verify</span> header) or <span className="text-text">serve an owners.json</span> on its domain, then press <span className="text-text font-medium">Verify</span>.</> }
   return { verified: false, text: <>Added to <span className="text-text font-medium">Your tools</span> below as <span className="font-mono">{c.full_name}</span>. To verify: open the row, <span className="text-text">add the GitHub topic</span> we show to the repo, then press <span className="text-text font-medium">Verify</span>.</> }
 }
 
@@ -406,6 +407,9 @@ function ClaimMcpProof({ c, onVerify, pending, msg }: { c: Claim; onVerify: () =
       </ol>
       <CodeChip value={`${header}: ${value}`} />
       <p className="mt-2">We read it on a live MCP <span className="font-mono">initialize</span> handshake — the same connection we grade. Then click Verify.</p>
+      {c.proof?.owners_json && c.proof.owners_json.length > 0 && (
+        <p className="mt-2">Or put a file on your domain instead. Serve <span className="font-mono break-all">{c.proof.owners_json[c.proof.owners_json.length - 1]}</span> (or <span className="font-mono break-all">{c.proof.owners_json[0]}</span> for this endpoint only) with your verified account email in it: <span className="font-mono">{'{"owners": ["you@example.com"]}'}</span>. It&apos;s the same file VerifyMCP reads, so one file covers both.</p>
+      )}
       <button onClick={onVerify} disabled={pending} className={btn + ' mt-2.5'}>{pending ? 'Checking…' : 'Verify'}</button>
       {msg && <div className="mt-2 text-warning">{msg}</div>}
     </div>
