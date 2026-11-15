@@ -8,9 +8,6 @@ The product is AgentAvow. Older names still appear in code and infra (`agentgrap
 the Python package name, the database name and the Docker image names); don't rename
 them in passing.
 
-`CLAUDE.md` is gitignored on purpose (each person keeps their own), so it can't point
-here from the repo. For Claude Code, create a local `CLAUDE.md` containing `@AGENTS.md`.
-
 ## Layout
 
 - `src/` FastAPI backend (`src/main.py` is the app). Scanner in `src/scanner/`, API routers in `src/api/`, trust and scoring in `src/trust/`, tool-call gate bridges in `src/bridges/`.
@@ -37,6 +34,12 @@ take outside contributions; `src/`, `web/`, `sdk/` and `scripts/` are all rights
 CI uses Python 3.12 (`requires-python >=3.11`), a `postgres:16` service (database
 `agentgraph_test`) and a `redis:7` service.
 
+**Tests wipe their database.** `tests/conftest.py` truncates every table in whatever
+`DATABASE_URL` points at. Point it at a dedicated test database, never dev, staging or
+prod. When two agents run at once, give each its own database (for example
+`agentgraph_test_<name>`, then `alembic upgrade head` against it), because they
+truncate each other's data.
+
 ```bash
 pip install -e ".[prod,dev]"
 ruff check src/ tests/
@@ -61,7 +64,8 @@ pytest tests/ -v              # env: DATABASE_URL, REDIS_URL, DEBUG=true
 
 ## Frontend (as ci.yml does)
 
-Node: CI uses Node 20. Vite 7 needs `^20.19.0 || >=22.12.0`.
+Node: CI uses Node 20 for `web/`. Check the `vite` version in `web/package.json` for
+its supported Node range.
 
 ```bash
 cd web
@@ -73,8 +77,7 @@ VITE_CUTOVER=true PRERENDER_STRICT=1 npm run prerender
 ```
 
 `PRERENDER_STRICT=1` makes CI fail when a public page stops rendering (on the host
-it only warns). As of this writing, ci.yml on main does not run eslint yet. Open PR
-#375 adds a `Lint` step, so keep `npm run lint` clean anyway.
+it only warns). ci.yml does not run eslint on `web/`; keep `npm run lint` clean anyway.
 
 Other CI jobs: `sdk/js` (`npm ci && npm test`, Node 22), `demos/rugpull`, OPA policy
 tests, Bitbucket/Azure template runs against the scanner image, and a non-blocking
@@ -88,15 +91,57 @@ publishes `ghcr.io/agentavow/scanner`.
   One writer per worktree.
 - One PR per change. Branch names follow `feat/`, `fix/`, `chore/`, `docs/`.
 - Never merge past failing CI or missing reviews, and never bypass branch protection.
-- `ci.yml` runs automatically only on PRs into `main` (and pushes to main). A stacked
-  PR whose base is another branch gets no CI run on its own. Trigger one with
-  `gh workflow run ci.yml --ref <branch>` and link the run in the PR.
+- `ci.yml` runs on every PR, including PRs stacked on another PR's branch, and on
+  pushes to main. `gh workflow run ci.yml --ref <branch>` triggers a manual run.
 - Stack PRs that change `web/package.json` / `web/package-lock.json` on top of each
-  other (as #371 → #373 → #374 → #375 do). Parallel lockfile changes conflict.
+  other (as #371 → #373 → #374 → #375 did). Parallel lockfile changes conflict.
 - Don't change global git config or system config. Pass one-off settings with
   `git -c ...`.
 - Never commit secrets. `.env*.example` / `.env.production.template` show variable
   names only.
+
+## House rules
+
+- **Tests wipe their database.** See the warning under "Backend": a dedicated test
+  database per agent, never dev, staging or prod.
+- **Python tables have TypeScript twins.** Change both sides in one PR:
+  `src/scanner/verdict.py` ↔ `web/src/components/trust/gradeSystem.ts`, and
+  `src/scanner/categories.py` ↔ `web/src/components/trust/scanCategories.ts`.
+  Main has gone red when only one side changed.
+- **Pushing to `main` releases things.** The Claude Code plugin
+  (`.claude-plugin/marketplace.json` → `plugins/agentavow-trust`) reaches everyone who
+  has it installed, and a push touching `sdk/mcp-server/**` is mirrored to
+  AgentAvow/agentavow-trust-mcp (`mirror-mcp-server.yml`), which Glama builds from.
+  Everything goes through a PR.
+- **The hosted `/mcp` tool list is pinned.** `_TOOLS` in `src/bridges/mcp_streamable.py`
+  is guarded by `tests/fixtures/mcp_tools_list_snapshot.json`,
+  `tests/fixtures/mcp_wire_2025_11_25/tools_list.json`, `EXPECTED_TOOLS_LIST_SHA256` in
+  `src/jobs/mcp_health.py` and the digest in `tests/test_mcp_card_trust_adoption_c.py`.
+  Any change to it also needs a manual Rescan of the published ChatGPT app by the
+  owner. Schema changes are additive only; flag them in the PR description.
+- **Merge only on an explicit green.** A watcher that errored or a pending job is not a
+  pass.
+- **No AI-attribution trailers** (`Co-Authored-By: Claude`, `Claude-Session:`,
+  "Generated with …") in commits, PR text or comments.
+- **Prod belongs to the owner.** No commands against the prod host or prod database.
+  The owner deploys (`scripts/deploy-prod.sh`); migrations run in the container
+  entrypoint (`scripts/docker-entrypoint.sh`).
+
+## Agent work queue
+
+GitHub labels drive which issues agents pick up:
+
+- `agent:ready`: owner-approved for the agent queue. Only the owner applies it.
+- `agent:in-progress`: claimed by an agent; other agents skip it.
+- `agent:needs-owner`: the agent is stuck (plan approval, a failure or a question) and
+  needs the owner.
+- `agent:needs-product`: needs a product or architecture decision; agents must not act
+  on it.
+- `priority:1` (highest), `priority:2` (normal), `priority:3` (low).
+
+Pick `agent:ready` issues by priority, highest first, then oldest. Add
+`agent:in-progress` when you start. If a fix would widen into a product or architecture
+change, add `agent:needs-product`, explain why in one comment, and stop.
 
 ## Conventions
 
