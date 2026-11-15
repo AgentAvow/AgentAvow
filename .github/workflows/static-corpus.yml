@@ -16,8 +16,8 @@ name: Static corpus
 # whose payload is reachable, pinned per case, so a relaxing rule cannot open a hole.
 
 on:
+  # Every PR that touches the scanner, including PRs stacked on another PR's branch.
   pull_request:
-    branches: [main]
     paths:
       - "src/scanner/**"
       - "scripts/corpus/**"
