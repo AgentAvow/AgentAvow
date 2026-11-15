@@ -116,3 +116,6 @@ HANDOFF.md
 
 # stray local venv
 .venv312/
+# Per-folder agent docs in the scanner package are shared, unlike a personal root CLAUDE.md.
+!src/scanner/static/CLAUDE.md
+!src/scanner/static/**/CLAUDE.md
