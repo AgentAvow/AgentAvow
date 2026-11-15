@@ -9,17 +9,21 @@ A match is a sample (low) only when ALL of these hold:
 
 1. the file is JSON (``.json`` / ``.jsonl``) or Python, and not a JSON file a tool
    executes (``package.json``, MCP configs …) or one an agent is given as instructions;
-2. the match sits inside one string value of a ``"key": "…"`` pair in an object whose
+2. the file sits on a test, fixture or corpus path (``_is_test_fixture_file``, or a
+   ``corpus`` / ``corpora`` / ``testcases`` directory or file stem). A data file
+   anywhere else can be imported and run by another module, which a per-file check
+   cannot rule out (#387 review);
+3. the match sits inside one string value of a ``"key": "…"`` pair in an object whose
    other keys include test-case vocabulary (``expect`` / ``expected`` / ``category`` /
    ``label`` / ``attack_type`` …);
-3. JSON: every host the string fetches is a reserved name (``evil.example``,
-   ``*.invalid``, ``example.com``), so it fetches nobody's script even if something
-   runs it (the reasoning of ``pipe_shell.WHY_RESERVED_TEST`` for test files). A JSON
-   attack prompt naming a real host keeps the dataset policy (``npm_scripts.DATASET_WHY``:
-   high in a dataset dir, critical elsewhere), because an agent reading it still sees it;
-4. Python: no line of the file hands that key (``case["text"]``, ``.get("text")``) to
-   an exec sink, and either rule 3 holds or the key is not one a tool runs (``cmd``,
-   ``command``, ``run`` …).
+4. every host the string fetches is a reserved name (``evil.example``, ``*.invalid``,
+   ``example.com``) and no curl / wget flag routes the fetch elsewhere
+   (``pipe_shell.reserved_hosts_only``), so it fetches nobody's script even if
+   something runs it, for JSON and Python alike. A sample naming a real host keeps the
+   dataset policy (``npm_scripts.DATASET_WHY``: high in a dataset dir, critical
+   elsewhere), because an agent reading it still sees it;
+5. Python: no line of the file hands that key (``case["text"]``, ``.get("text")``) to
+   an exec sink.
 """
 from __future__ import annotations
 
@@ -40,6 +44,8 @@ _CASE_KEYS = frozenset({
     "category", "label", "labels", "attack_type", "attack_class", "attack_category",
     "should_block", "should_detect", "must_block",
 })
+# Directory names / file stems that mark attack-sample corpora besides test dirs.
+_CORPUS_WORDS = frozenset({"corpus", "corpora", "testcases", "test_cases", "test-cases"})
 _STR = r'"(?:[^"\\\n]|\\.)*"' + r"|'(?:[^'\\\n]|\\.)*'"
 _PAIR_RE = re.compile(r"(?P<k>" + _STR + r")\s*:\s*(?P<v>" + _STR + r"|[^,}\]\s][^,}\]]*)")
 _KEY_LINE_RE = re.compile(r"^\s*(?:" + _STR + r")\s*:")
@@ -110,6 +116,16 @@ def _py_key_executed(key: str, content: str) -> bool:
     return False
 
 
+def _sample_path(file_path: str) -> bool:
+    """A test, fixture or corpus path (rule 2)."""
+    from src.scanner.scan import _is_test_fixture_file
+    if _is_test_fixture_file(file_path):
+        return True
+    p = Path(file_path)
+    words = {x.lower() for x in p.parts[:-1]} | {p.stem.lower()}
+    return bool(words & _CORPUS_WORDS)
+
+
 def sample_key(file_path: str, content: str, lines: list[str], idx: int,
                pattern: re.Pattern[str]) -> str | None:
     """The key of the attack-sample value every pipe-to-shell match on ``lines[idx]``
@@ -119,8 +135,10 @@ def sample_key(file_path: str, content: str, lines: list[str], idx: int,
     if p.suffix.lower() not in _EXTS:
         return None
     from src.scanner.package_context import is_agent_instruction_file
-    from src.scanner.shown_text import _EXEC_KEY_RE, _EXECUTED_JSON_NAMES
+    from src.scanner.shown_text import _EXECUTED_JSON_NAMES
     if name in _EXECUTED_JSON_NAMES or name.endswith(".mcp.json"):
+        return None
+    if not _sample_path(file_path):
         return None
     # A JSON file in a skill / prompts dir is text an agent reads; a .py there is code.
     if p.suffix.lower() != ".py" and is_agent_instruction_file(file_path):
@@ -139,10 +157,7 @@ def sample_key(file_path: str, content: str, lines: list[str], idx: int,
         return None
     if not {k.lower() for k in _object_keys(lines, idx) - {key}} & _CASE_KEYS:
         return None
-    py = p.suffix.lower() == ".py"
-    if py and _py_key_executed(key, content):
+    if p.suffix.lower() == ".py" and _py_key_executed(key, content):
         return None
-    if pipe_shell.reserved_hosts_only(line, pattern, file_path):
-        return key
-    return key if py and not _EXEC_KEY_RE.match(key) else None
+    return key if pipe_shell.reserved_hosts_only(line, pattern, file_path) else None
 

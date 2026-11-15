@@ -4575,6 +4575,12 @@ def _scan_content(
                     payload=remote_payload,
                     remediation=reserved_why or pipe_shell.why(pipe_class),
                 )
+                if (pipe_class == pipe_shell.NO_URL and effective_severity == "low"
+                        and not reserved_why):
+                    # Host-elided URL: low until the tree check finds an install hook,
+                    # a consumer run string or spawning code that names this file
+                    # (npm_scripts._restore_no_url, via restore_externally_invoked).
+                    finding._no_url_restore = "critical"  # type: ignore[attr-defined]
                 if npx_pre is not None:
                     # What it would have been (not a dataclass field): repository,
                     # local and package scans restore it when another file replaces

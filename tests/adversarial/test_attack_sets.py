@@ -22,6 +22,8 @@ production package path (npm_result_from_tarball -> apply_artifact_scan -> trust
   with the context rules for skills that talk about injection (2026-11-07; skill path)
 * ``cases_a2a_cards`` - A2A Agent Card grading: interfaces, auth, skill text, the card
   signature (2026-11-07; runs ``analyze_a2a_card``, not an npm tarball)
+* ``cases_attack_samples`` - attack samples in test data, curl routing flags against
+  a reserved host, host-elided (no-URL) pipes and the ``.sh`` TLD (#387 review)
 
 Every case's label is pinned in ``expected.json``. A scanner change that moves one fails
 here; regenerate with ``python -I tests/adversarial/expected_labels.py --write`` in the
@@ -43,7 +45,7 @@ EXPECTED = json.loads((HERE / "expected.json").read_text())
 SETS = ("cases_npm_scripts", "cases_printed_hint", "cases_trifecta", "cases_exfil_precision",
         "cases_browser_profile", "cases_signing_key",
         "cases_encoded_instructions", "cases_bytecode", "cases_skill_prose",
-        "cases_a2a_cards")
+        "cases_a2a_cards", "cases_attack_samples")
 
 # Attacks that still read safe today, with the label they should read.
 KNOWN_GAPS: dict[tuple[str, str], str] = {

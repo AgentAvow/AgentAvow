@@ -867,6 +867,33 @@ def _restore_helper_scripts(findings: list, texts: dict[str, str]) -> None:
             f._helper_restore = None
 
 
+def _restore_no_url(findings: list, texts: dict[str, str]) -> None:
+    """A host-elided pipe-to-shell lowered to low (``pipe_shell.NO_URL``) gets its
+    critical back when the file is something a consumer runs: code that can execute
+    something (``_SPAWN_RE``) names it, anything a consumer can run names it
+    (``consumer_run_strings``, every package.json script, install hooks included), or
+    the file is not in ``texts`` (unseen). A pipe in a file a hook runs is never only a
+    hint (#387 review)."""
+    from src.scanner.pipe_shell import WHY_NO_URL
+
+    marked = [f for f in findings if getattr(f, "_no_url_restore", None)
+              and f.severity == "low" and f.remediation == WHY_NO_URL]
+    if not marked:
+        return
+    paths = {f.file_path for f in marked}
+    spawners = [t for p, t in texts.items()
+                if t and p not in paths and _is_code_file(p) and _SPAWN_RE.search(t)]
+    runs = consumer_run_strings(texts, roots=None)
+    for f in marked:
+        path = f.file_path
+        others = [t for p, t in texts.items() if t and p != path
+                  and p.rsplit(".", 1)[-1].lower() in ("sh", "bash", "zsh")]
+        if (path not in texts or _names_file(path, spawners) or _names_file(path, runs)
+                or _names_file(path, others)):
+            f.severity, f.remediation = f._no_url_restore, ""
+            f._no_url_restore = None
+
+
 def mark_allowlist(finding: object, severity: str, keys: set[str]) -> None:
     """A webhook/tunnel-host match that is an allowlist element (scan.py
     ``_host_allowlist_entry``), reported low until the rest of the tree is checked."""
@@ -1020,6 +1047,7 @@ def restore_externally_invoked(findings: list, texts: dict[str, str], *,
     restore_signing_relaxed(findings, texts)
     _restore_datasets(findings, texts)
     _restore_helper_scripts(findings, texts)
+    _restore_no_url(findings, texts)
     _restore_dev_tooling(findings, texts,
                          REGISTRY_ROOTS if registry_artifact else CONSUMER_ROOTS)
     # (A finding a later pass already capped further, e.g. to info in an uninstalled

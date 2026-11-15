@@ -88,13 +88,12 @@ _URL_RE = re.compile(r"""(?:https?|ftp)://[^\s'"`)|>\]]+""", re.IGNORECASE)
 # A target the shell expands: $VAR, ${VAR}, $(cmd), `cmd`, %VAR%, {{ template }}.
 _VAR_RE = re.compile(r"""\$\{?\w|\$\(|`[^`]*\$|%\w+%|\{\{""")
 _PLACEHOLDER_ARG_RE = re.compile(r"""^(?:\.{2,}|…+|<[^>]*>|\[[^\]]*\]|url|URL|\.\.\.\w*)$""")
-# Nothing to fetch as written: a bare installer file name with no host
-# (`curl install.sh | bash`, watch-cli) or a URL whose path is literally elided
-# (`https://raw.githubusercontent.com/.../install.sh`, openclaw-ansible). Only
-# installer stems: `bun.sh` / `get.example.sh` name real hosts and stay critical.
-_SCRIPT_FILE_ARG_RE = re.compile(
-    r"""^(?:install(?:er)?|setup|bootstrap|init|uninstall|update|upgrade)"""
-    r"""\.(?:sh|bash|zsh|ps1)$""", re.IGNORECASE)
+# Nothing to fetch as written: a URL whose HOST is literally elided
+# (`https://.../install.sh`, `https://…/x`). Only the host counts: a real host with an
+# elided path (`https://dl.x.io/.../i.sh`) is still fetchable (`...` is a valid path
+# segment), and a bare `setup.sh` / `install.sh` is a host under the `.sh` TLD (#387
+# review). Never in agent instructions or an install hook; a tree pass restores it
+# when anything a consumer can run names the file (npm_scripts._restore_no_url).
 _ELIDED_SEGMENT_RE = re.compile(r"""^(?:\.{3,}|…+)$""")
 _INSECURE_FLAG_RE = re.compile(r"""(?:^|\s)(?:-k|--insecure|--no-check-certificate)\b""")
 _BASE64_RE = re.compile(r"""\bbase64\b|\batob\s*\(|\bb64decode\b""", re.IGNORECASE)
@@ -138,9 +137,9 @@ _POST_CUE_RE = re.compile(
 WHY_PINNED = ("Pipes a script pinned to an exact commit to a shell. The bytes can't change "
               "after you review them, so read that script once before you run it.")
 
-WHY_NO_URL = ("A pipe-to-shell with nothing to fetch as written: a bare installer file "
-              "name with no host, or a URL whose path is elided (`/.../`). It reads as "
-              "an install hint, not a command that can run. Reported for visibility.")
+WHY_NO_URL = ("A pipe-to-shell with nothing to fetch as written: a URL whose host is "
+              "elided (`https://.../install.sh`). It reads as an install hint, not a "
+              "command that can run. Reported for visibility.")
 WHY_OFFICIAL = ("Pipes a well-known vendor's official installer (HTTPS) to a shell. It "
                 "runs whatever that host serves at install time, so review it, or pin a "
                 "version / checksum.")
@@ -289,9 +288,17 @@ def _last_command_start(line: str, start: int, end: int) -> int:
 
 
 def _elided_url(url: str) -> bool:
-    """The URL's host or a path segment is a literal ellipsis (`/.../`, `/…/`)."""
+    """The URL's host itself is a literal ellipsis (`https://.../`, `https://…/`)."""
     rest = url.split("://", 1)[-1].split("?", 1)[0].split("#", 1)[0]
-    return any(_ELIDED_SEGMENT_RE.match(seg) for seg in rest.split("/"))
+    host = rest.split("/", 1)[0].rsplit("@", 1)[-1]
+    return bool(_ELIDED_SEGMENT_RE.match(host))
+
+
+def _no_url_allowed(file_path: str) -> bool:
+    """NO_URL is never given in agent instructions or an install-lifecycle file."""
+    from src.scanner.package_context import is_agent_instruction_file
+    name = Path(file_path).name.lower()
+    return name not in _INSTALL_HOOK_NAMES and not is_agent_instruction_file(file_path)
 
 
 def classify_match(line: str, start: int, end: int, file_path: str) -> str:
@@ -312,9 +319,8 @@ def classify_match(line: str, start: int, end: int, file_path: str) -> str:
         real = [a for a in args if a and not a.startswith("-")]
         if not real or all(_PLACEHOLDER_ARG_RE.match(a) for a in real):
             return DROP
-        if len(real) == 1 and _SCRIPT_FILE_ARG_RE.match(real[0]):
-            return NO_URL
-    elif not has_var and all(_elided_url(u) for u in urls):
+    elif (not has_var and all(_elided_url(u) for u in urls)
+          and _no_url_allowed(file_path)):
         return NO_URL
     name = Path(file_path).name.lower()
     if Path(file_path).suffix.lower() in _PROSE_EXTS and _prohibited(line, start, end):
@@ -348,15 +354,42 @@ def _is_reserved_host(host: str) -> bool:
             or any(h == d or h.endswith("." + d) for d in _RESERVED_DOMAINS))
 
 
+# An environment assignment before curl / wget that routes the fetch or loads a config.
+_ROUTING_ENV_RE = re.compile(r"(?i)(?:^|[\s\"'`])(?:\w*proxy|curl_home|wgetrc|curl_ca_bundle)=")
+
+
+def _routes_elsewhere(target: str) -> bool:
+    """A curl / wget flag in ``target`` that can make the fetch reach another host than
+    the URL names (``--connect-to``, ``--resolve``, ``-x`` / ``--proxy``, a SOCKS
+    proxy) or read a config that can (``-K`` / ``--config``, wget ``-e``): the URL's
+    host is no longer what is fetched (#387 review)."""
+    for raw in target.split():
+        t = raw.strip("'\"`")
+        if t.startswith("--"):
+            if t.partition("=")[0] in _LONG_DANGEROUS:
+                return True
+        elif t.startswith("-") and len(t) > 1:
+            for ch in t[1:]:
+                if ch in _SHORT_DANGEROUS:
+                    return True
+                if ch in _SHORT_WITH_VALUE:
+                    break
+    return False
+
+
 def reserved_hosts_only(line: str, pattern: re.Pattern[str], file_path: str) -> bool:
     """Every pipe-to-shell match on ``line`` fetches from a reserved host (and from
-    nothing else): no variable, no extra URL, at least one host per match."""
+    nothing else): no variable, no extra URL, no flag or environment setting that
+    routes the fetch elsewhere, at least one host per match."""
     any_match = False
     for m in pattern.finditer(line):
         any_match = True
         start = _last_command_start(line, m.start(), m.end())
         target = _target(line, start, m.end())
-        if not target or _VAR_RE.search(target):
+        if not target or _VAR_RE.search(target) or _routes_elsewhere(target):
+            return False
+        seps = list(_CMD_SEP_RE.finditer(line, 0, start))
+        if _ROUTING_ENV_RE.search(line[seps[-1].end() if seps else 0:start]):
             return False
         hosts = [hm.group(1) for u in _URL_RE.findall(target)
                  if (hm := _HOST_IN_URL_RE.match(u))]

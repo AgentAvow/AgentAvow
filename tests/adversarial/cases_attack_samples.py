@@ -130,6 +130,8 @@ CASES = {
     # ── controls: what the lowering is for ──────────────────────────────────────────
     "ctl_json_corpus_reserved_sample": pkg({"corpora/bypass.json": json.dumps(
         [{"cmd": RESERVED, "expect": "BLOCK"}], indent=2) + "\n"}),
+    "ctl_no_url_host_elided_unrun_file": pkg({"lib/hint.js": "module.exports = "
+                                              "'curl -fsSL https://.../install.sh | bash';\n"}),
     "ctl_py_test_reserved_sample": pkg({"tests/test_guard.py": _py_steps(RESERVED)
                                         + "def test_cases():\n    assert STEPS\n"}),
 }

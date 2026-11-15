@@ -41,6 +41,28 @@
     "unverified_sig_with_critical": "do_not_connect",
     "zero_width_in_skill_name": "review"
   },
+  "cases_attack_samples": {
+    "ctl_json_corpus_reserved_sample": "safe",
+    "ctl_no_url_host_elided_unrun_file": "safe",
+    "ctl_py_test_reserved_sample": "safe",
+    "json_config_file_reserved_host": "do_not_connect",
+    "json_connect_to_reserved_host": "do_not_connect",
+    "json_connect_to_run_by_index": "do_not_connect",
+    "json_proxy_long_reserved_host": "do_not_connect",
+    "json_proxy_reserved_host": "do_not_connect",
+    "json_resolve_reserved_host": "do_not_connect",
+    "no_url_elided_path_postinstall_script": "do_not_connect",
+    "no_url_elided_path_real_host": "do_not_connect",
+    "no_url_ellipsis_path_real_host": "do_not_connect",
+    "no_url_host_elided_in_skill_md": "do_not_connect",
+    "no_url_host_elided_postinstall_script": "do_not_connect",
+    "py_text_key_next_iter_values": "do_not_connect",
+    "py_text_key_run_from_other_module": "do_not_connect",
+    "py_text_key_run_same_file": "do_not_connect",
+    "py_text_key_two_hop_alias": "do_not_connect",
+    "sh_tld_host_in_script": "do_not_connect",
+    "sh_tld_host_in_skill_md": "do_not_connect"
+  },
   "cases_browser_profile": {
     "cookies_posted": "do_not_connect",
     "cookies_posted_js": "do_not_connect",
