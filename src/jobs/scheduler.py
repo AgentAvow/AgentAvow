@@ -2007,12 +2007,40 @@ async def _run_catalog_rescan() -> None:
             await asyncio.sleep(spacing)
         _discovery_cursor += 1
 
-    if refreshed or superseded or seeded or added or discovered:
+    # (d) Recovery: a launch skill row listed as its repo (no SKILL.md) is no longer
+    # skill-scanned by the passes above. Skill-scan the ones due for a recheck so a repo
+    # that gained a SKILL.md gets its skill row back (src/api/catalog_skill_rows.py).
+    rechecked = await _recheck_skill_rows(gh_ok, spacing)
+
+    if refreshed or superseded or seeded or added or discovered or rechecked:
         logger.info(
             "Catalog re-scan: refreshed %d community rows, %d stale corpus rows, "
-            "%d curated seed, %d launch-corpus backfill, %d discovered",
-            refreshed, superseded, seeded, added, discovered,
+            "%d curated seed, %d launch-corpus backfill, %d discovered, "
+            "%d skill rows recovered",
+            refreshed, superseded, seeded, added, discovered, rechecked,
         )
+
+
+async def _recheck_skill_rows(gh_ok: bool, spacing: float) -> int:
+    """Skill-scan the ``no_skill_md`` overlay entries due for a recheck. Each is marked
+    checked first, so a transient failure waits for the next recheck window instead of
+    retrying every cycle. Returns how many scanned successfully (and so recovered)."""
+    if not gh_ok:
+        return 0
+    from src.config import settings
+
+    limit = getattr(settings, "catalog_skill_recheck_limit", 10)
+    from src.api import catalog_skill_rows as sr
+    from src.database import async_session
+
+    done = 0
+    for owner, repo in await asyncio.to_thread(sr.recheck_targets, limit):
+        sr.mark_checked(f"{owner}/{repo}")
+        async with async_session() as db:
+            if await _rescan_catalog_row("openclaw", owner, repo, db):
+                done += 1
+        await asyncio.sleep(spacing)
+    return done
 
 
 async def _catalog_rescan_loop(interval: int | None = None) -> None:

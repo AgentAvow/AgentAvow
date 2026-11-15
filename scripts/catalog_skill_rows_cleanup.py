@@ -14,7 +14,9 @@ nothing. Read-only against GitHub (repo metadata + the git tree), one repo at a 
 
 Needs GITHUB_TOKEN (or the app's GitHub auth) for a useful rate limit. Run it where the
 catalog's data/launch-scans directory lives (the API host), as the user that owns it.
-A truncated tree or any non-404 error leaves the repo alone.
+A truncated or empty tree, or any non-404 error, leaves the repo alone. A 404 is only
+noted: a repo is recorded as gone when a second run, at least three hours later, gets a
+404 again (src/api/catalog_skill_rows.GONE_CONFIRM_GAP).
 """
 from __future__ import annotations
 
@@ -32,28 +34,6 @@ AUDIT_ROWS = (
     "byJoey/openclawctl", "itq5/OpenClaw-Admin", "MemTensor/MemOS-Cloud-OpenClaw-Plugin",
     "kwalus/Canopy", "bgdnvk/clanker", "LycheeMem/LycheeMem",
 )
-
-
-async def classify(client, headers: dict, full_name: str) -> str | None:
-    """no_skill_md / repo_gone / None (a skill, or unknown)."""
-    from src.api.catalog_skill_rows import NO_SKILL_MD, REPO_GONE
-
-    meta = await client.get(f"https://api.github.com/repos/{full_name}", headers=headers)
-    if meta.status_code in (404, 451):
-        return REPO_GONE
-    if meta.status_code != 200:
-        return None
-    branch = (meta.json() or {}).get("default_branch") or "HEAD"
-    tree = await client.get(
-        f"https://api.github.com/repos/{full_name}/git/trees/{branch}",
-        headers=headers, params={"recursive": "1"})
-    if tree.status_code != 200:
-        return None
-    body = tree.json() or {}
-    if body.get("truncated"):
-        return None
-    paths = [it.get("path", "") for it in body.get("tree") or [] if it.get("type") == "blob"]
-    return None if any(p.lower().endswith("skill.md") for p in paths) else NO_SKILL_MD
 
 
 def corpus_skill_repos() -> list[str]:
@@ -87,7 +67,7 @@ async def main() -> int:
     async with httpx.AsyncClient(timeout=20.0) as client:
         for i, name in enumerate(names):
             try:
-                kind = await classify(client, headers, name)
+                kind = await sr.classify(client, headers, name)
             except httpx.HTTPError as e:
                 print(f"skip {name}: {e.__class__.__name__}")
                 kind = None
@@ -100,6 +80,10 @@ async def main() -> int:
           + ("" if args.apply else " (dry run: nothing written; add --apply)"))
     if args.apply:
         for name, kind in found.items():
+            if kind == sr.REPO_GONE:
+                if not sr.note_404(name):
+                    print(f"first 404 noted for {name}; run again in 3+ hours to confirm")
+                continue
             if not sr.record(name, kind):
                 print(f"could not write the overlay for {name}", file=sys.stderr)
                 return 1

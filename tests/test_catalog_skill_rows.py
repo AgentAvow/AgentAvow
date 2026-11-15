@@ -87,6 +87,10 @@ def _use_corpus(data_dir, monkeypatch, repos):
 @pytest.mark.asyncio
 async def test_note_records_no_skill_md_for_corpus_skill_rows_only(data_dir, monkeypatch):
     _use_corpus(data_dir, monkeypatch, ["itq5/OpenClaw-Admin"])
+
+    async def confirmed(owner, repo):
+        return True
+    monkeypatch.setattr(sr, "confirm_no_skill_md", confirmed)
     await sr.note_skill_scan("itq5", "openclaw-admin", "No SKILL.md found — x")
     await sr.note_skill_scan("someone", "candidate", "No SKILL.md found — x")
     assert sr.load_overlay() == {"itq5/openclaw-admin": sr.NO_SKILL_MD}
@@ -104,7 +108,11 @@ async def test_repo_gone_needs_a_github_404(data_dir, monkeypatch):
     await sr.note_skill_scan("LycheeMem", "LycheeMem", "Repository not found or unreadable")
     await sr.note_skill_scan("acme", "ratelimited", "Repository not found or unreadable")
     assert seen == ["LycheeMem", "ratelimited"]
-    assert sr.load_overlay() == {"lycheemem/lycheemem": sr.REPO_GONE}
+    # one 404 is only noted, never a delisting
+    assert sr.load_overlay() == {}
+    first = sr._load_checks(data_dir / m._SKILL_ROWS_FILE)
+    assert "first_404_at" in first["lycheemem/lycheemem"]
+    assert "acme/ratelimited" not in first
 
 
 @pytest.mark.asyncio
@@ -160,3 +168,230 @@ async def test_rescan_of_a_skill_row_notes_the_failure(monkeypatch):
     ok = await sch._rescan_catalog_row("openclaw", "kwalus", "Canopy", db=None)
     assert ok is False
     assert noted == [("kwalus", "Canopy", "No SKILL.md found — x")]
+
+
+# --- no_skill_md needs a confirmed tree --------------------------------------------
+
+class _Resp:
+    def __init__(self, status, body=None):
+        self.status_code = status
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+class _TreeClient:
+    """meta answers ``meta``; tree answers ``tree`` (a status or a (status, body) pair)."""
+
+    def __init__(self, meta=200, tree=(200, {"tree": [{"type": "blob", "path": "a.py"}]})):
+        self.meta, self.tree = meta, tree
+
+    async def get(self, url, headers=None, params=None):
+        if "/git/trees/" in url:
+            status, body = self.tree if isinstance(self.tree, tuple) else (self.tree, None)
+            return _Resp(status, body)
+        return _Resp(self.meta, {"default_branch": "main"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("client,expected", [
+    (_TreeClient(), sr.NO_SKILL_MD),
+    (_TreeClient(tree=(200, {"tree": [{"type": "blob", "path": "x/SKILL.md"}]})), None),
+    (_TreeClient(tree=403), None),                       # rate-limited tree call
+    (_TreeClient(tree=502), None),                       # outage
+    (_TreeClient(tree=(200, {"tree": []})), None),       # empty tree
+    (_TreeClient(tree=(200, {"tree": [{"type": "blob", "path": "a.py"}],
+                              "truncated": True})), None),  # truncated tree
+    (_TreeClient(meta=403), None),
+    (_TreeClient(meta=404), sr.REPO_GONE),
+])
+async def test_classify_reads_no_skill_md_only_from_a_whole_non_empty_tree(client, expected):
+    assert await sr.classify(client, {}, "o/r") == expected
+
+
+@pytest.mark.asyncio
+async def test_failed_tree_call_never_records_no_skill_md(data_dir, monkeypatch):
+    """The scanner says "No SKILL.md found" after a failed tree call: the confirmation
+    tree call fails too, so nothing is recorded."""
+    import httpx
+
+    _use_corpus(data_dir, monkeypatch, ["acme/live-skill"])
+    client = _TreeClient(tree=403)
+
+    class _Ctx:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return client
+
+        async def __aexit__(self, *a):
+            return False
+
+    async def no_token():
+        return None
+    monkeypatch.setattr(httpx, "AsyncClient", _Ctx)
+    monkeypatch.setattr("src.github_auth.get_github_token", no_token)
+    await sr.note_skill_scan("acme", "live-skill", "No SKILL.md found — x")
+    assert sr.load_overlay() == {}
+    client.tree = (200, {"tree": [{"type": "blob", "path": "a.py"}], "truncated": True})
+    await sr.note_skill_scan("acme", "live-skill", "No SKILL.md found — x")
+    assert sr.load_overlay() == {}
+    client.tree = (200, {"tree": [{"type": "blob", "path": "a.py"}]})
+    await sr.note_skill_scan("acme", "live-skill", "No SKILL.md found — x")
+    assert sr.load_overlay() == {"acme/live-skill": sr.NO_SKILL_MD}
+
+
+# --- recovery ----------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_delisted_row_is_rechecked_and_recovers(data_dir, monkeypatch):
+    from datetime import timedelta
+
+    _use_corpus(data_dir, monkeypatch, ["acme/grew-a-skill"])
+    sr.record("acme/grew-a-skill", sr.NO_SKILL_MD)
+    monkeypatch.setattr(m, "_CATALOG_CACHE", m._build_catalog())
+    row = {r.full_name: r for r in m._load_rows()}["acme/grew-a-skill"]
+    assert row.surface == "github"
+    # still a corpus skill row for the re-scan loop, though it now opens the repo page
+    assert sr.is_corpus_skill_row("acme", "grew-a-skill")
+
+    assert sr.recheck_targets(10) == []  # just recorded: not due yet
+    later = sr._now() + sr.RECHECK_AFTER + timedelta(minutes=1)
+    assert sr.recheck_targets(10, now=later) == [("acme", "grew-a-skill")]
+
+    # the loop's recovery pass skill-scans it; the scan succeeds now
+    scanned = []
+
+    async def fake_rescan(surface, owner, repo, db):
+        scanned.append((surface, owner, repo))
+        await sr.note_skill_scan(owner, repo, None)
+        return True
+
+    class _Session:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(sr, "recheck_targets", lambda limit: [("acme", "grew-a-skill")])
+    monkeypatch.setattr(sch, "_rescan_catalog_row", fake_rescan)
+    monkeypatch.setattr("src.database.async_session", lambda: _Session())
+    assert await sch._recheck_skill_rows(True, 0) == 1
+    assert scanned == [("openclaw", "acme", "grew-a-skill")]
+    assert sr.load_overlay() == {}
+    restored = {r.full_name: r for r in m._load_rows()}["acme/grew-a-skill"]
+    assert restored.surface == "openclaw"
+    assert restored.page_path == "/check/skill/acme/grew-a-skill"
+
+
+@pytest.mark.asyncio
+async def test_recheck_still_missing_keeps_entry_and_waits(data_dir, monkeypatch):
+    from datetime import timedelta
+
+    _use_corpus(data_dir, monkeypatch, ["acme/still-not"])
+    sr.record("acme/still-not", sr.NO_SKILL_MD)
+    later = sr._now() + sr.RECHECK_AFTER + timedelta(minutes=1)
+    assert sr.recheck_targets(10, now=later) == [("acme", "still-not")]
+    sr.mark_checked("acme/still-not", now=later)
+    await sr.note_skill_scan("acme", "still-not", "No SKILL.md found — x")
+    assert sr.load_overlay() == {"acme/still-not": sr.NO_SKILL_MD}
+    assert sr.recheck_targets(10, now=later + timedelta(hours=1)) == []
+    assert await sch._recheck_skill_rows(False, 0) == 0  # GitHub budget low: no rechecks
+
+
+# --- repo_gone needs two 404s a gap apart ------------------------------------------
+
+def test_two_404s_after_the_gap_record_repo_gone(data_dir):
+    from datetime import timedelta
+
+    t0 = sr._now()
+    assert sr.note_404("Gone/Repo", now=t0) is False
+    assert sr.load_overlay() == {}
+    # a second 404 too soon does not count, and does not move the first one
+    assert sr.note_404("gone/repo", now=t0 + timedelta(minutes=30)) is False
+    assert sr.load_overlay() == {}
+    assert sr.note_404("gone/repo", now=t0 + sr.GONE_CONFIRM_GAP) is True
+    assert sr.load_overlay() == {"gone/repo": sr.REPO_GONE}
+    assert "gone/repo" not in sr._load_checks(data_dir / m._SKILL_ROWS_FILE)
+
+
+@pytest.mark.asyncio
+async def test_non_404_between_the_two_resets(data_dir, monkeypatch):
+    from datetime import timedelta
+
+    _use_corpus(data_dir, monkeypatch, ["acme/flaky"])
+    status = {"gone": True}
+
+    async def fake_gone(owner, repo):
+        return status["gone"]
+    monkeypatch.setattr(sr, "github_repo_gone", fake_gone)
+    t0 = sr._now()
+    monkeypatch.setattr(sr, "_now", lambda: t0)
+    await sr.note_skill_scan("acme", "flaky", "Repository not found or unreadable")
+    assert "first_404_at" in sr._load_checks(data_dir / m._SKILL_ROWS_FILE)["acme/flaky"]
+
+    # a 403 / outage in between resets the pending 404
+    status["gone"] = False
+    await sr.note_skill_scan("acme", "flaky", "Repository not found or unreadable")
+    assert "acme/flaky" not in sr._load_checks(data_dir / m._SKILL_ROWS_FILE)
+
+    # so a 404 after the gap is a FIRST 404 again, not a delisting
+    status["gone"] = True
+    monkeypatch.setattr(sr, "_now", lambda: t0 + sr.GONE_CONFIRM_GAP + timedelta(hours=1))
+    await sr.note_skill_scan("acme", "flaky", "Repository not found or unreadable")
+    assert sr.load_overlay() == {}
+
+    # a successful scan in between resets it as well
+    await sr.note_skill_scan("acme", "flaky", None)
+    assert "acme/flaky" not in sr._load_checks(data_dir / m._SKILL_ROWS_FILE)
+
+
+@pytest.mark.asyncio
+async def test_second_404_through_note_skill_scan_delists(data_dir, monkeypatch):
+    _use_corpus(data_dir, monkeypatch, ["LycheeMem/LycheeMem"])
+
+    async def gone(owner, repo):
+        return True
+    monkeypatch.setattr(sr, "github_repo_gone", gone)
+    t0 = sr._now()
+    monkeypatch.setattr(sr, "_now", lambda: t0)
+    await sr.note_skill_scan("LycheeMem", "LycheeMem", "Repository not found or unreadable")
+    assert sr.load_overlay() == {}
+    monkeypatch.setattr(sr, "_now", lambda: t0 + sr.GONE_CONFIRM_GAP)
+    await sr.note_skill_scan("LycheeMem", "LycheeMem", "Repository not found or unreadable")
+    assert sr.load_overlay() == {"lycheemem/lycheemem": sr.REPO_GONE}
+
+
+# --- _write is locked --------------------------------------------------------------
+
+def test_concurrent_writers_lose_no_entries(data_dir, monkeypatch):
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    from src.catalog_growth import state
+
+    real_read = state.read_json
+    barrier = threading.Barrier(8, timeout=5)
+
+    def slow_read(path, default):
+        # widen the read-modify-write window so an unlocked _write would lose entries
+        out = real_read(path, default)
+        time.sleep(0.01)
+        return out
+    monkeypatch.setattr(state, "read_json", slow_read)
+
+    def writer(i):
+        try:
+            barrier.wait()
+        except threading.BrokenBarrierError:
+            pass
+        assert sr.record(f"owner{i}/repo{i}", sr.NO_SKILL_MD)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(writer, range(40)))
+    monkeypatch.setattr(state, "read_json", real_read)
+    assert sr.load_overlay() == {f"owner{i}/repo{i}": sr.NO_SKILL_MD for i in range(40)}
