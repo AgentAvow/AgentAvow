@@ -405,6 +405,22 @@ async def registry_snippet(owner: str, repo: str):
 DRIFT_SCHEMA = "https://schema.agentgraph.co/attestation/drift/v1"
 
 
+def _tool_changes(older: object | None, newer: object) -> dict | None:
+    """Which tools were added, removed or changed between two history points (newest
+    first, so `older` is the next row). None when either point predates per-tool digests
+    or nothing changed."""
+    old_d = getattr(older, "tool_digests", None) if older is not None else None
+    new_d = getattr(newer, "tool_digests", None)
+    if not isinstance(old_d, dict) or not isinstance(new_d, dict):
+        return None
+    added = sorted(new_d.keys() - old_d.keys())
+    removed = sorted(old_d.keys() - new_d.keys())
+    changed = sorted(k for k in old_d.keys() & new_d.keys() if old_d[k] != new_d[k])
+    if not (added or removed or changed):
+        return None
+    return {"added": added, "removed": removed, "changed": changed}
+
+
 async def _drift_payload(full_name: str, subject_id: str, db: AsyncSession,
                          quiet: bool = False) -> dict:
     from src.models import ScanHistory
@@ -435,7 +451,10 @@ async def _drift_payload(full_name: str, subject_id: str, db: AsyncSession,
         "high": r.high,
         "score_delta": r.score_delta,
         "manifest_drift": r.manifest_drift,
-    } for r in rows]
+        # Unsigned detail for the report page (the signed payload below is unchanged).
+        "tool_manifest_digest": r.tool_manifest_digest,
+        "tool_changes": _tool_changes(rows[i + 1] if i + 1 < len(rows) else None, r),
+    } for i, r in enumerate(rows)]
     latest = rows[0]
     drift_events = sum(1 for r in rows if r.manifest_drift or (r.score_delta or 0) != 0)
 

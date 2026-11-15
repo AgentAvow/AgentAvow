@@ -90,3 +90,11 @@ https://agentgraph.co/.well-known/jwks.json
 - [Issues](https://github.com/AgentAvow/AgentAvow/issues)
 
 <!-- mcp-name: com.agentavow/agentavow-trust -->
+
+## Source and license
+
+MIT (see `LICENSE`). This package's source lives in
+[`AgentAvow/AgentAvow`](https://github.com/AgentAvow/AgentAvow/tree/main/sdk/mcp-server) and is
+copied automatically to [`AgentAvow/agentavow-trust-mcp`](https://github.com/AgentAvow/agentavow-trust-mcp);
+open issues and pull requests on the main repo. The MIT license covers this client package
+only: the AgentAvow service it calls is not open source.
