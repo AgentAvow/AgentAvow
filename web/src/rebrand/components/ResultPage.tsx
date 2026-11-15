@@ -9,7 +9,7 @@ import { AgentAvowChooser } from './AgentAvowChooser'
 import { Reveal } from './motion'
 import { useIsDesktop } from '../lib/hooks'
 import {
-  certifiedPending, certifiedRows, certifiedStatus, checkedAgo, fixText, sandboxSummary, topFindings,
+  certifiedPending, certifiedRows, certifiedStatus, checkedAgo, fixPrompt, fixText, sandboxSummary, topFindings,
   type CheckRow, type CheckRowState, type ResultKind, type TopFinding,
 } from '../lib/resultPage'
 
@@ -290,7 +290,36 @@ export function EmptyPanel({ title, children }: { title: string; children: React
   )
 }
 
-function FindingsSection({ scan, allFindings, intro }: { scan: Obj; allFindings: ReactNode; intro?: ReactNode }) {
+/** "Fix it with your AI": the findings as one prompt to paste into a coding agent. */
+export function FixWithAI({ scan, name }: { scan: Obj; name: string }) {
+  const [open, setOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const url = typeof window !== 'undefined' ? `${window.location.origin}${window.location.pathname}` : ''
+  const prompt = fixPrompt(scan, name, url)
+  if (!prompt) return null
+  const copy = () => {
+    navigator.clipboard?.writeText(prompt).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600) }, () => setOpen(true))
+  }
+  return (
+    <Reveal>
+      <div className="mt-4 glass rounded-2xl p-5" data-testid="fix-with-ai">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h3 className="text-[14.5px] font-bold">Is this yours? Fix it with your AI</h3>
+            <p className="text-text-muted text-[13px] mt-0.5">Copy the findings as one prompt and paste it into Claude Code, Cursor, Codex or another coding agent.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={copy} className={BTN_GHOST}>{copied ? 'Copied ✓' : 'Copy the prompt'}</button>
+            <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="text-[12.5px] font-semibold text-primary-light hover:text-primary">{open ? 'Hide' : 'Show'}</button>
+          </div>
+        </div>
+        {open && <pre className="mt-3 whitespace-pre-wrap break-words font-mono text-[11.5px] text-text-muted bg-surface border border-border rounded-xl p-3 max-h-[320px] overflow-auto">{prompt}</pre>}
+      </div>
+    </Reveal>
+  )
+}
+
+function FindingsSection({ scan, allFindings, intro, name }: { scan: Obj; allFindings: ReactNode; intro?: ReactNode; name: string }) {
   const [all, setAll] = useState(false)
   const top = topFindings(scan, 3)
   const total = Number(asObj(scan.findings).total ?? ((asObj(scan.findings).items as unknown[] | undefined)?.length ?? 0))
@@ -325,6 +354,7 @@ function FindingsSection({ scan, allFindings, intro }: { scan: Obj; allFindings:
         {all ? 'Hide the full list ▴' : total > 0 ? `See all ${total} finding${total === 1 ? '' : 's'} →` : 'See the full breakdown →'}
       </button>
       {all && <div data-testid="all-findings">{allFindings}</div>}
+      <FixWithAI scan={scan} name={name} />
     </Section>
   )
 }
@@ -460,7 +490,7 @@ export function ResultPage(props: ResultPageProps) {
       <CertifiedChecklist scan={scan} kind={kind} decision={d} />
 
       {/* 4 · top 3 findings with fixes, then all of them */}
-      <FindingsSection scan={scan} allFindings={props.allFindings} intro={props.findingsIntro} />
+      <FindingsSection scan={scan} allFindings={props.allFindings} intro={props.findingsIntro} name={props.name} />
 
       {/* 5 · what we couldn't check */}
       <GapsSection scan={scan} extra={props.gapNotes} panel={props.gapPanel} />
