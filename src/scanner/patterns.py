@@ -622,11 +622,17 @@ MANIFEST_EXEC_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
 # true` hooks read as "runs remote/shell/eval content" (verdict accuracy audit,
 # 2026-11-14). A `/dev/tcp/` or `/dev/udp/` path is a network socket in ANY redirect
 # direction (`< /dev/tcp/…`, `3<>/dev/tcp/…`, `&>/dev/udp/…`), so it is dangerous on its
-# own, even next to a quiet `> /dev/null`.
+# own, even next to a quiet `> /dev/null`. A raw socket client (`nc`, `ncat`, `socat`,
+# `telnet`) or a read of a home credential path (`~/.ssh/…`, `$HOME/.aws/credentials`,
+# `~/.npmrc`) is dangerous on its own too: `cat ~/.ssh/id_rsa > /dev/stdout | nc …` must
+# not lean on a device redirect to stay critical.
 INSTALL_SCRIPT_DANGER_RE = re.compile(
     r"""(?:curl|wget)\b|\|\s*(?:ba)?sh\b|\bnode\s+(?:-e|--eval|-p|--print|-pe|-ep)\b|"""
     r"""\bpython3?\s+-c\b|base64\s+(?:-d|--decode|-D)\b|\beval\b|"""
     r"""https?://|\bchmod\s+\+x\b|/dev/(?:tcp|udp)/|"""
+    r"""\b(?:nc|ncat|socat|telnet)\b|"""
+    r"""(?:~|\$\{?(?:HOME|USERPROFILE)\}?|/root|/home/[^/\s]+|/Users/[^/\s]+)/"""
+    r"""\.(?:ssh|aws|npmrc)\b|"""
     r""">&?\s*/dev/(?!(?:null|stdout|stderr)(?![\w/.-]))""",
     re.IGNORECASE,
 )
