@@ -45,6 +45,10 @@ The scanner has built-in **context-aware checks** that automatically skip safe p
 | `open("config.json", "r").read()` | Hardcoded file path string |
 | `with open(path) as f:` | Context manager ensures proper resource handling |
 | `Path("out.txt").write_text(data)` | Pathlib method call on a known path |
+| `base = getattr(__builtins__, name, OSError)` then `type(name, (Base, base), {})` | A builtin exception class looked up by name and used only as a class (low). Calling the result, or handing it to another name, stays critical |
+| England / Scotland / Wales flag emoji, with or without a ZWJ before each tag | A well-formed emoji tag sequence (the ZWJ form up to 7 tags). Other tag characters stay critical; bidi controls keep their finding |
+| An EC private key whose secret scalar is below 2^32 (e.g. a `d=4` key for a known-compromised CA) | Anyone can derive it, so it is a placeholder, not a leaked secret (low). Any other key body stays critical |
+| `curl … \| bash` inside a `code_example: \|` (or `bad_example`, `examples`, …) block of a YAML rule set | Example text a rule shows to a person (low). `run: \|` / `command: \|` blocks and YAML outside a rule set stay critical |
 
 ## Finding Names Reference
 
