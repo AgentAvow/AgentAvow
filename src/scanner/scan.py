@@ -3653,7 +3653,10 @@ def _benign_unicode_only(name: str, pattern: re.Pattern, line: str) -> bool:
     if name.startswith("Unicode Tags"):
         return not pattern.search(_EMOJI_TAG_SEQ_RE.sub("", line))
     if name.startswith("Zero-width"):
-        return all(_benign_zero_width(line, m.start()) for m in pattern.finditer(line))
+        flags = [(m.start(), m.end()) for m in _EMOJI_TAG_SEQ_RE.finditer(line)]
+        return all(_benign_zero_width(line, m.start())
+                   or any(a <= m.start() < b for a, b in flags)
+                   for m in pattern.finditer(line))
     return False
 
 

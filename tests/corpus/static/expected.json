@@ -5528,7 +5528,7 @@
    "severity": {
     "critical": 0,
     "high": 0,
-    "medium": 15,
+    "medium": 12,
     "low": 2,
     "info": 0
    },
@@ -5537,7 +5537,7 @@
    "rules": {
     "low: Private Key block (trivial placeholder EC key)": 1,
     "low: Source file too large to scan in full": 1,
-    "medium: Zero-width / invisible character": 15
+    "medium: Zero-width / invisible character": 12
    }
   },
   "pypi/more-itertools": {

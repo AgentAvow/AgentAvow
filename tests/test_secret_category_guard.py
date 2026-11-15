@@ -13,7 +13,8 @@ SRC = Path(__file__).resolve().parent.parent / "src"
 # Finding(category="secret", …) and _capability("secret", …) call sites, per file.
 _EMIT_RE = re.compile(r"""category\s*=\s*["']secret["']|_capability\(\s*["']secret["']""")
 KNOWN = {
-    "scanner/scan.py": 2,           # SECRET_PATTERNS hits + the PEM marker (info capability)
+    "scanner/scan.py": 3,           # SECRET_PATTERNS hits, the PEM marker (info capability),
+                                    # a trivial placeholder EC key (low; a key value)
     # docker image ENV / label (high); a private key in a shipped file (the publisher's)
     "scanner/artifact_scan.py": 2,
     "scanner/skill_scan.py": 1,     # "Uses your … API key" (capability, excluded from the cap)
