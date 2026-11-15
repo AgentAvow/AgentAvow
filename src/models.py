@@ -2644,6 +2644,9 @@ class ScanHistory(Base):
     # True when this row's tool_manifest_digest differs from the previous row's
     # (a signed-definition change — the rug-pull signal, even if the score held).
     manifest_drift = Column(Boolean, default=False, server_default="false", nullable=False)
+    # The per-tool digests behind tool_manifest_digest ({tool or manifest path: digest}),
+    # so the feed can say which tools were added, removed or changed. NULL before t33.
+    tool_digests = Column(JSONB, nullable=True)
     scanned_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True,
     )

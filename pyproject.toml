@@ -38,8 +38,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0,<9.0",
-    "pytest-asyncio>=0.21,<1.0",
+    "pytest>=9.1.1,<10.0",
+    "pytest-asyncio>=1.5,<2.0",
     "pytest-cov>=4.0,<6.0",
     "ruff>=0.1.0",
     "httpx>=0.25,<1.0",
@@ -102,6 +102,9 @@ ignore = ["UP007"]  # We handle union types with __future__ annotations
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Explicit so pytest-asyncio 1.x keeps running each async fixture in a loop of its own scope
+# (its pre-1.x behavior) instead of warning on every run.
+asyncio_default_fixture_loop_scope = "fixture-scope"
 
 [tool.setuptools.packages.find]
 where = ["."]

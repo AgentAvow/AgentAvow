@@ -220,7 +220,7 @@ export default function RebrandForDevelopers() {
             <Today rows={[
               [true, 'Public GitHub repos and skills: the GitHub topic'],
               [true, "npm, PyPI, crates: automatic when the package links to a repo you've claimed, or a keyword you publish"],
-              [true, <>MCP servers: return the code in an <code className={codeCls}>X-AgentAvow-Verify</code> header or <code className={codeCls}>serverInfo</code></>],
+              [true, <>MCP servers: return the code in an <code className={codeCls}>X-AgentAvow-Verify</code> header or <code className={codeCls}>serverInfo</code>, or serve <code className={codeCls}>/.well-known/owners.json</code> listing your verified account email</>],
             ]} />
             <div className="mt-auto pt-2 flex flex-wrap gap-2">
               <Link to={rp('/rebrand/tools')} onClick={() => trackPageAction('dev', 'claim_start')} className={btnPrimary}>Claim your tool</Link>

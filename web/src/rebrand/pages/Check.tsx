@@ -423,7 +423,18 @@ function AdoptionDetail({ data }: { data?: AdoptionResp | null }) {
   )
 }
 
-type DriftPoint = { scanned_at: string | null; trust_score: number | null; score_delta: number | null; manifest_drift: boolean }
+type ToolChanges = { added: string[]; removed: string[]; changed: string[] }
+type DriftPoint = { scanned_at: string | null; trust_score: number | null; score_delta: number | null; manifest_drift: boolean; tool_manifest_digest?: string | null; tool_changes?: ToolChanges | null }
+
+/** "sha256:abcd…" → "abcd1234": enough to tell two definitions apart at a glance. */
+const shortDigest = (d?: string | null) => (d ? d.replace(/^[a-z0-9-]+:/i, '').slice(0, 8) : '')
+
+/** "added delete_all · changed list" for one definition change; '' when not recorded. */
+function toolChangeText(t?: ToolChanges | null): string {
+  if (!t) return ''
+  const part = (label: string, xs: string[]) => (xs.length ? `${label} ${xs.slice(0, 4).join(', ')}${xs.length > 4 ? ` +${xs.length - 4}` : ''}` : '')
+  return [part('added', t.added), part('removed', t.removed), part('changed', t.changed)].filter(Boolean).join(' · ')
+}
 type DriftFeed = { summary: { points: number; drift_events?: number }; history: DriftPoint[] }
 
 /** The signed drift feed for a result (repo, package, MCP endpoint or skill). */
@@ -545,7 +556,24 @@ function DefinitionChanges({ path, toolCount }: { path: string; toolCount?: numb
           <>
             <p className="text-[13px] mt-1.5"><span className="text-warning font-semibold">Signed definition changed {changes.length}×</span>: the tool&apos;s manifest drifted across a release, even where the score held. That&apos;s the rug-pull signal.</p>
             <ul className="mt-2 flex flex-col gap-1 text-[12.5px]">
-              {changes.slice(0, 6).map((c, i) => <li key={i} className="flex justify-between gap-3"><span className="font-mono text-text-muted">{(c.scanned_at || '').slice(0, 10)}</span><span className="text-warning">definition changed · {c.trust_score ?? '–'}/100</span></li>)}
+              {changes.slice(0, 6).map((c, i) => {
+                const prev = history[history.indexOf(c) + 1]
+                const from = shortDigest(prev?.tool_manifest_digest), to = shortDigest(c.tool_manifest_digest)
+                const tools = toolChangeText(c.tool_changes)
+                return (
+                  <li key={i} className="flex flex-col gap-0.5">
+                    <div className="flex justify-between gap-3">
+                      <span className="font-mono text-text-muted">{(c.scanned_at || '').slice(0, 10)}</span>
+                      <span className="text-warning">definition changed · {c.trust_score ?? '–'}/100</span>
+                    </div>
+                    {(from || to || tools) && (
+                      <div className="font-mono text-[11.5px] text-text-muted break-all">
+                        {from && to ? `${from} → ${to}` : to}{tools ? <span className="font-sans"> · {tools}</span> : null}
+                      </div>
+                    )}
+                  </li>
+                )
+              })}
             </ul>
           </>
         ) : (
