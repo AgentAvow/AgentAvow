@@ -332,6 +332,83 @@ async def _mcp_challenge_ok(url: str, code: str) -> bool:
         return False
 
 
+OWNERS_JSON_MAX_BYTES = 64 * 1024
+OWNERS_JSON_MAX_REDIRECTS = 3
+
+
+def owners_json_urls(endpoint: str) -> list[str]:
+    """Where an MCP endpoint's owners.json can live, most specific first (the
+    convention VerifyMCP documents): next to the endpoint path, then at the host root.
+    https://x.com/mcp -> https://x.com/mcp/.well-known/owners.json, then
+    https://x.com/.well-known/owners.json."""
+    from urllib.parse import urlsplit
+
+    u = urlsplit(endpoint)
+    root = f"https://{u.netloc}"
+    path = u.path.rstrip("/")
+    urls = [f"{root}{path}/.well-known/owners.json"] if path else []
+    urls.append(f"{root}/.well-known/owners.json")
+    return urls
+
+
+def owners_from_doc(raw: bytes) -> set[str]:
+    """The lowercased owner addresses an owners.json lists: {"owners": ["a@b.c", ...]}.
+    Anything else (not JSON, wrong shape) lists nobody."""
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return set()
+    owners = doc.get("owners") if isinstance(doc, dict) else None
+    if not isinstance(owners, list):
+        return set()
+    return {o.strip().lower() for o in owners if isinstance(o, str) and o.strip()}
+
+
+async def _fetch_owners_json(url: str) -> bytes | None:
+    """GET one owners.json: https on every hop (at most 3 redirects), SSRF-pinned,
+    8 s timeout, body capped at 64 KB. None on any failure or a non-200."""
+    from urllib.parse import urljoin
+
+    from src.ssrf import ssrf_safe_async_client, validate_url_https
+
+    try:
+        async with ssrf_safe_async_client(timeout=8, follow_redirects=False) as client:
+            for _ in range(OWNERS_JSON_MAX_REDIRECTS + 1):
+                safe = validate_url_https(url, field_name="owners.json")
+                async with client.stream(
+                    "GET", safe, headers={"User-Agent": "AgentAvow-Claim-Verify",
+                                          "Accept": "application/json"},
+                ) as resp:
+                    loc = resp.headers.get("location")
+                    if resp.status_code in (301, 302, 303, 307, 308) and loc:
+                        url = urljoin(url, loc)
+                        continue
+                    if resp.status_code != 200:
+                        return None
+                    body = b""
+                    async for chunk in resp.aiter_bytes():
+                        body += chunk
+                        if len(body) > OWNERS_JSON_MAX_BYTES:
+                            return None
+                    return body
+    except Exception:
+        return None
+    return None
+
+
+async def _owners_json_ok(endpoint: str, email: str | None) -> bool:
+    """Proof of MCP-endpoint ownership by a file on its domain: owners.json (path level,
+    then host level) lists the claimant's verified account email. Fail-closed."""
+    want = (email or "").strip().lower()
+    if not want:
+        return False
+    for url in owners_json_urls(endpoint):
+        raw = await _fetch_owners_json(url)
+        if raw is not None and want in owners_from_doc(raw):
+            return True
+    return False
+
+
 class ClaimRequest(BaseModel):
     # Surface of the tool being claimed. github/openclaw send owner+repo; npm/pypi
     # send the package name in `repo`; mcp sends the endpoint URL in `repo`.
@@ -364,7 +441,8 @@ def _serialize(c: RepoClaim, meta: dict | None = None) -> dict:
     elif surface in ("npm", "pypi", "crates"):
         proof = {"kind": "keyword", "keyword": verify_token, "registry": surface}
     elif surface == "mcp":
-        proof = {"kind": "mcp-challenge", "header": "X-AgentAvow-Verify", "value": verify_token}
+        proof = {"kind": "mcp-challenge", "header": "X-AgentAvow-Verify", "value": verify_token,
+                 "owners_json": owners_json_urls(c.repo)}
     else:
         proof = {"kind": "topic", "topic": verify_token}
     return {
@@ -639,13 +717,21 @@ async def verify_claim(
     if surface == "mcp":
         if await _mcp_challenge_ok(claim.repo, claim.verify_code):
             return await _mark_verified("mcp-challenge")
+        # Second method: an owners.json on the endpoint's domain lists this account's
+        # email. Only a verified email counts, so nobody can claim with an address
+        # they don't control.
+        if entity.email_verified and await _owners_json_ok(claim.repo, entity.email):
+            return await _mark_verified("owners-json")
         return {
             "verified": False,
             "header": "X-AgentAvow-Verify",
             "value": f"agentavow-verify-{claim.verify_code}",
+            "owners_json": owners_json_urls(claim.repo),
             "detail": (
-                "Challenge not seen yet — have the server return the value above as an "
-                "X-AgentAvow-Verify response header (or in its serverInfo), then retry."
+                "Not verified yet. Either have the server return the value above as an "
+                "X-AgentAvow-Verify response header (or in its serverInfo), or publish "
+                'one of the owners.json files listed with {"owners": ["<your verified '
+                'account email>"]}. Then retry.'
             ),
         }
 
