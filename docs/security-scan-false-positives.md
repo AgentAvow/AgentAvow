@@ -45,10 +45,10 @@ The scanner has built-in **context-aware checks** that automatically skip safe p
 | `open("config.json", "r").read()` | Hardcoded file path string |
 | `with open(path) as f:` | Context manager ensures proper resource handling |
 | `Path("out.txt").write_text(data)` | Pathlib method call on a known path |
-| `base = getattr(__builtins__, name, OSError)` then `type(name, (Base, base), {})` | A builtin exception class looked up by name and used only as a class (low). Calling the result, or handing it to another name, stays critical |
-| England / Scotland / Wales flag emoji, with or without a ZWJ before each tag | A well-formed emoji tag sequence (the ZWJ form up to 7 tags). Other tag characters stay critical; bidi controls keep their finding |
+| `base = getattr(__builtins__, 'TimeoutError', OSError)` then `type(name, (Base, base), {})` | A builtin exception class looked up by a **literal** exception-class name (`…Error` / `…Exception` / `…Warning` or a builtin exception) and used only in `isinstance` / `issubclass` / `except` / a `type(…)` bases tuple (low). A computed key (`'ev'+'al'`, a parameter) stays critical, and so does any use of the name anywhere in the file that calls it, passes it to another call (`map(base, …)`), calls it through parentheses, rebinds it or subclasses it with `class X(base)` |
+| England / Scotland / Wales flag emoji, with or without a ZWJ before each tag | A subdivision flag whose tag text is `gbeng` / `gbsct` / `gbwls` or the ISO 3166-2 shape (a real alpha-2 country code + 1–3 lowercase alphanumerics). Any other tag run, in either form (longer runs, sentence chunks with no country code), stays critical; bidi controls keep their finding |
 | An EC private key whose secret scalar is below 2^32 (e.g. a `d=4` key for a known-compromised CA) | Anyone can derive it, so it is a placeholder, not a leaked secret (low). Any other key body stays critical |
-| `curl … \| bash` inside a `code_example: \|` (or `bad_example`, `examples`, …) block of a YAML rule set | Example text a rule shows to a person (low). `run: \|` / `command: \|` blocks and YAML outside a rule set stay critical |
+| `curl … \| bash` inside a `code_example: \|` (or `bad_example`, `examples`, …) block of a YAML rule entry | Example text a rule shows to a person (low), only in an entry of a top-level `rules:` list that has `id`, `severity` and a detection key (`pattern` / `regex` / `detection` …). `safe` / `good` keys, `run: \|` / `command: \|` blocks, entries without that schema and YAML outside a rule set stay critical, and the critical comes back when any file in view passes that field to a process or eval sink |
 
 ## Finding Names Reference
 
