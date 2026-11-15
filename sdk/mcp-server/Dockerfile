@@ -1,4 +1,5 @@
-FROM python:3.11-slim
-RUN pip install --no-cache-dir agentgraph-trust==0.3.0
-ENV AGENTGRAPH_URL=https://agentgraph.co
-ENTRYPOINT ["agentgraph-trust"]
+FROM python:3.12-slim
+WORKDIR /app
+COPY . .
+RUN pip install --no-cache-dir .
+ENTRYPOINT ["agentavow-trust"]
