@@ -1,0 +1,250 @@
+#!/usr/bin/env python3
+"""
+OpenClaw Academic Literature Search Skill
+专注于提供最强大的文献检索功能
+"""
+
+import os
+import sys
+import json
+import asyncio
+import aiohttp
+import yaml
+import xml.etree.ElementTree as ET
+from typing import Dict, List, Optional, Any, Tuple
+from dataclasses import dataclass, asdict, field
+from datetime import datetime, timedelta
+import hashlib
+import re
+import logging
+from pathlib import Path
+from enum import Enum
+from urllib.parse import quote
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# 常量定义
+CACHE_DIR = Path("~/.cache/openclaw/literature").expanduser()
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+class Database(Enum):
+    """支持的数据库"""
+    SEMANTIC_SCHOLAR = "semantic_scholar"
+    CROSSREF = "crossref"
+    PUBMED = "pubmed"
+    ARXIV = "arxiv"
+
+@dataclass
+class Paper:
+    """论文数据类"""
+    title: str
+    authors: List[str] = field(default_factory=list)
+    abstract: Optional[str] = None
+    year: Optional[int] = None
+    venue: Optional[str] = None
+    doi: Optional[str] = None
+    arxiv_id: Optional[str] = None
+    pmid: Optional[str] = None
+    citation_count: int = 0
+    url: Optional[str] = None
+    open_access_pdf: Optional[str] = None
+    is_open_access: bool = False
+    source_database: Database = Database.SEMANTIC_SCHOLAR
+    
+    def to_dict(self) -> Dict:
+        """转换为字典"""
+        data = asdict(self)
+        # 将 Database 枚举转换为字符串
+        data['source_database'] = self.source_database.value
+        return data
+
+class LiteratureSearchEngine:
+    """文献检索引擎核心"""
+    
+    def __init__(self, config: Dict = None):
+        self.config = config or {}
+        self.session = None
+        self.cache = {}
+        
+        # API配置
+        self.api_config = {
+            "semantic_scholar": {
+                "base_url": "https://api.semanticscholar.org/graph/v1",
+                "api_key": os.getenv("SEMANTIC_SCHOLAR_API_KEY", ""),
+            },
+            "crossref": {
+                "base_url": "https://api.crossref.org/works",
+                "email": os.getenv("CROSSREF_API_EMAIL", "openclaw@example.com"),
+            },
+            "pubmed": {
+                "base_url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils",
+                "api_key": os.getenv("PUBMED_API_KEY", ""),
+            },
+            "arxiv": {
+                "base_url": "http://export.arxiv.org/api/query",
+            }
+        }
+    
+    async def __aenter__(self):
+        """异步上下文管理器入口"""
+        self.session = aiohttp.ClientSession()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """异步上下文管理器出口"""
+        if self.session:
+            await self.session.close()
+    
+    async def search(self, query: str, databases: List[str], 
+                    max_results: int = 50, year_range: Tuple[int, int] = None,
+                    **kwargs) -> List[Paper]:
+        """执行文献检索"""
+        
+        # 创建检索任务
+        tasks = []
+        db_objects = [Database(db) for db in databases if db in [d.value for d in Database]]
+        
+        for db in db_objects:
+            if db == Database.SEMANTIC_SCHOLAR:
+                task = self._search_semantic_scholar(query, max_results, year_range)
+            elif db == Database.CROSSREF:
+                task = self._search_crossref(query, max_results, year_range)
+            elif db == Database.PUBMED:
+                task = self._search_pubmed(query, max_results, year_range)
+            elif db == Database.ARXIV:
+                task = self._search_arxiv(query, max_results, year_range)
+            else:
+                continue
+            
+            tasks.append(task)
+        
+        # 并行执行所有检索
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # 合并结果
+        all_papers = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(f"数据库 {databases[i]} 检索失败: {result}")
+                continue
+            if result:
+                all_papers.extend(result)
+        
+        # 去重和排序
+        deduplicated = self._deduplicate_papers(all_papers)
+        sorted_papers = self._sort_papers(deduplicated, kwargs.get("sort_by", "relevance"))
+        
+        return sorted_papers[:max_results]
+    
+    async def _search_semantic_scholar(self, query: str, max_results: int, 
+                                      year_range: Tuple[int, int] = None) -> List[Paper]:
+        """Semantic Scholar检索"""
+        params = {
+            "query": query,
+            "limit": min(max_results * 2, 100),
+            "fields": "paperId,title,abstract,authors,year,venue,citationCount,url,openAccessPdf,isOpenAccess,externalIds"
+        }
+        
+        if year_range:
+            params["year"] = f"{year_range[0]}-{year_range[1]}"
+        
+        try:
+            async with self.session.get(
+                f"{self.api_config['semantic_scholar']['base_url']}/paper/search",
+                params=params,
+                headers={"x-api-key": self.api_config['semantic_scholar']['api_key']} 
+                if self.api_config['semantic_scholar']['api_key'] else {}
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return self._process_semantic_scholar_results(data.get("data", []))
+        except Exception as e:
+            logger.error(f"Semantic Scholar检索失败: {e}")
+        
+        return []
+    
+    async def _search_crossref(self, query: str, max_results: int,
+                              year_range: Tuple[int, int] = None) -> List[Paper]:
+        """Crossref检索"""
+        params = {
+            "query": query,
+            "rows": min(max_results * 2, 100),
+            "select": "DOI,title,author,issued,abstract,URL,container-title"
+        }
+        
+        if year_range:
+            params["filter"] = f"from-pub-date:{year_range[0]},until-pub-date:{year_range[1]}"
+        
+        headers = {
+            "User-Agent": f"OpenClawLiteratureSearch/2.0.0 (mailto:{self.api_config['crossref']['email']})"
+        }
+        
+        try:
+            async with self.session.get(
+                self.api_config['crossref']['base_url'],
+                params=params,
+                headers=headers
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return self._process_crossref_results(data.get("message", {}).get("items", []))
+        except Exception as e:
+            logger.error(f"Crossref检索失败: {e}")
+        
+        return []
+    
+    async def _search_pubmed(self, query: str, max_results: int,
+                           year_range: Tuple[int, int] = None) -> List[Paper]:
+        """PubMed检索"""
+        # 构建PubMed查询
+        pubmed_query = query
+        if year_range:
+            pubmed_query += f" AND ({year_range[0]}[Date - Publication] : {year_range[1]}[Date - Publication])"
+        
+        # 第一步：获取 ID 列表
+        params = {
+            "db": "pubmed",
+            "term": pubmed_query,
+            "retmax": min(max_results, 100),
+            "retmode": "json",
+        }
+        
+        try:
+            async with self.session.get(
+                f"{self.api_config['pubmed']['base_url']}/esearch.fcgi",
+                params=params
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    id_list = data.get("esearchresult", {}).get("idlist", [])
+                    
+                    if not id_list:
+                        return []
+                    
+                    # 第二步：获取详细信息
+                    id_str = ",".join(id_list[:max_results])
+                    fetch_params = {
+                        "db": "pubmed",
+                        "id": id_str,
+                        "retmode": "xml",
+                        "rettype": "abstract"
+                    }
+                    
+                    async with self.session.get(
+                        f"{self.api_config['pubmed']['base_url']}/efetch.fcgi",
+                        params=fetch_params
+                    ) as fetch_response:
+                        if fetch_response.status == 200:
+                            xml_data = await fetch_response.text()
+                            return self._process_pubmed_results(xml_data)
+        except Exception as e:
+            logger.error(f"PubMed检索失败: {e}")
+        
+        return []
+    
+    def _process_pubmed_results(self, xml_data: str) -> List[Paper]:
