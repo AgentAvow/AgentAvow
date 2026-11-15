@@ -1999,12 +1999,10 @@ _TOOLS: list[types.Tool] = [
         name="scan_repo",
         title="Scan a GitHub repo",
         description=(
-            "Scan a public GitHub repository with AgentAvow and return whether it is safe "
-            "for an agent to connect to: one of three answers with its reason (Safe to "
-            "connect, Review before you connect, or Do not connect), a 0-100 trust score, an "
-            "adoption score from real usage (stars), the findings behind it (with where and how "
-            "to fix), and a signed, offline-verifiable attestation. Read-only, no account. "
-            "Calls the AgentAvow public API at agentavow.com."
+            "Is a public GitHub repo safe for an agent to connect to? Returns Safe to "
+            "connect, Review before you connect, or Do not connect with the reason, a 0-100 "
+            "trust score, an adoption score, findings with fixes, and a signed attestation. "
+            "Read-only; calls agentavow.com. Example: {\"repo\": \"vercel/next.js\"}"
         ),
         inputSchema={
             "type": "object",
@@ -2032,16 +2030,12 @@ _TOOLS: list[types.Tool] = [
         name="scan_package",
         title="Scan a package",
         description=(
-            "Scan a published package (npm, PyPI, crates, Docker, or Hugging Face) with "
-            "AgentAvow. Returns one of three answers with its reason (Safe to connect, Review "
-            "before you connect, or Do not connect), a 0-100 trust score, an adoption score from "
-            "real usage (downloads per week), findings with remediation, and a signed "
-            "attestation. Also reports published advisories that affect the scanned version, "
-            "the maintainer's deprecation notice, repo-vs-artifact drift (files shipped that "
-            "aren't in the source), and AgentAvow's behavioral sandbox results when available. "
-            "Scans the "
-            "latest version unless `version` (or a pin in the name) names one. Read-only; "
-            "calls agentavow.com."
+            "Scan a published npm, PyPI, crates, Docker or Hugging Face package. Returns "
+            "Safe to connect, Review before you connect, or Do not connect with the reason, a "
+            "0-100 trust score, an adoption score, findings, advisories, deprecation and "
+            "repo-vs-artifact drift, and a signed attestation. Latest version unless one is "
+            "given. Read-only; calls agentavow.com. "
+            "Example: {\"registry\": \"npm\", \"name\": \"chalk\"}"
         ),
         inputSchema={
             "type": "object",
@@ -2081,11 +2075,11 @@ _TOOLS: list[types.Tool] = [
         name="scan_mcp_server",
         title="Scan an MCP server",
         description=(
-            "Scan a live MCP server's tool definitions for tool-poisoning, prompt-injection, "
-            "invisible-unicode, and manifest-execution risks before your agent connects to it. "
-            "Returns one of three answers with its reason (Safe to connect, Review before you "
-            "connect, or Do not connect), a 0-100 trust score, findings, and a signed "
-            "attestation. Read-only; calls the agentavow.com public API."
+            "Scan a live MCP server's tool definitions for tool poisoning, prompt injection "
+            "and hidden characters before your agent connects. Returns Safe to connect, Review "
+            "before you connect, or Do not connect with the reason, a 0-100 trust score, "
+            "findings, and a signed attestation. Read-only; calls agentavow.com. "
+            "Example: {\"endpoint_url\": \"https://mcp.deepwiki.com/mcp\"}"
         ),
         inputSchema={
             "type": "object",
@@ -2105,9 +2099,9 @@ _TOOLS: list[types.Tool] = [
         name="verify_trust",
         title="Verify an entity's trust score",
         description=(
-            "Verify an AgentAvow entity's trust score. Returns trust_score (0-1), "
-            "trust_score_pct (0-100), trust_tier, and whether it meets a minimum threshold. "
-            "Read-only, no auth. Use before interacting with an unknown agent."
+            "Check an AgentAvow entity's trust score (0-1 and 0-100), tier, and whether it "
+            "meets a minimum. Read-only. Use before working with an unknown agent. "
+            "Example: {\"entity_id\": \"<uuid from lookup_identity>\", \"min_trust\": 0.5}"
         ),
         inputSchema={
             "type": "object",
@@ -2127,9 +2121,10 @@ _TOOLS: list[types.Tool] = [
         name="check_interaction_safety",
         title="Check interaction safety",
         description=(
-            "Check whether it is safe to interact with another agent by trust threshold. "
-            "Thresholds: delegate 0.6, trade 0.5, collaborate 0.4, follow 0.1. Returns is_safe, "
-            "risk_level, the score, and a recommendation. Read-only, no auth."
+            "Is it safe to interact with another agent? Thresholds: delegate 0.6, trade 0.5, "
+            "collaborate 0.4, follow 0.1. Returns is_safe, risk_level, the score and a "
+            "recommendation. Read-only. Example: {\"target_entity_id\": \"<uuid>\", "
+            "\"interaction_type\": \"delegate\"}"
         ),
         inputSchema={
             "type": "object",
@@ -2151,9 +2146,8 @@ _TOOLS: list[types.Tool] = [
         name="lookup_identity",
         title="Look up an agent or tool",
         description=(
-            "Look up an AgentAvow entity by W3C DID or display name. Returns the entity's id, "
-            "name, type, trust score and tier. Read-only, no auth. Use to resolve an identity "
-            "before checking its trust."
+            "Look up an AgentAvow entity by DID or display name. Returns its id, name, type, "
+            "trust score and tier. Read-only. Example: {\"query\": \"did:web:example.com\"}"
         ),
         inputSchema={
             "type": "object",
@@ -2176,8 +2170,8 @@ _TOOLS: list[types.Tool] = [
         name="get_trust_badge",
         title="Get a trust badge",
         description=(
-            "Get an embeddable AgentAvow trust badge (SVG) for an entity, with ready-to-paste "
-            "Markdown and HTML. The badge auto-updates as the score changes. Read-only, no auth."
+            "Get an auto-updating AgentAvow trust badge (SVG) for an entity, with Markdown "
+            "and HTML to paste. Read-only. Example: {\"entity_id\": \"<uuid>\"}"
         ),
         inputSchema={
             "type": "object",
@@ -2196,9 +2190,8 @@ _TOOLS: list[types.Tool] = [
         name="about_agentavow",
         title="About AgentAvow",
         description=(
-            "What AgentAvow is, which tool to use for what, how to read a verdict, and "
-            "example scans. Call this for an overview or when getting started. No input, "
-            "read-only."
+            "What AgentAvow is, which tool to use when, and how to read a verdict. Call it to "
+            "get started. Read-only. Example: {}"
         ),
         inputSchema={"type": "object", "properties": {}},
         annotations=_RO(title="About AgentAvow", readOnlyHint=True, openWorldHint=False),
