@@ -285,6 +285,22 @@
     "xctl_fn_export": "safe",
     "xctl_tpl_line": "do_not_connect"
   },
+  "cases_rule_exemptions": {
+    "builtin_call_past_window": "do_not_connect",
+    "builtin_class_base": "do_not_connect",
+    "builtin_parenthesized_call": "do_not_connect",
+    "builtin_passed_to_map": "do_not_connect",
+    "ctl_builtin_literal_exception": "safe",
+    "ctl_rule_example": "safe",
+    "ctl_subdivision_flags": "safe",
+    "plain_tag_flags_five_letter_chunks": "do_not_connect",
+    "plain_tag_flags_long": "do_not_connect",
+    "yaml_example_run_by_runner": "do_not_connect",
+    "yaml_rules_key_without_schema": "do_not_connect",
+    "yaml_safe_key": "do_not_connect",
+    "zwj_flags_five_letter_chunks": "do_not_connect",
+    "zwj_flags_seven_tags": "do_not_connect"
+  },
   "cases_signing_key": {
     "alias_chain": "do_not_connect",
     "axios_post": "do_not_connect",

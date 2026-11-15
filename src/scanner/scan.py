@@ -1291,8 +1291,8 @@ WHY_TRIVIAL_KEY = ("An EC private key whose secret scalar is a tiny number (unde
 
 def _pem_trivial_ec_key(lines: list[str], idx: int) -> bool:
     """True when the PEM block opening at ``lines[idx]`` is a well-formed, unencrypted EC
-    private key (SEC1 or PKCS#8) whose private scalar is below 2^32, e.g. mitmproxy's
-    d=4 key for a known-compromised CA in ``certs.py``. A random key's scalar never is.
+    private key (SEC1 or PKCS#8) whose private scalar is below 2^32, e.g. the
+    d=4 key of a known-compromised CA shipped as test data. A random key's scalar never is.
     Anything that does not parse exactly (RSA, extra bytes, two keys) returns False."""
     import base64
 
@@ -3162,15 +3162,56 @@ def _looks_like_oauth(lines: list[str], line_num: int) -> bool:
 
 
 # Emoji tag sequence (UTS #51): WAVING BLACK FLAG + tag digits / lowercase tag letters +
-# CANCEL TAG — the England / Scotland / Wales flags. Data, not smuggled ASCII. Some emoji
-# tables (mitmproxy's utils/emoji.py) write the same flags with a ZWJ before every tag;
-# that form is matched only up to 7 tags (a UTS #51 subdivision tag is 3 to 6 chars),
-# so it carries no more text than a real flag.
+# CANCEL TAG — a subdivision flag (England / Scotland / Wales). Some emoji tables write
+# the same flags with a ZWJ before every tag. A candidate is data only when its tag text
+# is a real subdivision code (``_real_flag_tags``): any other tag run, in either form,
+# is hidden text and keeps its finding.
 _EMOJI_TAG_SEQ_RE = re.compile(
-    "\U0001F3F4[\U000E0030-\U000E0039\U000E0061-\U000E007A]{1,32}\U000E007F"
-    "|\U0001F3F4(?:‍[\U000E0030-\U000E0039\U000E0061-\U000E007A]){1,7}"
-    "‍?\U000E007F"
+    "\U0001F3F4(?P<plain>[\U000E0030-\U000E0039\U000E0061-\U000E007A]{1,32})\U000E007F"
+    "|\U0001F3F4(?P<zwj>(?:\u200d[\U000E0030-\U000E0039\U000E0061-\U000E007A]){1,32})"
+    "\u200d?\U000E007F"
 )
+# The RGI subdivision flags, then the ISO 3166-2 shape: an ISO 3166-1 alpha-2 country
+# code + 1 to 3 lowercase alphanumerics (at most 6 tags + CANCEL TAG). Five-letter
+# chunks of a sentence fail the country-code check.
+_RGI_SUBDIVISION_FLAGS = frozenset({"gbeng", "gbsct", "gbwls"})
+_ISO_ALPHA2 = frozenset((
+    "ad ae af ag ai al am ao aq ar as at au aw ax az ba bb bd be bf bg bh bi bj bl bm bn "
+    "bo bq br bs bt bv bw by bz ca cc cd cf cg ch ci ck cl cm cn co cr cu cv cw cx cy cz "
+    "de dj dk dm do dz ec ee eg eh er es et fi fj fk fm fo fr ga gb gd ge gf gg gh gi gl "
+    "gm gn gp gq gr gs gt gu gw gy hk hm hn hr ht hu id ie il im in io iq ir is it je jm "
+    "jo jp ke kg kh ki km kn kp kr kw ky kz la lb lc li lk lr ls lt lu lv ly ma mc md me "
+    "mf mg mh mk ml mm mn mo mp mq mr ms mt mu mv mw mx my mz na nc ne nf ng ni nl no np "
+    "nr nu nz om pa pe pf pg ph pk pl pm pn pr ps pt pw py qa re ro rs ru rw sa sb sc sd "
+    "se sg sh si sj sk sl sm sn so sr ss st sv sx sy sz tc td tf tg th tj tk tl tm tn to "
+    "tr tt tv tw tz ua ug um us uy uz va vc ve vg vi vn vu wf ws ye yt za zm zw").split())
+_SUBDIVISION_RE = re.compile(r"(?P<cc>[a-z]{2})[a-z0-9]{1,3}")
+
+
+def _real_flag_tags(tags: str) -> bool:
+    """True when ``tags`` (the tag characters of a flag, decoded to ASCII) is a real
+    subdivision code: an RGI flag, or an alpha-2 country code + 1-3 alphanumerics."""
+    if tags in _RGI_SUBDIVISION_FLAGS:
+        return True
+    m = _SUBDIVISION_RE.fullmatch(tags)
+    return bool(m and m.group("cc") in _ISO_ALPHA2)
+
+
+def _real_flag_spans(line: str) -> list[tuple[int, int]]:
+    """Spans of the well-formed subdivision flags on ``line`` (either form)."""
+    out = []
+    for m in _EMOJI_TAG_SEQ_RE.finditer(line):
+        raw = (m.group("plain") or m.group("zwj") or "").replace("\u200d", "")
+        if _real_flag_tags("".join(chr(ord(c) - 0xE0000) for c in raw)):
+            out.append(m.span())
+    return out
+
+
+def _strip_real_flags(line: str) -> str:
+    spans = _real_flag_spans(line)
+    for a, b in reversed(spans):
+        line = line[:a] + line[b:]
+    return line
 
 
 def _benign_zero_width(line: str, pos: int) -> bool:
@@ -3574,76 +3615,231 @@ def _py_local_fetch_only(line: str, file_lang: str | None) -> bool:
             and not _PY_FETCH_SECRET_RE.search(line))
 
 
-# `base = getattr(__builtins__, name, OSError)`: a builtin EXCEPTION CLASS looked up by
-# name (PyAV's av/error.py builds FFmpeg error subclasses this way). Only the assignment
-# form with an exception-class default and a non-literal or exception-named key.
+# `base = getattr(__builtins__, 'ConnectionError', OSError)`: a builtin EXCEPTION CLASS
+# looked up by name to subclass. Only the assignment form, with a LITERAL key that names
+# an exception class and an exception-class default: a computed key (`'ev' + 'al'`, a
+# parameter) can name any builtin, so it keeps the critical.
+_BUILTIN_EXC_NAMES = ("BaseException|Exception|KeyboardInterrupt|SystemExit|GeneratorExit|"
+                      "StopIteration|StopAsyncIteration")
 _BUILTIN_CLASS_LOOKUP_RE = re.compile(
     r"""^\s*(?P<var>[A-Za-z_]\w*)\s*=\s*getattr\s*\(\s*__builtins__\s*,\s*"""
-    r"""(?P<key>[A-Za-z_]\w*|(?P<q>['"])[A-Z]\w*(?:Error|Exception|Warning)(?P=q))\s*,\s*"""
-    r"""(?:[A-Z]\w*(?:Error|Exception|Warning)|BaseException)\s*\)\s*(?:#.*)?$"""
+    r"""(?P<q>['"])(?:[A-Z]\w*(?:Error|Exception|Warning)|""" + _BUILTIN_EXC_NAMES
+    + r""")(?P=q)\s*,\s*"""
+    r"""(?:[A-Z]\w*(?:Error|Exception|Warning)|""" + _BUILTIN_EXC_NAMES
+    + r""")\s*\)\s*(?:#.*)?$"""
 )
-# Where an exception class is used as a class: a base in `type(…)` / `class X(…)`, or a
-# type test. A call of the name (`base(code)`) is never one of these.
-_EXC_CLASS_USE_RE = re.compile(
-    r"""\btype\s*\(|\bissubclass\s*\(|\bisinstance\s*\(|^\s*except\b|^\s*class\s+\w+\s*\("""
-)
-_BUILTIN_LOOKUP_WINDOW = 20
+_CALL_IDENT_RE = re.compile(r"([A-Za-z_][\w.]*)\s*$")
+
+
+def _exc_class_use(ln: str, start: int, end: int) -> bool:
+    """True when the name at ``ln[start:end]`` is used as a class in a type test or an
+    ``except`` clause, or as a base in ``type(name, (..., X), ...)``. A call (``X(…)``,
+    ``(X)(…)``), an argument to any other call (``map(X, …)``), a rebinding and a
+    ``class C(X)`` statement are not."""
+    if re.match(r"\s*\)?\s*\(", ln[end:]) or re.match(r"\s*class\s", ln):
+        return False
+    if re.match(r"\s*except\b", ln):
+        return True
+    stack: list[int] = []
+    for i, ch in enumerate(ln[:start]):
+        if ch in "([{":
+            stack.append(i)
+        elif ch in ")]}" and stack:
+            stack.pop()
+    if not stack or ln[stack[-1]] != "(":
+        return False
+
+    def ident(pos: int) -> str:
+        m = _CALL_IDENT_RE.search(ln[:pos])
+        return m.group(1) if m else ""
+    inner = ident(stack[-1])
+    if inner in ("isinstance", "issubclass"):
+        return True
+    return (inner == "" and len(stack) >= 2 and ln[stack[-2]] == "("
+            and ident(stack[-2]) in ("isinstance", "issubclass", "type"))
 
 
 def _builtin_class_lookup(lines: list[str], idx: int) -> bool:
     """True when ``lines[idx]`` binds a builtin exception class looked up on
-    ``__builtins__`` and every later use of the name (within 20 lines) treats it as a
-    class, never calls or re-binds it. ``getattr(__builtins__, 'ev'+'al')(x)``, a call of
-    the bound name, or handing it on (``f = base``) keep the critical."""
+    ``__builtins__`` by a literal exception-class name and EVERY other use of the name in
+    the file treats it as a class (``_exc_class_use``). One call, hand-off or subclass
+    statement anywhere keeps the critical."""
     m = _BUILTIN_CLASS_LOOKUP_RE.match(lines[idx])
     if not m:
         return False
     var = re.compile(r"(?<![\w.])" + re.escape(m.group("var")) + r"\b")
     uses = 0
-    for ln in lines[idx + 1: idx + 1 + _BUILTIN_LOOKUP_WINDOW]:
+    for j, ln in enumerate(lines):
+        if j == idx:
+            continue
         for vm in var.finditer(ln):
-            if re.match(r"\s*\(", ln[vm.end():]) or not _EXC_CLASS_USE_RE.search(ln):
+            if not _exc_class_use(ln, vm.start(), vm.end()):
                 return False
             uses += 1
     return uses > 0
 
 
 # A YAML rule set's documentation block: `code_example: |`, `bad_example: >`, … The
-# block scalar is text a rule shows to a person (agent-audit's `# BAD:` samples).
+# block scalar is text a rule shows to a person (a `# BAD:` sample). Only in an entry of
+# a top-level `rules:` list that carries the rule-schema keys (``_YAML_RULE_SCHEMA_OK``),
+# and never when a file in view runs that field (``restore_rule_examples``).
 _YAML_KEY_LINE_RE = re.compile(r"""^(\s*)(?:-\s+)?([\w.-]+):(?:\s|$)""")
 _YAML_BLOCK_HEADER_RE = re.compile(r"""^\s*(?:-\s+)?([\w.-]+):\s*[|>][-+0-9]*\s*(?:#.*)?$""")
 _YAML_EXAMPLE_KEY_RE = re.compile(
-    r"""(?:^|_)examples?(?:_|$)|^(?:bad|good|vulnerable|insecure|unsafe|safe|secure|"""
-    r"""fixed)(?:_code)?$""", re.IGNORECASE)
-_YAML_RULES_TOP_RE = re.compile(r"^rules:\s*$", re.MULTILINE)
+    r"""(?:^|_)examples?(?:_|$)|^(?:bad|vulnerable|insecure|unsafe)(?:_code)?$""",
+    re.IGNORECASE)
+_YAML_RULES_TOP_RE = re.compile(r"^rules:\s*(?:#.*)?$", re.MULTILINE)
+_YAML_LIST_ITEM_RE = re.compile(r"^(\s*)-\s+(?:([\w.-]+):(?:\s|$))?")
+_YAML_RULE_DETECT_KEYS = frozenset({
+    "pattern", "patterns", "pattern-either", "pattern-regex", "regex", "regexes",
+    "detection", "match", "matchers", "query", "condition", "conditions"})
 WHY_RULE_EXAMPLE = ("Example text inside a rule file's documentation block (a YAML "
                     "`code_example: |` scalar a rule shows to a person); nothing runs it. "
                     "Reported for visibility.")
 
 
-def _yaml_rule_example(file_path: str, content: str, lines: list[str], idx: int) -> bool:
-    """True when ``lines[idx]`` sits inside an example block scalar of a YAML rule set
-    (a top-level ``rules:`` key or a ``rules/`` directory). The owner is the nearest
-    less-indented YAML key line above; anything else (a ``run: |`` or ``command:``
-    block, a plain mapping) returns False."""
+def _yaml_indent(ln: str) -> int:
+    return len(ln) - len(ln.lstrip())
+
+
+def _yaml_rule_entry_ok(lines: list[str], idx: int) -> bool:
+    """True when ``lines[idx]`` (a key line) sits in an entry of the top-level ``rules:``
+    list and that entry has an ``id``, a ``severity`` and a detection key (``pattern`` /
+    ``regex`` / ``detection`` …): the schema of a rule, not just a ``rules:`` key."""
+    ind = _yaml_indent(lines[idx])
+    dash = None
+    for j in range(idx, -1, -1):
+        ln = lines[j]
+        if not ln.strip() or ln.lstrip().startswith("#"):
+            continue
+        m = _YAML_LIST_ITEM_RE.match(ln)
+        if m and (len(m.group(1)) < ind or j == idx):
+            dash = j
+            break
+        if _yaml_indent(ln) < ind:
+            ind = _yaml_indent(ln)
+            if ind == 0:
+                return False
+    if dash is None:
+        return False
+    d_ind = _yaml_indent(lines[dash])
+    for j in range(dash - 1, -1, -1):  # the list must belong to the top-level `rules:`
+        ln = lines[j]
+        if not ln.strip() or ln.lstrip().startswith("#"):
+            continue
+        if _yaml_indent(ln) < d_ind or (_yaml_indent(ln) == 0 and not ln.startswith("-")):
+            if not _YAML_RULES_TOP_RE.match(ln):
+                return False
+            break
+    else:
+        return False
+    m = _YAML_LIST_ITEM_RE.match(lines[dash])
+    keys = {m.group(2)} if m.group(2) else set()
+    k_ind = re.match(r"\s*-\s+", lines[dash]).end()
+    for ln in lines[dash + 1:]:
+        if not ln.strip() or ln.lstrip().startswith("#"):
+            continue
+        i = _yaml_indent(ln)
+        if i <= d_ind:
+            break
+        if i == k_ind:
+            km = _YAML_KEY_LINE_RE.match(ln)
+            if km:
+                keys.add(km.group(2))
+    return ("id" in keys and "severity" in keys
+            and bool(keys & _YAML_RULE_DETECT_KEYS))
+
+
+def _yaml_rule_example(file_path: str, content: str, lines: list[str],
+                       idx: int) -> str | None:
+    """The example key (``code_example``) when ``lines[idx]`` sits inside an example
+    block scalar of a rule entry in a YAML rule set (``_yaml_rule_entry_ok``); else None.
+    The owner is the nearest less-indented YAML key line above; anything else (a
+    ``run: |`` or ``command:`` block, a plain mapping) returns None."""
     if Path(file_path).suffix.lower() not in (".yaml", ".yml"):
-        return False
-    if not (_YAML_RULES_TOP_RE.search(content) or "/rules/" in "/" + file_path.replace("\\", "/")):
-        return False
-    cur = lines[idx]
-    m_ind = len(cur) - len(cur.lstrip())
+        return None
+    if not _YAML_RULES_TOP_RE.search(content):
+        return None
+    m_ind = _yaml_indent(lines[idx])
     for j in range(idx - 1, -1, -1):
         ln = lines[j]
         if not ln.strip():
             continue
-        ind = len(ln) - len(ln.lstrip())
+        ind = _yaml_indent(ln)
         if ind >= m_ind:
             continue
         if _YAML_KEY_LINE_RE.match(ln):
             hm = _YAML_BLOCK_HEADER_RE.match(ln)
-            return bool(hm and _YAML_EXAMPLE_KEY_RE.search(hm.group(1)))
+            if hm and _YAML_EXAMPLE_KEY_RE.search(hm.group(1)) and _yaml_rule_entry_ok(
+                    lines, j):
+                return hm.group(1)
+            return None
         m_ind = ind
+    return None
+
+
+# A file that reads a YAML field and runs it: the field's key as a string literal
+# (`rule['code_example']`, `.get("code_example")`), and a process / eval sink whose
+# arguments hold that literal or a name bound from it.
+_YAML_FIELD_SINK_RE = re.compile(
+    r"""\b(?:subprocess\s*\.\s*\w+|os\s*\.\s*(?:system|popen|exec\w*|spawn\w*)|pty\s*\.\s*spawn|"""
+    r"""Popen|run|call|check_call|check_output|getoutput|getstatusoutput|exec|eval|"""
+    r"""execSync|spawn|spawnSync|execFile|execFileSync|execa|shell)\s*\(""")
+
+
+def runs_yaml_field(text: str, key: str) -> bool:
+    """True when ``text`` (any file in view) passes the YAML field ``key`` to an exec
+    sink: directly, or through names bound from it (a few hops)."""
+    lit = re.compile(r"""(['"`])""" + re.escape(key) + r"""\1""")
+    if not lit.search(text):
+        return False
+    tainted: set[str] = set()
+    assign = re.compile(
+        r"""^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=(?!=)(.*)$""")
+    for _ in range(4):
+        grew = False
+        for ln in text.splitlines():
+            am = assign.match(ln)
+            if not am or am.group(1) in tainted:
+                continue
+            rhs = am.group(2)
+            if lit.search(rhs) or any(re.search(r"(?<![\w$.])" + re.escape(t) + r"\b", rhs)
+                                      for t in tainted):
+                tainted.add(am.group(1))
+                grew = True
+        if not grew:
+            break
+    for sm in _YAML_FIELD_SINK_RE.finditer(text):
+        depth, i, args = 1, sm.end(), []
+        while i < len(text) and depth and i - sm.end() < 600:
+            ch = text[i]
+            depth += ch == "("
+            depth -= ch == ")"
+            args.append(ch)
+            i += 1
+        arg = "".join(args)
+        if lit.search(arg) or any(re.search(r"(?<![\w$.])" + re.escape(t) + r"\b", arg)
+                                  for t in tainted):
+            return True
     return False
+
+
+def restore_rule_examples(findings: list, texts: dict[str, str]) -> list:
+    """A pipe-to-shell in a YAML rule example lowered per file (``rule_example_pre``)
+    gets its grade back when any file in view runs that example field
+    (``runs_yaml_field``). Mutates and returns ``findings``."""
+    memo: dict[str, bool] = {}
+    for f in findings:
+        pre = getattr(f, "rule_example_pre", None)
+        if pre is None or f.severity != "low" or f.remediation != WHY_RULE_EXAMPLE:
+            continue
+        key = pre[3]
+        if key not in memo:
+            memo[key] = any(runs_yaml_field(t, key) for p, t in texts.items()
+                            if t and Path(p).suffix.lower() not in (".yaml", ".yml"))
+        if memo[key]:
+            f.severity, f.payload, f.remediation = pre[0], pre[1], pre[2]
+    return findings
 
 
 def _benign_unicode_only(name: str, pattern: re.Pattern, line: str) -> bool:
@@ -3651,9 +3847,9 @@ def _benign_unicode_only(name: str, pattern: re.Pattern, line: str) -> bool:
     emoji tag sequence or a typographic joiner (precision PR 2: wcwidth's grapheme
     tables). Smuggled tag text (no flag base / uppercase tags) still fires."""
     if name.startswith("Unicode Tags"):
-        return not pattern.search(_EMOJI_TAG_SEQ_RE.sub("", line))
+        return not pattern.search(_strip_real_flags(line))
     if name.startswith("Zero-width"):
-        flags = [(m.start(), m.end()) for m in _EMOJI_TAG_SEQ_RE.finditer(line)]
+        flags = _real_flag_spans(line)
         return all(_benign_zero_width(line, m.start())
                    or any(a <= m.start() < b for a, b in flags)
                    for m in pattern.finditer(line))
@@ -4142,7 +4338,7 @@ def _scan_content(
                         and _is_documented_example(line, match.start())
                         and not _LIVE_KEY_PREFIX_RE.match(val)):
                     sev = "medium"
-                # A PEM EC key whose private scalar is trivially small (mitmproxy's
+                # A PEM EC key whose private scalar is trivially small (a
                 # deliberately compromised d=4 CA key) protects nothing: reported, low.
                 if name == "Private Key block" and _pem_trivial_ec_key(lines, idx):
                     findings.append(Finding(
@@ -4563,13 +4759,21 @@ def _scan_content(
                             pre_sev, pre_payload, pipe_shell.why(pipe_class))
                         findings.append(shown)
                         break
-                if (name == pipe_shell.PIPE_TO_SHELL
-                        and _yaml_rule_example(file_path, content, lines, idx)):
+                rule_key = (_yaml_rule_example(file_path, content, lines, idx)
+                            if name == pipe_shell.PIPE_TO_SHELL else None)
+                if rule_key:
                     # A `# BAD:` sample in a security rule's documentation block.
-                    findings.append(Finding(
+                    shown = Finding(
                         category="dynamic_remote_load", name=name, severity="low",
                         file_path=file_path, line_number=line_num,
-                        snippet=stripped[:120], remediation=WHY_RULE_EXAMPLE))
+                        snippet=stripped[:120], remediation=WHY_RULE_EXAMPLE)
+                    # What it would have been: restored when a file in view runs the
+                    # field (`restore_rule_examples`).
+                    pre_sev, pre_payload = _graded(
+                        "defect", effective_severity, name in _PAYLOAD_REMOTE_LOAD_NAMES)
+                    shown.rule_example_pre = (  # type: ignore[attr-defined]
+                        pre_sev, pre_payload, pipe_shell.why(pipe_class), rule_key)
+                    findings.append(shown)
                     break
                 # Downgrade in test/doc/infra files like other groups
                 effective_severity, remote_payload = _graded(
@@ -4758,7 +4962,7 @@ def _scan_content(
                 if (name == "Obfuscated eval (Python)"
                         and _builtin_class_lookup(lines, idx)):
                     # A builtin exception class looked up by name and used only as a
-                    # class (PyAV's error table), never called.
+                    # class (an error table's base classes), never called.
                     kind, effective_severity, capability = (
                         "capability", "low", "code:builtin_lookup")
                     emitted_name = "Builtin exception class looked up by name"
