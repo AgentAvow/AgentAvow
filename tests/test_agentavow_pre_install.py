@@ -683,3 +683,54 @@ def test_a_checkout_under_home_var_does_not_ask(hook, monkeypatch, capsys):
     assert _run(mod, monkeypatch, capsys,
                 _bash("grep -rn verdict $HOME/projects/AgentAvow/src | head"),
                 lambda *a, **k: None) == {}
+
+
+# --- 0.1.43: fewer false asks, and a maintainer switch ----------------------------------
+
+@pytest.mark.parametrize("cmd", [
+    # "allow" inside another word, in a command that touches some other cache folder
+    "cat > ~/.cache/herdr/status/x.md <<EOF\nTests skip on a shallow clone.\nEOF",
+    "echo 'swallow the error' > ~/.cache/tool/log.txt",
+    "grep -rn fallow ~/.cache/pip",
+    # a checkout path inside a bracketed list, in a command that also changes directory
+    'cd /tmp && python3 -c \'for cwd in ["/home/me/projects/AgentAvow", None]: print(cwd)\'',
+])
+def test_lookalikes_do_not_ask(hook, monkeypatch, capsys, cmd):
+    mod, _ = hook
+    assert _run(mod, monkeypatch, capsys, _bash(cmd), lambda *a, **k: None) == {}
+
+
+@pytest.mark.parametrize("cmd", [
+    "cat ~/.cache/x/allowed.json",
+    "echo x >> ~/.cache/$D/allow-list",
+    "cat ~/.cache/agentavow/allow.key",
+])
+def test_allow_files_under_the_cache_still_ask(hook, monkeypatch, capsys, cmd):
+    mod, _ = hook
+    _ask_reason(mod, monkeypatch, capsys, _bash(cmd))
+
+
+def test_the_maintainer_switch_turns_off_only_the_own_files_ask(hook, monkeypatch, capsys):
+    mod, _ = hook
+    cmd = _bash("cat ~/.cache/agentavow/scanned.json")
+    _ask_reason(mod, monkeypatch, capsys, cmd)
+    monkeypatch.setenv("AGENTAVOW_MAINTAINER", "1")
+    assert _run(mod, monkeypatch, capsys, cmd, lambda *a, **k: None) == {}
+
+
+@pytest.mark.parametrize("cmd", [
+    "AGENTAVOW_MAINTAINER=1 cat ~/.cache/agentavow/allow.key",
+    "export AGENTAVOW_MAINTAINER=1; cat ~/.cache/agentavow/allow.key",
+    "env AGENTAVOW_MAINTAINER=1 cat ~/.cache/agentavow/allow.key",
+])
+def test_setting_the_switch_inside_a_command_does_nothing(hook, monkeypatch, capsys, cmd):
+    mod, _ = hook
+    monkeypatch.delenv("AGENTAVOW_MAINTAINER", raising=False)
+    _ask_reason(mod, monkeypatch, capsys, _bash(cmd))
+
+
+@pytest.mark.parametrize("value", ["", "0", "off", "false", "no"])
+def test_the_switch_is_off_unless_turned_on(hook, monkeypatch, capsys, value):
+    mod, _ = hook
+    monkeypatch.setenv("AGENTAVOW_MAINTAINER", value)
+    _ask_reason(mod, monkeypatch, capsys, _bash("cat ~/.cache/agentavow/allow.key"))

@@ -44,7 +44,7 @@ import sys
 import time
 import urllib.error
 
-__version__ = "0.1.42"
+__version__ = "0.1.43"
 
 TIMEOUT = 12  # seconds per scan: an install is rare, so a slower fresh scan is fine
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -55,6 +55,7 @@ _HERE = pathlib.Path(__file__).resolve().parent
 # Stored grades first so an install is not held up; one bounded fresh scan at most;
 # anything slow, unknown or unscannable stays silent (fail-open).
 INSTALL_ENV = "AGENTAVOW_INSTALL_CHECKS"  # "off" disables package-install checks
+MAINTAINER_ENV = "AGENTAVOW_MAINTAINER"  # "1" turns off the own-files ask
 PKG_CAP = 5            # packages checked per command
 PKG_BUDGET = 14.0      # seconds for all package lookups in one command (hook timeout 20)
 FRESH_MAX = 1          # fresh scans per command for a package with no stored grade
@@ -505,6 +506,8 @@ _STANDALONE = re.compile(r"(?<![\w.@-])agentavow(?![\w.-])")
 _REPO_SLUG = re.compile(r"agentavow/agentavow|(?:github(?:usercontent)?|gitlab)\.com/+agentavow")
 _PATH_PART = re.compile(r"/agentavow(?![\w.-])")
 _CACHE_DIR = re.compile(r"\.cache\b|xdg_cache_home")
+# "allow" starting a word (allowed, allow.key, allow-list), not inside one (shallow, swallow).
+_ALLOW_WORD = re.compile(r"(?<![a-z])allow")
 _GLOB_AFTER_CACHE = re.compile(r"\.cache/+[^\s/]*[*?\[]")
 # `cd` into a folder named agentavow (the whole name: a checkout at AgentAvow-wt-x is not).
 _CD_INTO = re.compile(r"\b(?:cd|pushd|chdir)\b[\s(]+[^;&|\n]*(?<![\w.@-])agentavow(?![\w.-])")
@@ -523,7 +526,7 @@ _REPO_SLUG_ANY_CASE = re.compile(r"agentavow/agentavow|(?:github(?:usercontent)?
 _MAKES_LINK = re.compile(r"\bln\b|symlink|\bmount\b|\bbindfs\b", re.IGNORECASE)
 _UNRESOLVED = re.compile(r"[*?\[\]${}()`]")
 _HOME_VAR = re.compile(r"\$(?:home\b|\{home\})", re.IGNORECASE)
-_TOKEN_STOP = set(";&|<>=(")
+_TOKEN_STOP = set(";&|<>=([,")  # `[` and `,` end a token: ["/a/AgentAvow", ...]
 
 
 def _is_cache_parent(prefix: str, cwd: object, has_cd: bool, sets_home: bool) -> bool:
@@ -606,10 +609,10 @@ def _shell_names_own_files(command: str, cwd: object = None) -> bool:
         return True
     standalone = bool(_STANDALONE.search(t))
     if _CACHE_DIR.search(s) and (standalone or _GLOB_AFTER_CACHE.search(s)
-                                 or "allow" in s):
+                                 or _ALLOW_WORD.search(s)):
         return True
     cd_in = bool(_CD_INTO.search(t)) and not _cd_cannot_reach_own_dir(s, cwd)
-    return standalone and (cd_in or bool(re.search(r"allow|scanned", s)))
+    return standalone and (cd_in or bool(re.search(r"\b(?:allow|scanned)", s)))
 
 
 def _path_in_own_dir(raw: str, cwd: object) -> bool:
@@ -645,6 +648,15 @@ def _touches_own_files(payload: dict) -> bool:
     return False
 
 
+def _maintainer() -> bool:
+    """AGENTAVOW_MAINTAINER=1 in the environment Claude Code was started with turns off the
+    own-files ask, for people who work on AgentAvow itself. Only this process's environment
+    counts: a command that sets the variable runs in its own shell, which this hook never
+    sees. The Do not connect install asks are unaffected (AGENTAVOW_INSTALL_CHECKS)."""
+    import os
+    return os.environ.get(MAINTAINER_ENV, "").strip().lower() in ("1", "on", "true", "yes")
+
+
 def _ask_about_allow_list() -> None:
     reason = ("AgentAvow: this reads or changes AgentAvow's own files (~/.cache/agentavow: "
               "the grades, the list of servers you allowed past a Do not connect answer, "
@@ -663,7 +675,7 @@ def main() -> None:
     if not isinstance(payload, dict) or payload.get("hook_event_name") not in (None, "PreToolUse"):
         return
     try:
-        if _touches_own_files(payload):
+        if _touches_own_files(payload) and not _maintainer():
             _ask_about_allow_list()
             return
     except Exception:

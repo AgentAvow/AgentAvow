@@ -116,7 +116,15 @@ example-server https://mcp.example.com/mcp K7Q2M-9XA3B
   install-time hook asks you first, and so does the gate for an MCP tool call that
   names it. A Claude command that runs `--allow-line` asks too. A different folder that
   happens to be named AgentAvow, such as a checkout of this repo or the plugin's own
-  install folder, does not count.
+  install folder, does not count, and neither does a word that only contains "allow"
+  (such as "shallow") in a command about another cache folder.
+- If you work on AgentAvow itself and this check gets in your way, start Claude Code
+  with `AGENTAVOW_MAINTAINER=1` in its environment (for example
+  `AGENTAVOW_MAINTAINER=1 claude`, or an export in your shell profile). It turns off
+  only this own-files check; Do not connect answers still ask. The hook reads the
+  variable from the environment Claude Code started with, so a command Claude runs
+  cannot turn it on. Anything that can change Claude Code's own environment, such as
+  the `env` block in its settings files, can.
 
 Settings, all optional, read from the environment and never sent anywhere:
 
@@ -209,7 +217,7 @@ AgentAvow, so it never sends it.
 **Once a day** (the first session start of each UTC day, even when there is nothing new
 to check) the session-start hook sends one more small request, a POST to
 `https://agentavow.com/api/v1/public/plugin/active` with the same install ID header and
-a body of `{"version": "0.1.42", "app": "desktop"}`: the plugin version and the app
+a body of `{"version": "0.1.43", "app": "desktop"}`: the plugin version and the app
 type, one of `desktop`, `cli`, `sdk`, `cloud` or `other`, read from Claude Code's
 `CLAUDE_CODE_ENTRYPOINT`. No tool, server, path or repo name goes in it. It lets
 AgentAvow count the machines the plugin protects, including the many days the hook
