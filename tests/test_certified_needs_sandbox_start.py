@@ -461,6 +461,7 @@ async def test_scan_skill_records_the_count(monkeypatch):
     }
 
     async def fake_tree(owner, repo, token, meta_out=None):
+        assert token == "tok"  # the get_github_token patch must reach scan_skill
         tree, trunc = trees[repo]
         return tree, trunc, True, "main"
 
@@ -468,7 +469,7 @@ async def test_scan_skill_records_the_count(monkeypatch):
         return ("---\nname: demo\ndescription: A demo.\n---\nRead the notes."
                 if path == "SKILL.md" else "text")
 
-    monkeypatch.setattr(scan_mod, "get_github_token", fake_token, raising=False)
+    monkeypatch.setattr("src.github_auth.get_github_token", fake_token)
     monkeypatch.setattr(scan_mod, "_fetch_repo_tree", fake_tree)
     monkeypatch.setattr(scan_mod, "_fetch_file_content", fake_content)
     assert (await scan_mod.scan_skill("acme", "notes")).artifact_scan["runnable_files"] == 0
