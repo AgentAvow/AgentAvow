@@ -1069,7 +1069,7 @@ def code_key_exec_site(key: str, path: str,
     texts = {fp: t for fp, t in texts.items()
              if fp == path or not (t and ((judged(fp) and is_test_code(fp, t))
                                           or _TEST_SUPPORT_RE.search(fp)))}
-    site = _code_computed_exec_site(texts)
+    site = _code_computed_exec_site(texts) or _code_variable_exec_site(texts)
     if site is not None:
         return site
     word = re.compile(r"(?<![\w$])" + re.escape(key) + r"(?![\w$])")
@@ -1128,6 +1128,49 @@ def code_key_exec_site(key: str, path: str,
                 rx = re.compile(r"(?<![\w$])\$?\{?" + re.escape(n) + r"(?![\w$])")
                 if any(rx.search(x) for x in sink_lines):
                     return fp, i + 1
+    return None
+
+
+_PLAIN_TEMPLATE_RE = re.compile(r"`[^`$\\]*`")
+_PROCESS_RECEIVER_RE = re.compile(r"(?i)exec|shell|proc|spawn|child|cmd|^cp$|^zx$|^sh$|^\$$")
+# Words in a sink's argument list that are not a value read from somewhere.
+_LITERAL_WORDS = frozenset({"true", "false", "null", "undefined", "new", "Array", "Object",
+                            "process", "env", "cwd", "__dirname"})
+
+
+def _code_variable_exec_site(texts: dict[str, str]) -> tuple[str, int] | None:
+    """A sink call in code whose arguments read a variable (``execSync(b)``,
+    ``spawn('sh', ['-c', v[0]])``): the field's value can reach it through any alias
+    chain, computed key or ``Object.entries`` loop, so it counts for every key. Object
+    keys (``{ stdio: 'inherit' }``), ``process.cwd()`` and literals do not count, nor
+    does a definition (``function runAll(a) {``) or a ``run`` / ``call`` method of an
+    object that is not a process helper (``stmt.run(x)``)."""
+    for fp, text in texts.items():
+        if not text or Path(fp.lower()).suffix not in _CODE_LANG_SUFFIXES:
+            continue
+        flat = _PLAIN_TEMPLATE_RE.sub(lambda m: "``", _QUOTED_RE.sub(_blank_quoted, text))
+        for m in _CODE_SINK_RE.finditer(flat):
+            if not m.group(0).endswith("("):
+                continue
+            depth, j = 1, m.end()
+            while j < len(flat) and depth and j - m.end() < 2000:
+                if flat[j] == "(":
+                    depth += 1
+                elif flat[j] == ")":
+                    depth -= 1
+                j += 1
+            args = flat[m.end():j - 1]
+            rm = re.search(r"([\w$]*)\s*\.\s*$", flat[max(0, m.start() - 60):m.start()])
+            if rm and re.match(r"(?:run\w*|call|check_call|[Cc]ommand)\b", m.group(0)) \
+                    and not _PROCESS_RECEIVER_RE.search(rm.group(1)):
+                continue  # `stmt.run(x)`, `fn.call(x)`: a method of something else
+            if re.match(r"\s*(?::[^=;{]*)?(?:\{|=>)", flat[j:j + 80]) or re.search(
+                    r"\bfunction\s*\*?\s*$|\b(?:async|get|set|static)\s+$",
+                    flat[max(0, m.start() - 20):m.start()]):
+                continue  # a definition, not a call
+            for w in re.finditer(r"(?<![\w$.])[A-Za-z_$][\w$]*(?![\w$])(?!\s*:(?!:))", args):
+                if w.group(0) not in _LITERAL_WORDS:
+                    return fp, text.count("\n", 0, m.start()) + 1
     return None
 
 

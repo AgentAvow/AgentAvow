@@ -220,6 +220,13 @@ def test_freellmapi_notes_printed_by_the_cli_are_low(tmp_path):
     FL_INDEX.replace("process.stdout.write(`\\n${note}\\n`)", "spawn.sync('sh', ['-c', note])"),
     FL_INDEX + "export function run(ctx) {\n  const { notes } = mimoCode(ctx);\n\n\n"
                "  spawn.sync('sh', ['-c', notes[0]]);\n}\n",
+    # A computed key, an entries loop and an alias chain.
+    FL_INDEX + "export function run(ctx) {\n  const g = mimoCode(ctx);\n  const k = 'notes';\n"
+               "  const list = g[k];\n  spawn.sync('sh', ['-c', list[0]]);\n}\n",
+    FL_INDEX + "export function run(ctx) {\n"
+               "  for (const [, v] of Object.entries(mimoCode(ctx))) spawn.sync('sh', ['-c', v[0]]);\n}\n",
+    FL_INDEX + "export function run(ctx) {\n  const g = mimoCode(ctx);\n  const list = g.notes;\n"
+               "  const a = list;\n  const b = a[0];\n  spawn.sync('sh', ['-c', b]);\n}\n",
 ])
 def test_freellmapi_notes_run_by_the_cli_stay_critical(tmp_path, index):
     assert _local(tmp_path, {

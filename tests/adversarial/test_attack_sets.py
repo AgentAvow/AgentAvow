@@ -22,6 +22,8 @@ production package path (npm_result_from_tarball -> apply_artifact_scan -> trust
   with the context rules for skills that talk about injection (2026-11-07; skill path)
 * ``cases_a2a_cards`` - A2A Agent Card grading: interfaces, auth, skill text, the card
   signature (2026-11-07; runs ``analyze_a2a_card``, not an npm tarball)
+* ``cases_shown_cmd`` - an install hint only shown (shell, Go, Rust, JS) whose text
+  can still reach a process (#378; scanned as a source repo with ``scan_local``)
 
 Every case's label is pinned in ``expected.json``. A scanner change that moves one fails
 here; regenerate with ``python -I tests/adversarial/expected_labels.py --write`` in the
@@ -75,11 +77,6 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     ("cases_skill_prose", "gap_security_doc_fenced_payload"): "review",
     # Card analysis is pure: a hostname that resolves to a private address is not seen.
     ("cases_a2a_cards", "gap_dns_name_to_private"): "review",
-    # #378 review: an install hint that only reaches a print / log / error must keep
-    # its critical once that text can reach a process (fixed one by one on the branch).
-    ("cases_shown_cmd", "js_computed_key_to_exec"): "do_not_connect",
-    ("cases_shown_cmd", "js_object_entries_to_exec"): "do_not_connect",
-    ("cases_shown_cmd", "js_alias_chain_to_exec"): "do_not_connect",
 }
 
 _mods: dict[str, object] = {}
