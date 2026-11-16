@@ -3902,65 +3902,118 @@ def _yaml_rule_example(file_path: str, content: str, lines: list[str],
     return None
 
 
-# A file that reads a YAML field and runs it: the field's key as a string literal
-# (`rule['code_example']`, `.get("code_example")`), and a process / eval sink whose
-# arguments hold that literal or a name bound from it.
+# A file that runs a YAML rule example: it NAMES the rules file (``hooks.yaml``) or the
+# bare example key (``code_example``, quoted or not: ``y.rules[0].code_example``, a
+# ``yq`` path) and either (a) an exec sink or ``| sh`` sits within
+# ``_RULE_RUN_NEAR`` lines of that mention, or (b) an exec sink's arguments hold a name
+# bound from that mention (assignment, ``for`` / ``with`` target; a few hops). Any file
+# in view counts, workflow / CI YAML included; in a YAML file the example blocks and
+# their ``<key>: |`` headers are the rule text itself and are skipped.
 _YAML_FIELD_SINK_RE = re.compile(
     r"""\b(?:subprocess\s*\.\s*\w+|os\s*\.\s*(?:system|popen|exec\w*|spawn\w*)|pty\s*\.\s*spawn|"""
     r"""Popen|run|call|check_call|check_output|getoutput|getstatusoutput|exec|eval|"""
     r"""execSync|spawn|spawnSync|execFile|execFileSync|execa|shell)\s*\(""")
+_RULE_LINE_SINK_RE = re.compile(
+    r"""\|\s*(?:sudo\s+)?(?:/(?:usr/)?bin/)?(?:ba|z|da|k|fi)?sh\b"""
+    r"""|\b(?:ba|z|da|k)?sh\s+-\w*c\b|\beval\s|\bsource\s+<\(|\bexec\s""")
+_RULE_RUN_NEAR = 3
+_RULE_ASSIGN_RE = re.compile(
+    r"""^\s*(?:(?:const|let|var|local|export)\s+)?([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=(?!=)(.*)$""")
+_RULE_FOR_RE = re.compile(
+    r"""^\s*(?:async\s+)?for\s+\(?\s*(?:(?:const|let|var)\s+)?([\w$,\s\[\]{}]+?)\s+(?:in|of)\s+(.*)$""")
+_RULE_WITH_RE = re.compile(r"""^\s*(?:async\s+)?with\s+(.*)\bas\s+(\w+)""")
 
 
-def runs_yaml_field(text: str, key: str) -> bool:
-    """True when ``text`` (any file in view) passes the YAML field ``key`` to an exec
-    sink: directly, or through names bound from it (a few hops)."""
-    lit = re.compile(r"""(['"`])""" + re.escape(key) + r"""\1""")
-    if not lit.search(text):
+def _rule_mention_re(key: str, rule_path: str) -> re.Pattern:
+    """The bare example key as a word, or the rules file by name (either YAML suffix)."""
+    stem = re.escape(Path(rule_path).stem) if rule_path else None
+    alts = [r"(?<![\w-])" + re.escape(key) + r"(?![\w-])"]
+    if stem:
+        alts.append(r"(?<![\w-])" + stem + r"\.ya?ml\b")
+    return re.compile("|".join(alts))
+
+
+def _rule_text_lines(path: str, text: str) -> list[str]:
+    """``text``'s lines; for a YAML file, rule example blocks and their headers blank."""
+    lines = text.splitlines()
+    if Path(path).suffix.lower() not in (".yaml", ".yml"):
+        return lines
+    out = list(lines)
+    for i, ln in enumerate(lines):
+        hm = _YAML_BLOCK_HEADER_RE.match(ln)
+        if (hm and _YAML_EXAMPLE_KEY_RE.search(hm.group(1))) or (
+                ln.strip() and _yaml_rule_example(path, text, lines, i)):
+            out[i] = ""
+    return out
+
+
+def runs_yaml_field(text: str, key: str, rule_path: str = "", path: str = "") -> bool:
+    """True when ``text`` (the file ``path``, any file in view) runs the YAML rule
+    example ``key`` of ``rule_path``: a mention of the key or the rules file near an
+    exec sink / ``| sh``, or a sink fed by a name bound from such a mention."""
+    mention = _rule_mention_re(key, rule_path)
+    if not mention.search(text):
         return False
+    lines = _rule_text_lines(path, text)
+    hits = [i for i, ln in enumerate(lines) if mention.search(ln)]
+    if not hits:
+        return False
+    sink_lines = {i for i, ln in enumerate(lines)
+                  if _YAML_FIELD_SINK_RE.search(ln) or _RULE_LINE_SINK_RE.search(ln)}
+    if any(abs(i - j) <= _RULE_RUN_NEAR for i in hits for j in sink_lines):
+        return True
+
+    def names_in(expr: str, tainted: set[str]) -> bool:
+        return bool(mention.search(expr)) or any(
+            re.search(r"(?<![\w.])" + re.escape(t) + r"\b", expr) for t in tainted)
+
     tainted: set[str] = set()
-    assign = re.compile(
-        r"""^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=(?!=)(.*)$""")
-    for _ in range(4):
+    for _ in range(5):
         grew = False
-        for ln in text.splitlines():
-            am = assign.match(ln)
-            if not am or am.group(1) in tainted:
-                continue
-            rhs = am.group(2)
-            if lit.search(rhs) or any(re.search(r"(?<![\w$.])" + re.escape(t) + r"\b", rhs)
-                                      for t in tainted):
-                tainted.add(am.group(1))
+        for ln in lines:
+            targets: list[str] = []
+            for rx, ti, ei in ((_RULE_ASSIGN_RE, 1, 2), (_RULE_FOR_RE, 1, 2),
+                               (_RULE_WITH_RE, 2, 1)):
+                m = rx.match(ln)
+                if m and names_in(m.group(ei), tainted):
+                    targets += re.findall(r"[A-Za-z_$][\w$]*", m.group(ti))
+            new = {t for t in targets if t not in tainted
+                   and t not in ("const", "let", "var", "in", "of")}
+            if new:
+                tainted |= new
                 grew = True
         if not grew:
             break
-    for sm in _YAML_FIELD_SINK_RE.finditer(text):
+    if not tainted:
+        return False
+    joined = "\n".join(lines)
+    for sm in _YAML_FIELD_SINK_RE.finditer(joined):
         depth, i, args = 1, sm.end(), []
-        while i < len(text) and depth and i - sm.end() < 600:
-            ch = text[i]
+        while i < len(joined) and depth and i - sm.end() < 600:
+            ch = joined[i]
             depth += ch == "("
             depth -= ch == ")"
             args.append(ch)
             i += 1
-        arg = "".join(args)
-        if lit.search(arg) or any(re.search(r"(?<![\w$.])" + re.escape(t) + r"\b", arg)
-                                  for t in tainted):
+        if names_in("".join(args), tainted):
             return True
-    return False
+    return any(names_in(lines[j], tainted) for j in sink_lines
+               if _RULE_LINE_SINK_RE.search(lines[j]))
 
 
 def restore_rule_examples(findings: list, texts: dict[str, str]) -> list:
     """A pipe-to-shell in a YAML rule example lowered per file (``rule_example_pre``)
-    gets its grade back when any file in view runs that example field
-    (``runs_yaml_field``). Mutates and returns ``findings``."""
-    memo: dict[str, bool] = {}
+    gets its grade back when any file in view, workflow YAML included, runs that
+    example field (``runs_yaml_field``). Mutates and returns ``findings``."""
+    memo: dict[tuple[str, str], bool] = {}
     for f in findings:
         pre = getattr(f, "rule_example_pre", None)
         if pre is None or f.severity != "low" or f.remediation != WHY_RULE_EXAMPLE:
             continue
-        key = pre[3]
+        key = (pre[3], getattr(f, "file_path", "") or "")
         if key not in memo:
-            memo[key] = any(runs_yaml_field(t, key) for p, t in texts.items()
-                            if t and Path(p).suffix.lower() not in (".yaml", ".yml"))
+            memo[key] = any(runs_yaml_field(t, key[0], key[1], p)
+                            for p, t in texts.items() if t)
         if memo[key]:
             f.severity, f.payload, f.remediation = pre[0], pre[1], pre[2]
     return findings
