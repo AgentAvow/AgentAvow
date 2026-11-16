@@ -3168,8 +3168,9 @@ def _looks_like_oauth(lines: list[str], line_num: int) -> bool:
 # Emoji tag sequence (UTS #51): WAVING BLACK FLAG + tag digits / lowercase tag letters +
 # CANCEL TAG — a subdivision flag (England / Scotland / Wales). Some emoji tables write
 # the same flags with a ZWJ before every tag. A candidate is data only when its tag text
-# is a real subdivision code (``_real_flag_tags``): any other tag run, in either form,
-# is hidden text and keeps its finding.
+# is a real subdivision code (``_real_flag_spans``: RGI only in the ZWJ form, at most 2
+# non-RGI flags per line in the plain form): any other tag run is hidden text and keeps
+# its finding.
 _EMOJI_TAG_SEQ_RE = re.compile(
     "\U0001F3F4(?P<plain>[\U000E0030-\U000E0039\U000E0061-\U000E007A]{1,32})\U000E007F"
     "|\U0001F3F4(?P<zwj>(?:\u200d[\U000E0030-\U000E0039\U000E0061-\U000E007A]){1,32})"
@@ -3201,14 +3202,26 @@ def _real_flag_tags(tags: str) -> bool:
     return bool(m and m.group("cc") in _ISO_ALPHA2)
 
 
+# Non-RGI subdivision flags (plain form, ISO 3166-2 shape) allowed on one line. A run of
+# them spells text two to four letters at a time (`se|nd|th...`): past this, none count.
+_MAX_NON_RGI_FLAGS_PER_LINE = 2
+
+
 def _real_flag_spans(line: str) -> list[tuple[int, int]]:
-    """Spans of the well-formed subdivision flags on ``line`` (either form)."""
-    out = []
+    """Spans of the well-formed subdivision flags on ``line``. The ZWJ-interleaved form is
+    data only for the RGI flags (``gbeng`` / ``gbsct`` / ``gbwls``). The plain form also
+    takes the ISO 3166-2 shape, at most ``_MAX_NON_RGI_FLAGS_PER_LINE`` per line."""
+    rgi, other = [], []
     for m in _EMOJI_TAG_SEQ_RE.finditer(line):
         raw = (m.group("plain") or m.group("zwj") or "").replace("\u200d", "")
-        if _real_flag_tags("".join(chr(ord(c) - 0xE0000) for c in raw)):
-            out.append(m.span())
-    return out
+        tags = "".join(chr(ord(c) - 0xE0000) for c in raw)
+        if tags in _RGI_SUBDIVISION_FLAGS:
+            rgi.append(m.span())
+        elif m.group("plain") and _real_flag_tags(tags):
+            other.append(m.span())
+    if len(other) > _MAX_NON_RGI_FLAGS_PER_LINE:
+        other = []
+    return sorted(rgi + other)
 
 
 def _strip_real_flags(line: str) -> str:
