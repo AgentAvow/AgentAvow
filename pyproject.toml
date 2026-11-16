@@ -34,6 +34,9 @@ dependencies = [
     "boto3>=1.34,<2.0",
     # x402 live check: one site's subdomains share payees, shared-hosting tenants don't.
     "publicsuffixlist>=1.1,<2.0",
+    # PEP 440 version comparison for PyPI advisory ranges (src/scanner/incident_history.py).
+    # Only dev tools pulled it in before, so the prod image lacked it.
+    "packaging>=23.0",
 ]
 
 [project.optional-dependencies]
