@@ -761,6 +761,9 @@ _CATALOG_SOURCES: tuple[tuple[str, str, str], ...] = (
 # community_scans, so such a row opens the endpoint's page and the live scan replaces it
 # (one row per page) instead of a "not checked" row sitting beside the live one.
 _MCP_ENDPOINTS_FILE = "mcp-endpoints.json"
+# Launch skill rows reclassified or dropped after their skill scan failed for good
+# (written by the catalog re-scan loop; src/api/catalog_skill_rows.py).
+_SKILL_ROWS_FILE = "skill-rows.json"
 
 
 def load_mcp_endpoints(path: Path | None = None) -> dict[str, str]:
@@ -805,7 +808,10 @@ def _load_rows(failed: set[str] | None = None) -> list[CatalogRow]:
     for surface, fname, key in _CATALOG_SOURCES:
         rows += _load_surface(surface, _DATA_DIR / fname, results_key=key, failed=failed)
     _apply_mcp_endpoints(rows, load_mcp_endpoints())
-    return rows
+    # Skill rows whose skill scan can't run (no SKILL.md: listed as the repo instead;
+    # repo deleted: dropped). See src/api/catalog_skill_rows.py.
+    from src.api.catalog_skill_rows import apply_overlay, load_overlay
+    return apply_overlay(rows, load_overlay(_DATA_DIR / _SKILL_ROWS_FILE))
 
 
 def _source_signature() -> tuple[tuple[str, int | None, int | None], ...]:
@@ -813,7 +819,8 @@ def _source_signature() -> tuple[tuple[str, int | None, int | None], ...]:
     (file, None, None). The host re-score scripts rewrite these files atomically
     (tmp + rename), so any rewrite changes the signature."""
     out: list[tuple[str, int | None, int | None]] = []
-    for fname in [f for _s, f, _k in _CATALOG_SOURCES] + [_MCP_ENDPOINTS_FILE]:
+    for fname in ([f for _s, f, _k in _CATALOG_SOURCES]
+                  + [_MCP_ENDPOINTS_FILE, _SKILL_ROWS_FILE]):
         try:
             st = (_DATA_DIR / fname).stat()
             out.append((fname, st.st_mtime_ns, st.st_size))
