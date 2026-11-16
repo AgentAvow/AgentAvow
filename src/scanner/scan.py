@@ -5,12 +5,16 @@ Designed to run against the recruitment_prospects table of discovered repos.
 """
 from __future__ import annotations
 
+import ast
 import asyncio
+import builtins as _builtins_mod
 import hashlib
+import io
 import json
 import logging
 import posixpath
 import re
+import tokenize
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -3623,9 +3627,9 @@ _BUILTIN_EXC_NAMES = ("BaseException|Exception|KeyboardInterrupt|SystemExit|Gene
                       "StopIteration|StopAsyncIteration")
 _BUILTIN_CLASS_LOOKUP_RE = re.compile(
     r"""^\s*(?P<var>[A-Za-z_]\w*)\s*=\s*getattr\s*\(\s*__builtins__\s*,\s*"""
-    r"""(?P<q>['"])(?:[A-Z]\w*(?:Error|Exception|Warning)|""" + _BUILTIN_EXC_NAMES
+    r"""(?P<q>['"])(?P<key>[A-Z]\w*(?:Error|Exception|Warning)|""" + _BUILTIN_EXC_NAMES
     + r""")(?P=q)\s*,\s*"""
-    r"""(?:[A-Z]\w*(?:Error|Exception|Warning)|""" + _BUILTIN_EXC_NAMES
+    r"""(?P<default>[A-Z]\w*(?:Error|Exception|Warning)|""" + _BUILTIN_EXC_NAMES
     + r""")\s*\)\s*(?:#.*)?$"""
 )
 _CALL_IDENT_RE = re.compile(r"([A-Za-z_][\w.]*)\s*$")
@@ -3659,19 +3663,126 @@ def _exc_class_use(ln: str, start: int, end: int) -> bool:
             and ident(stack[-2]) in ("isinstance", "issubclass", "type"))
 
 
+def _real_builtin_exc(name: str) -> bool:
+    """True when ``name`` is a real builtin exception class (``OSError``, ...)."""
+    obj = getattr(_builtins_mod, name, None)
+    return isinstance(obj, type) and issubclass(obj, BaseException)
+
+
+# Ways to reach a name or the builtins without writing the name: any of these anywhere in
+# the file keeps the critical (``vars()['ba' + 'se']``, a patched ``builtins.OSError``).
+_NAME_INDIRECTION_CALLS = frozenset({"vars", "globals", "locals", "setattr", "delattr"})
+_NAME_INDIRECTION_MODULES = frozenset({"builtins", "__builtin__", "__main__"})
+
+
+def _py_bound_names(tree: ast.AST) -> set[str]:
+    """Every name the module binds anywhere (assignment, def / class, import, argument,
+    ``except ... as``, ``global``, match capture)."""
+    out: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            out.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            out.add(node.name)
+        elif isinstance(node, ast.alias):
+            out.add(node.asname or node.name.split(".")[0])
+        elif isinstance(node, ast.arg):
+            out.add(node.arg)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            out.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            out.update(node.names)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            out.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            out.add(node.rest)
+    return out
+
+
+def _py_name_indirection(tree: ast.AST) -> bool:
+    """True when the module can reach a name without writing it: ``vars()`` /
+    ``globals()`` / ``locals()`` / ``setattr``, a ``__dict__`` or ``sys.modules`` read, or
+    an import of ``builtins`` / ``__main__``."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in _NAME_INDIRECTION_CALLS:
+            return True
+        if isinstance(node, ast.Attribute) and (
+                node.attr == "__dict__"
+                or (node.attr == "modules" and isinstance(node.value, ast.Name)
+                    and node.value.id == "sys")):
+            return True
+        if isinstance(node, ast.Import) and any(
+                a.name.split(".")[0] in _NAME_INDIRECTION_MODULES for a in node.names):
+            return True
+        if isinstance(node, ast.ImportFrom) and (
+                (node.module or "").split(".")[0] in _NAME_INDIRECTION_MODULES):
+            return True
+    return False
+
+
+def _py_logical_lines(text: str) -> list[tuple[int, int]] | None:
+    """0-based (first, last) physical-line spans of each logical line (bracket-joined and
+    backslash-continued lines join); None when the text does not tokenize."""
+    spans: list[tuple[int, int]] = []
+    first = None
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+            if tok.type in (tokenize.NL, tokenize.COMMENT, tokenize.INDENT,
+                            tokenize.DEDENT, tokenize.ENCODING, tokenize.ENDMARKER):
+                continue
+            if first is None:
+                first = tok.start[0] - 1
+            if tok.type == tokenize.NEWLINE:
+                spans.append((first, tok.end[0] - 1))
+                first = None
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return None
+    if first is not None:
+        spans.append((first, len(text.splitlines()) - 1))
+    return spans
+
+
 def _builtin_class_lookup(lines: list[str], idx: int) -> bool:
     """True when ``lines[idx]`` binds a builtin exception class looked up on
-    ``__builtins__`` by a literal exception-class name and EVERY other use of the name in
-    the file treats it as a class (``_exc_class_use``). One call, hand-off or subclass
-    statement anywhere keeps the critical."""
+    ``__builtins__`` and nothing in the file can make it anything else:
+
+    * the key AND the default both name real builtin exception classes
+      (``_real_builtin_exc``) that the file never binds (at module level
+      ``__builtins__`` is a dict, so ``getattr`` returns the default);
+    * the file never binds ``__builtins__`` (a shadowing class / assignment / import),
+      mentions it only on lookup lines, and has no name indirection
+      (``_py_name_indirection``: ``vars()``, ``globals()``, ...);
+    * EVERY other use of the bound name, on bracket-joined logical lines, treats it as a
+      class (``_exc_class_use``). One call, hand-off or subclass statement anywhere
+      keeps the critical. A file that does not parse keeps it too."""
     m = _BUILTIN_CLASS_LOOKUP_RE.match(lines[idx])
-    if not m:
+    if not m or not (_real_builtin_exc(m.group("key"))
+                     and _real_builtin_exc(m.group("default"))):
+        return False
+    text = "\n".join(lines)
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return False
+    bound = _py_bound_names(tree)
+    if bound & {m.group("key"), m.group("default"), "__builtins__"}:
+        return False
+    if _py_name_indirection(tree):
+        return False
+    if any("__builtins__" in ln and not _BUILTIN_CLASS_LOOKUP_RE.match(ln)
+           for ln in lines):
+        return False
+    spans = _py_logical_lines(text)
+    if spans is None:
         return False
     var = re.compile(r"(?<![\w.])" + re.escape(m.group("var")) + r"\b")
     uses = 0
-    for j, ln in enumerate(lines):
-        if j == idx:
+    for a, b in spans:
+        if a <= idx <= b:
+            if a != b:
+                return False  # the lookup itself must be one physical line
             continue
+        ln = " ".join(x.strip() if k else x for k, x in enumerate(lines[a:b + 1]))
         for vm in var.finditer(ln):
             if not _exc_class_use(ln, vm.start(), vm.end()):
                 return False
