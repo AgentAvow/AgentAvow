@@ -447,3 +447,112 @@ class TestBreakerCancellation:
         with Network([200]) as n:
             assert (await _get()).status_code == 200
         assert len(n.requests) == 1
+
+
+# ---------------------------------------------------------------------------
+# Pinned transport: next validated address on a connect failure (src/ssrf.py)
+# ---------------------------------------------------------------------------
+
+V6 = "2606:4700::6810:1"
+V4 = PUBLIC
+
+
+class MultiAddr:
+    """DNS answers several addresses; connects to the addresses in ``down`` fail."""
+
+    def __init__(self, answer, *, down=(), exc=None) -> None:
+        self.answer = answer
+        self.down = set(down)
+        self.exc = exc or httpx.ConnectError
+        self.connects: list[str] = []
+        self.dns_lookups = 0
+        self.seen: list[httpx.Request] = []
+
+    def getaddrinfo(self, host, *args, **kwargs):
+        self.dns_lookups += 1
+        return [
+            (socket.AF_INET6 if ":" in ip else socket.AF_INET, socket.SOCK_STREAM, 6, "",
+             (ip, 0)) for ip in self.answer
+        ]
+
+    def __enter__(self):
+        async def handle(transport, request):
+            ip = request.url.host
+            self.connects.append(ip)
+            self.seen.append(request)
+            if ip in self.down:
+                raise self.exc(f"connect to {ip} failed")
+            return httpx.Response(200, json={}, request=request)
+
+        self._patches = [
+            patch.object(httpx.AsyncHTTPTransport, "handle_async_request", handle),
+            patch("socket.getaddrinfo", self.getaddrinfo),
+        ]
+        for p in self._patches:
+            p.start()
+        return self
+
+    def __exit__(self, *exc):
+        for p in self._patches:
+            p.stop()
+
+
+class TestPinnedTransportAddressFallback:
+    async def test_aaaa_first_v6_fails_v4_succeeds(self, clock):
+        with MultiAddr([V6, V4], down={V6}) as m:
+            resp = await _get("https://registry.npmjs.org/x")
+        assert resp.status_code == 200
+        assert m.connects == [V6, V4]
+        assert m.dns_lookups == 1  # no second resolution inside the loop
+        last = m.seen[-1]
+        assert last.headers["host"] == "registry.npmjs.org"
+        assert last.extensions["sni_hostname"] == "registry.npmjs.org"
+
+    async def test_connect_timeout_also_falls_through(self, clock):
+        with MultiAddr([V6, V4], down={V6}, exc=httpx.ConnectTimeout) as m:
+            assert (await _get()).status_code == 200
+        assert m.connects == [V6, V4]
+
+    async def test_all_addresses_failing_raises_connect_error(self, clock):
+        from src.source_import.errors import SourceFetchError
+        from src.source_import.pypi_fetcher import fetch_pypi
+
+        with MultiAddr([V6, V4], down={V6, V4}) as m:
+            with pytest.raises(SourceFetchError) as ei:
+                await fetch_pypi("demo-pkg", "https://pypi.org/project/demo-pkg/")
+        assert str(ei.value) == (
+            f"Network error fetching PyPI package demo-pkg: connect to {V4} failed"
+        )
+        assert isinstance(ei.value.__cause__, httpx.ConnectError)
+        # One http.py attempt = one pass over the addresses; each attempt resolves
+        # (and validates) once.
+        assert m.connects == [V6, V4] * fh.MAX_ATTEMPTS
+        assert m.dns_lookups == fh.MAX_ATTEMPTS
+
+    async def test_blocked_address_anywhere_refuses_before_connecting(self, clock):
+        with MultiAddr([V6, V4, "10.0.0.5"]) as m:
+            with pytest.raises(ValueError, match="blocked internal address"):
+                await _get()
+        assert m.connects == []
+
+    async def test_read_error_does_not_try_next_address(self, clock):
+        with MultiAddr([V6, V4], down={V6}, exc=httpx.ReadError) as m:
+            with pytest.raises(httpx.ReadError):
+                await _get()
+        assert m.connects == [V6]
+
+    async def test_response_does_not_try_next_address(self, clock):
+        with MultiAddr([V6, V4]) as m:
+            assert (await _get()).status_code == 200
+        assert m.connects == [V6]
+
+    async def test_mcp_client_post_falls_through_only_on_connect(self):
+        # The live MCP path shares this transport. A failed connect sent nothing, so
+        # trying the next address doesn't repeat the POST.
+        from src.ssrf import ssrf_safe_async_client
+
+        with MultiAddr([V6, V4], down={V6}) as m:
+            async with ssrf_safe_async_client(timeout=5) as c:
+                resp = await c.post("https://mcp.example.com/mcp", json={"x": 1})
+        assert resp.status_code == 200
+        assert m.connects == [V6, V4]
