@@ -51,6 +51,10 @@ _CATALOG_BUILD_LOCK = threading.Lock()
 # uvicorn worker has its own copy; a write in one worker invalidates only that
 # worker's cache, the others pick the change up when the TTL lapses.
 COMMUNITY_ROWS_TTL_SECONDS = 60
+# Past its TTL the cached community rows are still served (and one background refill
+# starts) for up to this long, so a visitor never waits on the DB read. Older than this
+# (the refill keeps failing), a request reads the rows itself.
+COMMUNITY_ROWS_MAX_STALE_SECONDS = 600
 # Memory guard on the community read (one row per scanned tool; prod is well under it).
 COMMUNITY_ROWS_MAX = 50_000
 FLAGGED_STAT_TTL_SECONDS = 120
@@ -62,6 +66,10 @@ _COMMUNITY_CACHE: tuple[list[CatalogRow], float] | None = None
 # served for the same catalog object and equal community rows.
 _FLAGGED_STAT_CACHE: tuple[dict[str, Any], list[CatalogRow], dict[str, Any], float] | None = None
 _COMMUNITY_LOCKS: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Lock]] = {}
+# Bumped when a write marks the rows stale: a refill that read the DB before the write
+# stores its rows already expired, so the next request starts another refill.
+_COMMUNITY_GEN = 0
+_COMMUNITY_TASK: tuple[asyncio.AbstractEventLoop, asyncio.Task[None]] | None = None
 
 # Fully computed list responses for the default views, keyed by (surface, sort, limit).
 # Value: (catalog, community fill, response, expires_at). A hit needs the same catalog
@@ -104,6 +112,25 @@ def invalidate_community_rows_cache() -> None:
     global _COMMUNITY_CACHE
     _COMMUNITY_CACHE = None
     _drop_derived_caches()
+
+
+def mark_community_rows_stale() -> None:
+    """A community scan was written: keep serving the cached rows (and the figures built
+    from them) and refresh them in the background, so the next visitor does not wait on
+    a full re-read. This worker shows the new row once the refill lands (about a second).
+    Outside an event loop it falls back to a hard invalidation."""
+    global _COMMUNITY_CACHE, _COMMUNITY_GEN
+    _COMMUNITY_GEN += 1
+    cached = _COMMUNITY_CACHE
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        invalidate_community_rows_cache()
+        return
+    if cached is None:
+        return
+    _COMMUNITY_CACHE = (cached[0], _now())  # expired now: next read serves it + refills
+    _schedule_community_refill()
 
 
 def _drop_derived_caches() -> None:
@@ -956,26 +983,86 @@ async def _community_rows(db: AsyncSession) -> list[CatalogRow]:
     """On-demand scans users have run, persisted so the catalog grows over time.
     Best-effort — a DB hiccup must never break the static catalog.
 
-    Cached per process for COMMUNITY_ROWS_TTL_SECONDS; concurrent cold callers share one
-    DB read. Returns a new list each call (callers may append to it); the rows are
-    categorized at fill time, so callers never need to mutate them. An error result is
-    not cached."""
-    global _COMMUNITY_CACHE
+    Cached per process for COMMUNITY_ROWS_TTL_SECONDS. Past the TTL the cached rows are
+    still returned (for up to COMMUNITY_ROWS_MAX_STALE_SECONDS) and one background refill
+    starts (stale-while-revalidate), so no request waits on the DB read. With nothing
+    cached (first call, or a hard invalidation) the caller reads the rows; concurrent
+    cold callers share one DB read. Returns a new list each call (callers may append to
+    it); the rows are categorized at fill time, so callers never need to mutate them. An
+    error result is not cached."""
     cached = _COMMUNITY_CACHE
-    if cached is not None and cached[1] > _now():
-        return list(cached[0])
+    if cached is not None:
+        now = _now()
+        if cached[1] > now:
+            return list(cached[0])
+        if now - cached[1] <= COMMUNITY_ROWS_MAX_STALE_SECONDS:
+            _schedule_community_refill()
+            return list(cached[0])
+    return await _refill_community_rows(db)
+
+
+async def _refill_community_rows(db: AsyncSession, *, force: bool = False) -> list[CatalogRow]:
+    """Read the community rows into the cache (one reader at a time per worker). Unless
+    ``force``, a cache another caller filled meanwhile is returned as is."""
+    global _COMMUNITY_CACHE
     async with _community_lock():
         cached = _COMMUNITY_CACHE
-        if cached is not None and cached[1] > _now():
+        if not force and cached is not None and cached[1] > _now():
             return list(cached[0])
+        gen = _COMMUNITY_GEN
         rows = await _fetch_community_rows(db)
         if rows is None:
-            return []
+            return list(cached[0]) if cached is not None else []
         for r in rows:
             if r.category is None:
                 r.category = _categorize(r)
-        _COMMUNITY_CACHE = (rows, _now() + COMMUNITY_ROWS_TTL_SECONDS)
+        # A write that landed during the read: store the rows already expired, so the
+        # next request refills again and picks the write up.
+        expires = _now() + COMMUNITY_ROWS_TTL_SECONDS if gen == _COMMUNITY_GEN else _now()
+        _COMMUNITY_CACHE = (rows, expires)
         return list(rows)
+
+
+_REFILL_SESSIONS: Any = None
+
+
+def _refill_sessionmaker() -> Any:
+    """Sessions for the background refill on their own unpooled engine: its connection
+    is opened and closed by the refill itself and never handed back to the app's pool,
+    so a refill cut short (a worker shutting down, a test's event loop closing) cannot
+    leave a connection bound to a dead loop for a request to pick up."""
+    global _REFILL_SESSIONS
+    if _REFILL_SESSIONS is None:
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+        from sqlalchemy.pool import NullPool
+
+        from src.config import settings
+
+        engine = create_async_engine(settings.database_url, poolclass=NullPool)
+        _REFILL_SESSIONS = async_sessionmaker(engine, class_=AsyncSession,
+                                              expire_on_commit=False)
+    return _REFILL_SESSIONS
+
+
+async def _background_community_refill() -> None:
+    """Refill the community rows off the request path. Never raises."""
+    try:
+        async with _refill_sessionmaker()() as db:
+            await _refill_community_rows(db, force=True)
+    except Exception:
+        logger.warning("community rows background refill failed", exc_info=True)
+
+
+def _schedule_community_refill() -> asyncio.Task[None]:
+    """Start a background refill unless one is already running on this event loop."""
+    global _COMMUNITY_TASK
+    loop = asyncio.get_running_loop()
+    cur = _COMMUNITY_TASK
+    if cur is not None and cur[0] is loop and not cur[1].done():
+        return cur[1]
+    task = loop.create_task(_background_community_refill(), name="community-rows-refill")
+    _COMMUNITY_TASK = (loop, task)
+    return task
 
 
 async def community_mark_grade(c: Any) -> str | None:
@@ -1130,7 +1217,8 @@ def _default_view_key(
 async def _cached_default_view(key: tuple[Any, ...], db: AsyncSession) -> CatalogResponse:
     """Serve a default view from the per-process cache (no filtering, sorting or summary
     work on a hit). The entry is valid for the catalog object and community-rows fill it
-    was computed from, and at most COMMUNITY_ROWS_TTL_SECONDS. Callers get a deep copy."""
+    was computed from (a fill is served stale for at most COMMUNITY_ROWS_MAX_STALE_SECONDS
+    past its TTL while it refills). Callers get a deep copy."""
     surface, sort, limit = key
     catalog = _get_catalog()
     await _community_rows(db)  # refills the shared rows when their TTL has lapsed
@@ -1148,8 +1236,9 @@ async def _cached_default_view(key: tuple[Any, ...], db: AsyncSession) -> Catalo
         now = _now()
         for k in [k for k, v in _VIEW_CACHE.items() if v[3] <= now or v[1] is not fill]:
             del _VIEW_CACHE[k]
+        # Valid while its fill is: a refill (or a stale fill aged out) makes a new one.
         _VIEW_CACHE[key] = (catalog, fill, out.model_copy(deep=True),
-                            now + COMMUNITY_ROWS_TTL_SECONDS)
+                            now + COMMUNITY_ROWS_TTL_SECONDS + COMMUNITY_ROWS_MAX_STALE_SECONDS)
     return out
 
 
@@ -1600,7 +1689,7 @@ async def flagged_stat(
         if not (cached[3] > _now() and _same_rows(cached[1], community)):
             _schedule_flagged_stat_refresh()
         return copy.deepcopy(cached[2])
-    out = _compute_flagged_stat(catalog, community)
+    out = await _compute_stat(catalog, community)
     _FLAGGED_STAT_CACHE = (catalog, community, out, _now() + FLAGGED_STAT_TTL_SECONDS)
     return copy.deepcopy(out)
 
@@ -1625,13 +1714,13 @@ async def _refresh_flagged_stat() -> None:
         from src.database import async_session
 
         async with async_session() as db:
-            community = await _community_rows(db)
+            community = await _refill_community_rows(db)
         fill = _COMMUNITY_CACHE
         if fill is None or fill[1] <= _now():
             # The DB read failed (or a write just cleared it). Computing over an empty
             # community set would publish a wrong figure, so keep the current one.
             return
-        out = await asyncio.to_thread(_compute_flagged_stat, catalog, community)
+        out = await _compute_stat(catalog, community)
         if gen != _FLAGGED_STAT_GEN or catalog is not _CATALOG_CACHE:
             return  # invalidated meanwhile; the next request computes from fresh inputs
         _FLAGGED_STAT_CACHE = (catalog, community, out, _now() + FLAGGED_STAT_TTL_SECONDS)
@@ -1690,6 +1779,42 @@ async def stop_flagged_stat_refresher() -> None:
         if task.get_loop() is loop:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+
+
+async def _compute_stat(catalog: dict[str, Any], community: list[CatalogRow]) -> dict[str, Any]:
+    """The /flagged-stat response: the flagged counts plus the answer mix, computed off
+    the event loop (the skill-collection step reads the scan cache, so it stays async)."""
+    out = await asyncio.to_thread(_compute_flagged_stat, catalog, community)
+    out["answer_mix"] = await _answer_mix(catalog, community)
+    return out
+
+
+async def _answer_mix(catalog: dict[str, Any], community: list[CatalogRow]) -> dict[str, Any]:
+    """The answer mix every surface leads with, in one figure set. Counts the rows the
+    all-kinds Browse list holds (``browse_listed_rows``: one row per page, a skill
+    collection as one tool, x402 left out), so ``safe`` / ``review`` / ``do_not_connect``
+    / ``certified`` equal the ``total`` of ``GET /public/scan-catalog?decision=<d>`` and
+    ``?grade=certified``. ``x402_scored`` (paid x402 endpoints) is never in
+    ``tools_checked``."""
+    merged, _listed, _dropped = await asyncio.to_thread(_supersede, catalog, community)
+    rows = await _lead_with_skill_collections(merged)
+    mix = {"safe": 0, "review": 0, "do_not_connect": 0}
+    certified = 0
+    for r in rows:
+        if r.surface == "x402":
+            continue
+        if r.decision in mix:
+            mix[r.decision] += 1
+        if r.certified_mark:
+            certified += 1
+    summary = catalog.get("summary")
+    x402 = getattr(summary, "x402_scored", None) or getattr(summary, "x402_endpoints_total", 0)
+    return {
+        **mix,
+        "certified": certified,
+        "tools_checked": sum(mix.values()),
+        "x402_scored": x402 or 0,
+    }
 
 
 def _compute_flagged_stat(

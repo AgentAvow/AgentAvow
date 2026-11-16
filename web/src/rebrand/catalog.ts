@@ -131,10 +131,23 @@ export interface FlaggedCounts {
   critical_pct: number | null
 }
 
+/** The answer mix, server-computed over the rows the all-kinds Browse list holds (equals
+ * the /public/scan-catalog?decision=… and ?grade=certified totals). */
+export interface StatAnswerMix {
+  safe: number
+  review: number
+  do_not_connect: number
+  certified: number
+  tools_checked: number
+  x402_scored: number
+}
+
 export interface FlaggedStat extends FlaggedCounts {
   /** legacy alias of scanned_total */
   scanned: number
   by_surface: Record<string, FlaggedCounts>
+  /** absent on a backend older than 2026-11-15 */
+  answer_mix?: StatAnswerMix
 }
 
 /** The headline stat (% of SCANNED tools with a high/critical finding), server-computed so
