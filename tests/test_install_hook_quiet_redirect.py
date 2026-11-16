@@ -3,8 +3,8 @@ shell / eval content" (verdict accuracy audit, 2026-11-14).
 
 ``INSTALL_SCRIPT_DANGER_RE`` counted any ``> /dev/…`` redirect, so the most common way
 to silence a hook (``> /dev/null 2>&1``, ``2>/dev/null || true``) made it critical:
-yarn 1.22.22 (12.7M downloads a week) read Do not connect for a preinstall that runs its
-own local file with output discarded. A constant ``node -e "console.log('\\n…')"``
+a widely used package manager read Do not connect for a preinstall that runs its own
+local file with output discarded. A constant ``node -e "console.log('\\n…')"``
 banner with a JS escape was critical too. Both are now the medium "auto-runs on install"
 signal; a redirect to any other device and every remote / shell / eval token stay
 critical.
@@ -21,12 +21,12 @@ def _hook(cmd: str, hook: str = "postinstall"):
 
 
 # Verbatim hooks from the audit sample / the Do-not-connect list it came from.
-YARN_1_22_22 = ":; (node ./preinstall.js > /dev/null 2>&1 || true)"
+QUIET_LOCAL_PREINSTALL = ":; (node ./preinstall.js > /dev/null 2>&1 || true)"
 
 
 class TestQuietHooksAreMedium:
-    def test_yarn_preinstall_is_medium(self):
-        f = _hook(YARN_1_22_22, "preinstall")
+    def test_quiet_local_preinstall_is_medium(self):
+        f = _hook(QUIET_LOCAL_PREINSTALL, "preinstall")
         assert [x.severity for x in f] == ["medium"]
         assert "auto-runs on install" in f[0].name
 

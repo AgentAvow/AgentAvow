@@ -617,8 +617,8 @@ MANIFEST_EXEC_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
 
 # Dangerous content inside an npm lifecycle install hook (#5).
 # A redirect to a device (`> /dev/tcp/host/port`, `>& /dev/sda`) counts; silencing
-# output (`> /dev/null 2>&1`, `2>/dev/null`, `>/dev/stderr`) does not. yarn 1.22.22's
-# preinstall `node ./preinstall.js > /dev/null 2>&1` and `npm rebuild x 2>/dev/null ||
+# output (`> /dev/null 2>&1`, `2>/dev/null`, `>/dev/stderr`) does not. A package
+# manager's preinstall `node ./preinstall.js > /dev/null 2>&1` and `npm rebuild x 2>/dev/null ||
 # true` hooks read as "runs remote/shell/eval content" (verdict accuracy audit,
 # 2026-11-14). A `/dev/tcp/` or `/dev/udp/` path is a network socket in ANY redirect
 # direction (`< /dev/tcp/…`, `3<>/dev/tcp/…`, `&>/dev/udp/…`), so it is dangerous on its
