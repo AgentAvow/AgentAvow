@@ -76,3 +76,13 @@ def test_apply_osv():
     assert apply_osv(row, None) == {"outcome": "safe", "osv": "unknown", "outcome_osv": "safe"}
     # A not-checked item stays not checked unless OSV itself names the version.
     assert apply_osv({"outcome": "not_checked"}, False)["outcome_osv"] == "not_checked"
+
+
+def test_timeout_row_is_not_checked():
+    from scripts.benchmark.run import timeout_row
+
+    item = {"set": "C", "id": "x", "group": "g", "raw_label": "malicious_intent",
+            "truth": "malicious", "surface": "package", "stratum": "s", "split": "tune"}
+    row = timeout_row(item, 300)
+    assert row["outcome"] == "not_checked" and row["answer"] is None
+    assert "300 s" in row["reason"]

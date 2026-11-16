@@ -37,6 +37,7 @@ import tarfile
 import time
 import zipfile
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -440,12 +441,31 @@ def breakdown(rows: list[dict], key: str) -> dict:
     return {k: summarize(v) for k, v in sorted(groups.items())}
 
 
+def timeout_row(item: dict, limit: float) -> dict:
+    """The row for an item whose scan ran past the time limit: not checked."""
+    row = {k: item[k] for k in ("set", "id", "group", "raw_label", "truth", "surface",
+                                "stratum", "split")}
+    row.update(answer=None, outcome=outcome_for(None), secs=float(limit),
+               reason=f"not checked: scan ran past the {limit:.0f} s limit")
+    return row
+
+
+def _kill_pool(pool: ProcessPoolExecutor) -> None:
+    """Stop a pool now, killing any worker still running a scan."""
+    for p in list((getattr(pool, "_processes", None) or {}).values()):
+        if p.is_alive():
+            p.kill()
+    pool.shutdown(wait=False, cancel_futures=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--set", action="append", choices=["A", "B", "C", "D"], required=True)
     ap.add_argument("--split", default="all", choices=["all", "tune", "heldout"])
     ap.add_argument("--limit", type=int, default=0, help="first N items per set (smoke)")
     ap.add_argument("--workers", type=int, default=1)
+    ap.add_argument("--timeout", type=float, default=300.0,
+                    help="seconds per item before it is killed and counted not checked")
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args(argv)
     if args.workers > 2:
@@ -469,20 +489,39 @@ def main(argv: list[str] | None = None) -> int:
     done = {(r["set"], r["id"]) for r in rows}
     todo = [it for it in items if (it["set"], it["id"]) not in done]
     n = len(rows)
+
+    def new_pool() -> ProcessPoolExecutor:
+        return ProcessPoolExecutor(max_workers=args.workers, initializer=_worker_init)
+
+    # A fresh pool every BATCH items bounds worker memory growth (max_tasks_per_child
+    # hangs on this Python). Items run ``workers`` at a time; one that runs past
+    # ``--timeout`` is killed with its pool and counted as not checked.
+    pool, used = new_pool(), 0
     with rows_path.open("a") as fh:
-        # A fresh pool per batch bounds worker memory growth. (max_tasks_per_child
-        # hangs on this Python, so workers are recycled this way instead.)
-        for start in range(0, len(todo), BATCH):
-            batch = todo[start:start + BATCH]
-            with ProcessPoolExecutor(max_workers=args.workers,
-                                     initializer=_worker_init) as pool:
-                for row in pool.map(scan_item, batch, chunksize=1):
+        try:
+            for start in range(0, len(todo), args.workers):
+                window = todo[start:start + args.workers]
+                futs = [(it, pool.submit(scan_item, it)) for it in window]
+                deadline = time.monotonic() + args.timeout
+                killed = False
+                for it, fut in futs:
+                    try:
+                        row = fut.result(timeout=max(0.0, deadline - time.monotonic()))
+                    except FuturesTimeout:
+                        row = timeout_row(it, args.timeout)
+                        killed = True
                     n += 1
                     rows.append(row)
                     fh.write(json.dumps(row, sort_keys=True) + "\n")
                     fh.flush()
                     print(f"[{n}/{len(items)}] {row['set']} {row['id'][:60]} "
                           f"{row['truth']} -> {row['outcome']} ({row['secs']}s)", flush=True)
+                used += len(window)
+                if killed or used >= BATCH:
+                    _kill_pool(pool)
+                    pool, used = new_pool(), 0
+        finally:
+            _kill_pool(pool)
 
     summary = {
         "run_id": run_id, "scanner_commit": _scanner_commit(), "split": args.split,
