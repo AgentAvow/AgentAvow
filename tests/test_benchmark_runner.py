@@ -65,3 +65,14 @@ def test_breakdown_by_list_field():
     got = breakdown(rows, "categories")
     assert got["a"]["malicious"]["checked"] == 2
     assert got["b"]["malicious"]["checked"] == 1
+
+
+def test_apply_osv():
+    from scripts.benchmark.osv import apply_osv
+
+    row = {"outcome": "safe"}
+    assert apply_osv(row, True)["outcome_osv"] == "do_not_connect"
+    assert apply_osv(row, False)["outcome_osv"] == "safe"
+    assert apply_osv(row, None) == {"outcome": "safe", "osv": "unknown", "outcome_osv": "safe"}
+    # A not-checked item stays not checked unless OSV itself names the version.
+    assert apply_osv({"outcome": "not_checked"}, False)["outcome_osv"] == "not_checked"

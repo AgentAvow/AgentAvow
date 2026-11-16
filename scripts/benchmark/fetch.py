@@ -243,6 +243,20 @@ def _raw_url(sample_path: str) -> str:
             + urllib.parse.quote(sample_path, safe="/"))
 
 
+MIN_FREE_BYTES = 5 * 1024**3  # stop fetching before the disk drops under 5 GB free
+
+
+def check_disk(path: Path, need: int = 0) -> None:
+    """Stop (SystemExit) if writing ``need`` more bytes would leave under 5 GB free."""
+    import shutil
+
+    path.mkdir(parents=True, exist_ok=True)
+    free = shutil.disk_usage(path).free
+    if free - need < MIN_FREE_BYTES:
+        raise SystemExit(f"disk guard: {free / 1024**3:.1f} GB free; stopping before "
+                         f"it drops under {MIN_FREE_BYTES / 1024**3:.0f} GB")
+
+
 def c_cache_path(blob: str) -> Path:
     return set_dir("C") / "cache" / f"{blob}.zip"
 
@@ -255,6 +269,7 @@ def fetch_c_sample(item: dict, max_bytes: int) -> str:
         return "cached"
     if int(item["size"]) > max_bytes:
         return "too_large"
+    check_disk(p.parent, int(item["size"]))
     raw = _get(_raw_url(item["path"]), max_bytes=max_bytes)
     if git_blob_sha(raw) != item["blob"]:
         raise RuntimeError(f"{item['path']}: blob id mismatch")
@@ -319,12 +334,17 @@ def fetch_d(download: int | None) -> None:
         cache = d / "cache"
         for i in hash_order("D", by_id)[:download]:
             e = by_id[i]
-            _raw, digest = ensure_cached(cache, e["archive"]["url"], e["archive"].get("sha256"),
-                                         max_bytes=MAX_DOWNLOAD_BYTES)
-            e["archive"]["sha256"] = digest
-            if e.get("wheel"):
-                ensure_cached(cache, e["wheel"]["url"], e["wheel"]["sha256"],
-                              max_bytes=MAX_DOWNLOAD_BYTES)
+            check_disk(cache, int(e["archive"].get("size") or 0))
+            try:
+                _raw, digest = ensure_cached(cache, e["archive"]["url"],
+                                             e["archive"].get("sha256"),
+                                             max_bytes=MAX_DOWNLOAD_BYTES)
+                e["archive"]["sha256"] = digest
+                if e.get("wheel"):
+                    ensure_cached(cache, e["wheel"]["url"], e["wheel"]["sha256"],
+                                  max_bytes=MAX_DOWNLOAD_BYTES)
+            except Exception as exc:  # noqa: BLE001 — the runner counts it as not checked
+                print(f"{i}: download failed: {exc}")
         out.write_text(json.dumps(man, indent=1))
     print(f"D: {len(man['packages'])} packages, {len(man['excluded'])} excluded -> {out}")
 
@@ -352,7 +372,10 @@ def main(argv: list[str] | None = None) -> int:
             for it in idx["items"]:
                 strata.setdefault(it["stratum"], []).append(it["path"])
             for p in quota_sample("C", strata, C_QUOTAS)[: args.samples]:
-                print(p, fetch_c_sample(by_path[p], MAX_DOWNLOAD_BYTES))
+                try:
+                    print(p, fetch_c_sample(by_path[p], MAX_DOWNLOAD_BYTES), flush=True)
+                except Exception as exc:  # noqa: BLE001 — counted as not checked later
+                    print(p, f"failed: {exc}", flush=True)
     else:
         fetch_d(args.download or None)
     return 0

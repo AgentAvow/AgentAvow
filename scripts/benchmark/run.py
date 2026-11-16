@@ -51,6 +51,7 @@ ZIP_PASSWORD = SOURCES["C"]["zip_password"].encode()
 # Members over this are skipped unread by production's unpack anyway, so they are not
 # decrypted here (ZipCrypto in Python is slow).
 _MAX_MEMBER = 8 * 1024 * 1024
+BATCH = 200  # items per worker pool before the workers are replaced
 
 
 # ---------------------------------------------------------------------------
@@ -420,12 +421,14 @@ def _scanner_commit() -> str:
 
 
 def _ensure_c_samples(items: list[dict]) -> None:
+    """Say how many C samples are missing; they are scanned as not checked."""
     from scripts.benchmark.fetch import c_cache_path
-    missing = [it["id"] for it in items if it["set"] == "C" and not c_cache_path(it["blob"]).is_file()
+    missing = [it["id"] for it in items if it["set"] == "C"
+               and not c_cache_path(it["blob"]).is_file()
                and int(it["size"]) <= 50 * 1024 * 1024]
     if missing:
-        raise SystemExit(f"{len(missing)} C samples are not downloaded; run "
-                         f"fetch.py C --samples N first (e.g. {missing[0]})")
+        print(f"warning: {len(missing)} C samples not downloaded (fetch.py C --samples N); "
+              f"they count as not checked, e.g. {missing[0]}", flush=True)
 
 
 def breakdown(rows: list[dict], key: str) -> dict:
@@ -458,16 +461,28 @@ def main(argv: list[str] | None = None) -> int:
     run_id = time.strftime("%Y%m%d-%H%M%S")
     out = args.out or data_root() / "results" / run_id
     out.mkdir(parents=True, exist_ok=True)
+    # Resume: rows already written for this output dir are kept, not rescanned.
+    rows_path = out / "rows.jsonl"
     rows: list[dict] = []
-    with (out / "rows.jsonl").open("w") as fh, ProcessPoolExecutor(
-            max_workers=args.workers, initializer=_worker_init,
-            max_tasks_per_child=50) as pool:
-        for n, row in enumerate(pool.map(scan_item, items, chunksize=1), 1):
-            rows.append(row)
-            fh.write(json.dumps(row, sort_keys=True) + "\n")
-            fh.flush()
-            print(f"[{n}/{len(items)}] {row['set']} {row['id'][:60]} {row['truth']} -> "
-                  f"{row['outcome']} ({row['secs']}s)", flush=True)
+    if rows_path.is_file():
+        rows = [json.loads(line) for line in rows_path.open() if line.strip()]
+    done = {(r["set"], r["id"]) for r in rows}
+    todo = [it for it in items if (it["set"], it["id"]) not in done]
+    n = len(rows)
+    with rows_path.open("a") as fh:
+        # A fresh pool per batch bounds worker memory growth. (max_tasks_per_child
+        # hangs on this Python, so workers are recycled this way instead.)
+        for start in range(0, len(todo), BATCH):
+            batch = todo[start:start + BATCH]
+            with ProcessPoolExecutor(max_workers=args.workers,
+                                     initializer=_worker_init) as pool:
+                for row in pool.map(scan_item, batch, chunksize=1):
+                    n += 1
+                    rows.append(row)
+                    fh.write(json.dumps(row, sort_keys=True) + "\n")
+                    fh.flush()
+                    print(f"[{n}/{len(items)}] {row['set']} {row['id'][:60]} "
+                          f"{row['truth']} -> {row['outcome']} ({row['secs']}s)", flush=True)
 
     summary = {
         "run_id": run_id, "scanner_commit": _scanner_commit(), "split": args.split,
