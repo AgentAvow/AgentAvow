@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -950,6 +951,11 @@ async def health_check() -> JSONResponse:
 
 # Seconds each readiness check may take before it counts as failed.
 _READYZ_TIMEOUT_SECONDS = 2.0
+# /readyz is public, so a burst must not turn into a burst of DB queries: each worker
+# reuses its last answer for this long, and concurrent callers share one check.
+_READYZ_CACHE_SECONDS = 1.0
+_readyz_cache: tuple[float, int, dict] | None = None  # (monotonic time, status, body)
+_readyz_lock = asyncio.Lock()
 
 
 @app.get("/livez", include_in_schema=False)
@@ -990,20 +996,25 @@ async def _readiness_check(check) -> str:
 async def readyz() -> JSONResponse:
     """Readiness: Postgres and Redis both answer within a short timeout.
 
-    200 when both are ok; 503 naming the dependency that failed otherwise."""
-    database, redis_state = await asyncio.gather(
-        _readiness_check(_ready_database), _readiness_check(_ready_redis),
-    )
-    checks = {"database": database, "redis": redis_state}
-    failed = [name for name, state in checks.items() if state != "ok"]
-    body: dict = {"status": "ready" if not failed else "not_ready", "checks": checks}
-    if failed:
-        body["failed"] = failed
-        logger.warning("readyz: not ready (%s)", ", ".join(failed))
+    200 when both are ok; 503 naming the dependency that failed otherwise. The answer
+    is cached in-process for ``_READYZ_CACHE_SECONDS``."""
+    global _readyz_cache
+    async with _readyz_lock:
+        now = time.monotonic()
+        if _readyz_cache is None or now - _readyz_cache[0] >= _READYZ_CACHE_SECONDS:
+            database, redis_state = await asyncio.gather(
+                _readiness_check(_ready_database), _readiness_check(_ready_redis),
+            )
+            checks = {"database": database, "redis": redis_state}
+            failed = [name for name, state in checks.items() if state != "ok"]
+            body: dict = {"status": "ready" if not failed else "not_ready", "checks": checks}
+            if failed:
+                body["failed"] = failed
+                logger.warning("readyz: not ready (%s)", ", ".join(failed))
+            _readyz_cache = (time.monotonic(), 503 if failed else 200, body)
+        _, status_code, body = _readyz_cache
     return JSONResponse(
-        content=body,
-        status_code=503 if failed else 200,
-        headers={"Cache-Control": "no-store"},
+        content=body, status_code=status_code, headers={"Cache-Control": "no-store"},
     )
 
 

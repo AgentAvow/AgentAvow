@@ -52,6 +52,13 @@ def _db_down(*_a, **_kw):
     raise ConnectionRefusedError(f"could not connect to {SECRET_DSN}")
 
 
+@pytest.fixture(autouse=True)
+def _fresh_readyz_cache(monkeypatch):
+    """Each test starts with no cached readiness answer and a lock on its own loop."""
+    monkeypatch.setattr(main_mod, "_readyz_cache", None)
+    monkeypatch.setattr(main_mod, "_readyz_lock", asyncio.Lock())
+
+
 @pytest.fixture
 def db_up(monkeypatch):
     monkeypatch.setattr(src.database, "async_session", lambda: _FakeSession())
@@ -171,6 +178,56 @@ async def test_readyz_times_out_a_hung_dependency(monkeypatch, redis_up):
     assert resp.json()["failed"] == ["database"]
 
 
+class _CountingSession(_FakeSession):
+    calls = 0
+
+    async def execute(self, *_a, **_kw):
+        type(self).calls += 1
+
+
+@pytest.mark.asyncio
+async def test_readyz_caches_answer_for_one_second(monkeypatch, redis_up):
+    _CountingSession.calls = 0
+    monkeypatch.setattr(src.database, "async_session", lambda: _CountingSession())
+    clock = [1000.0]
+    monkeypatch.setattr(main_mod.time, "monotonic", lambda: clock[0])
+
+    for _ in range(5):
+        assert (await _get("/readyz")).status_code == 200
+    assert _CountingSession.calls == 1  # a burst within the second shares one check
+
+    clock[0] += 0.5
+    await _get("/readyz")
+    assert _CountingSession.calls == 1
+
+    clock[0] += 0.6  # 1.1 s after the check: the cache has expired
+    await _get("/readyz")
+    assert _CountingSession.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_readyz_concurrent_burst_shares_one_check(monkeypatch, redis_up):
+    _CountingSession.calls = 0
+    monkeypatch.setattr(src.database, "async_session", lambda: _CountingSession())
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resps = await asyncio.gather(*(client.get("/readyz") for _ in range(10)))
+    assert all(r.status_code == 200 for r in resps)
+    assert _CountingSession.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_readyz_cache_keeps_failure_status(monkeypatch, db_down, redis_up):
+    clock = [50.0]
+    monkeypatch.setattr(main_mod.time, "monotonic", lambda: clock[0])
+    assert (await _get("/readyz")).status_code == 503
+    # The DB comes back, but within the second the cached 503 is still served.
+    monkeypatch.setattr(src.database, "async_session", lambda: _FakeSession())
+    assert (await _get("/readyz")).status_code == 503
+    clock[0] += 1.0
+    assert (await _get("/readyz")).status_code == 200
+
+
 # --- /health is unchanged -------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -225,6 +282,9 @@ def _location_blocks(conf: str, path: str) -> list[str]:
     return pattern.findall(conf)
 
 
+READYZ_LIMIT = "limit_req zone=readyz burst=5 nodelay;"
+
+
 @pytest.mark.parametrize("path", ["/livez", "/readyz"])
 def test_nginx_proxies_probes_like_health(path: str):
     conf = (ROOT / "nginx" / "nginx.conf").read_text()
@@ -234,8 +294,11 @@ def test_nginx_proxies_probes_like_health(path: str):
     assert len(blocks) == health_count >= 1
     for body in blocks:
         assert "proxy_pass $backend;" in body
-        assert "limit_req" not in body
         assert "return 301" not in body
+        if path == "/livez":
+            assert "limit_req" not in body
+        else:
+            assert READYZ_LIMIT in body
 
 
 @pytest.mark.parametrize("path", ["/livez", "/readyz"])
@@ -244,7 +307,16 @@ def test_nginx_ssl_proxies_probes(path: str):
     blocks = _location_blocks(conf, path)
     assert len(blocks) == 1
     assert "proxy_pass http://backend:8000;" in blocks[0]
-    assert "limit_req" not in blocks[0]
+    if path == "/livez":
+        assert "limit_req" not in blocks[0]
+    else:
+        assert READYZ_LIMIT in blocks[0]
+
+
+@pytest.mark.parametrize("name", ["nginx.conf", "nginx-ssl.conf"])
+def test_nginx_defines_readyz_zone(name: str):
+    conf = (ROOT / "nginx" / name).read_text()
+    assert "limit_req_zone $binary_remote_addr zone=readyz:1m rate=2r/s;" in conf
 
 
 # --- prod compose: graceful shutdown --------------------------------------------------
