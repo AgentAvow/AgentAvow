@@ -174,7 +174,7 @@ change, add `agent:needs-product`, explain why in one comment, and stop.
   `tests/test_no_direct_env_reads.py` fails on new reads. In production
   (`ENVIRONMENT=production`, or `DEBUG=false` with it unset) the app refuses to start
   with the default `JWT_SECRET` or a localhost database or Redis. See
-  `docs/adr/0001-settings-validated-at-startup.md`.
+  `docs/adr/0003-settings-validated-at-startup.md`.
 - **Scanner false positives** for users: `docs/security-scan-false-positives.md`
   covers inline `# ag-scan:ignore` and allowlist entries. Scanner precision fixes
   usually come with corpus or fixture tests.

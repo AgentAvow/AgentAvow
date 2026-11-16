@@ -11,7 +11,7 @@ legitimately use localhost, so those refusals apply to production only.
 
 Code outside this module should read ``settings`` rather than ``os.environ``;
 ``tests/test_no_direct_env_reads.py`` enforces that with an AST check. See
-``docs/adr/0001-settings-validated-at-startup.md``.
+``docs/adr/0003-settings-validated-at-startup.md``.
 """
 from __future__ import annotations
 

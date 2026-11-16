@@ -1,8 +1,8 @@
-# ADR 0001: One settings class, validated at startup
+# 0003: One settings class, validated at startup
 
-- Status: accepted
-- Date: 2026-11-16
-- Issue: #403
+- **Status:** Accepted
+- **Date:** 2026-11-16
+- **Decided by:** the owner (issue #403, agreed changes in #402)
 
 ## Context
 
@@ -53,3 +53,9 @@ with `DEBUG=false` and doesn't set an environment name.
 - The baseline in `tests/test_no_direct_env_reads.py` (26 reads in 10 files, mostly
   the ERC-8004 bridge, the Bluesky env writes in `src/jobs/scheduler.py` and the
   CI-side scanner entry points) still has to be worked down.
+
+## Evidence
+
+- `src/config.py` (`Settings`, `load_settings()`, `validate_startup()`), called from `src/main.py`.
+- `tests/test_settings.py` and `tests/test_no_direct_env_reads.py`.
+- Issue #403; the agreed changes are in the owner's comment on #402.

@@ -175,7 +175,7 @@ Settings are checked when the service starts:
   may use localhost. A few other production settings (`BASE_URL`, `CORS_ORIGINS`,
   `ATTESTATION_SIGNING_KEY_ED25519`) only log a warning.
 
-See `docs/adr/0001-settings-validated-at-startup.md` for why.
+See `docs/adr/0003-settings-validated-at-startup.md` for why.
 
 ### Required (`.env`)
 

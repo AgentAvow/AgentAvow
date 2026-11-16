@@ -20,3 +20,4 @@ new record that supersedes the old one and set the old one's status to
 |---|----------|--------|
 | [0001](0001-tech-stack.md) | The tech stack is decided | Accepted |
 | [0002](0002-old-machine-identifiers-stay.md) | Machine identifiers keep the `agentgraph` name after the rebrand | Accepted |
+| [0003](0003-settings-validated-at-startup.md) | One settings class, validated at startup; safety refusals in production only | Accepted |
