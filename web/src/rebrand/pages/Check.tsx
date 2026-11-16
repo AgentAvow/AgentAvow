@@ -1834,11 +1834,20 @@ function SkillResult({ owner, repo, skill }: { owner: string; repo: string; skil
   if (isLoading) return <ScanningLoader owner="skill" repo={`${owner}/${repo}${skill ? `/${skill}` : ''}`} />
   if (isError && error instanceof ScanStillCheckingError) return <StillChecking what={`${owner}/${repo}${skill ? `/${skill}` : ''}`} />
   if (isError || !scan) {
+    // A deleted or private repo is not "missing a SKILL.md": say it is unavailable.
+    const gone = /repository not found|unreadable/i.test(errorDetail(error))
     return (
       <div className="max-w-[560px] mx-auto px-6 py-24 text-center">
-        <h1 className="text-2xl font-extrabold tracking-tight">Not a recognizable Agent Skill</h1>
-        <p className="mt-3 text-text-muted text-[14px]">We couldn&apos;t find a <span className="font-mono">SKILL.md</span> in <span className="font-mono">{owner}/{repo}</span>. Point us at a repo (or the primary skill in a collection) that ships one.</p>
-        <Link to={rp('/rebrand/check')} className="mt-6 inline-block text-primary-light hover:text-primary font-semibold">← Scan something else</Link>
+        <h1 className="text-2xl font-extrabold tracking-tight">{gone ? 'Repository unavailable' : 'Not a recognizable Agent Skill'}</h1>
+        {gone ? (
+          <p className="mt-3 text-text-muted text-[14px]">GitHub has no readable repository at <span className="font-mono">{owner}/{repo}</span>. It may have been deleted, renamed or made private, so there is nothing to check.</p>
+        ) : (
+          <>
+            <p className="mt-3 text-text-muted text-[14px]">We couldn&apos;t find a <span className="font-mono">SKILL.md</span> in <span className="font-mono">{owner}/{repo}</span>. Point us at a repo (or the primary skill in a collection) that ships one.</p>
+            {!skill && <Link to={rp(`/rebrand/check/${owner}/${repo}`)} className="mt-4 inline-block text-primary-light hover:text-primary font-semibold">See the scan of the {owner}/{repo} repository →</Link>}
+          </>
+        )}
+        <div><Link to={rp('/rebrand/check')} className="mt-6 inline-block text-primary-light hover:text-primary font-semibold">← Scan something else</Link></div>
       </div>
     )
   }

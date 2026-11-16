@@ -113,6 +113,7 @@ async def test_scan_skill_collection_end_to_end(monkeypatch):
         return "tok"
 
     async def fake_tree(owner, repo, token, meta_out=None):
+        assert token == "tok"  # the get_github_token patch must reach scan_skill
         return [{"path": p, "type": "blob"} for p in (
             "skills/clean/SKILL.md", "skills/risky/SKILL.md", "skills/risky/run.sh",
             "template/SKILL.md")], False, True, "main"
@@ -128,7 +129,7 @@ async def test_scan_skill_collection_end_to_end(monkeypatch):
             return "---\nname: tmpl\n---\n"
         return None
 
-    monkeypatch.setattr(scan_mod, "get_github_token", fake_token, raising=False)
+    monkeypatch.setattr("src.github_auth.get_github_token", fake_token)
     monkeypatch.setattr(scan_mod, "_fetch_repo_tree", fake_tree)
     monkeypatch.setattr(scan_mod, "_fetch_file_content", fake_content)
 
@@ -158,12 +159,13 @@ async def test_single_skill_repo_unchanged(monkeypatch):
         return "tok"
 
     async def fake_tree(owner, repo, token, meta_out=None):
+        assert token == "tok"  # the get_github_token patch must reach scan_skill
         return [{"path": "SKILL.md", "type": "blob"}], False, True, "main"
 
     async def fake_content(owner, repo, path, token, ref=None):
         return "---\nname: solo\ndescription: x\n---\nhi" if path == "SKILL.md" else None
 
-    monkeypatch.setattr(scan_mod, "get_github_token", fake_token, raising=False)
+    monkeypatch.setattr("src.github_auth.get_github_token", fake_token)
     monkeypatch.setattr(scan_mod, "_fetch_repo_tree", fake_tree)
     monkeypatch.setattr(scan_mod, "_fetch_file_content", fake_content)
     res = await scan_mod.scan_skill("acme", "solo")
