@@ -5084,10 +5084,15 @@ def _is_inert_guard_snippet(code: str) -> bool:
     return True
 
 
-# The only inline snippets treated as inert: an exit code or a constant log line.
+# The only inline snippets treated as inert: an exit code or a constant log line. The
+# literal may hold the simple JS escapes `\n \t \r \' \\` (`'\nInstalling Context
+# Sync...\n'`; context-sync, vidlens-mcp banners; verdict accuracy audit, 2026-11-14).
+# `\u` / `\x` escapes, which can spell a word the danger check looks for, and anything
+# with `$` or a backtick the shell would expand, keep the critical.
 _INERT_NODE_SNIPPET_RE = re.compile(
-    r"""^\s*(?:process\.exit\(\s*\d*\s*\)|console\.(?:log|warn|error)\(\s*(?:'[^'$`\\]*'|"""
-    r"""\\?"[^"$`\\]*\\?"|\d+)?\s*\))\s*;?\s*$""",
+    r"""^\s*(?:process\.exit\(\s*\d*\s*\)|console\.(?:log|warn|error)\(\s*"""
+    r"""(?:'(?:[^'$`\\\n]|\\[ntr'\\])*'|"""
+    r"""\\?"(?:[^"$`\\\n]|\\[ntr'\\])*\\?"|\d+)?\s*\))\s*;?\s*$""",
 )
 
 
