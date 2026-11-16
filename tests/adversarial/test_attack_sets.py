@@ -43,7 +43,7 @@ EXPECTED = json.loads((HERE / "expected.json").read_text())
 SETS = ("cases_npm_scripts", "cases_printed_hint", "cases_trifecta", "cases_exfil_precision",
         "cases_browser_profile", "cases_signing_key",
         "cases_encoded_instructions", "cases_bytecode", "cases_skill_prose",
-        "cases_a2a_cards")
+        "cases_a2a_cards", "cases_shown_cmd")
 
 # Attacks that still read safe today, with the label they should read.
 KNOWN_GAPS: dict[tuple[str, str], str] = {
@@ -75,6 +75,17 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     ("cases_skill_prose", "gap_security_doc_fenced_payload"): "review",
     # Card analysis is pure: a hostname that resolves to a private address is not seen.
     ("cases_a2a_cards", "gap_dns_name_to_private"): "review",
+    # #378 review: an install hint that only reaches a print / log / error must keep
+    # its critical once that text can reach a process (fixed one by one on the branch).
+    ("cases_shown_cmd", "go_error_method_to_exec"): "do_not_connect",
+    ("cases_shown_cmd", "go_sprint_to_exec"): "do_not_connect",
+    ("cases_shown_cmd", "go_fprintln_to_sh_stdin"): "do_not_connect",
+    ("cases_shown_cmd", "go_log_output_to_sh_stdin"): "do_not_connect",
+    ("cases_shown_cmd", "rs_err_named_msg_to_arg"): "do_not_connect",
+    ("cases_shown_cmd", "rs_err_formatted_to_arg"): "do_not_connect",
+    ("cases_shown_cmd", "js_computed_key_to_exec"): "do_not_connect",
+    ("cases_shown_cmd", "js_object_entries_to_exec"): "do_not_connect",
+    ("cases_shown_cmd", "js_alias_chain_to_exec"): "do_not_connect",
 }
 
 _mods: dict[str, object] = {}

@@ -303,6 +303,10 @@ def test_openmausbot_rerun_command_captured_into_messages_is_low(tmp_path):
     'x=$(command_line x)',
     'say "$(command_line x; id)" > /tmp/run.sh',
     'sudo say "$(command_line x)"',
+    # A string spanning lines, then the output piped to sh on the line it closes on.
+    'msg="hello\n"; command_line x | sh',
+    # `printf -v` stores the output in a variable; it does not print it.
+    'printf -v CMD "%s" "$(command_line x)"\neval "$CMD"',
 ])
 def test_openmausbot_rerun_command_run_stays_critical(tmp_path, line):
     script = OMB.replace('main "$@"', line + '\nmain "$@"')

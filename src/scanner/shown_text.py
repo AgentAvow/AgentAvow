@@ -203,13 +203,23 @@ def _line_runs(toks: list[_Tok]) -> bool:
     return False
 
 
-def _code_view(lines: list[str]) -> tuple[list[str], list[bool]] | None:
+def _printf_assigns(cmd: list[_Tok]) -> bool:
+    """``printf -v NAME …`` stores its output in a variable instead of printing it."""
+    h = _head(cmd)
+    return h is not None and h.text == "printf" and any(
+        t.kind == "word" and t is not h and t.text.startswith("-v") for t in cmd)
+
+
+def _code_view(lines: list[str]) -> tuple[list[str], list[bool], list[int]] | None:
     """Each line with quoted text, ``${…}`` expansions, comments and heredoc bodies
     blanked, and whether the line STARTS as code (not inside a string or heredoc that
-    an earlier line opened). Quotes are followed across lines. None when a quote or
-    heredoc never closes."""
+    an earlier line opened), and the column where code resumes on that line (0 for a
+    line that starts as code; the line's length when the whole line is string or
+    heredoc text). Quotes are followed across lines. None when a quote or heredoc
+    never closes."""
     out: list[str] = []
     starts: list[bool] = []
+    resume: list[int] = []
     quote: str | None = None
     heredoc: str | None = None
     pending_doc: str | None = None
@@ -217,14 +227,18 @@ def _code_view(lines: list[str]) -> tuple[list[str], list[bool]] | None:
         if heredoc is not None:
             out.append("")
             starts.append(False)
+            resume.append(len(raw))
             if raw.strip() == heredoc:
                 heredoc = None
             continue
         starts.append(quote is None)
+        resume.append(0 if quote is None else len(raw))
         buf: list[str] = []
         i, n = 0, len(raw)
         while i < n:
             c = raw[i]
+            if quote is not None and resume[-1] == n and c == quote:
+                resume[-1] = i + 1  # the string an earlier line opened closes here
             if quote == "'":
                 if c == "'":
                     quote = None
@@ -269,7 +283,7 @@ def _code_view(lines: list[str]) -> tuple[list[str], list[bool]] | None:
             heredoc, pending_doc = pending_doc, None
     if quote is not None or heredoc is not None:
         return None
-    return out, starts
+    return out, starts, resume
 
 
 class _ShellFile:
@@ -279,7 +293,7 @@ class _ShellFile:
         self.lines = lines
         self.text = "\n".join(lines)
         view = _code_view(lines)
-        self.code, self.starts = view if view is not None else ([], [])
+        self.code, self.starts, self.resume = view if view is not None else ([], [], [])
         self.funcs: list[tuple[str, int, int]] | None = (
             self._functions() if view is not None else None)
         self._print_only: dict[str, bool] = {}
@@ -376,6 +390,8 @@ class _ShellFile:
                     continue
                 if h.quotes or "$" in h.text:
                     return False  # runs a parameter: "$@", $1, ${cmd}
+                if _printf_assigns(cmd):
+                    return False
                 if h.text in _PRINT_BODY_OK:
                     if h.text in ("[", "[[", "test", "local", "declare", "typeset",
                                   "readonly") and any(
@@ -406,8 +422,16 @@ class _ShellFile:
             for idx, line in enumerate(self.lines):
                 if not rx.search(line) or any(s <= idx <= e for s, e in own):
                     continue
-                if not self.starts[idx] and "$(" not in line and "`" not in line:
-                    continue  # text inside a string / heredoc an earlier line opened
+                if not self.starts[idx]:
+                    # The line opens inside a string / heredoc an earlier line opened.
+                    # Text before the string closes is shown; code after it is read
+                    # like any other line (`msg="hello` / `"; name | sh`).
+                    cut = self.resume[idx]
+                    if not rx.search(line[cut:]) and (
+                            "$(" not in line[:cut] and "`" not in line[:cut]):
+                        continue
+                    if rx.search(line[cut:]) and not rx.search(line[:cut]):
+                        line = " " * cut + line[cut:]
                 arm = _CASE_ARM_RE.match(line)
                 if arm and not rx.search(line[:arm.end()]):
                     line = " " * arm.end() + line[arm.end():]  # `a|A) name ;;`
@@ -476,6 +500,8 @@ class _ShellFile:
                 return False
             if cmd[-1].kind == "op" and cmd[-1].text in ("|", "|&", "&"):
                 return False
+            if _printf_assigns(cmd):
+                return False  # `printf -v CMD "%s" "$(name)"` assigns, it does not print
             if h.text not in _PRINTERS and (_SOURCES_RE.search(self.text)
                                             or not self.print_only(h.text)):
                 return False
@@ -611,6 +637,8 @@ def shell_shown(lines: list[str], idx: int, matches: list[tuple[int, int]],
         if h is None or h is word or h.quotes:
             return False  # the string is the command or an assignment, not an argument
         if cmd[-1].kind == "op" and cmd[-1].text in ("|", "|&", "&"):
+            return False
+        if _printf_assigns(cmd):
             return False
         if h.text not in _PRINTERS:
             if _SOURCES_RE.search(sf.text) or not sf.print_only(h.text):

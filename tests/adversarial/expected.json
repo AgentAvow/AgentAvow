@@ -294,6 +294,23 @@
     "xctl_fn_export": "safe",
     "xctl_tpl_line": "do_not_connect"
   },
+  "cases_shown_cmd": {
+    "ctl_go_shown": "safe",
+    "ctl_js_shown": "safe",
+    "ctl_rs_shown": "safe",
+    "ctl_sh_shown": "safe",
+    "go_error_method_to_exec": "safe",
+    "go_fprintln_to_sh_stdin": "safe",
+    "go_log_output_to_sh_stdin": "safe",
+    "go_sprint_to_exec": "safe",
+    "js_alias_chain_to_exec": "safe",
+    "js_computed_key_to_exec": "safe",
+    "js_object_entries_to_exec": "safe",
+    "rs_err_formatted_to_arg": "safe",
+    "rs_err_named_msg_to_arg": "safe",
+    "sh_multiline_string_then_pipe": "do_not_connect",
+    "sh_printf_v_then_eval": "do_not_connect"
+  },
   "cases_signing_key": {
     "alias_chain": "do_not_connect",
     "axios_post": "do_not_connect",
