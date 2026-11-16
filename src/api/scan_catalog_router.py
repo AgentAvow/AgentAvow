@@ -19,6 +19,7 @@ import copy
 import json
 import logging
 import re
+import sys
 import threading
 import time
 from collections.abc import Iterable
@@ -228,6 +229,131 @@ class CatalogRow(BaseModel):
             d = decide({"trust_score": self.trust_score, "findings": findings})
             self.decision, self.decision_reason = d.decision, d.reason
         return self
+
+
+_ROW_FIELDS: tuple[str, ...] = tuple(CatalogRow.model_fields)
+# Fields whose values repeat across rows (a few distinct reasons, errors, languages,
+# dates): one shared object per distinct value within a load (see _compact).
+_POOLED_FIELDS = frozenset({
+    "surface", "grade", "primary_language", "category", "adoption_unit", "scan_error",
+    "skipped", "price_usd", "decision", "decision_reason", "scan_source", "last_scanned_at",
+})
+
+
+class StoredRow:
+    """A catalog row as the per-worker caches hold it: the same fields as ``CatalogRow``,
+    read and written by attribute, in a slotted object.
+
+    A pydantic ``CatalogRow`` costs about 3.4 KB per row (an instance ``__dict__`` and a
+    fields-set ``set`` for 32 fields, nearly all None), so ~59k cached rows held ~200 MB
+    per uvicorn worker. This object is ~290 bytes. Rows are validated as ``CatalogRow``
+    when they are built (the validator fills page_path / certified_mark / decision) and
+    stored as ``StoredRow``; a response page turns its rows back into ``CatalogRow``
+    (``to_model``), so the API output is unchanged. ``model_copy`` and ``model_dump`` work
+    as on the pydantic model. ``top_findings`` is kept as (severity, name) tuples and
+    read back as ``CatalogFinding`` models."""
+
+    __slots__ = tuple(f for f in _ROW_FIELDS if f != "top_findings") + ("_findings",)
+    __hash__ = None  # type: ignore[assignment]  # mutable, like the pydantic model
+
+    def __init__(self, **values: Any) -> None:
+        for f in _ROW_FIELDS:
+            setattr(self, f, values.get(f))
+
+    @property
+    def top_findings(self) -> list[CatalogFinding] | None:
+        fs = self._findings
+        if fs is None:
+            return None
+        return [CatalogFinding.model_construct(severity=s, name=n) for s, n in fs]
+
+    @top_findings.setter
+    def top_findings(self, value: Any) -> None:
+        if value is None:
+            self._findings = None
+            return
+        out = []
+        for f in value:
+            if isinstance(f, CatalogFinding):
+                out.append((f.severity, f.name))
+            else:
+                f = CatalogFinding.model_validate(f)
+                out.append((f.severity, f.name))
+        self._findings = tuple(out)
+
+    def _values(self) -> tuple[Any, ...]:
+        return tuple(getattr(self, s) for s in StoredRow.__slots__)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, StoredRow):
+            return NotImplemented
+        return self._values() == other._values()
+
+    def __repr__(self) -> str:
+        set_ = ", ".join(f"{f}={getattr(self, f)!r}" for f in _ROW_FIELDS
+                         if getattr(self, f) is not None)
+        return f"StoredRow({set_})"
+
+    def model_copy(self, *, update: dict[str, Any] | None = None,
+                   deep: bool = False) -> StoredRow:
+        """A copy with ``update`` applied, unvalidated (as ``BaseModel.model_copy``)."""
+        new = object.__new__(StoredRow)
+        for s in StoredRow.__slots__:
+            v = getattr(self, s)
+            setattr(new, s, copy.deepcopy(v) if deep else v)
+        for k, v in (update or {}).items():
+            setattr(new, k, v)
+        return new
+
+    def to_model(self) -> CatalogRow:
+        """The pydantic row, field for field (no re-validation: the values were
+        validated when the row was built)."""
+        return CatalogRow.model_construct(**{f: getattr(self, f) for f in _ROW_FIELDS})
+
+    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
+        return self.to_model().model_dump(**kwargs)
+
+    def model_dump_json(self, **kwargs: Any) -> str:
+        return self.to_model().model_dump_json(**kwargs)
+
+
+def _compact(row: CatalogRow | StoredRow, pool: dict[Any, Any] | None = None) -> StoredRow:
+    """``row`` as a ``StoredRow``. Values of ``_POOLED_FIELDS`` (and finding tuples) are
+    shared through ``pool``, so ten thousand rows with the same scan error hold one
+    string. A datetime is pooled by its ISO text, so a shared value serializes the same."""
+    if isinstance(row, StoredRow):
+        return row
+    values = row.__dict__
+    out = object.__new__(StoredRow)
+    for f in _ROW_FIELDS:
+        v = values.get(f)
+        if pool is not None and v is not None and f in _POOLED_FIELDS:
+            k = ("dt", v.isoformat()) if isinstance(v, datetime) else v
+            v = pool.setdefault(k, v)
+        setattr(out, f, v)
+    if pool is not None and out._findings:
+        out._findings = tuple(pool.setdefault(t, t) for t in out._findings)
+    return out
+
+
+def as_catalog_row(row: CatalogRow | StoredRow) -> CatalogRow:
+    """The pydantic ``CatalogRow`` for a cached row (a ``CatalogRow`` passes through)."""
+    return row.to_model() if isinstance(row, StoredRow) else row
+
+
+def _release_free_heap() -> None:
+    """Hand freed heap memory back to the OS after a catalog (re)build. glibc keeps
+    freed chunks in its arenas (a build runs in a worker thread, so in a thread arena)
+    and RSS stays at the build's peak; ``malloc_trim(0)`` returns them. Linux/glibc
+    only; a no-op elsewhere and on any error."""
+    if not sys.platform.startswith("linux"):
+        return
+    try:
+        import ctypes
+
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        logger.debug("malloc_trim unavailable", exc_info=True)
 
 
 _PKG_SURFACES = ("npm", "pypi", "crates", "huggingface", "docker")
@@ -745,8 +871,8 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
 
 def _load_surface(
     surface: str, path: Path, results_key: str = "results",
-    failed: set[str] | None = None,
-) -> list[CatalogRow]:
+    failed: set[str] | None = None, pool: dict[Any, Any] | None = None,
+) -> list[StoredRow]:
     if not path.exists():
         logger.warning("scan_catalog: missing %s", path)
         return []
@@ -760,7 +886,10 @@ def _load_surface(
     results = data.get(results_key, data) if isinstance(data, dict) else data
     if not isinstance(results, list):
         return []
-    rows = [_normalize_row(surface, r) for r in results if isinstance(r, dict)]
+    # Each row is validated as a CatalogRow and stored compact at once, so the build
+    # never holds every row as a pydantic model (see StoredRow).
+    pool = {} if pool is None else pool
+    rows = [_compact(_normalize_row(surface, r), pool) for r in results if isinstance(r, dict)]
     # A file-level scan date (openclaw-results.json carries one) dates every row
     # that has none of its own.
     file_when = _parse_when(data.get("scan_date")) if isinstance(data, dict) else None
@@ -830,10 +959,12 @@ def _apply_mcp_endpoints(rows: list[CatalogRow], endpoints: dict[str, str]) -> N
             r.page_path = page_path_for(r.surface, r.name, r.full_name, r.endpoint_url)
 
 
-def _load_rows(failed: set[str] | None = None) -> list[CatalogRow]:
-    rows: list[CatalogRow] = []
+def _load_rows(failed: set[str] | None = None) -> list[StoredRow]:
+    rows: list[StoredRow] = []
+    pool: dict[Any, Any] = {}
     for surface, fname, key in _CATALOG_SOURCES:
-        rows += _load_surface(surface, _DATA_DIR / fname, results_key=key, failed=failed)
+        rows += _load_surface(surface, _DATA_DIR / fname, results_key=key, failed=failed,
+                              pool=pool)
     _apply_mcp_endpoints(rows, load_mcp_endpoints())
     # Skill rows whose skill scan can't run (no SKILL.md: listed as the repo instead;
     # repo deleted: dropped). See src/api/catalog_skill_rows.py.
@@ -950,6 +1081,7 @@ def _get_catalog() -> dict[str, Any]:
     with _CATALOG_BUILD_LOCK:
         if _CATALOG_CACHE is None:
             _CATALOG_CACHE = _build_catalog()
+            _release_free_heap()
         return _CATALOG_CACHE
 
 
@@ -975,6 +1107,8 @@ def reload_catalog_if_sources_changed() -> bool:
             return False  # rebuilt meanwhile (another thread or an admin refresh)
         fresh = _build_catalog()
         _CATALOG_CACHE = fresh
+        # Entries for the old catalog can never hit again; drop them so it is freed.
+        _VIEW_CACHE.clear()
     logger.info("scan_catalog: source files changed, rebuilt (%d rows)", len(fresh["rows"]))
     return True
 
@@ -1119,8 +1253,9 @@ async def _fetch_community_rows(db: AsyncSession) -> list[CatalogRow] | None:
         if len(scanned) >= COMMUNITY_ROWS_MAX:
             logger.warning("community_scans: %d rows reached the catalog read ceiling",
                            len(scanned))
-        out: list[CatalogRow] = []
+        out: list[StoredRow] = []
         seen: set[str] = set()
+        pool: dict[Any, Any] = {}
         for c in scanned:
             surf, name, repository_url, endpoint_url = community_row_coords(
                 getattr(c, "surface", None), c.repo, c.full_name)
@@ -1133,7 +1268,7 @@ async def _fetch_community_rows(db: AsyncSession) -> list[CatalogRow] | None:
                     continue
                 seen.add(pkey)
             stored_grade = await community_mark_grade(c)
-            out.append(
+            out.append(_compact(
                 CatalogRow(
                     surface=surf,
                     name=name,
@@ -1158,8 +1293,7 @@ async def _fetch_community_rows(db: AsyncSession) -> list[CatalogRow] | None:
                     page_path=path,
                     last_scanned_at=getattr(c, "last_scanned_at", None),
                     scan_source="live",
-                )
-            )
+                ), pool))
         return out
     except Exception:
         logger.warning("community_scans fetch failed", exc_info=True)
@@ -1593,7 +1727,7 @@ async def _catalog_view(
 
     return CatalogResponse(
         summary=summary,
-        rows=page,
+        rows=[as_catalog_row(r) for r in page],
         total=total,
         offset=offset,
         limit=limit,
@@ -1706,8 +1840,9 @@ async def _refresh_flagged_stat() -> None:
     try:
         # Pick up a host re-score's rewritten launch-scan files (see
         # reload_catalog_if_sources_changed); the timer runs this in every worker.
+        reloaded = False
         try:
-            await asyncio.to_thread(reload_catalog_if_sources_changed)
+            reloaded = await asyncio.to_thread(reload_catalog_if_sources_changed)
         except Exception:
             logger.warning("scan catalog source reload failed", exc_info=True)
         catalog = await asyncio.to_thread(_get_catalog)
@@ -1724,6 +1859,10 @@ async def _refresh_flagged_stat() -> None:
         if gen != _FLAGGED_STAT_GEN or catalog is not _CATALOG_CACHE:
             return  # invalidated meanwhile; the next request computes from fresh inputs
         _FLAGGED_STAT_CACHE = (catalog, community, out, _now() + FLAGGED_STAT_TTL_SECONDS)
+        if reloaded:
+            # The old catalog's last reference (the previous stat) is gone now.
+            del catalog, community, out
+            await asyncio.to_thread(_release_free_heap)
     except Exception:
         logger.warning("flagged-stat background refresh failed", exc_info=True)
 

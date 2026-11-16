@@ -47,6 +47,10 @@ services:
       # web worker's event loop (it held one worker's loop and slowed half the
       # requests, 2026-10-08).
       BLUESKY_SUBSCRIBER_IN_WEB: "false"
+      # glibc gives each thread that allocates its own malloc arena (up to 8 per core)
+      # and keeps freed memory in it. The scan catalog is built in worker threads, so
+      # every rebuild could leave its peak behind in another arena. Two arenas cap that.
+      MALLOC_ARENA_MAX: "2"
     expose:
       - "8000"
     command: >
