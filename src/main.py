@@ -431,7 +431,7 @@ try:
     Instrumentator(
         should_group_status_codes=True,
         should_ignore_untemplated=True,
-        excluded_handlers=["/health", "/metrics"],
+        excluded_handlers=["/health", "/livez", "/readyz", "/metrics"],
     ).instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 except ImportError:
     pass  # prometheus-fastapi-instrumentator not installed (dev/test)
@@ -543,13 +543,17 @@ async def usage_scope_http_middleware(request: Request, call_next) -> Response:
     return await usage_scope_middleware(request, call_next)
 
 
+# Health probes: polled every few seconds, so never logged per request.
+_PROBE_PATHS = frozenset({"/health", "/livez", "/readyz"})
+
+
 @app.middleware("http")
 async def request_logging_middleware(request: Request, call_next) -> Response:
     """Log every request with method, path, status, and timing."""
     import time as _time
 
     # Skip health checks to reduce noise
-    if request.url.path == "/health":
+    if request.url.path in _PROBE_PATHS:
         return await call_next(request)
 
     start = _time.monotonic()
@@ -935,6 +939,72 @@ async def health_check() -> JSONResponse:
 
     status_code = 503 if health["status"] == "degraded" else 200
     return JSONResponse(content=health, status_code=status_code)
+
+
+# --- Liveness and readiness (#404) --------------------------------------------------
+# /health above stays exactly as it is: the deploy script, rollback, capacity and
+# health-check scripts and outside monitors all read its body and `status: ok`.
+# /livez and /readyz sit beside it for probes that need the two answers apart.
+# Neither is rate limited (no limiter dependency), logged per request, counted by
+# Prometheus or listed in the OpenAPI document.
+
+# Seconds each readiness check may take before it counts as failed.
+_READYZ_TIMEOUT_SECONDS = 2.0
+
+
+@app.get("/livez", include_in_schema=False)
+async def livez() -> JSONResponse:
+    """Liveness: the process is up and serving. Calls no dependency."""
+    return JSONResponse(content={"status": "ok"}, headers={"Cache-Control": "no-store"})
+
+
+async def _ready_database() -> None:
+    from sqlalchemy import text
+
+    from src.database import async_session
+
+    async with async_session() as db:
+        await db.execute(text("SELECT 1"))
+
+
+async def _ready_redis() -> None:
+    from src.redis_client import get_redis
+
+    if not await get_redis().ping():
+        raise RuntimeError("redis ping returned false")
+
+
+async def _readiness_check(check) -> str:
+    """Run one dependency check with a short timeout. Returns ok, timeout or error;
+    never the exception text, which can carry hosts or connection strings."""
+    try:
+        await asyncio.wait_for(check(), timeout=_READYZ_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return "timeout"
+    except Exception:
+        return "error"
+    return "ok"
+
+
+@app.get("/readyz", include_in_schema=False)
+async def readyz() -> JSONResponse:
+    """Readiness: Postgres and Redis both answer within a short timeout.
+
+    200 when both are ok; 503 naming the dependency that failed otherwise."""
+    database, redis_state = await asyncio.gather(
+        _readiness_check(_ready_database), _readiness_check(_ready_redis),
+    )
+    checks = {"database": database, "redis": redis_state}
+    failed = [name for name, state in checks.items() if state != "ok"]
+    body: dict = {"status": "ready" if not failed else "not_ready", "checks": checks}
+    if failed:
+        body["failed"] = failed
+        logger.warning("readyz: not ready (%s)", ", ".join(failed))
+    return JSONResponse(
+        content=body,
+        status_code=503 if failed else 200,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get(f"{settings.api_v1_prefix}/ping")

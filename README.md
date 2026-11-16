@@ -197,7 +197,7 @@ VITE_API_BASE_URL=http://localhost:8000/api/v1
 
 ## API Overview
 
-The public scanning API needs **no authentication**. All app endpoints use the `/api/v1` prefix; interactive API docs are at `/api/v1/docs` (Swagger) and `/api/v1/redoc` (`/docs` is the product documentation). `GET /health` (no prefix) checks DB + Redis connectivity.
+The public scanning API needs **no authentication**. All app endpoints use the `/api/v1` prefix; interactive API docs are at `/api/v1/docs` (Swagger) and `/api/v1/redoc` (`/docs` is the product documentation). `GET /health` (no prefix) checks DB + Redis connectivity. `GET /livez` answers 200 whenever the process is up (no dependency calls), and `GET /readyz` answers 200 when DB and Redis both respond within 2 s, or 503 naming the one that failed.
 
 ### Public scan API (no auth)
 
