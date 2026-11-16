@@ -453,6 +453,11 @@ def test_coder_go_upgrade_message_is_low(tmp_path):
     '\nfunc upgrade(v string) {\n\tmsg := defaultUpgradeMessage(v)\n'
     '\tfmt.Fprintln(stdinPipe, msg)\n}\n',
     '\nvar Upgrade = defaultUpgradeMessage\n',
+    # An error's text reaches a process under a name the walk cannot know.
+    '\nfunc upgrade(v string) error {\n\tproblem := fmt.Errorf("%s", defaultUpgradeMessage(v))\n'
+    '\ts := problem.Error()\n\treturn exec.Command("sh", "-c", s).Run()\n}\n',
+    '\nfunc upgrade(v string) {\n\tproblem := fmt.Errorf("%s", defaultUpgradeMessage(v))\n'
+    '\tlog.SetOutput(sink)\n\tlog.Println(problem)\n}\n',
 ])
 def test_coder_go_upgrade_message_run_stays_critical(tmp_path, tail):
     assert _local(tmp_path, {"cli/root.go": CODER + tail}, "cli/root.go",
@@ -523,6 +528,14 @@ def test_sem_rust_error_message_is_low(tmp_path):
         "return Err(format!(", "let m = format!(").replace(
         ".into());\n    }\n    let status", ";\n        std::process::Command::new(\"sh\")"
         ".arg(m).status()?;\n    }\n    let status", 1)},
+    # The error bound under another name, or formatted first.
+    {"crates/sem-cli/src/main.rs": SEM_MAIN.replace(
+        'Err(e) = update', 'Err(msg) = update').replace(
+        'eprintln!("error: {e}");',
+        'std::process::Command::new("sh").arg("-c").arg(msg.to_string()).status().ok();')},
+    {"crates/sem-cli/src/main.rs": SEM_MAIN.replace(
+        'eprintln!("error: {e}");',
+        'let s = format!("{e}"); std::process::Command::new("sh").arg(&s).status().ok();')},
 ])
 def test_sem_rust_error_text_run_stays_critical(tmp_path, files):
     tree = {"crates/sem-cli/src/commands/update.rs": SEM,

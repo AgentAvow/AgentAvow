@@ -231,20 +231,49 @@ _RUST_ERROR_MACROS = frozenset({"anyhow", "bail", "eyre", "anyhow::anyhow", "any
                                 "eyre::eyre", "eyre::bail"})
 _RUST_PASSTHRU = frozenset({"into", "to_string", "to_owned", "as_str", "trim", "clone"})
 
-# A call that starts a process, and an error identifier inside its argument list
-# (`exec.Command("sh", "-c", err.Error())`, `.arg(e.to_string())`).
+# A call that starts a process (`exec.Command("sh", "-c", s)`, `.arg(&s)`). An error's
+# text can reach one under any name (`s := problem.Error()`, `fmt.Sprint(problem)`,
+# `if let Err(msg) = …`, `let s = format!("{e}")`), so an error value counts as shown
+# only when no process in view takes anything but literals, no child's stdin is
+# opened and Go's `log` output stays on a standard stream.
 _GO_EXEC_CALL_RE = re.compile(r"(?:exec\.Command(?:Context)?|syscall\.Exec|os\.StartProcess)\s*\(")
 _RUST_EXEC_CALL_RE = re.compile(r"(?:Command::new|\.args?)\s*\(")
-_GO_ERR_ID_RE = re.compile(r"\berr\w*\b|\.Error\(\)")
-_RUST_ERR_ID_RE = re.compile(r"\b(?:e|err|error|why)\b")
+_GO_STDIN_RE = re.compile(r"\.StdinPipe\s*\(|\.Stdin\s*=[^=]")
+_RUST_STDIN_RE = re.compile(
+    r"\.stdin\s*\((?!\s*(?:std::process::)?Stdio::(?:null|inherit)\(\)\s*\))")
+_GO_LOG_REDIRECT_RE = re.compile(r"\blog\.SetOutput\s*\((?!\s*os\.Std(?:err|out)\s*\))")
 _STR_BLANK_RE = re.compile(r'"(?:[^"\\\n]|\\.)*"|`[^`]*`')
+_ARG_ID_RE = re.compile(r"(?<![\w.:])[A-Za-z_]\w*")
+_RUST_PATH_PARAM_RE = (r"\b{}\s*:\s*(?:&\s*)?(?:mut\s+)?(?:std::path::|std::ffi::)?"
+                       r"(?:Path|PathBuf|OsStr|OsString)\b")
+_ARG_WORDS = frozenset({"mut", "ref", "as", "true", "false", "nil", "self"})
+
+
+def _arg_ids_plain(args: str, text: str, rust: bool) -> bool:
+    """Every identifier in a process call's argument list (strings blanked; method and
+    path segments skipped) is a constant of this file, or in Rust a parameter typed
+    as a filesystem path (`tmp: &Path`)."""
+    for m in _ARG_ID_RE.finditer(args):
+        name = m.group(0)
+        if name in _ARG_WORDS:
+            continue
+        if re.search(r"\bconst\s+" + re.escape(name) + r"\b", text):
+            continue
+        if rust and re.search(_RUST_PATH_PARAM_RE.format(re.escape(name)), text):
+            continue
+        return False
+    return True
 
 
 def _err_to_exec(text: str, rust: bool) -> bool:
-    """Does some process-starting call in ``text`` take an error identifier among its
-    arguments (string contents blanked)?"""
+    """Could an error's text reach a process in ``text``: a process-starting call that
+    takes a non-literal argument, an opened child stdin, or (Go) ``log`` output sent
+    somewhere other than a standard stream?"""
+    if (_RUST_STDIN_RE if rust else _GO_STDIN_RE).search(text):
+        return True
+    if not rust and _GO_LOG_REDIRECT_RE.search(text):
+        return True
     call_re = _RUST_EXEC_CALL_RE if rust else _GO_EXEC_CALL_RE
-    err_re = _RUST_ERR_ID_RE if rust else _GO_ERR_ID_RE
     if not call_re.search(text):
         return False
     flat = _STR_BLANK_RE.sub(lambda m: '""', text)
@@ -256,7 +285,10 @@ def _err_to_exec(text: str, rust: bool) -> bool:
             elif flat[j] == ")":
                 depth -= 1
             j += 1
-        if err_re.search(flat[m.end():j - 1]):
+        args = flat[m.end():j - 1]
+        if not rust and m.group(0).startswith("exec.CommandContext"):
+            args = args.split(",", 1)[1] if "," in args else ""  # the context
+        if not _arg_ids_plain(args, text, rust):
             return True
     return False
 
@@ -329,6 +361,12 @@ class _Flow:
                 and not p.endswith("_test.go"))
         if not self._err_ok:
             raise _UnclassifiedError("some code hands an error's text to a process")
+
+    def require_log_shown(self) -> None:
+        """Go ``log.*`` prints only while no code in view sends its output elsewhere."""
+        if any(_GO_LOG_REDIRECT_RE.search(text or "") for p, text in self.files.items()
+               if Path(p).suffix.lower() in self.exts):
+            raise _UnclassifiedError("log output sent somewhere other than a standard stream")
 
     def func_bounds(self, t: _Toks, k: int) -> tuple[int, int, str | None]:
         """(body `{`, body `}`, function name) of the function holding token ``k``."""
@@ -424,6 +462,8 @@ class _Flow:
                     return None
             raise _UnclassifiedError(f"value passed to {name}")
         if name in _GO_PRINT:
+            if name.startswith("log."):
+                self.require_log_shown()
             return None
         if name in _GO_FPRINT:
             first = self.first_arg(t, o)

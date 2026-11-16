@@ -77,12 +77,6 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     ("cases_a2a_cards", "gap_dns_name_to_private"): "review",
     # #378 review: an install hint that only reaches a print / log / error must keep
     # its critical once that text can reach a process (fixed one by one on the branch).
-    ("cases_shown_cmd", "go_error_method_to_exec"): "do_not_connect",
-    ("cases_shown_cmd", "go_sprint_to_exec"): "do_not_connect",
-    ("cases_shown_cmd", "go_fprintln_to_sh_stdin"): "do_not_connect",
-    ("cases_shown_cmd", "go_log_output_to_sh_stdin"): "do_not_connect",
-    ("cases_shown_cmd", "rs_err_named_msg_to_arg"): "do_not_connect",
-    ("cases_shown_cmd", "rs_err_formatted_to_arg"): "do_not_connect",
     ("cases_shown_cmd", "js_computed_key_to_exec"): "do_not_connect",
     ("cases_shown_cmd", "js_object_entries_to_exec"): "do_not_connect",
     ("cases_shown_cmd", "js_alias_chain_to_exec"): "do_not_connect",
