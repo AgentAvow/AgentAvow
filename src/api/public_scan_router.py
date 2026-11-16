@@ -1268,9 +1268,11 @@ async def _capture_community_scan(
     )
     await db.execute(stmt)
     await db.commit()
-    from src.api.scan_catalog_router import invalidate_community_rows_cache
+    from src.api.scan_catalog_router import mark_community_rows_stale
 
-    invalidate_community_rows_cache()  # this worker's Browse / flagged-stat see it now
+    # This worker's Browse / flagged-stat pick the row up from a background refill
+    # (about a second); the next visitor is served the cached figures meanwhile.
+    mark_community_rows_stale()
 
     # Append a score-history point (Redis list, capped) so the timeline grows
     # over time — each fresh scan / daily re-scan adds a datapoint.
