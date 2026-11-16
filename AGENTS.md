@@ -161,6 +161,13 @@ change, add `agent:needs-product`, explain why in one comment, and stop.
 - **Deploy gate:** `scripts/deploy-prod.sh` runs `nginx -t` on the new config in a
   throwaway container before it rebuilds or restarts anything, and stops if that
   fails. `tests/test_deploy_prod_script.py` pins this. Keep the gate.
+- **Settings:** add a field to `Settings` in `src/config.py` and a line to
+  `.env.example` (`tests/test_settings.py` checks every field is listed), then read
+  `settings.<field>`. Don't read `os.environ` / `os.getenv` under `src/`:
+  `tests/test_no_direct_env_reads.py` fails on new reads. In production
+  (`ENVIRONMENT=production`, or `DEBUG=false` with it unset) the app refuses to start
+  with the default `JWT_SECRET` or a localhost database or Redis. See
+  `docs/adr/0001-settings-validated-at-startup.md`.
 - **Scanner false positives** for users: `docs/security-scan-false-positives.md`
   covers inline `# ag-scan:ignore` and allowlist entries. Scanner precision fixes
   usually come with corpus or fixture tests.

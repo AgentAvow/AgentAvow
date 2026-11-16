@@ -504,15 +504,11 @@ async def custom_redoc() -> HTMLResponse:
     return HTMLResponse(_REDOC_HTML)
 
 
-# --- Startup safety checks ---
-if settings.jwt_secret == "CHANGE-ME-IN-PRODUCTION":
-    _msg = (
-        "JWT_SECRET is set to the default value. "
-        "Set a strong, random JWT_SECRET in .env before deploying to production."
-    )
-    if not settings.debug:
-        raise RuntimeError(_msg)
-    logging.getLogger(__name__).warning(_msg)
+# --- Startup safety checks (src/config.py validate_startup) ---
+# Raises ConfigError naming each refused setting; uvicorn then exits non-zero.
+from src.config import validate_startup as _validate_startup  # noqa: E402
+
+_validate_startup(settings)
 
 
 app.add_middleware(
