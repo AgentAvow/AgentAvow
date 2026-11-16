@@ -6,11 +6,14 @@ import re
 
 import httpx
 
+from src.source_import.http import FetchClient, fetch_client
 from src.source_import.types import SourceImportResult
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT = 10  # seconds
+_TIMEOUT = 10  # seconds, per attempt
+# Budget for the whole fetch (repo, README, four dependency files), retries included.
+_TOTAL_DEADLINE = 45.0
 
 # Framework detection: dependency string → framework name
 _FRAMEWORK_PATTERNS: list[tuple[str, str]] = [
@@ -80,7 +83,7 @@ async def fetch_github(owner: str, repo: str, url: str) -> SourceImportResult:
         headers["Authorization"] = f"Bearer {token}"
 
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        async with fetch_client(total=_TOTAL_DEADLINE, attempt_timeout=_TIMEOUT) as client:
             # 1. Fetch repo metadata
             repo_resp = await client.get(api_base, headers=headers)
 
@@ -174,7 +177,7 @@ async def fetch_github(owner: str, repo: str, url: str) -> SourceImportResult:
 
 
 async def _fetch_dependency_files(
-    client: httpx.AsyncClient,
+    client: FetchClient,
     api_base: str,
     headers: dict[str, str],
 ) -> dict[str, str]:

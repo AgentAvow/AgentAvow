@@ -7,9 +7,13 @@ import re
 import httpx
 
 from src.source_import.errors import SourceFetchError, SourceParseError
+from src.source_import.http import fetch_client
 from src.source_import.types import SourceImportResult
 
 logger = logging.getLogger(__name__)
+
+# Budget for the whole PyPI fetch, retries included.
+_TOTAL_DEADLINE = 20.0
 
 _FRAMEWORK_PATTERNS: list[tuple[str, str]] = [
     ("langchain", "langchain"),
@@ -63,7 +67,7 @@ async def fetch_pypi(package_name: str, url: str) -> SourceImportResult:
         SourceFetchError: If the package is not found or a network error occurs.
     """
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with fetch_client(total=_TOTAL_DEADLINE, attempt_timeout=10) as client:
             resp = await client.get(
                 f"https://pypi.org/pypi/{package_name}/json"
             )
