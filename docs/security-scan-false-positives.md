@@ -45,6 +45,7 @@ The scanner has built-in **context-aware checks** that automatically skip safe p
 | `open("config.json", "r").read()` | Hardcoded file path string |
 | `with open(path) as f:` | Context manager ensures proper resource handling |
 | `Path("out.txt").write_text(data)` | Pathlib method call on a known path |
+| `placeholder: 'acme.tunnel.example'`, `"e.g. acme.tunnel.example"`, a host-allowlist suffix, a bundled public-suffix list | A tunnel host listed as data is reported low, not critical, but only while it can never be dialled: its holder is never passed on, interpolated or returned; the object around it is never read whole (`Object.values`, spread, `JSON.stringify`, passed to a call); it is not returned from a function, exported or set on `this`; and the file never reads its own source. Anything else keeps the critical. |
 
 ## Finding Names Reference
 

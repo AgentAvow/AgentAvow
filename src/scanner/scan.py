@@ -3450,6 +3450,11 @@ _EXAMPLE_LEAD_RE = re.compile(
 # dialled. The value is tracked by the name that holds it (its key, variable or list)
 # and every alias assigned from that name; any read that is not a plain comparison or
 # membership test counts as reaching a network call (unsure stays critical).
+# Reads that skip the name are covered by :func:`_data_holder_safe`: an enclosing
+# object read whole, a literal returned / exported / on `this`, a file reading its own
+# source. Gating these relaxations on a sink-free file instead (as _domain_list_entry
+# does) was rejected: the bundled packages they exist for always carry a fetch, so
+# that gate drops every one of them back to critical.
 _JS_NOT_A_NAME = frozenset({
     "module", "exports", "undefined", "null", "true", "false", "default", "case",
     "this", "window", "globalThis", "self", "return", "new", "await", "typeof"})
@@ -3490,6 +3495,82 @@ def _enclosing_openers(lines: list[str], idx: int, limit: int = 60) -> list[int]
         if len(out) >= 3:
             break
     return out
+
+
+# A file that reads its own source can pull any literal out of itself without naming
+# its holder (`readFileSync(__filename).match(/…ngrok…/)`).
+_READS_OWN_SOURCE_RE = re.compile(
+    r"""\b(?:readFile\w*|createReadStream|open|read_text|read_bytes|Path)\s*\(\s*"""
+    r"""(?:__filename|__file__|import\.meta\.(?:url|filename)|fileURLToPath\s*\(\s*import\.meta"""
+    r"""|process\.argv\[1\]|sys\.argv\[0\]|require\.main)"""
+    r"""|\binspect\.getsource|\bgetsourcelines\b""")
+# An enclosing literal whose holder escapes this file or is unnamed: returned from a
+# function, exported, or set on `this`. Its reads cannot be tracked by name.
+_ESCAPING_OPENER_RE = re.compile(
+    r"""\breturn\s*[\[{(]|\bmodule\.exports\b|\bexports\.[\w$]+\s*=|^\s*export\b"""
+    r"""|\bthis\.[\w$]+\s*=|=>\s*(?:\(\s*[\[{]|\[)\s*$""")
+_EXPORTS_NAME_RE = re.compile(r"""\bmodule\.exports\b|\bexports\.[\w$]+\s*=|^\s*export\b""")
+
+
+def _data_holder_safe(lines: list[str], idx: int, names: set[str],
+                      span: tuple[int, int], start: int | None = None,
+                      wrapped: bool = False) -> bool:
+    """A tunnel host listed as data on line ``idx`` (held under ``names``, defined on
+    lines ``span``) can never be dialled: the file does not read its own source, no
+    enclosing literal is returned / exported / set on ``this`` (its reads are
+    untracked), no enclosing object is read whole (reflection, spread, passed to a
+    call, a computed key), and :func:`_value_reaches_network` finds no read of the
+    holder itself. ``start`` is the line to search enclosing brackets from (the list's
+    opener for a long list); ``wrapped`` says that opener is a bundler's CommonJS
+    wrapper's `module.exports = [`, which the caller tracks by the wrapper's name."""
+    if _READS_OWN_SOURCE_RE.search("\n".join(lines)):
+        return False
+    first = idx if start is None else start
+    openers = ([] if start is None else [start]) + _enclosing_openers(lines, first)
+    outer: set[str] = set()
+    for n, j in enumerate(openers):
+        if j == first and start is None:
+            continue
+        if not (wrapped and n == 0) and _ESCAPING_OPENER_RE.search(lines[j]):
+            return False
+        if n == 0 and start is not None:
+            continue  # the list's own holder: tracked by the caller's names
+        if re.search(r"[\[{]\s*$", lines[j]):
+            outer |= _holder_names(lines[j])
+    outer -= names
+    if any(_EXPORTS_NAME_RE.search(ln) and re.search(
+            r"(?<![\w$])" + re.escape(nm) + r"(?![\w$])", ln)
+            for nm in names | outer for ln in lines
+            if nm and nm not in _JS_NOT_A_NAME and not _is_line_comment(ln)):
+        return False
+    if _outer_object_read_whole(lines, outer, span):
+        return False
+    return not _value_reaches_network(lines, names, span)
+
+
+def _outer_object_read_whole(lines: list[str], names: set[str], span: tuple[int, int]) -> bool:
+    """An object enclosing the value is read in any way other than a member access
+    (`cfg.other`) or a comparison: `Object.values(cfg)`, `...cfg`, `for (k in cfg)`,
+    `JSON.stringify(cfg)`, `send(cfg)`, `cfg[k]`, `return cfg`, an alias."""
+    lo, hi = span
+    for name in {n for n in names if n and n not in _JS_NOT_A_NAME}:
+        name_re = re.compile(r"(?<![\w$.])" + re.escape(name) + r"(?![\w$])")
+        for n, ln in enumerate(lines):
+            if lo <= n <= hi or _is_line_comment(ln):
+                continue
+            for om in name_re.finditer(ln):
+                before, after = ln[:om.start()], ln[om.end():]
+                if re.match(r"""['"]?\s*:(?!:)""", after) and not before.rstrip().endswith("?"):
+                    continue  # a key of the same name elsewhere
+                if re.match(r"\s*=(?![=>])", after) and not before.strip("\t ({;,"):
+                    continue  # its definition
+                if re.search(r"\b(?:const|let|var|function|class)\s+$", before):
+                    continue
+                if re.match(r"\s*\??\.\s*[A-Za-z_$]", after) or (
+                        _BENIGN_AFTER_RE.match(after) or _BENIGN_BEFORE_RE.search(before)):
+                    continue
+                return True
+    return False
 
 
 def _value_reaches_network(lines: list[str], names: set[str], span: tuple[int, int]) -> bool:
@@ -3568,7 +3649,7 @@ def _tunnel_host_example(lines: list[str], idx: int, m: re.Match[str]) -> bool:
         # `const o = { placeholder: '…' }`: the object itself may be read whole.
         if openers and re.search(r"=\s*[\[{]\s*$", lines[openers[0]]):
             names |= _holder_names(lines[openers[0]])
-        return not _value_reaches_network(lines, names, (idx, idx))
+        return _data_holder_safe(lines, idx, names, (idx, idx))
     return False
 
 
@@ -3606,7 +3687,7 @@ def _suffix_allowlist_default(lines: list[str], idx: int, pattern: re.Pattern[st
         if not (om and _allowlist_key_ok(om.group("key"), lines, idx)):
             return False
         key = om.group("key").strip("\"'").rsplit(".", 1)[-1]
-        return not _value_reaches_network(lines, {key}, (k + 1, idx))
+        return _data_holder_safe(lines, idx, {key}, (k + 1, idx))
     return False
 
 
@@ -3649,11 +3730,13 @@ def _bundled_domain_list_entry(lines: list[str], idx: int, pattern: re.Pattern[s
     # (`module.exports = [`) the bundler's wrapper (`var require_rules = __commonJS(`).
     names = _holder_names(lines[a - 1])
     span_lo = a - 1
+    wrapped = False
     if not names and re.search(r"\b(?:module\.)?exports\s*=\s*\[\s*$", lines[a - 1]):
         for j in _enclosing_openers(lines, a - 1)[:1]:
             names = set(_HOLDER_DECL_RE.findall(lines[j])) - _JS_NOT_A_NAME
             span_lo = j
-    return not _value_reaches_network(lines, names, (span_lo, b + 1))
+            wrapped = bool(names) and "__commonJS" in lines[j]
+    return _data_holder_safe(lines, idx, names, (span_lo, b + 1), start=a - 1, wrapped=wrapped)
 
 
 # Public Suffix List markers: its section comments, an exception rule (`"!www.ck"`),
