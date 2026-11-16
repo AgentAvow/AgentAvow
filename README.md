@@ -8,6 +8,8 @@
 
 AgentAvow answers "is this tool safe for my agent to connect?" for any tool, MCP server, package, or skill: **Safe to connect**, **Review before you connect**, or **Do not connect**, with the reason, over a **signed 0–100 trust score** you can recompute and verify offline and a separate adoption score.
 
+![AgentAvow catching a changed MCP tool definition](https://raw.githubusercontent.com/AgentAvow/AgentAvow/main/demos/rugpull/media/rugpull-demo.gif)
+
 ## MCP Server — Trust & Security for AI Agents
 
 Check whether a tool is safe before your agent connects to it, from Claude, ChatGPT, Cursor, VS Code or any MCP client. For a local install:

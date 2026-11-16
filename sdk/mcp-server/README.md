@@ -2,7 +2,13 @@
 
 > **Formerly `agentgraph-trust`.** This distribution is now published as **`agentavow-trust`**. The import module is unchanged — `import agentgraph_trust` still works.
 
-> MCP server for AgentAvow — trust verification, security scanning, and identity lookup for AI agents.
+Ask your agent "is this MCP server, package or repo safe to connect?" and get **Safe to connect**, **Review before you connect** or **Do not connect**, with the reason and a signed 0–100 trust score.
+
+```bash
+uvx agentavow-trust
+```
+
+![AgentAvow catching a changed MCP tool definition](https://raw.githubusercontent.com/AgentAvow/AgentAvow/main/demos/rugpull/media/rugpull-demo.gif)
 
 ## Install
 
