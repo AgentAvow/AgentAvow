@@ -18,6 +18,7 @@ them in passing.
 - `integrations/` the claude-code hook scripts, plus litellm, opa (policy tested in CI) and openai-plugin.
 - `sdk/` SDKs and packages: `js/` (npm gate, tested in CI), `python/`, `mcp-server/`, `bridges/`, and others. See `sdk/PUBLISHING.md`.
 - `docs/standards/` open specs and conformance vectors (Apache-2.0 / CC BY 4.0; see `CONTRIBUTING.md`). Each vector folder has `generate.mjs` and `verify.mjs`.
+- `docs/adr/` architecture decision records: decisions already made. Read the index before proposing to change a core layer.
 - `docs/` user and operator docs (quickstart, onboarding, moderation playbook, `security-scan-false-positives.md`).
 - `github-action/` the PR trust-scan Action (`trust-scan.yml` runs it on PRs). `local-scan-action/` is the local-scan Action (`agentavow-selfscan.yml`).
 - `gitlab/`, `bitbucket/`, `azure-devops/` CI templates around the slim scanner image (`docker/scanner.Dockerfile`).
@@ -53,8 +54,13 @@ pytest tests/ -v              # env: DATABASE_URL, REDIS_URL, DEBUG=true
   refuse the default `JWT_SECRET`, so every module errors.
 - The full CI run takes about 25 to 35 minutes, judging by recent runs. Run the tests
   you touched locally first, e.g. `pytest tests/test_x.py -q`.
+- **`make check`** runs the fast gates in one go: ruff, AST verify, the doc-parity test
+  (`tests/test_doc_parity.py`, which checks that the commands and paths on this page
+  exist) and the web typecheck. It needs no database. Run it before every push. The
+  full suite is still `make test`.
 - The Makefile wraps these with a `.venv` (`make setup`, `make lint`, `make test`,
-  `make migrate`). Its `db-start` target uses Homebrew services, so it is macOS-only.
+  `make migrate`); pass `VENV=.venv312` (or any other venv) to use a different one.
+  Its `db-start` target uses Homebrew services, so it is macOS-only.
   On Linux, `docker compose up db redis` from `docker-compose.yml` gives you Postgres
   and Redis.
 - New migration: `alembic revision --autogenerate -m "..."` (`make migration`).
@@ -90,6 +96,7 @@ publishes `ghcr.io/agentavow/scanner`.
   `git worktree add ../AgentAvow-wt-<topic> -b <type>/<topic> origin/main`.
   One writer per worktree.
 - One PR per change. Branch names follow `feat/`, `fix/`, `chore/`, `docs/`.
+  `.github/pull_request_template.md` lists the checks every PR ticks.
 - Never merge past failing CI or missing reviews, and never bypass branch protection.
 - `ci.yml` runs on every PR, including PRs stacked on another PR's branch, and on
   pushes to main. `gh workflow run ci.yml --ref <branch>` triggers a manual run.
