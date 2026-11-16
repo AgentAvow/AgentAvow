@@ -96,6 +96,10 @@ jobs:
         working-directory: web
         run: npm ci
 
+      - name: Lint
+        working-directory: web
+        run: npm run lint
+
       - name: TypeScript check
         working-directory: web
         run: npx tsc -b

@@ -399,6 +399,7 @@ export default function RebrandBrowse() {
   const [qInput, setQInput] = useState(q)
   const [sheetOpen, setSheetOpen] = useState(false)
   // Keep the search box in sync when q changes from outside (back/forward, clear).
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- sync the search box when q changes from outside (back/forward, clear)
   useEffect(() => { setQInput(q) }, [q])
 
   // Merge changes into the URL. `replace` (default) so filter tweaks don't stack up

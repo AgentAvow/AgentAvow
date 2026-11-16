@@ -26,6 +26,7 @@ export default function Leaderboard() {
   const [page, setPage] = useState(0)
 
   useEffect(() => { document.title = 'Leaderboard - AgentAvow' }, [])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- reset pagination when filters change
   useEffect(() => { setPage(0) }, [metric, entityType])
 
   const { data, isLoading, isError, refetch } = useQuery<LeaderboardEntry[]>({

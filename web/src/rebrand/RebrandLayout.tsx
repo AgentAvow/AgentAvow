@@ -152,6 +152,7 @@ function Wordmark() {
   // The animated version only mounts after load on a device that can hover.
   const [canHover, setCanHover] = useState(false)
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- matchMedia is client-only; reading it after mount keeps SSR/prerender markup static
     try { setCanHover(window.matchMedia('(hover: hover) and (pointer: fine)').matches) } catch { /* static */ }
   }, [])
   const animate = canHover && !reduce
