@@ -511,12 +511,25 @@ from src.config import validate_startup as _validate_startup  # noqa: E402
 _validate_startup(settings)
 
 
+# Optional Idempotency-Key on POST and PATCH (src/idempotency, #407). Added first so
+# it is the innermost middleware: CORS, security headers and the request id still
+# wrap a replayed answer.
+from src.idempotency import IdempotencyMiddleware  # noqa: E402
+from src.idempotency import install_openapi as _install_idempotency_openapi  # noqa: E402
+
+app.add_middleware(IdempotencyMiddleware)
+_install_idempotency_openapi(app)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-API-Key", "X-Provider-Key"],
+    allow_headers=[
+        "Authorization", "Content-Type", "X-Request-ID", "X-API-Key", "X-Provider-Key",
+        "Idempotency-Key",
+    ],
 )
 
 

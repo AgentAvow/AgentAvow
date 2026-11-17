@@ -42,6 +42,10 @@ FROZEN: dict[str, int] = {
     "client_error": 400,
     "server_error": 500,
     "validation_failed": 422,
+    "idempotency_key_invalid": 400,
+    "idempotency_key_in_use": 409,
+    "idempotency_key_reused": 422,
+    "idempotency_unavailable": 503,
 }
 
 
