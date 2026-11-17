@@ -5,18 +5,18 @@ import SEOHead from '../../components/SEOHead'
 import { trackCta, trackPluginCommandCopy } from '../../lib/analytics'
 import { startMetaPixel, trackMetaInstallCopy } from '../../lib/metaPixel'
 import { rp } from '../basePath'
-import { ChatGptLink, EmailSetup } from '../components/AdLanding'
+import { ChatGptLink, EmailSetup, WalletAdExamples } from '../components/AdLanding'
 import { PLUGIN_LINES } from '../lib/adLanding'
 import { BTN_GHOST_CLASS, DIVIDER_CLASS, Eyebrow } from '../components/PageBits'
 
 /**
  * /claude-code: the landing page for the Claude Code plugin (Google search ads, and
- * any link to the plugin). Approved concept v2, 2026-11-16: one H1, the two commands
- * with one copy button and real session output beside it, then the three answers in
- * one row. Detail sits lower, under "How it works".
+ * any link to the plugin). Concept v3, 2026-11-17: one H1, the real-results card the
+ * X ad's homepage uses (compact), then the two commands with one copy button, then the
+ * three answers in one row. Session output and detail sit lower, under "How it works".
  *
  * Phones (below the md breakpoint, by CSS only): the plugin installs on a computer, so
- * the first screen offers "Email me the setup" and a copy/share link right under it,
+ * the first screen offers "Email me the setup" and a copy/share link under the card,
  * then "Check a server" and "Add to ChatGPT". The full site nav stays (Kenne, 11-11).
  * The Meta Pixel loads here and nowhere else (lib/metaPixel.ts).
  */
@@ -142,28 +142,25 @@ export default function RebrandClaudeCode() {
       />
 
       {/* HERO */}
-      <div className="relative pt-5 md:pt-12 pb-9 md:pb-12">
+      <div className="relative pt-4 md:pt-12 pb-9 md:pb-12">
         <div className="relative z-[2] max-w-[1080px] mx-auto px-6">
-          <Eyebrow className="hidden md:block">AgentAvow for Claude Code</Eyebrow>
-          <div className="md:mt-3 md:grid md:grid-cols-[1.05fr_1fr] md:gap-10 md:items-start">
-            <div>
-              <h1 className="text-[clamp(27px,4.4vw,44px)] font-extrabold leading-[1.1] tracking-[-.025em] [text-wrap:balance]">{H1}</h1>
-              <p className="mt-3 md:mt-[18px] max-w-[46ch] text-[17px] md:text-[18px] font-light text-text-muted">Safe servers stay quiet. You only hear about the ones to review.</p>
+          <div className="max-w-[720px]">
+            <Eyebrow className="hidden md:block">AgentAvow for Claude Code</Eyebrow>
+            <h1 className="md:mt-3 text-[clamp(27px,4.4vw,44px)] font-extrabold leading-[1.1] tracking-[-.025em] [text-wrap:balance]">{H1}</h1>
 
-              {/* Phone: the plugin needs a computer, so send the setup there. */}
-              <div className="md:hidden mt-4">
-                <p className="text-[14.5px] text-text-muted mb-2.5">It&apos;s a Claude Code plugin, so it installs on your computer. Send yourself the setup:</p>
-                <EmailSetup search={search} />
-              </div>
+            {/* Real results, the same card as the X ad's homepage. */}
+            <div className="mt-3.5 md:mt-6"><WalletAdExamples compact /></div>
 
-              {/* Computer: paste the two lines. */}
-              <div className="hidden md:block mt-6">
-                <Install id="plugin-lines-hero" />
-                <p className="mt-2.5 text-[14px] text-text-muted"><b className="font-semibold text-text">Free · No account</b> · Paste into Claude Code, then start a new session.</p>
-              </div>
+            {/* Phone: the plugin needs a computer, so send the setup there. */}
+            <div className="md:hidden mt-3">
+              <p className="text-[14.5px] text-text-muted mb-2">It installs on a computer. Email yourself the setup:</p>
+              <EmailSetup search={search} />
             </div>
-            <div className="hidden md:block">
-              <SessionOutput />
+
+            {/* Computer: paste the two lines. */}
+            <div className="hidden md:block mt-5">
+              <Install id="plugin-lines-hero" />
+              <p className="mt-2.5 text-[14px] text-text-muted"><b className="font-semibold text-text">Free · No account</b> · Paste into Claude Code, then start a new session.</p>
             </div>
           </div>
 
@@ -199,7 +196,7 @@ export default function RebrandClaudeCode() {
         <div className="max-w-[1080px] mx-auto px-6">
           <h2 className={h2} id="how-it-works">How it works</h2>
           <p className="mt-2.5 text-text-muted max-w-[60ch]">When a session starts, and when Claude Code adds a server or installs a package, the plugin checks it with AgentAvow. Your first session opens with one line, like this:</p>
-          <div className="md:hidden mt-4"><SessionOutput /></div>
+          <div className="mt-4 max-w-[720px]"><SessionOutput /></div>
           <div className="grid sm:grid-cols-2 gap-3.5 mt-[22px]">
             <div className="glass rounded-2xl border border-border/60 p-5">
               <h3 className="text-[16px] font-bold">What it checks</h3>
@@ -255,7 +252,7 @@ export default function RebrandClaudeCode() {
           <div className="md:hidden mt-4 max-w-[480px]">
             <EmailSetup search={search} />
           </div>
-          <p className="mt-3 text-[14px] text-text-muted">Needs Claude Code and <code className="font-mono text-[13px] text-primary-light">python3</code>. Remove it any time from <code className="font-mono text-[13px] text-primary-light">/plugin</code>. Or open <code className="font-mono text-[13px] text-primary-light">/plugin</code> and find AgentAvow Trust under Discover (the directory can lag behind the latest version).</p>
+          <p className="mt-3 text-[14px] text-text-muted">Needs Claude Code and <code className="font-mono text-[13px] text-primary-light">python3</code>. Remove it any time from <code className="font-mono text-[13px] text-primary-light">/plugin</code>.</p>
         </div>
       </div>
 

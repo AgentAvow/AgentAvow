@@ -35,9 +35,18 @@ export function adTags(search: string): Record<string, string> {
  * The X wallet-key ads: x3-do-not-connect and x5-wallet-home (2026-11-test-x, see
  * docs/internal/ads-deep-dive-2026-11-16.md). Their homepage opens on the check and
  * the real results, the ad's finding among them.
+ *
+ * Reads the page URL only, not the tags stored for this tab (unlike adTags): after one
+ * ad visit, the logo leads to the usual homepage. public/ad-hero.js does the same.
  */
 export function isWalletKeyAd(search: string): boolean {
-  return /^x[35](?:-|$)/i.test(adTags(search).utm_content ?? '')
+  let content = ''
+  try {
+    content = new URLSearchParams(search).get('utm_content') ?? ''
+  } catch {
+    // Bad query string
+  }
+  return /^x[35](?:-|$)/i.test(content)
 }
 
 /** /claude-code with the ad's tags, so an install made later on a computer still counts for the ad. */

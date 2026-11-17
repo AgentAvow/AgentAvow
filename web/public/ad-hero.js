@@ -9,14 +9,9 @@
   try {
     var path = location.pathname.replace(/\/+$/, '')
     if (path !== '' && path !== '/rebrand') return
+    // The page URL only, never the tags stored for this tab: after one ad visit, the
+    // logo and a plain link must lead to the usual homepage.
     var content = new URLSearchParams(location.search).get('utm_content')
-    if (!content) {
-      try {
-        content = (JSON.parse(sessionStorage.getItem('ag_utm') || '{}') || {}).utm_content
-      } catch (e) {
-        content = null
-      }
-    }
     if (!/^x[35](?:-|$)/i.test(content || '')) return
     var root = document.documentElement
     root.setAttribute('data-ad-hero', 'wallet')
