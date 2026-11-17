@@ -87,6 +87,7 @@ from src.api.scan_catalog_router import router as scan_catalog_router
 from src.api.search_router import router as search_router
 from src.api.security_attestation_router import router as security_attestation_router
 from src.api.semantic_search_router import router as semantic_search_router
+from src.api.send_setup_router import router as send_setup_router
 from src.api.social_router import router as social_router
 from src.api.sso_router import router as sso_router
 from src.api.submolt_router import router as submolt_router
@@ -768,6 +769,7 @@ app.include_router(sandbox_stats_router, prefix=settings.api_v1_prefix)
 # generic /public/scan/{owner}/{repo}/... routes.
 app.include_router(erc8004_router, prefix=settings.api_v1_prefix)
 app.include_router(public_scan_router, prefix=settings.api_v1_prefix)
+app.include_router(send_setup_router, prefix=settings.api_v1_prefix)
 # The Claude Code plugin's once-a-day active request (counts protected machines).
 app.include_router(plugin_active_router, prefix=settings.api_v1_prefix)
 app.include_router(preflight_router, prefix=settings.api_v1_prefix)

@@ -110,14 +110,14 @@ def test_privacy_policy_discloses_the_pixel():
 
 
 def test_copy_button_falls_back_to_a_manual_copy():
-    """In-app browsers (Reddit's) can refuse clipboard writes. Then the line is
-    selected and the person is told to copy it by hand; the onCopy handler still
+    """In-app browsers (Reddit's) can refuse clipboard writes. Then the commands are
+    selected and the person is told to copy them by hand; the onCopy handler still
     tracks that copy, and nothing is counted for a copy that didn't happen."""
     src = (Path(__file__).resolve().parent.parent / "web" / "src" / "rebrand" / "pages"
            / "ClaudeCode.tsx").read_text()
     body = src[src.index("const copy = async"):]
     body = body[: body.index("\n  }\n")]
-    assert "selectLine(" in body and "setManual(i)" in body
+    assert "selectNode(" in body and "setManual(true)" in body
     assert body.index("return") < body.index("copied()")  # failure returns before tracking
     assert "onCopy={selectionCopied}" in src
     assert "press and hold" in src
