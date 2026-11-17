@@ -432,7 +432,22 @@ def _tool_description(result) -> str:
     return "A source repository"
 
 
-_BEHAVIORAL_CACHE_TTL = 24 * 3600  # a package's runtime behavior rarely changes intra-day
+_BEHAVIORAL_CACHE_TTL = 24 * 3600  # floor; see _behavioral_cache_ttl()
+
+
+def _behavioral_cache_ttl() -> int:
+    """How long a sandbox block stays cached: one day longer than the backfill's
+    revisit window (``behavioral_backfill_retry_days``), never under 24 h.
+
+    The block was cached for 24 h while the backfill revisits a coordinate only every
+    7 days, so an unvisited tool lost its block (and with it the Certified mark, which
+    needs a finished sandbox run) for six days of every seven: on 11-17, 588 of 754
+    stored A+ rows read "waiting for a sandbox slot". A new release still gets a fresh
+    run at once: ``trigger.on_scan_change`` drops the cached block when the version or
+    tool digest moves. The signed observation carries its own ``observed_at``."""
+    from src.config import settings
+    days = int(getattr(settings, "behavioral_backfill_retry_days", 7) or 7)
+    return max(_BEHAVIORAL_CACHE_TTL, (days + 1) * 24 * 3600)
 
 
 def _declared_egress(data: dict) -> set[str]:
@@ -574,7 +589,7 @@ async def _run_and_cache_behavioral(
     *, plan: str | None = None, env_names: list[str] | None = None,
     readme_text: str | None = None, version: str | None = None,
 ) -> dict | None:
-    """Run the sandbox tier once and cache the result (24h). Returns the block.
+    """Run the sandbox tier once and cache the result (_behavioral_cache_ttl). Returns the block.
     ``version`` = the exact release to install; it is stamped on the block and on the
     signed observation's subject.
     ``expected_hosts`` = the tool's declared egress (see ``_declared_egress``); without
@@ -639,7 +654,7 @@ async def _run_and_cache_behavioral(
         from src.redis_client import get_redis
         await get_redis().set(
             _behavioral_cache_key(surface, name, expected_hosts, plan), json.dumps(block),
-            ex=_BEHAVIORAL_CACHE_TTL,
+            ex=_behavioral_cache_ttl(),
         )
         await _behavioral_slots.clear_pending(
             _behavioral_cache_key(surface, name, expected_hosts, plan))
