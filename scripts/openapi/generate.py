@@ -9,6 +9,11 @@ The app is imported in a child process with a fixed environment and an empty wor
 directory, so a developer's shell variables or untracked `.env` cannot change which
 routes are registered or how they are described. Output is JSON with sorted keys,
 two-space indent and a trailing newline, so the same code always gives the same bytes.
+
+The text also depends on the FastAPI and pydantic versions, and the repo has no lock
+file. docs/api/openapi-toolchain.txt pins the ones that matter. The generator refuses
+to run under other versions (`make openapi-venv` builds a venv with the pins) unless
+given --any-toolchain, which is for experiments only.
 """
 
 from __future__ import annotations
@@ -36,6 +41,43 @@ FIXED_ENV = {
 # Passed through so the interpreter itself can start; none of these reach settings.
 PASS_THROUGH = ("PATH", "HOME", "TMPDIR", "SYSTEMROOT", "LANG", "LC_ALL")
 _CHILD_FLAG = "_AGENTAVOW_OPENAPI_CHILD"
+
+
+TOOLCHAIN = ROOT / "docs" / "api" / "openapi-toolchain.txt"
+
+
+def pinned_toolchain() -> dict[str, str]:
+    """{package: version} from the toolchain file."""
+    pins: dict[str, str] = {}
+    for line in TOOLCHAIN.read_text(encoding="utf-8").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line:
+            name, _, version = line.partition("==")
+            pins[name.strip().lower()] = version.strip()
+    return pins
+
+
+def toolchain_mismatches() -> list[str]:
+    """One line per pinned package whose installed version differs (empty when all match)."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    out = []
+    for name, want in sorted(pinned_toolchain().items()):
+        try:
+            have = version(name)
+        except PackageNotFoundError:
+            have = "not installed"
+        if have != want:
+            out.append(f"{name} {have} (pinned {want})")
+    return out
+
+
+def toolchain_message(mismatches: list[str]) -> str:
+    return (
+        "The OpenAPI document must be generated with the versions pinned in "
+        f"docs/api/openapi-toolchain.txt, but this interpreter has: {', '.join(mismatches)}.\n"
+        "Run `make openapi-venv` once, then `make openapi` (or `make openapi-check`)."
+    )
 
 
 def serialize(spec: dict) -> str:
@@ -93,8 +135,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true", help="fail if the file is stale")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--any-toolchain", action="store_true",
+                        help="skip the version pin check (output may not match CI)")
     args = parser.parse_args(argv)
     path = args.output.resolve()
+    mismatches = [] if args.any_toolchain else toolchain_mismatches()
+    if mismatches:
+        print(toolchain_message(mismatches), file=sys.stderr)
+        return 2
     if args.check:
         ok, message = check(path)
         print(message, file=sys.stdout if ok else sys.stderr)

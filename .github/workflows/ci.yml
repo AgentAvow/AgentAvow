@@ -94,8 +94,9 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: pip install -e ".[prod,dev]"
+      # Pinned FastAPI/pydantic versions, so an upstream release does not change the text.
+      - name: Install dependencies (pinned OpenAPI toolchain)
+        run: pip install -e ".[prod,dev]" -c docs/api/openapi-toolchain.txt
 
       - name: Committed OpenAPI document is current
         run: python scripts/openapi/generate.py --check

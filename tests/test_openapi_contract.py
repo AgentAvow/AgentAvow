@@ -39,7 +39,26 @@ gen = _load("generate")
 
 @pytest.fixture(scope="module")
 def fresh() -> str:
+    """The document as the code builds it. Skipped when this interpreter's FastAPI or
+    pydantic differ from docs/api/openapi-toolchain.txt: the text would differ for
+    reasons that are not route changes. The api-contract CI job always runs with the
+    pins, so it stays the gate."""
+    mismatches = gen.toolchain_mismatches()
+    if mismatches:
+        pytest.skip(gen.toolchain_message(mismatches))
     return gen.generate()
+
+
+def test_toolchain_file_pins_the_schema_libraries():
+    pins = gen.pinned_toolchain()
+    for name in ("fastapi", "pydantic", "pydantic-core", "starlette"):
+        assert pins.get(name), f"{name} must be pinned in {gen.TOOLCHAIN.name}"
+
+
+def test_generator_refuses_an_unpinned_toolchain(monkeypatch, capsys):
+    monkeypatch.setattr(gen, "toolchain_mismatches", lambda: ["fastapi 0.1 (pinned 9.9)"])
+    assert gen.main(["--check"]) == 2
+    assert "make openapi-venv" in capsys.readouterr().err
 
 
 # --- the committed document is current -------------------------------------------

@@ -22,7 +22,12 @@ and has no OpenAPI description at all.
    `scripts/openapi/generate.py` (`make openapi`). The app is imported in a child
    process with a fixed environment and an empty working directory, so shell variables
    or an untracked `.env` cannot change which routes are registered. Output is JSON
-   with sorted keys, two-space indent and a trailing newline.
+   with sorted keys, two-space indent and a trailing newline. The text also depends on
+   the FastAPI and pydantic versions (the repo has no lock file, and the first CI run
+   already differed from a local venv), so `docs/api/openapi-toolchain.txt` pins
+   fastapi, pydantic, pydantic-core and starlette. The generator refuses other versions.
+   `make openapi-venv` builds `.venv-openapi` with the pins, and the CI job installs
+   with them as constraints. Bumping the pins is its own PR, with the regenerated file.
 2. **Staleness gate.** `generate.py --check` (CI job `api-contract`, and
    `tests/test_openapi_contract.py` in the backend suite) fails when the committed
    file differs from the code, and says to run `make openapi`.
@@ -63,9 +68,12 @@ and has no OpenAPI description at all.
   each route documents them.
 - Routes hidden from the document (the plugin's `/public/plugin/active` ping, HTML
   pages, badge HEAD) are not checked by the diff. Their own tests guard them.
-- A FastAPI or pydantic upgrade can change the generated text with no route change.
-  The staleness gate then fails until someone runs `make openapi`; the breaking gate
-  shows whether the upgrade changed anything clients rely on.
+- The document describes the code under the pinned FastAPI and pydantic. Prod installs
+  whatever the version ranges allow, so its live `/api/v1/openapi.json` can differ in
+  small ways (a regex `pattern`, say). Bump the pins from time to time. The breaking
+  gate shows whether a bump changes anything clients rely on.
+- In the backend test job (unpinned versions) the staleness tests skip with a message.
+  The `api-contract` job is the gate.
 - The very first PR has no base document, so its breaking step reports "nothing to
   compare" and passes.
 

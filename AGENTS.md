@@ -132,7 +132,8 @@ publishes `ghcr.io/agentavow/scanner`.
   Any change to it also needs a manual Rescan of the published ChatGPT app by the
   owner. Schema changes are additive only; flag them in the PR description.
 - **The REST API document is committed.** After a route or model change, run
-  `make openapi` and commit `docs/api/openapi.json`; CI fails when it is stale or when
+  `make openapi` (after `make openapi-venv` once: it pins FastAPI and pydantic from
+  `docs/api/openapi-toolchain.txt`) and commit `docs/api/openapi.json`. CI fails when it is stale or when
   it breaks a client against the base branch (`make openapi-check`). New routes go
   under `/api/v1`; exceptions go in `docs/api/route-allowlist.json` with a reason, and
   owner-approved breaks in `docs/api/approved-breaks.json`. This diff does not cover
