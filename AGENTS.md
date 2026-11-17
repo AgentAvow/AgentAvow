@@ -138,6 +138,10 @@ publishes `ghcr.io/agentavow/scanner`.
   under `/api/v1`; exceptions go in `docs/api/route-allowlist.json` with a reason, and
   owner-approved breaks in `docs/api/approved-breaks.json`. This diff does not cover
   `/mcp`; the snapshot guards above still do (`docs/adr/0006-api-contract.md`).
+- **`Idempotency-Key` stays optional.** `src/idempotency.py` replays a keyed POST or
+  PATCH from Redis (ADR 0007). Never require the header on a route anonymous
+  clients call, and give every new entry in `EXCLUDED_PREFIXES` a reason there and in
+  `docs/adr/0007-idempotency-key.md`.
 - **Merge only on an explicit green.** A watcher that errored or a pending job is not a
   pass.
 - **No AI-attribution trailers** (`Co-Authored-By: Claude`, `Claude-Session:`,

@@ -72,14 +72,20 @@ CATALOG: dict[str, ErrorCode] = _codes(
     ("server_error", 500, "Server error"),
     # Specific codes.
     ("validation_failed", 422, "Request validation failed"),
+    # Idempotency-Key (src/idempotency.py, #407).
+    ("idempotency_key_invalid", 400, "Invalid Idempotency-Key"),
+    ("idempotency_key_in_use", 409, "Idempotency-Key in use"),
+    ("idempotency_key_reused", 422, "Idempotency-Key reused with a different request"),
+    ("idempotency_unavailable", 503, "Idempotency store unavailable"),
 )
 
-# The code an error gets when its route did not name one.
-DEFAULT_CODE_BY_STATUS: dict[int, str] = {
-    entry.status: entry.code
-    for entry in CATALOG.values()
-    if entry.code not in ("client_error", "server_error", "validation_failed")
-}
+# The code an error gets when its route did not name one: the first entry listed for
+# its status. The generic codes come first, so a specific code added below never
+# becomes a default.
+DEFAULT_CODE_BY_STATUS: dict[int, str] = {}
+for _entry in CATALOG.values():
+    DEFAULT_CODE_BY_STATUS.setdefault(_entry.status, _entry.code)
+del _entry
 
 
 def get(code: str) -> ErrorCode:
