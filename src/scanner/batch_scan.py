@@ -20,10 +20,6 @@ import httpx
 from src.config import settings
 from src.scanner.scan import ScanResult, scan_repo
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 
@@ -396,6 +392,10 @@ async def run_batch_scan(
 
 if __name__ == "__main__":
     import argparse
+
+    from src.observability import setup_logging
+
+    setup_logging()
 
     parser = argparse.ArgumentParser(
         description="Batch scan MCP server repos",

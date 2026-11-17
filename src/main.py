@@ -3,15 +3,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
-from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.api.a2a_router import router as a2a_router
 from src.api.account_claims_router import router as account_claims_router
@@ -109,8 +106,9 @@ from src.api.x402_router import router as x402_router
 from src.bridges.mcp_streamable import mcp_asgi_app
 from src.bridges.mcp_streamable import session_manager as mcp_session_manager
 from src.config import settings
+from src.errors.handlers import install_problem_handlers
 from src.feeds.bluesky.feed_router import router as bluesky_feed_router
-from src.logging_config import setup_logging
+from src.observability import ObservabilityMiddleware, setup_logging
 
 setup_logging()
 
@@ -523,59 +521,12 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def request_id_middleware(request: Request, call_next) -> Response:
-    """Attach a unique request ID for log correlation."""
-    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4())[:8])
-    request.state.request_id = request_id
-    response: Response = await call_next(request)
-    response.headers["X-Request-ID"] = request_id
-    return response
-
-
-@app.middleware("http")
 async def usage_scope_http_middleware(request: Request, call_next) -> Response:
     """Decide what counts as usage: redirects and legacy-host requests reach no
     usage counter (src/usage_scope)."""
     from src.usage_scope import usage_scope_middleware
 
     return await usage_scope_middleware(request, call_next)
-
-
-# Health probes: polled every few seconds, so never logged per request.
-_PROBE_PATHS = frozenset({"/health", "/livez", "/readyz"})
-
-
-@app.middleware("http")
-async def request_logging_middleware(request: Request, call_next) -> Response:
-    """Log every request with method, path, status, and timing."""
-    import time as _time
-
-    # Skip health checks to reduce noise
-    if request.url.path in _PROBE_PATHS:
-        return await call_next(request)
-
-    start = _time.monotonic()
-    response: Response = await call_next(request)
-    duration_ms = round((_time.monotonic() - start) * 1000, 1)
-
-    request_id = getattr(request.state, "request_id", "-")
-    entity_id = getattr(request.state, "entity_id", "-")
-    client_ip = request.client.host if request.client else "-"
-
-    logger.info(
-        "%s %s %s %.1fms",
-        request.method, request.url.path, response.status_code, duration_ms,
-        extra={
-            "request_id": request_id,
-            "method": request.method,
-            "path": request.url.path,
-            "status_code": response.status_code,
-            "duration_ms": duration_ms,
-            "client_ip": client_ip,
-            "entity_id": entity_id,
-        },
-    )
-    return response
 
 
 @app.middleware("http")
@@ -709,80 +660,21 @@ async def rate_limit_headers_middleware(request: Request, call_next) -> Response
     return response
 
 
+# Health probes: polled every few seconds, so never logged per request.
+_PROBE_PATHS = frozenset({"/health", "/livez", "/readyz"})
+
+# Request id, W3C trace context and the access log (src/observability, #405). Added
+# last so it is the outermost middleware: every line logged under it, from any
+# middleware or route, carries the request's request_id and trace_id.
+app.add_middleware(ObservabilityMiddleware, skip_log_paths=_PROBE_PATHS)
+
+
 logger = logging.getLogger(__name__)
 
 
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(
-    request: Request, exc: RequestValidationError,
-) -> JSONResponse:
-    request_id = getattr(request.state, "request_id", "unknown")
-
-    def _sanitize_value(v: object) -> object:
-        """Recursively make a value JSON-serializable."""
-        if isinstance(v, (str, int, float, bool, type(None))):
-            return v
-        if isinstance(v, dict):
-            return {k: _sanitize_value(val) for k, val in v.items()}
-        if isinstance(v, (list, tuple)):
-            return [_sanitize_value(item) for item in v]
-        return str(v)
-
-    def _sanitize_errors(errors: list[dict]) -> list[dict]:
-        """Make validation error dicts JSON-serializable.
-
-        Pydantic/FastAPI may put non-serializable objects (e.g. ValueError)
-        in the ``ctx`` field. Convert them recursively.
-        """
-        sanitized = []
-        for err in errors:
-            clean = dict(err)
-            if "ctx" in clean:
-                clean["ctx"] = _sanitize_value(clean["ctx"])
-            sanitized.append(clean)
-        return sanitized
-
-    return JSONResponse(
-        status_code=422,
-        content={
-            "detail": _sanitize_errors(exc.errors()),
-            "request_id": request_id,
-        },
-    )
-
-
-@app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(
-    request: Request, exc: StarletteHTTPException,
-) -> JSONResponse:
-    request_id = getattr(request.state, "request_id", "unknown")
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "detail": exc.detail,
-            "request_id": request_id,
-        },
-    )
-
-
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(
-    request: Request, exc: Exception,
-) -> JSONResponse:
-    request_id = getattr(request.state, "request_id", "unknown")
-    logger.error(
-        "Unhandled exception [request_id=%s]: %s",
-        request_id,
-        exc,
-        exc_info=True,
-    )
-    return JSONResponse(
-        status_code=500,
-        content={
-            "detail": "Internal server error",
-            "request_id": request_id,
-        },
-    )
+# Every API error answers as RFC 9457 problem+json from one code catalog (#409,
+# src/errors). The old "detail" and "request_id" fields keep their values.
+install_problem_handlers(app)
 
 
 app.include_router(account_router, prefix=settings.api_v1_prefix)

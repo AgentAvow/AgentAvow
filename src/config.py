@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     # localhost and default-secret refusals in validate_startup() apply to
     # production only. See effective_environment.
     environment: str = ""
+    # json | text. Empty: text when DEBUG is true, json otherwise (src/observability).
+    log_format: str = ""
     api_v1_prefix: str = "/api/v1"
     base_url: str = "http://localhost:5173"
 
@@ -613,6 +615,14 @@ class Settings(BaseSettings):
         if v not in _ENVIRONMENT_ALIASES:
             raise ValueError("must be one of local, staging, production")
         return _ENVIRONMENT_ALIASES[v]
+
+    @field_validator("log_format")
+    @classmethod
+    def _check_log_format(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if v not in ("", "json", "text"):
+            raise ValueError("must be json or text (or empty for the default)")
+        return v
 
     @field_validator("database_url")
     @classmethod

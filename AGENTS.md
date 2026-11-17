@@ -111,6 +111,11 @@ publishes `ghcr.io/agentavow/scanner`.
 
 - **Tests wipe their database.** See the warning under "Backend": a dedicated test
   database per agent, never dev, staging or prod.
+- **Logging goes through `src/observability/`.** Log with `logging.getLogger(__name__)`;
+  don't call `logging.basicConfig` or import a tracing library elsewhere (CLI entry
+  points call `src.observability.setup_logging()`). The formatter adds request and
+  trace ids and redacts secrets and emails (`tests/test_observability_imports.py`,
+  ADR 0004). Still don't log tokens, headers or request bodies on purpose.
 - **Python tables have TypeScript twins.** Change both sides in one PR:
   `src/scanner/verdict.py` ↔ `web/src/components/trust/gradeSystem.ts`, and
   `src/scanner/categories.py` ↔ `web/src/components/trust/scanCategories.ts`.

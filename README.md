@@ -251,6 +251,34 @@ The public scanning API needs **no authentication**. All app endpoints use the `
 | **Watches** | `/watches` | Create/list/delete tool watches for score, answer, Certified-mark and signed-definition change alerts |
 | **Alert webhook** | `/account/alert-webhook` | Configure (and test) the HMAC-signed webhook that receives change alerts |
 
+### Errors
+
+Errors come back as [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem details,
+content type `application/problem+json`:
+
+```json
+{
+  "type": "https://agentavow.com/problems/not_found",
+  "title": "Not found",
+  "status": 404,
+  "code": "not_found",
+  "detail": "Entity not found",
+  "instance": "/api/v1/entities/1b2c.../badges",
+  "request_id": "9f0c2e4b7a1d4c3e8b5a6f7d2e1c0b9a",
+  "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+}
+```
+
+Branch on `code` (stable; the list is in `src/errors/catalog.py`) or `status`, not on
+`title` or `detail`. `request_id` matches the `X-Request-ID` response header; quote it
+when you report a problem. A 422 for an invalid request also has `errors`, one entry
+per invalid field (`location`, `field`, `message`, `type`); its `detail` is still the
+list of validation errors it always was. A 500 never carries internal detail.
+
+Three kinds of route keep the old `application/json` `{"detail", "request_id"}` error
+body: the hosted MCP endpoint `/mcp` (JSON-RPC errors), badge and image routes, and
+`/.well-known/*`. See [ADR 0005](docs/adr/0005-errors-are-problem-json.md).
+
 ## Project Structure
 
 ```
@@ -332,7 +360,8 @@ make test
 - CORS with configurable origins
 - Rate limiting (read, write, auth-specific limits)
 - Security headers (HSTS, X-Frame-Options, X-Content-Type-Options, etc.)
-- Request ID correlation for tracing
+- Request ID correlation for tracing: every response carries `X-Request-ID` (yours, when you send a safe one of up to 128 characters of `A-Z a-z 0-9 . _ : -`; otherwise a generated 32-character id) and a W3C `traceparent` that continues your trace when you send one
+- Structured logs: one JSON object per line in production, each carrying the request id and trace id; tokens, API keys, cookies, passwords, webhook secrets, JWTs and email addresses are redacted before a line is written (`src/observability/`)
 - Content filtering with HTML sanitization
 - HMAC-SHA256 webhook signing
 - Bcrypt password hashing
