@@ -159,6 +159,24 @@ npm run dev
 
 ## Environment Variables
 
+All backend settings live in one class, `Settings` in `src/config.py`, and every one
+of them is listed in `.env.example`. Code reads `settings.<name>`, not `os.environ`
+(a test fails on new direct reads under `src/`).
+
+Settings are checked when the service starts:
+
+- A malformed value (a number that isn't one, a `DATABASE_URL` that isn't PostgreSQL,
+  a `REDIS_URL` that isn't Redis, an unknown `ENVIRONMENT`) stops the service. The
+  error names each bad variable and never prints its value.
+- `ENVIRONMENT` is `local`, `staging` or `production`. When it is unset, it is
+  `production` if `DEBUG=false` and `local` if `DEBUG=true`.
+- In production the service refuses to start with the default `JWT_SECRET`, or with
+  `DATABASE_URL` or `REDIS_URL` pointing at localhost. Staging and local development
+  may use localhost. A few other production settings (`BASE_URL`, `CORS_ORIGINS`,
+  `ATTESTATION_SIGNING_KEY_ED25519`) only log a warning.
+
+See `docs/adr/0003-settings-validated-at-startup.md` for why.
+
 ### Required (`.env`)
 
 ```bash
@@ -173,6 +191,7 @@ JWT_SECRET=change-me-to-a-random-64-char-string
 ```bash
 APP_NAME=AgentAvow
 DEBUG=false
+ENVIRONMENT=            # local | staging | production (see above)
 JWT_ALGORITHM=HS256
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES=15
 JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
