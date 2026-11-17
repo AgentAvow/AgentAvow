@@ -141,46 +141,75 @@ const TONE: Record<Answer, { text: string; icon: string; phrase: string }> = {
 
 /**
  * Real results, each read from the live API (GET /public/scan/package/...) on
- * 2026-11-17 UTC before it went in here. Each row links to its report, which always
- * shows today's result. Re-check before changing a row.
+ * 2026-11-17 UTC before it went in here (context7 re-read that evening: 83 → 80, 31
+ * files). Each row links to its report, which always shows today's result. Re-check
+ * before changing a row. `short` is the name the compact card shows.
  */
-const EXAMPLE_ROWS: { name: string; answer: Answer; score: number; why: string; report: string }[] = [
-  { name: 'context7', answer: 'safe', score: 83, why: 'No critical or high findings in 30 files.', report: '/rebrand/check/pkg/npm/@upstash/context7-mcp' },
+const EXAMPLE_ROWS: { name: string; short?: string; answer: Answer; score: number; why: string; report: string }[] = [
+  { name: 'context7', answer: 'safe', score: 80, why: 'No critical or high findings in 31 files.', report: '/rebrand/check/pkg/npm/@upstash/context7-mcp' },
   { name: 'mcp-server-git', answer: 'safe', score: 77, why: 'Nothing found. Latest version, 2026.11.11.', report: '/rebrand/check/pkg/pypi/mcp-server-git' },
-  { name: '@modelcontextprotocol/server-puppeteer', answer: 'review', score: 64, why: 'One high finding: an undeclared network call. Archived by its maintainer, so nobody patches it.', report: '/rebrand/check/pkg/npm/@modelcontextprotocol/server-puppeteer' },
+  { name: '@modelcontextprotocol/server-puppeteer', short: 'server-puppeteer', answer: 'review', score: 64, why: 'One high finding: an undeclared network call. Archived by its maintainer, so nobody patches it.', report: '/rebrand/check/pkg/npm/@modelcontextprotocol/server-puppeteer' },
 ]
 
-function Row({ name, answer, score, children, report }: { name: string; answer: Answer; score: number; children: React.ReactNode; report: string }) {
+/**
+ * A report link. On /claude-code (`full`) it's a full page load, like that page's other
+ * links, so the Meta Pixel loaded there never rides along into the app (see the Meta Pixel loader).
+ */
+function ReportLink({ to, full, className, children }: { to: string; full: boolean; className: string; children: React.ReactNode }) {
+  return full
+    ? <a href={rp(to)} className={className}>{children}</a>
+    : <Link to={rp(to)} className={className}>{children}</Link>
+}
+
+function Row({ name, answer, score, children, report, compact }: { name: string; answer: Answer; score: number; children: React.ReactNode; report: string; compact?: boolean }) {
   const t = TONE[answer]
+  // Compact (/claude-code): Safe and Review rows are one line; each name links to its report.
+  const brief = compact && answer !== 'dnc'
   return (
-    <li className={`grid grid-cols-[22px_1fr] gap-x-2.5 gap-y-1 px-4 py-3.5 ${answer === 'dnc' ? 'bg-danger/[0.07]' : ''}`}>
+    <li className={`grid grid-cols-[22px_1fr] gap-x-2.5 gap-y-1 px-4 ${compact ? 'py-2.5' : 'py-3.5'} ${answer === 'dnc' ? 'bg-danger/[0.07]' : ''}`}>
       <span className={`mt-[1px] w-[22px] h-[22px] rounded-full inline-grid place-items-center text-[12px] font-extrabold ${t.text} ${answer === 'safe' ? 'bg-success/15' : answer === 'review' ? 'bg-warning/15' : 'bg-danger/15'}`} aria-hidden="true">{t.icon}</span>
       <div className="min-w-0">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="font-mono text-[13.5px] text-text [overflow-wrap:anywhere]">{name}</span>
+          {compact
+            ? <ReportLink to={report} full className="font-mono text-[13.5px] text-text [overflow-wrap:anywhere] underline decoration-border underline-offset-2 hover:text-primary-light">{name}</ReportLink>
+            : <span className="font-mono text-[13.5px] text-text [overflow-wrap:anywhere]">{name}</span>}
           <span className={`text-[14.5px] font-bold ${t.text}`}>{t.phrase}</span>
-          <span className="text-[12.5px] text-text-muted">· trust score {score}</span>
+          <span className="text-[12.5px] text-text-muted">· {compact ? '' : 'trust score '}{score}</span>
         </div>
-        <div className="mt-1 text-[13.5px] text-text-muted">{children}</div>
-        <Link to={rp(report)} className="mt-1 inline-block text-[13px] font-semibold text-primary-light hover:text-primary">See the report →</Link>
+        {!brief && <div className={`${compact ? 'mt-0.5' : 'mt-1'} text-[13.5px] text-text-muted`}>{children}</div>}
+        {!compact && <Link to={rp(report)} className="mt-1 inline-block text-[13px] font-semibold text-primary-light hover:text-primary">See the report →</Link>}
       </div>
     </li>
   )
 }
 
-/** "What a check looks like": mostly Safe, one Review, and the ad's Do not connect with the fix beside it. */
-export function WalletAdExamples() {
+/**
+ * "What a check looks like": mostly Safe, one Review, and the ad's Do not connect with
+ * the fix beside it. `compact` (the /claude-code hero) keeps one line per Safe or Review
+ * row and a shorter finding, so the phone actions stay on the first screen. Its links
+ * are full page loads (see ReportLink).
+ */
+export function WalletAdExamples({ compact = false }: { compact?: boolean }) {
+  const latest = (
+    <ReportLink to="/rebrand/check/pkg/npm/gadgethumans-mcp" full={compact} className="font-semibold text-primary-light hover:text-primary">See 1.2.4 →</ReportLink>
+  )
   return (
     <div className="glass rounded-2xl border border-border/60 overflow-hidden text-left">
-      <div className="px-4 py-2.5 border-b border-border/60 text-[12.5px] font-semibold text-text-muted">Real results, November 2026. Each report shows today&apos;s result.</div>
+      <div className="px-4 py-2.5 border-b border-border/60 text-[12.5px] font-semibold text-text-muted">
+        {compact ? 'Real results and trust scores, November 2026' : <>Real results, November 2026. Each report shows today&apos;s result.</>}
+      </div>
       <ul className="divide-y divide-border/60">
         {EXAMPLE_ROWS.map((r) => (
-          <Row key={r.name} name={r.name} answer={r.answer} score={r.score} report={r.report}>{r.why}</Row>
+          <Row key={r.name} name={compact ? r.short ?? r.name : r.name} answer={r.answer} score={r.score} report={r.report} compact={compact}>{r.why}</Row>
         ))}
-        <Row name="gadgethumans-mcp 1.0.15" answer="dnc" score={45} report="/rebrand/check/pkg/npm/gadgethumans-mcp?version=1.0.15">
-          <p>Reads the wallet private key from your environment and sends it over the network (index.js, line 215).</p>
-          <p className="mt-2 rounded-lg bg-danger/[0.10] px-2.5 py-1.5 text-[13px] text-text">AgentAvow asks before you install it, and stops calls to a server that&apos;s already connected.</p>
-          <p className="mt-2">The latest version, 1.2.4, reads <b className="text-success font-semibold">Safe to connect</b> (82). <Link to={rp('/rebrand/check/pkg/npm/gadgethumans-mcp')} className="font-semibold text-primary-light hover:text-primary">See 1.2.4 →</Link></p>
+        <Row name="gadgethumans-mcp 1.0.15" answer="dnc" score={45} report="/rebrand/check/pkg/npm/gadgethumans-mcp?version=1.0.15" compact={compact}>
+          {compact
+            ? <p>Sends your wallet private key over the network (index.js:215).</p>
+            : <p>Reads the wallet private key from your environment and sends it over the network (index.js, line 215).</p>}
+          <p className={`${compact ? 'mt-1.5' : 'mt-2'} rounded-lg bg-danger/[0.10] px-2.5 py-1.5 text-[13px] text-text`}>AgentAvow asks before you install it, and stops calls to a server that&apos;s already connected.</p>
+          {compact
+            ? <p className="mt-1.5">Latest <ReportLink to="/rebrand/check/pkg/npm/gadgethumans-mcp" full className="font-semibold text-primary-light hover:text-primary underline underline-offset-2">1.2.4</ReportLink>: <b className="text-success font-semibold">Safe to connect</b> (82).</p>
+            : <p className="mt-2">The latest version, 1.2.4, reads <b className="text-success font-semibold">Safe to connect</b> (82). {latest}</p>}
         </Row>
       </ul>
     </div>
