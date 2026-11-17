@@ -7,10 +7,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
-from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.api.a2a_router import router as a2a_router
 from src.api.account_claims_router import router as account_claims_router
@@ -107,6 +105,7 @@ from src.api.x402_router import router as x402_router
 from src.bridges.mcp_streamable import mcp_asgi_app
 from src.bridges.mcp_streamable import session_manager as mcp_session_manager
 from src.config import settings
+from src.errors.handlers import install_problem_handlers
 from src.feeds.bluesky.feed_router import router as bluesky_feed_router
 from src.observability import ObservabilityMiddleware, setup_logging
 
@@ -672,81 +671,9 @@ app.add_middleware(ObservabilityMiddleware, skip_log_paths=_PROBE_PATHS)
 logger = logging.getLogger(__name__)
 
 
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(
-    request: Request, exc: RequestValidationError,
-) -> JSONResponse:
-    request_id = getattr(request.state, "request_id", "unknown")
-
-    def _sanitize_value(v: object) -> object:
-        """Recursively make a value JSON-serializable."""
-        if isinstance(v, (str, int, float, bool, type(None))):
-            return v
-        if isinstance(v, dict):
-            return {k: _sanitize_value(val) for k, val in v.items()}
-        if isinstance(v, (list, tuple)):
-            return [_sanitize_value(item) for item in v]
-        return str(v)
-
-    def _sanitize_errors(errors: list[dict]) -> list[dict]:
-        """Make validation error dicts JSON-serializable.
-
-        Pydantic/FastAPI may put non-serializable objects (e.g. ValueError)
-        in the ``ctx`` field. Convert them recursively.
-        """
-        sanitized = []
-        for err in errors:
-            clean = dict(err)
-            if "ctx" in clean:
-                clean["ctx"] = _sanitize_value(clean["ctx"])
-            sanitized.append(clean)
-        return sanitized
-
-    return JSONResponse(
-        status_code=422,
-        content={
-            "detail": _sanitize_errors(exc.errors()),
-            "request_id": request_id,
-        },
-    )
-
-
-@app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(
-    request: Request, exc: StarletteHTTPException,
-) -> JSONResponse:
-    request_id = getattr(request.state, "request_id", "unknown")
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "detail": exc.detail,
-            "request_id": request_id,
-        },
-    )
-
-
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(
-    request: Request, exc: Exception,
-) -> JSONResponse:
-    request_id = getattr(request.state, "request_id", "unknown")
-    logger.error(
-        "Unhandled exception [request_id=%s]: %s",
-        request_id,
-        exc,
-        exc_info=True,
-        extra={
-            "request_id": request_id,
-            "trace_id": getattr(request.state, "trace_id", None),
-        },
-    )
-    return JSONResponse(
-        status_code=500,
-        content={
-            "detail": "Internal server error",
-            "request_id": request_id,
-        },
-    )
+# Every API error answers as RFC 9457 problem+json from one code catalog (#409,
+# src/errors). The old "detail" and "request_id" fields keep their values.
+install_problem_handlers(app)
 
 
 app.include_router(account_router, prefix=settings.api_v1_prefix)

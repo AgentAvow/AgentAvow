@@ -22,3 +22,4 @@ new record that supersedes the old one and set the old one's status to
 | [0002](0002-old-machine-identifiers-stay.md) | Machine identifiers keep the `agentgraph` name after the rebrand | Accepted |
 | [0003](0003-settings-validated-at-startup.md) | One settings class, validated at startup; safety refusals in production only | Accepted |
 | [0004](0004-structured-logs-and-trace-ids.md) | Structured JSON logs, request and trace ids, redaction; no OpenTelemetry SDK | Accepted |
+| [0005](0005-errors-are-problem-json.md) | API errors are RFC 9457 problem+json from one code catalog; old `detail` and `request_id` kept | Accepted |
