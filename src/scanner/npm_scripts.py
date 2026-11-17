@@ -1087,15 +1087,50 @@ def restore_externally_invoked(findings: list, texts: dict[str, str], *,
 
 _JS_FILE_EXTS = (".js", ".mjs", ".cjs", ".ts", ".mts", ".cts")
 _SH_FILE_EXTS = (".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd")
+_STR = r"""['"`][^'"`\n]{0,300}['"`]"""
 _LOCAL_IMPORT_RE = re.compile(
-    r"""(?:require\s*\(\s*|from\s+|import\s*\(\s*|import\s+)['"`](\.{1,2}/[^'"`\s]{1,300})['"`]"""
-    # require(__dirname + '/x.js') / `${__dirname}/x` / path.join|resolve(__dirname, 'x')
+    # path.join|resolve(__dirname, 'lib', 'x.js'), also on require('path') inline (first,
+    # so the inner `require('path')` is not taken as a plain require)
+    r"""(?:\bpath|require\s*\(\s*['"](?:node:)?path['"]\s*\))\s*\.\s*(?:join|resolve)\s*\("""
+    rf"""\s*__dirname((?:\s*,\s*{_STR}){{1,8}})\s*\)"""
+    # require('./x') / import … from './x' / require('./' + 'x') (literal pieces only)
+    rf"""|(?:require\s*\(\s*|from\s+|import\s*\(\s*|import\s+)({_STR}(?:\s*\+\s*{_STR}){{0,8}})"""
+    # require(__dirname + '/x.js') / `${{__dirname}}/x`
     r"""|__dirname\s*\+\s*['"`]/([^'"`\s]{1,300})['"`]"""
-    r"""|\$\{\s*__dirname\s*\}/([^'"`\s$]{1,300})`"""
-    r"""|path\s*\.\s*(?:join|resolve)\s*\(\s*__dirname\s*,\s*['"`]\.?/?([^'"`\s]{1,300})['"`]""")
-# How far the hook's own requires are followed (transitively, local files only).
+    r"""|\$\{\s*__dirname\s*\}/([^'"`\s$]{1,300})`""")
+_DIRNAME_TMPL_RE = re.compile(r"^\$\{\s*__dirname\s*\}/")
+_STR_PIECE_RE = re.compile(r"""['"`]([^'"`\n]{0,300})['"`]""")
+# How far the hook's own requires are followed (transitively, local files only), and
+# how much of the package the walk and the signal read may cover. Past the signal
+# budget, the files that look most suspicious are read first (a hook cannot hide its
+# payload behind dozens of dummy requires).
 _MAX_HOOK_DEPTH = 4
-_MAX_HOOK_FILES = 50
+_MAX_HOOK_FILES = 400
+_MAX_WALK_BYTES = 32 * 1024 * 1024
+_MAX_SIGNAL_BYTES = 16 * 1024 * 1024
+_SUSPECT_WORDS = ("hostname", "userInfo", "networkInterfaces", "eval", "Function(", "_0x",
+                  "fromCharCode", "atob", "_authToken", "systemd", "crontab", "oast",
+                  "pipedream", "webhook", "whoami", "process.env", "base64")
+
+
+def _local_refs(text: str) -> list[str]:
+    """Relative paths a JS file loads from its own package, as plain ``./x`` strings."""
+    out: list[str] = []
+    for m in _LOCAL_IMPORT_RE.finditer(text):
+        joined, lit, plus, tmpl = m.groups()
+        if lit is not None:
+            rel = _DIRNAME_TMPL_RE.sub("./", "".join(_STR_PIECE_RE.findall(lit)))
+            if not rel.startswith(("./", "../")):
+                continue
+        elif plus is not None or tmpl is not None:
+            rel = "./" + (plus if plus is not None else tmpl)
+        else:
+            parts = [p.strip("/") for p in _STR_PIECE_RE.findall(joined) if p.strip("/.")]
+            if not parts:
+                continue
+            rel = "./" + "/".join(parts)
+        out.append(rel)
+    return out
 _HOOK_NAME_RE = re.compile(r"^npm '([\w-]+)' lifecycle script \(auto-runs on install\)$")
 
 
@@ -1129,26 +1164,50 @@ def _hook_code(scripts: dict[str, str], hook: str, main: str,
             hit = _resolve(have, "", w) if w != RUNS_PACKAGE_CODE else None
             if hit is not None and hit not in files:
                 files.append(hit)
+    from src.scanner.install_signals import MAX_SIGNAL_TEXT
+
     frontier = list(files)
+    seen_files = set(files)
+    walked = 0
     for _depth in range(_MAX_HOOK_DEPTH):
         nxt: list[str] = []
         for path in frontier:
-            if not path.endswith(_JS_FILE_EXTS):
+            if not path.endswith(_JS_FILE_EXTS) or walked > _MAX_WALK_BYTES:
                 continue
-            text = texts.get(path) or ""
+            text = (texts.get(path) or "")[:MAX_SIGNAL_TEXT]
+            walked += len(text)
             base = path.rsplit("/", 1)[0] + "/" if "/" in path else ""
-            for m in _LOCAL_IMPORT_RE.finditer(text[:256_000]):
-                rel = next(g for g in m.groups() if g is not None)
-                if not rel.startswith("."):
-                    rel = "./" + rel
+            for rel in _local_refs(text):
                 hit = _resolve(have, base, rel)
-                if hit is not None and hit not in files and len(files) < _MAX_HOOK_FILES:
+                if hit is not None and hit not in seen_files \
+                        and len(files) < _MAX_HOOK_FILES:
+                    seen_files.add(hit)
                     files.append(hit)
                     nxt.append(hit)
         if not nxt:
             break
         frontier = nxt
     return cmds, files
+
+
+def _signal_order(files: list[str], texts: dict[str, str]) -> list[str]:
+    """The files to read for signals, within ``_MAX_SIGNAL_BYTES``: everything when it
+    fits, otherwise the ones carrying the most suspect words first."""
+    if sum(len(texts.get(p) or "") for p in files) <= _MAX_SIGNAL_BYTES:
+        return files
+
+    def score(p: str) -> int:
+        t = texts.get(p) or ""
+        return -sum(w in t for w in _SUSPECT_WORDS)
+
+    out, used = [], 0
+    for p in sorted(files, key=score):
+        n = len(texts.get(p) or "")
+        if used + n > _MAX_SIGNAL_BYTES and out:
+            continue
+        out.append(p)
+        used += n
+    return out
 
 
 def escalate_suspicious_install_hooks(findings: list, texts: dict[str, str]) -> None:
@@ -1184,7 +1243,7 @@ def escalate_suspicious_install_hooks(findings: list, texts: dict[str, str]) -> 
         signals: set[str] = set()
         for c in cmds:
             signals |= shell_signals(c)
-        for p in files:
+        for p in _signal_order(files, texts):
             text = texts.get(p) or ""
             low = p.lower()
             if low.endswith(_SH_FILE_EXTS):

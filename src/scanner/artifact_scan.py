@@ -386,6 +386,22 @@ def _is_build_binary_spawn(node: ast.Call, fname: str, assigns: dict,
 # uploads / runs the tests): code inside a command class derived from one of these is
 # not an install hook.
 _NON_INSTALL_COMMAND_RE = re.compile(r"^(?:sdist|upload|register|clean|test|check)", re.I)
+# Calls that only print or log their arguments.
+_LOG_CALLS = frozenset({"print", "debug", "info", "warning", "warn", "error", "critical",
+                        "exception", "log", "announce"})
+
+
+def _cmdclass_keys(tree: ast.AST) -> dict[str, set[str]]:
+    """Class name -> the command names it is registered under in any ``{'install':
+    Cls}``-shaped dict of the file (a cmdclass passed inline or built in a name)."""
+    out: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            for k, v in zip(node.keys, node.values):
+                if (isinstance(k, ast.Constant) and isinstance(k.value, str)
+                        and isinstance(v, ast.Name)):
+                    out.setdefault(v.id, set()).add(k.value)
+    return out
 
 
 # Receivers whose `.run()` / `.system()` / `.call()` is not a process or network call:
@@ -449,6 +465,10 @@ class _InstallExecVisitor(ast.NodeVisitor):
         self.recon_unguarded = False
         self.obfuscated_unguarded = False
         self.const_signals: set[str] = set()
+        self._uname_names: set[str] = set()
+        self._log_depth = 0
+        # class name -> the cmdclass keys it is registered under (``_cmdclass_keys``).
+        self.cmd_keys: dict[str, set[str]] = {}
         self._setup_meta_depth = 0
 
     def visit_Import(self, node: ast.Import) -> None:
@@ -499,6 +519,8 @@ class _InstallExecVisitor(ast.NodeVisitor):
                 self._env_write(t.value, node.value)
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             self._values[node.targets[0].id] = node.value
+            if isinstance(node.value, ast.Call) and _call_name(node.value) == "uname":
+                self._uname_names.add(node.targets[0].id)  # `u = os.uname()`
             if isinstance(node.value, (ast.List, ast.Tuple, ast.BinOp)):
                 self._assigns[node.targets[0].id] = node.value
         self.generic_visit(node)
@@ -506,9 +528,18 @@ class _InstallExecVisitor(ast.NodeVisitor):
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         # `class sdist(sdist_orig): def run(self): os.system("git rev-parse …")` runs
         # when the maintainer builds an sdist, never on `pip install` (precision PR 2).
-        bases = [b.id if isinstance(b, ast.Name) else b.attr if isinstance(b, ast.Attribute)
-                 else "" for b in node.bases]
-        if any(_NON_INSTALL_COMMAND_RE.match(b) for b in bases):
+        # A class registered in a cmdclass dict is judged by the command it is
+        # registered under, not its base: `class install(sdist)` registered as
+        # `cmdclass={'install': install}` runs on install.
+        keys = {k for k in self.cmd_keys.get(node.name, ())
+                if k in _INSTALL_BUILD_COMMANDS or _NON_INSTALL_COMMAND_RE.match(k)}
+        if keys:
+            maintainer_only = all(_NON_INSTALL_COMMAND_RE.match(k) for k in keys)
+        else:
+            bases = [b.id if isinstance(b, ast.Name) else b.attr
+                     if isinstance(b, ast.Attribute) else "" for b in node.bases]
+            maintainer_only = any(_NON_INSTALL_COMMAND_RE.match(b) for b in bases)
+        if maintainer_only:
             self._guard_depth += 1
             self.generic_visit(node)
             self._guard_depth -= 1
@@ -537,8 +568,13 @@ class _InstallExecVisitor(ast.NodeVisitor):
     def _note_uname_use(self, parent: ast.AST, child: ast.AST) -> None:
         """`platform.uname()` / `os.uname()` names the machine only through its node
         name: `.nodename`, `[1]`, or the whole tuple handed on (`str(uname())`,
-        `{'u': uname()}`). `.machine` / `.system` / `.release` are platform checks."""
-        if not (isinstance(child, ast.Call) and _call_name(child) == "uname"):
+        `{'u': uname()}`), also through a name bound to it (`u = os.uname()`). `.machine`
+        / `.system` / `.release` are platform checks, and a print / log line is local."""
+        if self._log_depth:
+            return
+        if not ((isinstance(child, ast.Call) and _call_name(child) == "uname")
+                or (isinstance(child, ast.Name) and child.id in self._uname_names
+                    and isinstance(parent, (ast.Attribute, ast.Subscript)))):
             return
         if isinstance(parent, ast.Attribute):
             if parent.attr == "nodename":
@@ -551,6 +587,8 @@ class _InstallExecVisitor(ast.NodeVisitor):
             self.recon_unguarded = True
 
     def generic_visit(self, node: ast.AST) -> None:
+        log = isinstance(node, ast.Call) and _call_name(node) in _LOG_CALLS
+        self._log_depth += log
         if self._guard_depth == 0 and isinstance(
                 node, (ast.Attribute, ast.Subscript, ast.Call, ast.Dict, ast.List,
                        ast.Tuple, ast.FormattedValue, ast.BinOp, ast.keyword)):
@@ -559,6 +597,7 @@ class _InstallExecVisitor(ast.NodeVisitor):
                     continue
                 self._note_uname_use(node, child)
         super().generic_visit(node)
+        self._log_depth -= log
 
     def visit_Constant(self, node: ast.Constant) -> None:
         # A string in install-time code naming a callback-collector / raw-IP host, a
@@ -680,6 +719,7 @@ def detect_pypi_install_exec(source: str, file_path: str) -> list:
         return []
 
     visitor = _InstallExecVisitor()
+    visitor.cmd_keys = _cmdclass_keys(tree)
     visitor.visit(tree)
 
     # Install-time code that phones home with host / user details, names a callback

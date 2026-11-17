@@ -33,10 +33,10 @@ from __future__ import annotations
 
 import re
 
-# Head + tail of a hook file read for signals (a payload sits at either end; padding in
-# the middle is a published evasion, which the full-file engine still reads).
-MAX_SIGNAL_TEXT = 256 * 1024
-_TAIL = 64 * 1024
+# A hook file is read whole for signals up to this size (every pattern is linear, so
+# padding a beacon into the middle of a file does not hide it); past it, head + tail.
+MAX_SIGNAL_TEXT = 2 * 1024 * 1024
+_TAIL = 512 * 1024
 
 
 def clip(text: str) -> str:
@@ -57,8 +57,7 @@ OOB_HOST_RE = re.compile(
     r"""|discord(?:app)?\.com/api/webhooks|api\.telegram\.org/bot)"""
     r"""|https?://(?!(?:127\.|0\.0\.0\.0|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.))"""
     r"""\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b""",
-    re.IGNORECASE,
-)
+)  # matched against lower-cased text (case-insensitive matching is ~5x slower)
 
 # Stored credentials an install hook has no business reading: npm auth tokens, SSH
 # private keys, cloud / git / registry credential files.
@@ -88,11 +87,10 @@ _JS_NET_RE = re.compile(
     # a downloader / resolver spawned from the script
     r"""|['"`]\s*(?:curl|wget|nslookup|dig|ping|nc|ncat)\s""",
 )
-# Who / where the machine is. `userInfo()` counts only for its user name; the whole
-# environment only when serialised; `whoami` only inside a spawned command string.
+# Who / where the machine is. The whole environment counts only when serialised;
+# `whoami` only inside a spawned command string; the user name in `_js_username_sent`.
 _JS_RECON_RE = re.compile(
     r"""\b(?:hostname|networkInterfaces)\s*\(\s*\)"""
-    r"""|\buserInfo\s*\(\s*\)\s*\.\s*username\b"""
     r"""|\{\s*username\s*[,}][^;\n]{0,80}?=\s*(?:os\s*\.\s*)?userInfo\s*\("""
     r"""|JSON\.stringify\s*\(\s*process\.env\s*[,)]"""
     r"""|\b(?:exec|execSync|spawn|spawnSync|execFile|execFileSync)\s*\(\s*['"`][^'"`\n]{0,200}?"""
@@ -101,8 +99,20 @@ _JS_RECON_RE = re.compile(
     r"""|ipinfo\.io|ifconfig\.me|api\.ipify\.org|icanhazip\.com|checkip\.amazonaws\.com"""
     r"""|ip-api\.com""",
 )
+# Names bound to `os.userInfo()`, and every `<name>.username` / `userInfo().username`.
+# Identifiers start only where no identifier character precedes, so each is scanned once.
 _JS_USERINFO_VAR_RE = re.compile(
-    r"""\b([A-Za-z_$][\w$]{0,40})\s*=\s*(?:os\s*\.\s*)?userInfo\s*\(""")
+    r"""(?<![\w$])([A-Za-z_$][\w$]*)\s*=\s*(?:os\s*\.\s*)?userInfo\s*\(""")
+_JS_USERNAME_USE_RE = re.compile(
+    r"""(?<![\w$])(?:([A-Za-z_$][\w$]*)|userInfo\s*\(\s*\))\s*\.\s*username\b""")
+# A statement that uses the user name for a local path (a per-user cache or temp dir),
+# not to send it anywhere.
+_PATH_USE_RE = re.compile(
+    r"""/tmp/|\bpath\s*\.\s*(?:join|resolve)\b|\.cache\b|\bmkdir|\bwriteFile|\breadFile"""
+    r"""|\bexistsSync\b|\bhomedir\b|\btmpdir\b|\bchown""")
+_SEND_USE_RE = re.compile(
+    r"""https?:|\brequest\s*\(|\bfetch\s*\(|\blookup\s*\(|\.get\s*\("""
+    r"""|\bsend\s*\(|\baxios\b|\bdns\b|encodeURIComponent|JSON\.stringify""")
 _JS_OBFUSCATOR_RE = re.compile(r"\b_0x[0-9a-f]{4,6}\b")
 # eval / Function applied DIRECTLY to a decode, or to a function whose body decodes a
 # char-code array (`eval(function(s,n){…fromCharCode…}([40,105,…]))`).
@@ -112,7 +122,7 @@ _JS_EVAL_DECODE_RE = re.compile(
     r"""function\s*\([^)]{0,60}\)\s*\{[^}]{0,600}?fromCharCode)""")
 # A name bound to a decode, later passed to eval / Function.
 _JS_DECODED_VAR_RE = re.compile(
-    r"""\b([A-Za-z_$][\w$]{0,40})\s*=\s*(?:atob\s*\(|Buffer\s*\.\s*from\s*\([^)\n]{0,4000}?"""
+    r"""(?<![\w$])([A-Za-z_$][\w$]*)\s*=\s*(?:atob\s*\(|Buffer\s*\.\s*from\s*\([^)\n]{0,4000}?"""
     r"""['"](?:base64|hex)['"]|String\s*\.\s*fromCharCode\b)""")
 
 # ---------------------------------------------------------------------------
@@ -157,7 +167,7 @@ def common_signals(text: str, out: set[str] | None = None) -> set[str]:
     ``dropper``."""
     out = set() if out is None else out
     text = clip(text)
-    if OOB_HOST_RE.search(text):
+    if OOB_HOST_RE.search(text.lower()):
         out.add("oob")
     if CREDS_RE.search(text):
         out.add("creds")
@@ -179,13 +189,35 @@ def py_signals(text: str) -> set[str]:
     return common_signals(text, out)
 
 
-def _js_recon(text: str) -> bool:
-    if _JS_RECON_RE.search(text):
-        return True
-    for m in _JS_USERINFO_VAR_RE.finditer(text):
-        if re.search(rf"\b{re.escape(m.group(1))}\s*\.\s*username\b", text):
+def _statement(text: str, pos: int, end: int) -> str:
+    """The statement around a match: back to the previous `;` / newline and on to the
+    next, at most 300 characters each way (minified bundles have no newlines)."""
+    lo = max(pos - 300, 0)
+    cut = max(text.rfind(";", lo, pos), text.rfind("\n", lo, pos))
+    hi = min(end + 300, len(text))
+    stops = [i for i in (text.find(";", end, hi), text.find("\n", end, hi)) if i != -1]
+    return text[(cut + 1 if cut != -1 else lo):(min(stops) if stops else hi)]
+
+
+def _js_username_sent(text: str) -> bool:
+    """The user name read from ``os.userInfo()`` and used anywhere but a local path
+    (``/tmp/tool-${info.username}``). One pass for the bound names, one for the uses."""
+    names = {m.group(1) for m in _JS_USERINFO_VAR_RE.finditer(text)}
+    for m in _JS_USERNAME_USE_RE.finditer(text):
+        if m.group(1) is not None and m.group(1) not in names:
+            continue
+        stmt = _statement(text, m.start(), m.end())
+        if not _PATH_USE_RE.search(stmt) or _SEND_USE_RE.search(stmt):
             return True
     return False
+
+
+def _js_recon(text: str) -> bool:
+    return bool(_JS_RECON_RE.search(text)) or _js_username_sent(text)
+
+
+# eval / Function applied to a plain name (checked against the names bound to a decode).
+_JS_EVAL_NAME_RE = re.compile(r"""\b(?:eval|Function)\s*\(\s*([A-Za-z_$][\w$]*)\s*[),]""")
 
 
 def _is_obfuscated_js(text: str) -> bool:
@@ -193,10 +225,9 @@ def _is_obfuscated_js(text: str) -> bool:
         return True
     if _JS_EVAL_DECODE_RE.search(text):
         return True
-    for m in _JS_DECODED_VAR_RE.finditer(text):
-        if re.search(rf"\b(?:eval|Function)\s*\(\s*{re.escape(m.group(1))}\s*[),]", text):
-            return True
-    return False
+    decoded = {m.group(1) for m in _JS_DECODED_VAR_RE.finditer(text)}
+    return bool(decoded) and any(
+        m.group(1) in decoded for m in _JS_EVAL_NAME_RE.finditer(text))
 
 
 def js_signals(text: str) -> set[str]:
