@@ -2480,6 +2480,11 @@
             "title": "Copy Plugin Cmd",
             "type": "integer"
           },
+          "email_setup": {
+            "default": 0,
+            "title": "Email Setup",
+            "type": "integer"
+          },
           "lp_view": {
             "default": 0,
             "title": "Lp View",
@@ -2509,6 +2514,11 @@
           "sessions": {
             "default": 0,
             "title": "Sessions",
+            "type": "integer"
+          },
+          "share_link": {
+            "default": 0,
+            "title": "Share Link",
             "type": "integer"
           },
           "source": {
@@ -14986,6 +14996,36 @@
           "content"
         ],
         "title": "SendMessageRequest",
+        "type": "object"
+      },
+      "SendSetupRequest": {
+        "properties": {
+          "email": {
+            "format": "email",
+            "maxLength": 254,
+            "title": "Email",
+            "type": "string"
+          },
+          "utm": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "maxProperties": 10,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Utm"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "SendSetupRequest",
         "type": "object"
       },
       "ServiceEndpoint": {
@@ -54647,6 +54687,50 @@
         "summary": "Scan Verdict",
         "tags": [
           "public-scan"
+        ]
+      }
+    },
+    "/api/v1/public/send-setup": {
+      "post": {
+        "description": "Email the Claude Code plugin setup to the given address, once. No auth.\n\nAnswers 202 whether or not the provider accepted it right away (the shared email\nqueue retries), 422 for a bad address, 429 past a limit, 404 when turned off.",
+        "operationId": "send_setup_api_v1_public_send_setup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendSetupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Send Setup Api V1 Public Send Setup Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Send Setup",
+        "tags": [
+          "public"
         ]
       }
     },
