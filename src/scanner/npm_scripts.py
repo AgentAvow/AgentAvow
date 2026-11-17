@@ -1088,7 +1088,14 @@ def restore_externally_invoked(findings: list, texts: dict[str, str], *,
 _JS_FILE_EXTS = (".js", ".mjs", ".cjs", ".ts", ".mts", ".cts")
 _SH_FILE_EXTS = (".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd")
 _LOCAL_IMPORT_RE = re.compile(
-    r"""(?:require\s*\(\s*|from\s+|import\s*\(\s*|import\s+)['"`](\.{1,2}/[^'"`\s]+)['"`]""")
+    r"""(?:require\s*\(\s*|from\s+|import\s*\(\s*|import\s+)['"`](\.{1,2}/[^'"`\s]{1,300})['"`]"""
+    # require(__dirname + '/x.js') / `${__dirname}/x` / path.join|resolve(__dirname, 'x')
+    r"""|__dirname\s*\+\s*['"`]/([^'"`\s]{1,300})['"`]"""
+    r"""|\$\{\s*__dirname\s*\}/([^'"`\s$]{1,300})`"""
+    r"""|path\s*\.\s*(?:join|resolve)\s*\(\s*__dirname\s*,\s*['"`]\.?/?([^'"`\s]{1,300})['"`]""")
+# How far the hook's own requires are followed (transitively, local files only).
+_MAX_HOOK_DEPTH = 4
+_MAX_HOOK_FILES = 50
 _HOOK_NAME_RE = re.compile(r"^npm '([\w-]+)' lifecycle script \(auto-runs on install\)$")
 
 
@@ -1103,8 +1110,9 @@ def _hook_code(scripts: dict[str, str], hook: str, main: str,
                texts: dict[str, str]) -> tuple[list[str], list[str]]:
     """(shell command strings, local file paths) an install hook runs: the hook, the
     scripts it names (``npm run x``), the local files those run, and the local files
-    those files ``require`` / ``import`` (one level). Under-approximate on purpose:
-    this only ever RAISES a finding, so an unfollowable command adds nothing."""
+    those files ``require`` / ``import`` (transitively, up to ``_MAX_HOOK_DEPTH`` levels
+    and ``_MAX_HOOK_FILES`` files). Under-approximate on purpose: this only ever RAISES
+    a finding, so an unfollowable command adds nothing."""
     have = {p[2:] if p.startswith("./") else p: p for p in texts}
     names = list(scripts)
     todo, seen = [hook], set()
@@ -1121,15 +1129,25 @@ def _hook_code(scripts: dict[str, str], hook: str, main: str,
             hit = _resolve(have, "", w) if w != RUNS_PACKAGE_CODE else None
             if hit is not None and hit not in files:
                 files.append(hit)
-    for path in list(files):
-        if not path.endswith(_JS_FILE_EXTS):
-            continue
-        text = texts.get(path) or ""
-        base = path.rsplit("/", 1)[0] + "/" if "/" in path else ""
-        for m in _LOCAL_IMPORT_RE.finditer(text[:200_000]):
-            hit = _resolve(have, base, m.group(1))
-            if hit is not None and hit not in files:
-                files.append(hit)
+    frontier = list(files)
+    for _depth in range(_MAX_HOOK_DEPTH):
+        nxt: list[str] = []
+        for path in frontier:
+            if not path.endswith(_JS_FILE_EXTS):
+                continue
+            text = texts.get(path) or ""
+            base = path.rsplit("/", 1)[0] + "/" if "/" in path else ""
+            for m in _LOCAL_IMPORT_RE.finditer(text[:256_000]):
+                rel = next(g for g in m.groups() if g is not None)
+                if not rel.startswith("."):
+                    rel = "./" + rel
+                hit = _resolve(have, base, rel)
+                if hit is not None and hit not in files and len(files) < _MAX_HOOK_FILES:
+                    files.append(hit)
+                    nxt.append(hit)
+        if not nxt:
+            break
+        frontier = nxt
     return cmds, files
 
 

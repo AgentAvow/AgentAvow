@@ -145,28 +145,64 @@ def _call_name(node: ast.Call) -> str:
     return ""
 
 
-def _is_cli_publish_guard(test: ast.AST) -> bool:
-    """True if an ``if`` test gates code on a manual CLI subcommand rather than
-    install time — i.e. it inspects ``sys.argv`` or ``__name__`` (``== '__main__'``).
+# setup.py commands only a maintainer types (`python setup.py publish`); pip never
+# runs them. `bdist_wheel` / `build` / `install` / `develop` / `egg_info` are what pip
+# runs, so a guard on those is the install path.
+_PUBLISH_ONLY_COMMANDS = frozenset({
+    "sdist", "upload", "register", "publish", "release", "tag", "test", "pytest",
+    "clean", "check", "docs", "build_sphinx", "upload_docs", "lint", "bumpversion",
+})
 
-    ``if sys.argv[-1] == 'publish':`` / ``if __name__ == '__main__':`` wrap
-    maintainer helpers (publish/upload/tag) that run when the author types
-    ``python setup.py publish`` — NOT when a consumer runs ``pip install``. Code
-    reachable only under such a guard is not an install hook.
-    """
-    for node in ast.walk(test):
-        if isinstance(node, ast.Attribute) and node.attr == "argv":
-            return True
-        if isinstance(node, ast.Name) and node.id in ("argv", "__name__"):
-            return True
+
+def _mentions_argv(node: ast.AST) -> bool:
+    return any((isinstance(n, ast.Attribute) and n.attr == "argv")
+               or (isinstance(n, ast.Name) and n.id == "argv") for n in ast.walk(node))
+
+
+def _publish_consts(node: ast.AST) -> bool:
+    """A constant publish-only command name, or a tuple / list / set of them."""
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, str) and node.value in _PUBLISH_ONLY_COMMANDS
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)) and node.elts:
+        return all(_publish_consts(e) for e in node.elts)
     return False
 
 
-def _is_negated_guard(test: ast.AST) -> bool:
-    """``'sdist' not in sys.argv`` / ``sys.argv[-1] != 'publish'`` /
-    ``__name__ != '__main__'``: a guard whose BODY runs on an ordinary install."""
-    return (isinstance(test, ast.Compare) and len(test.ops) == 1
-            and isinstance(test.ops[0], (ast.NotIn, ast.NotEq)))
+def _publish_guard(test: ast.AST) -> str | None:
+    """How an ``if`` test relates to a maintainer-only CLI command.
+
+    ``"publish"``: the body runs only for a publish-only command
+    (``sys.argv[-1] == 'publish'``, ``'upload' in sys.argv``). ``"not_publish"``: the
+    negation (``'sdist' not in argv``, ``not 'sdist' in argv``), so the BODY is the
+    install path and the else-branch the maintainer's. ``None``: anything else,
+    including ``if __name__ == '__main__':`` (pip runs setup.py as ``__main__``) and a
+    bare ``if sys.argv:`` — both are the install path.
+    """
+    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+        inner = _publish_guard(test.operand)
+        return {"publish": "not_publish", "not_publish": "publish"}.get(inner or "")
+    if isinstance(test, ast.BoolOp):
+        kinds = [_publish_guard(v) for v in test.values]
+        if isinstance(test.op, ast.And) and "publish" in kinds:
+            return "publish"
+        if isinstance(test.op, ast.Or) and all(k == "publish" for k in kinds):
+            return "publish"
+        if isinstance(test.op, ast.Or) and "not_publish" in kinds:
+            return "not_publish"
+        return None
+    if isinstance(test, ast.Compare) and len(test.ops) == 1:
+        left, right, op = test.left, test.comparators[0], test.ops[0]
+        if isinstance(op, (ast.In, ast.NotIn)):
+            hit = _publish_consts(left) and _mentions_argv(right) or (
+                _mentions_argv(left) and _publish_consts(right))
+            if hit:
+                return "publish" if isinstance(op, ast.In) else "not_publish"
+        elif isinstance(op, (ast.Eq, ast.NotEq)):
+            hit = (_mentions_argv(left) and _publish_consts(right)) or (
+                _publish_consts(left) and _mentions_argv(right))
+            if hit:
+                return "publish" if isinstance(op, ast.Eq) else "not_publish"
+    return None
 
 
 def _is_fixed_argv_spawn(node: ast.Call, fname: str) -> bool:
@@ -480,27 +516,49 @@ class _InstallExecVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_If(self, node: ast.If) -> None:
-        if _is_cli_publish_guard(node.test) and _is_negated_guard(node.test):
-            # `if 'sdist' not in sys.argv:` / `if sys.argv[1] != 'publish':` — the body
-            # is the install path (the evasion seen in the benchmark), the else-branch
-            # the maintainer's.
-            for child in node.body:
-                self.visit(child)
-            self._guard_depth += 1
-            for child in node.orelse:
-                self.visit(child)
-            self._guard_depth -= 1
-        elif _is_cli_publish_guard(node.test):
-            # The body runs only under the guard → guarded. The else-branch is the
-            # normal (install) path → visited unguarded.
-            self._guard_depth += 1
-            for child in node.body:
-                self.visit(child)
-            self._guard_depth -= 1
-            for child in node.orelse:
-                self.visit(child)
-        else:
+        kind = _publish_guard(node.test)
+        if kind is None:
+            # `if __name__ == '__main__':`, `if sys.argv:`, `if 'develop' in argv:` and
+            # any other test: pip can take either branch, so both are the install path.
             self.generic_visit(node)
+            return
+        # "publish": the body runs only for a maintainer-only command, the else-branch
+        # on install. "not_publish" (`'sdist' not in argv`): the other way round.
+        guarded, install = (node.body, node.orelse) if kind == "publish" \
+            else (node.orelse, node.body)
+        self.visit(node.test)
+        for child in install:
+            self.visit(child)
+        self._guard_depth += 1
+        for child in guarded:
+            self.visit(child)
+        self._guard_depth -= 1
+
+    def _note_uname_use(self, parent: ast.AST, child: ast.AST) -> None:
+        """`platform.uname()` / `os.uname()` names the machine only through its node
+        name: `.nodename`, `[1]`, or the whole tuple handed on (`str(uname())`,
+        `{'u': uname()}`). `.machine` / `.system` / `.release` are platform checks."""
+        if not (isinstance(child, ast.Call) and _call_name(child) == "uname"):
+            return
+        if isinstance(parent, ast.Attribute):
+            if parent.attr == "nodename":
+                self.recon_unguarded = True
+        elif isinstance(parent, ast.Subscript):
+            sl = parent.slice
+            if isinstance(sl, ast.Constant) and sl.value == 1:
+                self.recon_unguarded = True
+        else:
+            self.recon_unguarded = True
+
+    def generic_visit(self, node: ast.AST) -> None:
+        if self._guard_depth == 0 and isinstance(
+                node, (ast.Attribute, ast.Subscript, ast.Call, ast.Dict, ast.List,
+                       ast.Tuple, ast.FormattedValue, ast.BinOp, ast.keyword)):
+            for child in ast.iter_child_nodes(node):
+                if isinstance(node, ast.Call) and child is node.func:
+                    continue
+                self._note_uname_use(node, child)
+        super().generic_visit(node)
 
     def visit_Constant(self, node: ast.Constant) -> None:
         # A string in install-time code naming a callback-collector / raw-IP host, a
@@ -519,13 +577,18 @@ class _InstallExecVisitor(ast.NodeVisitor):
     def _signal_call(self, node: ast.Call, fname: str, target: str) -> None:
         """Recon / obfuscated-exec signals of one unguarded call."""
         from src.scanner.install_signals import PY_RECON_CALLS
-        if fname in PY_RECON_CALLS and (
-                fname not in ("node", "uname")
-                or target in ("platform.node", "platform.uname", "os.uname")):
+        if fname in PY_RECON_CALLS or target == "platform.node":
             self.recon_unguarded = True
-        if fname in ("dict", "dumps", "str", "copy") and re.search(
-                r"\bos\.environ\b(?!\s*\.\s*get)", _target_src(node)):
-            self.recon_unguarded = True  # a copy of the whole environment
+        # The whole environment serialised (`json.dumps(os.environ)`, `str(os.environ)`)
+        # or handed to a network call. A copy for a subprocess (`os.environ.copy()`,
+        # `dict(os.environ, CC=...)`) is not recon.
+        if fname in ("dumps", "dump", "str", "repr") and node.args and re.fullmatch(
+                r"(?:dict\()?os\.environ\)?", _target_src(node.args[0])):
+            self.recon_unguarded = True
+        if _SETUP_NET_FETCH_RE.search(target) or target.split(".")[0] in self._net_aliases:
+            for a in [*node.args, *(kw.value for kw in node.keywords)]:
+                if re.fullmatch(r"(?:dict\()?os\.environ\)?", _target_src(a)):
+                    self.recon_unguarded = True
         if fname in ("exec", "eval", "compile") and node.args \
                 and _OBFUSCATED_ARG_RE.search(_target_src(node.args[0])[:5000]):
             self.obfuscated_unguarded = True
