@@ -7,6 +7,7 @@ from email.mime.text import MIMEText
 from pathlib import Path
 
 from src.config import settings
+from src.email_queue import recipient_for_log
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +187,9 @@ def _load_template(
     return content
 
 
-async def _send_via_resend(to: str, subject: str, html_body: str) -> bool:
+async def _send_via_resend(
+    to: str, subject: str, html_body: str, *, private: bool = False,
+) -> bool:
     """Send email via Resend API."""
     import httpx
 
@@ -206,16 +209,29 @@ async def _send_via_resend(to: str, subject: str, html_body: str) -> bool:
                 },
             )
             if resp.status_code in (200, 201):
-                logger.info("Email sent via Resend to %s: %s", to, subject)
+                logger.info(
+                    "Email sent via Resend to %s: %s", recipient_for_log(to, private), subject,
+                )
                 return True
-            logger.error("Resend API error %s: %s", resp.status_code, resp.text)
+            # A provider error can quote the address, so a private send logs the status only.
+            logger.error(
+                "Resend API error %s: %s", resp.status_code,
+                "(body withheld: private recipient)" if private else resp.text,
+            )
             return False
-    except Exception:
-        logger.exception("Failed to send email via Resend to %s", to)
+    except Exception as exc:
+        if private:
+            # The exception text can quote the address: log its type only.
+            logger.error("Failed to send email via Resend to a private recipient: %s",
+                         type(exc).__name__)
+        else:
+            logger.exception("Failed to send email via Resend to %s", to)
         return False
 
 
-async def _send_via_smtp(to: str, subject: str, html_body: str) -> bool:
+async def _send_via_smtp(
+    to: str, subject: str, html_body: str, *, private: bool = False,
+) -> bool:
     """Send email via SMTP."""
     import aiosmtplib
 
@@ -234,25 +250,35 @@ async def _send_via_smtp(to: str, subject: str, html_body: str) -> bool:
             password=settings.smtp_password,
             start_tls=True,
         )
-        logger.info("Email sent via SMTP to %s: %s", to, subject)
+        logger.info(
+            "Email sent via SMTP to %s: %s", recipient_for_log(to, private), subject,
+        )
         return True
-    except Exception:
-        logger.exception("Failed to send email via SMTP to %s", to)
+    except Exception as exc:
+        if private:
+            # The exception text can quote the address: log its type only.
+            logger.error("Failed to send email via SMTP to a private recipient: %s",
+                         type(exc).__name__)
+        else:
+            logger.exception("Failed to send email via SMTP to %s", to)
         return False
 
 
-async def send_email(to: str, subject: str, html_body: str) -> bool:
+async def send_email(to: str, subject: str, html_body: str, *, private: bool = False) -> bool:
     """Send an email with rate limiting, retry, and overflow queuing.
 
     Delegates to :func:`src.email_queue.send_email_rated` which enforces a
     per-minute rate limit (configurable via ``EMAIL_RATE_LIMIT_PER_MINUTE``),
     retries on transient failures, and queues overflow when the limit is hit.
 
+    ``private``: the address must not reach the logs (see
+    :func:`src.email_queue.recipient_for_log`).
+
     Returns True on success (or queued), False on failure after retries.
     """
     from src.email_queue import send_email_rated
 
-    return await send_email_rated(to, subject, html_body)
+    return await send_email_rated(to, subject, html_body, private=private)
 
 
 async def send_verification_email(to: str, token: str) -> bool:

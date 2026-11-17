@@ -25,6 +25,7 @@ interface CampaignRow {
   content: string | null; term: string | null
   sessions: number; lp_view: number; check_submit: number; result_view: number
   copy_plugin_cmd: number; open_plugin_dir: number; add_claude: number; add_chatgpt: number
+  email_setup: number; share_link: number
   badge_copied: number; contact_submit: number
 }
 interface CostRow {
@@ -143,6 +144,7 @@ export default function CampaignPanel() {
               <th className={`${th} text-right`}>Visits</th><th className={`${th} text-right`}>Landed</th><th className={`${th} text-right`}>Ran a check</th>
               <th className={`${th} text-right`}>Copied install cmd</th><th className={`${th} text-right`}>Copy rate</th><th className={`${th} text-right`}>Opened plugin directory</th>
               <th className={`${th} text-right`}>Add Claude</th><th className={`${th} text-right`}>Add ChatGPT</th>
+              <th className={`${th} text-right`} title="Email me the setup, sent">Emailed setup</th><th className={`${th} text-right`} title="Copy link / Share">Shared link</th>
             </tr></thead>
             <tbody>
               {rows.map((r, i) => (
@@ -159,6 +161,8 @@ export default function CampaignPanel() {
                   <td className={`${td} text-right text-text-muted`}>{fmt(r.open_plugin_dir)}</td>
                   <td className={`${td} text-right text-text-muted`}>{fmt(r.add_claude)}</td>
                   <td className={`${td} text-right text-text-muted`}>{fmt(r.add_chatgpt)}</td>
+                  <td className={`${td} text-right text-text-muted`}>{fmt(r.email_setup)}</td>
+                  <td className={`${td} text-right text-text-muted`}>{fmt(r.share_link)}</td>
                 </tr>
               ))}
             </tbody>
