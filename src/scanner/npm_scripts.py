@@ -1079,3 +1079,103 @@ def restore_externally_invoked(findings: list, texts: dict[str, str], *,
                 or any(fnmatch.fnmatchcase(n, g) for g in globs) for n in owners)):
             f.severity, f.payload, f.remediation = sev, payload, ""
             f._maintainer_restore = None
+
+
+# ---------------------------------------------------------------------------
+# Install hooks whose code is suspicious, not just present (benchmark triage cause 2)
+# ---------------------------------------------------------------------------
+
+_JS_FILE_EXTS = (".js", ".mjs", ".cjs", ".ts", ".mts", ".cts")
+_SH_FILE_EXTS = (".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd")
+_LOCAL_IMPORT_RE = re.compile(
+    r"""(?:require\s*\(\s*|from\s+|import\s*\(\s*|import\s+)['"`](\.{1,2}/[^'"`\s]+)['"`]""")
+_HOOK_NAME_RE = re.compile(r"^npm '([\w-]+)' lifecycle script \(auto-runs on install\)$")
+
+
+def _resolve(have: dict[str, str], base: str, word: str) -> str | None:
+    p = _norm(base, word[2:] if word.startswith("./") else word)
+    if p is None:
+        return None
+    return next((have[p + s] for s in _RESOLVE_SUFFIXES if p + s in have), None)
+
+
+def _hook_code(scripts: dict[str, str], hook: str, main: str,
+               texts: dict[str, str]) -> tuple[list[str], list[str]]:
+    """(shell command strings, local file paths) an install hook runs: the hook, the
+    scripts it names (``npm run x``), the local files those run, and the local files
+    those files ``require`` / ``import`` (one level). Under-approximate on purpose:
+    this only ever RAISES a finding, so an unfollowable command adds nothing."""
+    have = {p[2:] if p.startswith("./") else p: p for p in texts}
+    names = list(scripts)
+    todo, seen = [hook], set()
+    cmds: list[str] = []
+    files: list[str] = []
+    while todo:
+        n = todo.pop()
+        if n in seen or n not in scripts:
+            continue
+        seen.add(n)
+        cmds.append(scripts[n])
+        todo.extend(_referenced(scripts[n], names) or ())
+        for w in _script_file_refs(scripts[n], main):
+            hit = _resolve(have, "", w) if w != RUNS_PACKAGE_CODE else None
+            if hit is not None and hit not in files:
+                files.append(hit)
+    for path in list(files):
+        if not path.endswith(_JS_FILE_EXTS):
+            continue
+        text = texts.get(path) or ""
+        base = path.rsplit("/", 1)[0] + "/" if "/" in path else ""
+        for m in _LOCAL_IMPORT_RE.finditer(text[:200_000]):
+            hit = _resolve(have, base, m.group(1))
+            if hit is not None and hit not in files:
+                files.append(hit)
+    return cmds, files
+
+
+def escalate_suspicious_install_hooks(findings: list, texts: dict[str, str]) -> None:
+    """Raise a root package.json's medium ``install_hook`` finding to high when the
+    code the hook runs is suspicious, not merely present (``src.scanner.install_signals``:
+    host / user recon plus a network call, an out-of-band callback host, an obfuscated
+    payload). An ordinary build, banner or binary download keeps its medium."""
+    from src.scanner.install_signals import (
+        js_signals,
+        py_signals,
+        shell_signals,
+        suspicious_reason,
+    )
+
+    hooks = [f for f in findings if getattr(f, "category", "") == "install_hook"
+             and getattr(f, "file_path", "") == "package.json"
+             and getattr(f, "severity", "") == "medium"
+             and _HOOK_NAME_RE.match(getattr(f, "name", "") or "")]
+    if not hooks or not texts.get("package.json"):
+        return
+    try:
+        data = json.loads(texts["package.json"].lstrip("﻿"))
+    except ValueError:
+        return
+    scripts = data.get("scripts") if isinstance(data, dict) else None
+    if not isinstance(scripts, dict):
+        return
+    scripts = {k: v for k, v in scripts.items() if isinstance(k, str) and isinstance(v, str)}
+    main = data.get("main") if isinstance(data.get("main"), str) else ""
+    for f in hooks:
+        hook = _HOOK_NAME_RE.match(f.name).group(1)
+        cmds, files = _hook_code(scripts, hook, main, texts)
+        signals: set[str] = set()
+        for c in cmds:
+            signals |= shell_signals(c)
+        for p in files:
+            text = texts.get(p) or ""
+            low = p.lower()
+            if low.endswith(_SH_FILE_EXTS):
+                signals |= shell_signals(text)
+            elif low.endswith(".py"):
+                signals |= py_signals(text)
+            else:
+                signals |= js_signals(text)
+        reason = suspicious_reason(signals)
+        if reason:
+            f.severity = "high"
+            f.name = f"npm '{hook}' lifecycle script ({reason})"

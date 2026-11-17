@@ -162,6 +162,13 @@ def _is_cli_publish_guard(test: ast.AST) -> bool:
     return False
 
 
+def _is_negated_guard(test: ast.AST) -> bool:
+    """``'sdist' not in sys.argv`` / ``sys.argv[-1] != 'publish'`` /
+    ``__name__ != '__main__'``: a guard whose BODY runs on an ordinary install."""
+    return (isinstance(test, ast.Compare) and len(test.ops) == 1
+            and isinstance(test.ops[0], (ast.NotIn, ast.NotEq)))
+
+
 def _is_fixed_argv_spawn(node: ast.Call, fname: str) -> bool:
     """True for a ``subprocess.*`` call whose argv is a literal list/tuple, no
     ``shell=True``, and whose classification is a capability (benign binary, no
@@ -216,8 +223,14 @@ _BUILD_PART_DANGER_RE = re.compile(
 _NET_MODULES = frozenset({
     "requests", "httpx", "urllib3", "aiohttp", "pycurl", "wget", "socket", "ftplib",
     "http.client", "urllib.request", "urllib2", "six.moves.urllib.request", "paramiko",
-    "smtplib", "telnetlib",
+    "smtplib", "telnetlib", "discord", "discord_webhook", "dhooks",
 })
+# The argument of an install-time exec()/eval()/compile() that decodes a payload:
+# `exec(b64decode(...))`, `exec(''.join(map(chr, [...])))`, `exec(Fernet(k).decrypt(b))`.
+# The common `exec(open('pkg/_version.py').read())` metadata read has none of these.
+_OBFUSCATED_ARG_RE = re.compile(
+    r"b64decode|b32decode|a85decode|b85decode|decompress|decrypt|fromhex|unhexlify"
+    r"|\bchr\b|marshal|codecs\.decode|rot_?13|\[::-1\]|bytes\(\s*\[|bytearray\(\s*\[")
 # A spawned VCS / package fetch: `git clone`, `pip download`, `svn checkout`.
 _SETUP_VCS_FETCH_RE = re.compile(
     r"""['"](?:git|hg)['"]\s*,\s*(?:['"]-\w+['"]\s*,\s*)*['"](?:clone|fetch|pull)['"]"""
@@ -296,6 +309,18 @@ def _is_build_binary_spawn(node: ast.Call, fname: str, assigns: dict,
                 isinstance(first, ast.Call) and isinstance(first.func, ast.Attribute)
                 and first.func.attr in ("format", "join")):
             return False
+        s = _const_str(first)
+        if s is not None and s.strip() and any(c.isspace() for c in s.strip()):
+            # A whole command line in one string (`Popen('powershell -EncodedCommand
+            # …')`): on Windows that string IS the command line, shell or not. Read it
+            # as one: payload tokens, a shell / downloader first word, or an inline-code
+            # flag make it more than a build step.
+            if SHELL_PAYLOAD_DANGER_RE.search(s):
+                return False
+            words = s.split()
+            if _basename(words[0]) in DANGEROUS_ARGV0_SHELLS | DANGEROUS_ARGV0_NET \
+                    or any(w in DANGEROUS_ARGV_FLAGS for w in words):
+                return False
         parts = [first]
     for i, el in enumerate(parts):
         try:
@@ -382,6 +407,13 @@ class _InstallExecVisitor(ast.NodeVisitor):
         self.dropped_binary_unguarded = False
         # Unguarded execs that passed only as a fixed-argv spawn or a toolchain step.
         self.build_step_unguarded = False
+        # What the install-time code does beyond running (``src.scanner.install_signals``):
+        # reads who / where the machine is, names a callback-collector or raw-IP host,
+        # or exec()s a decoded string.
+        self.recon_unguarded = False
+        self.obfuscated_unguarded = False
+        self.const_signals: set[str] = set()
+        self._setup_meta_depth = 0
 
     def visit_Import(self, node: ast.Import) -> None:
         for a in node.names:
@@ -448,7 +480,17 @@ class _InstallExecVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_If(self, node: ast.If) -> None:
-        if _is_cli_publish_guard(node.test):
+        if _is_cli_publish_guard(node.test) and _is_negated_guard(node.test):
+            # `if 'sdist' not in sys.argv:` / `if sys.argv[1] != 'publish':` — the body
+            # is the install path (the evasion seen in the benchmark), the else-branch
+            # the maintainer's.
+            for child in node.body:
+                self.visit(child)
+            self._guard_depth += 1
+            for child in node.orelse:
+                self.visit(child)
+            self._guard_depth -= 1
+        elif _is_cli_publish_guard(node.test):
             # The body runs only under the guard → guarded. The else-branch is the
             # normal (install) path → visited unguarded.
             self._guard_depth += 1
@@ -460,15 +502,58 @@ class _InstallExecVisitor(ast.NodeVisitor):
         else:
             self.generic_visit(node)
 
+    def visit_Constant(self, node: ast.Constant) -> None:
+        # A string in install-time code naming a callback-collector / raw-IP host, a
+        # credential file, a persistence location, or holding code that fetches and runs
+        # more code (`open(tmp).write(b"exec(urlopen('https://…').read())")`). The
+        # setup() metadata (url=, project_urls=) is description, not code: not counted.
+        from src.scanner.install_signals import common_signals
+        if self._guard_depth or self._setup_meta_depth:
+            return
+        v = node.value
+        if isinstance(v, bytes):
+            v = v[:20_000].decode("utf-8", "replace")
+        if isinstance(v, str):
+            self.const_signals |= common_signals(v[:20_000])
+
+    def _signal_call(self, node: ast.Call, fname: str, target: str) -> None:
+        """Recon / obfuscated-exec signals of one unguarded call."""
+        from src.scanner.install_signals import PY_RECON_CALLS
+        if fname in PY_RECON_CALLS and (
+                fname not in ("node", "uname")
+                or target in ("platform.node", "platform.uname", "os.uname")):
+            self.recon_unguarded = True
+        if fname in ("dict", "dumps", "str", "copy") and re.search(
+                r"\bos\.environ\b(?!\s*\.\s*get)", _target_src(node)):
+            self.recon_unguarded = True  # a copy of the whole environment
+        if fname in ("exec", "eval", "compile") and node.args \
+                and _OBFUSCATED_ARG_RE.search(_target_src(node.args[0])[:5000]):
+            self.obfuscated_unguarded = True
+
     def visit_Call(self, node: ast.Call) -> None:
         fname = _call_name(node)
+        if fname == "setup" and self._guard_depth == 0:
+            # Metadata keywords: visited for cmdclass below, but their string constants
+            # are not install-time code.
+            self._setup_meta_depth += 1
+            for kw in node.keywords:
+                self.visit(kw)
+            self._setup_meta_depth -= 1
+            for arg in node.args:
+                self.visit(arg)
+            self.visit(node.func)
+            self._check_cmdclass(node)
+            return
         if self._guard_depth == 0:
             try:
                 target = ast.unparse(node.func)
             except Exception:  # noqa: BLE001
                 target = ""
+            self._signal_call(node, fname, target)
             head = target.split(".")[0].split("(")[0]
-            if _SETUP_NET_FETCH_RE.search(target) or head in self._net_aliases:
+            # (`socket.gethostname()` reads a name, it fetches nothing.)
+            if (_SETUP_NET_FETCH_RE.search(target) or head in self._net_aliases) \
+                    and fname not in ("gethostname", "getfqdn"):
                 self.net_fetch_unguarded = True
             if fname in ("__import__", "import_module") and node.args \
                     and isinstance(node.args[0], ast.Constant) \
@@ -498,17 +583,20 @@ class _InstallExecVisitor(ast.NodeVisitor):
                 else:
                     self.has_dynamic_unguarded = True
         if fname == "setup":
-            for kw in node.keywords:
-                if kw.arg == "cmdclass" and isinstance(kw.value, ast.Dict):
-                    # Flag only if the override targets a real install/build command.
-                    for key in kw.value.keys:
-                        if (
-                            isinstance(key, ast.Constant)
-                            and isinstance(key.value, str)
-                            and key.value in _INSTALL_BUILD_COMMANDS
-                        ):
-                            self.cmdclass = True
+            self._check_cmdclass(node)
         self.generic_visit(node)
+
+    def _check_cmdclass(self, node: ast.Call) -> None:
+        for kw in node.keywords:
+            if kw.arg == "cmdclass" and isinstance(kw.value, ast.Dict):
+                # Flag only if the override targets a real install/build command.
+                for key in kw.value.keys:
+                    if (
+                        isinstance(key, ast.Constant)
+                        and isinstance(key.value, str)
+                        and key.value in _INSTALL_BUILD_COMMANDS
+                    ):
+                        self.cmdclass = True
 
 
 def detect_pypi_install_exec(source: str, file_path: str) -> list:
@@ -531,6 +619,16 @@ def detect_pypi_install_exec(source: str, file_path: str) -> list:
     visitor = _InstallExecVisitor()
     visitor.visit(tree)
 
+    # Install-time code that phones home with host / user details, names a callback
+    # collector, or exec()s a decoded string (``src.scanner.install_signals``) is high
+    # whatever else it does; a plain build step or cmdclass stays medium.
+    from src.scanner.install_signals import suspicious_reason
+    signals = set(visitor.const_signals) | {s for s, on in (
+        ("net", visitor.net_fetch_unguarded or visitor.has_net_unguarded),
+        ("recon", visitor.recon_unguarded),
+        ("obfuscated", visitor.obfuscated_unguarded)) if on}
+    reason = suspicious_reason(signals)
+
     findings: list = []
     if visitor.unguarded:
         # network + exec at install time is the pip-install download-and-run pattern.
@@ -540,7 +638,7 @@ def detect_pypi_install_exec(source: str, file_path: str) -> list:
             severity = "critical"
         elif visitor.has_dynamic_unguarded or (
                 (visitor.net_fetch_unguarded or visitor.dropped_binary_unguarded)
-                and visitor.build_step_unguarded):
+                and visitor.build_step_unguarded) or reason:
             severity = "high"
         else:
             severity = "medium"
@@ -554,7 +652,19 @@ def detect_pypi_install_exec(source: str, file_path: str) -> list:
             snippet=(
                 f"install-time exec via {name}(...) in setup.py"
                 + (" (argv, no shell)" if severity == "medium" else "")
+                + (f"; it {reason}" if reason else "")
             ),
+            remediation=_REMEDIATION_HINTS.get("install_hook", "Audit install-time code"),
+        ))
+    elif reason:
+        findings.append(Finding(
+            category="install_hook",
+            name=f"setup.py {reason}",
+            severity="high",
+            file_path=file_path,
+            line_number=1,
+            snippet="install-time code in setup.py"
+                    + (" (custom cmdclass)" if visitor.cmdclass else ""),
             remediation=_REMEDIATION_HINTS.get("install_hook", "Audit install-time code"),
         ))
     elif visitor.cmdclass:
@@ -869,6 +979,13 @@ def scan_artifact_files(
     restore_externally_invoked(
         findings, {p: af.text for p, af in fetched.files.items() if af.text},
         registry_artifact=is_npm_tarball)
+
+    # An npm install hook whose code phones home with host / user details, contacts a
+    # callback collector, or runs an obfuscated payload: medium → high.
+    if is_npm_tarball:
+        from src.scanner.npm_scripts import escalate_suspicious_install_hooks
+        escalate_suspicious_install_hooks(
+            findings, {p: af.text for p, af in fetched.files.items() if af.text})
 
     return findings, files_scanned, has_install_hook
 
