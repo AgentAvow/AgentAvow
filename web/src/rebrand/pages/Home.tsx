@@ -300,7 +300,8 @@ export default function RebrandHome() {
   const pressed = (k: Tab) => tab === k || (k === 'safe' && tab === 'deep')
   const shown = tab === 'dnc' ? null : examples?.[tab]
 
-  const checkBox = (
+  // The ad hero gets a short, fixed placeholder: the rotating hints are cut off on a phone.
+  const checkBox = (placeholder: string) => (
     <>
       <form
         onSubmit={(e) => { e.preventDefault(); runCheck(value) }}
@@ -313,7 +314,7 @@ export default function RebrandHome() {
           value={value}
           onChange={(e) => setValue(e.target.value)}
           aria-label="Link to check"
-          placeholder={value ? '' : hint}
+          placeholder={value ? '' : placeholder}
           className="flex-1 min-w-0 bg-transparent outline-none font-mono text-[15.5px] text-text placeholder:text-text-muted"
         />
         <button type="submit" className="font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow whitespace-nowrap">
@@ -342,7 +343,7 @@ export default function RebrandHome() {
             Is your MCP server <span className="gradient-text-bio">safe</span> to connect?
           </h1>
           <p className="mt-3.5 mx-auto max-w-[46ch] text-[17px] text-text-muted font-light">Paste a server or package. Get a plain answer in seconds.</p>
-          {checkBox}
+          {checkBox('Server or package')}
           <p className="mt-3 text-[13px] text-text-muted">Free · No account · We read its public code. Nothing is installed on your device.</p>
 
           <h2 className="mt-10 mb-3 text-[19px] font-bold tracking-tight text-left">What a check looks like</h2>
@@ -358,7 +359,7 @@ export default function RebrandHome() {
         </div>
       </section>
       ) : (
-      <section className="text-center pt-16 pb-10 px-6">
+      <section className="text-center pt-16 pb-10 px-6" data-hero="default">
         <motion.div
           className="max-w-[1080px] mx-auto"
           initial={inSnapshot() ? false : { opacity: 0, y: 14 }}
@@ -373,7 +374,7 @@ export default function RebrandHome() {
             Paste a link to any app, connector or package. Get a clear answer, <b className="text-text font-semibold">Safe to connect</b>, <b className="text-text font-semibold">Review before you connect</b>, or <b className="text-text font-semibold">Do not connect</b>, with the reasons.
           </p>
 
-          {checkBox}
+          {checkBox(hint)}
 
           <div className="mt-4 flex flex-wrap gap-2 justify-center items-center">
             <span className="text-[13px] text-text-muted">Try one:</span>
