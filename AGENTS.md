@@ -141,7 +141,8 @@ publishes `ghcr.io/agentavow/scanner`.
 - **`Idempotency-Key` stays optional.** `src/idempotency.py` replays a keyed POST or
   PATCH from Redis (ADR 0007). Never require the header on a route anonymous
   clients call, and give every new entry in `EXCLUDED_PREFIXES` a reason there and in
-  `docs/adr/0007-idempotency-key.md`.
+  `docs/adr/0007-idempotency-key.md`. A new route that answers a plaintext secret
+  (API key, signing secret, token) goes in `SECRET_ROUTES`; the tests fail otherwise.
 - **Merge only on an explicit green.** A watcher that errored or a pending job is not a
   pass.
 - **No AI-attribution trailers** (`Co-Authored-By: Claude`, `Claude-Session:`,

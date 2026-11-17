@@ -10,8 +10,14 @@ The header is optional everywhere. A request without it runs exactly as before, 
 Redis outage never touches it. See docs/adr/0007-idempotency-key.md.
 
 - Scope: the key is stored per (key, method, path, caller). The caller is the API key
-  (hashed), the JWT subject, the hash of any other credential, or ``anon``, so two
-  accounts that pick the same key never see each other's responses.
+  (hashed), the JWT subject or ``anon``, so two accounts that pick the same key never
+  see each other's responses. A request whose bearer token is not a valid access
+  token runs as if it sent no key.
+- Before anything stored is answered (replay, 409, 422) to a caller with a
+  credential, the credential passes the check a protected route runs
+  (``get_current_entity``): a logged-out token or a revoked key gets its 401.
+- Secrets are never stored: routes that mint or rotate one (``SECRET_ROUTES``) ignore
+  the header, and an answer with a secret-named string member is not stored.
 - Same key, different request (body, query or content type): 422
   ``idempotency_key_reused``.
 - Same key while the first request still runs: 409 ``idempotency_key_in_use`` with
@@ -34,6 +40,7 @@ import base64
 import hashlib
 import json
 import logging
+import re
 import secrets
 import time
 from collections.abc import Callable
@@ -70,6 +77,48 @@ EXCLUDED_PREFIXES: tuple[str, ...] = (
     "/api/v1/gateway/webhook/rescan",
     # The MCP bridge speaks JSON-RPC, which has its own retry semantics (like /mcp).
     "/api/v1/mcp/",
+)
+
+# Routes whose answer carries a plaintext secret shown once (an API key, a signing
+# secret, a claim or bearer token, a payment client secret). They ignore the header
+# like the prefixes above, so such a secret never sits in Redis. Each pattern matches
+# the whole path; ``_SEG`` stands for one path parameter.
+_SEG = r"[^/]+"
+SECRET_ROUTES: tuple[tuple[str, str], ...] = (
+    ("/api/v1/account/api-keys", "returns a new personal API key (key)"),
+    ("/api/v1/account/alert-webhook/rotate-secret",
+     "returns a new alert-webhook signing secret (signing_secret)"),
+    ("/api/v1/webhooks", "returns a new webhook signing secret (secret)"),
+    ("/api/v1/agents", "returns a new agent API key and claim token"),
+    ("/api/v1/agents/register", "returns a new agent API key and claim token"),
+    (f"/api/v1/agents/{_SEG}/rotate-key", "returns a new agent API key"),
+    (f"/api/v1/agents/{_SEG}/recover-key", "returns a new agent API key"),
+    ("/api/v1/a2a/agent-card/import", "returns a new agent API key"),
+    ("/api/v1/bots/bootstrap", "returns a new bot API key and claim token"),
+    ("/api/v1/bots/import-source", "returns a new bot API key and claim token"),
+    ("/api/v1/attestation-providers/register", "returns a new provider API key"),
+    (f"/api/v1/organizations/{_SEG}/api-keys", "returns a new organization API key"),
+    ("/api/v1/migration/moltbook", "returns a claim token"),
+    ("/api/v1/sandbox/token", "returns a sandbox bearer token"),
+    (f"/api/v1/marketplace/{_SEG}/purchase", "returns a Stripe client_secret"),
+    (f"/api/v1/marketplace/purchases/{_SEG}/confirm", "returns a Stripe client_secret"),
+    (f"/api/v1/marketplace/purchases/{_SEG}/cancel", "returns a Stripe client_secret"),
+    (f"/api/v1/marketplace/purchases/{_SEG}/refund", "returns a Stripe client_secret"),
+    (f"/api/v1/marketplace/capabilities/{_SEG}/adopt", "returns a Stripe client_secret"),
+)
+_SECRET_ROUTE_RE = re.compile(
+    "^(?:" + "|".join(pattern for pattern, _ in SECRET_ROUTES) + ")/?$",
+)
+
+# A JSON member with one of these names and a non-empty string value counts as a
+# secret. SECRET_ROUTES is the rule; this is the backstop: an answer that carries one
+# is never stored (the key is freed and a retry runs again).
+# A bare "key" is too common an identifier (onboarding step keys) to match here; the
+# one route that answers a raw key under that name is in SECRET_ROUTES.
+SECRET_FIELD_RE = re.compile(
+    r"^(?:.*_)?(?:secret|api_?key|private_?key|signing_?key|secret_?key|access_?key"
+    r"|token|password|passphrase|credentials?)$",
+    re.IGNORECASE,
 )
 
 RECORD_TTL_SECONDS = 24 * 60 * 60
@@ -118,7 +167,31 @@ def is_covered(method: str, path: str) -> bool:
     """True when a POST or PATCH to ``path`` honours ``Idempotency-Key``."""
     if method.upper() not in METHODS or not path.startswith(COVERED_PREFIX):
         return False
-    return not path.startswith(EXCLUDED_PREFIXES)
+    if path.startswith(EXCLUDED_PREFIXES):
+        return False
+    return not _SECRET_ROUTE_RE.match(path)
+
+
+def carries_secret(value: Any) -> bool:
+    """True when a decoded JSON value has a secret-named member with a string value."""
+    if isinstance(value, dict):
+        for name, item in value.items():
+            if isinstance(item, str) and item and SECRET_FIELD_RE.match(str(name)):
+                return True
+            if carries_secret(item):
+                return True
+    elif isinstance(value, list):
+        return any(carries_secret(item) for item in value)
+    return False
+
+
+def _body_carries_secret(content_type: bytes, body: bytes) -> bool:
+    if b"json" not in content_type.lower():
+        return False
+    try:
+        return carries_secret(json.loads(body))
+    except ValueError:
+        return False
 
 
 def valid_key(value: str) -> bool:
@@ -148,9 +221,43 @@ def caller_subject(headers: dict[bytes, bytes]) -> str:
             payload = decode_token(auth[7:].decode("latin-1").strip())
             if payload and payload.get("kind") == "access" and payload.get("sub"):
                 return "sub:" + str(payload["sub"])
-        # An expired or unknown credential: its own scope, so its 401 is never shared.
-        return "cred:" + _sha256(auth)
+        # Not a valid access token: the request runs as if it sent no key.
+        return INVALID_CREDENTIAL
     return "anon"
+
+
+INVALID_CREDENTIAL = "invalid-credential"
+
+
+async def check_credentials(scope: dict) -> None:
+    """Run the credential check a protected route runs (``get_current_entity``): the
+    API key must be active, the JWT not blacklisted by logout nor invalidated by a
+    password change, the account active. Raises its ``HTTPException`` on failure."""
+    from fastapi.security import HTTPAuthorizationCredentials
+
+    from src.api.deps import get_current_entity
+    from src.database import get_db
+
+    headers = dict(scope.get("headers") or [])
+    api_key = headers.get(b"x-api-key")
+    auth = headers.get(b"authorization", b"").decode("latin-1")
+    credentials = None
+    if auth[:7].lower() == "bearer ":
+        credentials = HTTPAuthorizationCredentials(
+            scheme="Bearer", credentials=auth[7:].strip(),
+        )
+    # The app's own get_db, honouring dependency overrides (tests).
+    overrides = getattr(scope.get("app"), "dependency_overrides", None) or {}
+    sessions = overrides.get(get_db, get_db)()
+    db = await sessions.__anext__()
+    try:
+        await get_current_entity(
+            credentials=credentials,
+            x_api_key=api_key.decode("latin-1") if api_key is not None else None,
+            db=db,
+        )
+    finally:
+        await sessions.aclose()
 
 
 def storage_key(subject: str, method: str, path: str, key: str) -> str:
@@ -181,9 +288,11 @@ class IdempotencyMiddleware:
     """Pure ASGI middleware. Added innermost in src/main.py, so CORS, security
     headers and the request id still wrap a replayed answer."""
 
-    def __init__(self, app, redis_factory: Callable[[], Any] | None = None) -> None:
+    def __init__(self, app, redis_factory: Callable[[], Any] | None = None,
+                 credential_check: Callable[[dict], Any] | None = None) -> None:
         self.app = app
         self.redis_factory = redis_factory or _default_redis
+        self.credential_check = credential_check or check_credentials
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http" or not is_covered(scope["method"], scope["path"]):
@@ -209,14 +318,20 @@ class IdempotencyMiddleware:
             )
             return
 
+        subject = caller_subject(dict(scope.get("headers") or []))
+        if subject == INVALID_CREDENTIAL:
+            # An expired or unknown token: the route answers it (a 401 where auth is
+            # required) exactly as it would without the key. Nothing is stored.
+            await self.app(scope, receive, send)
+            return
+
         body, disconnected = await _read_body(receive)
         if disconnected:
             return  # The client left before sending its request; nothing to run.
         replay_receive = _replaying_receive(body, receive)
 
         method = scope["method"]
-        rkey = storage_key(caller_subject(dict(scope.get("headers") or [])),
-                           method, scope["path"], key)
+        rkey = storage_key(subject, method, scope["path"], key)
         fingerprint = request_fingerprint(scope, body)
         marker = f"{_IN_FLIGHT}{secrets.token_hex(8)}:{fingerprint}"
 
@@ -232,6 +347,12 @@ class IdempotencyMiddleware:
             return
 
         if not acquired:
+            # Nothing from the store goes out before the credential passes the check
+            # the route runs: a logged-out token or a revoked key gets its 401.
+            if subject != "anon" and not await self._credential_ok(
+                scope, replay_receive, send,
+            ):
+                return
             await self._answer_existing(scope, replay_receive, send, existing, fingerprint)
             return
 
@@ -276,6 +397,19 @@ class IdempotencyMiddleware:
             logger.warning("idempotency: could not release the key", exc_info=True)
 
     # -- answers ----------------------------------------------------------------------
+
+    async def _credential_ok(self, scope, receive, send) -> bool:
+        from starlette.exceptions import HTTPException as StarletteHTTPException
+
+        from src.errors.handlers import http_exception_handler
+
+        try:
+            await self.credential_check(scope)
+        except StarletteHTTPException as exc:
+            response = await http_exception_handler(Request(scope, receive), exc)
+            await response(scope, receive, send)
+            return False
+        return True
 
     async def _answer_existing(self, scope, receive, send, existing: str,
                                fingerprint: str) -> None:
@@ -358,6 +492,15 @@ class IdempotencyMiddleware:
                 return
             start = state["start"]
             body = b"".join(state["chunks"])
+            ctype = dict(start.get("headers") or []).get(b"content-type", b"")
+            if _body_carries_secret(ctype, body):
+                # Backstop for a route missing from SECRET_ROUTES: never store it.
+                logger.warning("idempotency: answer carries a secret, not stored: %s %s",
+                               scope["method"], scope["path"])
+                state["mode"] = "pass"
+                await send(start)
+                await send({"type": "http.response.body", "body": body, "more_body": False})
+                return
             await self._finish(rkey, marker, {
                 "fp": fingerprint,
                 "status": start["status"],

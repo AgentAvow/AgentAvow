@@ -28,9 +28,17 @@ whole API, the public scan included.
    body. The record is keyed by a SHA-256 of (caller, method, path, key), so neither
    the raw key nor a credential appears in a Redis key name.
 3. **Caller scope.** The caller is the hashed `X-API-Key` (it wins, as in
-   `get_current_entity`), else the `sub` of a valid access JWT, else the hash of any
-   other `Authorization` value, else `anon`. Two accounts that use the same key never
-   see each other's answers.
+   `get_current_entity`), else the `sub` of a valid access JWT, else `anon`. Two
+   accounts that use the same key never see each other's answers. A request whose
+   `Authorization` is not a valid access token runs as if it sent no key (the route
+   answers it, a 401 where auth is required), and nothing is stored for it.
+   **Credentials are checked before anything stored goes out.** Before a replay, a
+   409 or a 422 for a caller with a credential, the middleware runs
+   `get_current_entity`, the check a protected route runs: the API key must still be
+   active, the JWT must not be blacklisted by logout or invalidated by a password
+   change, and the account must be active. When it fails, the caller gets that 401
+   (problem+json) and nothing from the store. A logged-out token or a revoked key
+   cannot replay.
 4. **Answers.** Same key and same request (method, path, query, content type and a
    SHA-256 of the body): the stored answer, with `Idempotent-Replayed: true`. Same key,
    different request: 422 `idempotency_key_reused`. Same key while the first request
@@ -60,8 +68,22 @@ whole API, the public scan included.
    - `/api/v1/auth/*`: anonymous, and the answers carry tokens and cookies.
    - Webhooks we receive: `/api/v1/marketplace/stripe/webhook`,
      `/api/v1/gateway/webhook/rescan`, and `/api/v1/sso/*` (posted by the IdP).
+   - **Routes that mint or rotate a secret** (`SECRET_ROUTES`, each with its reason):
+     a plaintext secret shown once must never sit in Redis. Personal, agent, bot,
+     attestation-provider and organization API keys (create, register, rotate,
+     recover, A2A import); the alert-webhook `rotate-secret`; `POST /api/v1/webhooks`
+     (its signing secret); the Moltbook migration's claim token; the sandbox bearer
+     token; and the marketplace purchase routes that return a Stripe `client_secret`.
+   - **Backstop:** an answer whose JSON has a secret-named member (`SECRET_FIELD_RE`:
+     `*secret`, `*api_key`, `*token`, `*password`, `*private_key`, `*credentials` and
+     the like) with a string value is never stored, even on a covered route; the key
+     is freed and a retry runs again.
+     `tests/test_idempotency_key.py` walks every covered operation's response schema,
+     and the source of every covered endpoint for secret-named dict keys, and fails
+     on a hit: such a route goes into `SECRET_ROUTES`.
    Every other POST and PATCH under `/api/v1` is covered, first of all the account
-   writes: watches, claims, alert-webhook and webhook configs, API keys.
+   writes: watches, claims, the alert-webhook test, webhook updates and the GitHub App
+   claim.
 10. **OpenAPI.** The header is documented as an optional parameter on every covered
     operation (`add_openapi_parameter`). Adding an optional parameter is additive for
     the ADR 0006 gate.
@@ -70,13 +92,11 @@ whole API, the public scan included.
 
 - A client can make any covered write safe to retry by sending a fresh key per
   logical write and reusing it on retries.
-- A replay skips the route, so its dependencies (rate limits, the token blacklist)
-  do not run again. The scope limits a replay to the same API key or JWT subject, with
-  the same request body.
-- Answers that carry a one-time secret (a new API key, a rotated webhook secret) sit
-  in Redis for up to 24 hours when the client sent a key. Redis is internal and
-  password-protected; that is the price of a retry returning the same secret instead
-  of minting a second one.
+- A replay skips the route, so its other dependencies (rate limits, scope or role
+  checks) do not run again; the credential check does (3). The scope limits a replay
+  to the same API key or JWT subject, with the same request body.
+- Retrying a route that mints a secret still mints a second one: the client has to
+  clean up the extra key. That is the price of never storing plaintext secrets.
 - Keyed requests buffer the request body and, up to 256 KiB, the answer.
 - Don't add an exclusion without a reason in `EXCLUDED_PREFIXES` and here. Don't make
   the header required on a route anonymous clients call.
@@ -86,5 +106,6 @@ whole API, the public scan included.
 - Issue #407; triage in the #402 wishlist; `src/idempotency.py`; `src/main.py`;
   catalog codes in `src/errors/catalog.py`; `docs/api/openapi.json`.
 - Tests: `tests/test_idempotency_key.py` (replay, 422, 409, unkeyed writes, Redis down
-  with and without a key, exclusions, TTL, caller separation through the real app),
+  with and without a key, exclusions, secret routes and the secret walk, TTL, caller
+  separation, logged-out and revoked credentials through the real app),
   `tests/test_errors_catalog.py`.

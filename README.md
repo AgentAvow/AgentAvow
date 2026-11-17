@@ -283,7 +283,7 @@ body: the hosted MCP endpoint `/mcp` (JSON-RPC errors), badge and image routes, 
 
 ### Safe retries
 
-Any POST or PATCH under `/api/v1` (watches, claims, alert webhooks, API keys and the
+Any POST or PATCH under `/api/v1` (watches, claims, webhook updates and the
 rest) accepts an optional `Idempotency-Key` header: 1 to 255 printable ASCII
 characters, a fresh value per write, the same value on each retry of it. A retry
 with the same key and request body gets the first answer again, with
@@ -291,7 +291,10 @@ with the same key and request body gets the first answer again, with
 with a different request answers 422 `idempotency_key_reused`. A retry while the
 first request still runs answers 409 `idempotency_key_in_use` with `Retry-After`.
 The header is never required: without it a write runs as it always has. The public
-scan, beacon, auth and received-webhook routes ignore it. See
+scan, beacon, auth and received-webhook routes ignore it, and so do the routes that
+mint or rotate a secret (API keys, signing secrets): a plaintext secret is never
+stored. A replay goes out only after the credential passes the same check the
+route runs, so a logged-out token or a revoked key gets a 401. See
 [ADR 0007](docs/adr/0007-idempotency-key.md).
 
 ## Project Structure

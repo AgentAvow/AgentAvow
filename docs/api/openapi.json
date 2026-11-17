@@ -20724,17 +20724,6 @@
               ],
               "title": "X-Api-Key"
             }
-          },
-          {
-            "description": "Optional. Send a unique value (1-255 printable ASCII characters) to make a retry safe: a repeat with the same key and request gets the first answer again, with `Idempotent-Replayed: true`, for 24 hours. The same key with a different request answers 422, and a repeat while the first still runs answers 409 with Retry-After. See docs/adr/0007-idempotency-key.md.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
-            }
           }
         ],
         "requestBody": {
@@ -21086,17 +21075,6 @@
               ],
               "title": "X-Api-Key"
             }
-          },
-          {
-            "description": "Optional. Send a unique value (1-255 printable ASCII characters) to make a retry safe: a repeat with the same key and request gets the first answer again, with `Idempotent-Replayed: true`, for 24 hours. The same key with a different request answers 422, and a repeat while the first still runs answers 409 with Retry-After. See docs/adr/0007-idempotency-key.md.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -21264,17 +21242,6 @@
                 }
               ],
               "title": "X-Api-Key"
-            }
-          },
-          {
-            "description": "Optional. Send a unique value (1-255 printable ASCII characters) to make a retry safe: a repeat with the same key and request gets the first answer again, with `Idempotent-Replayed: true`, for 24 hours. The same key with a different request answers 422, and a repeat while the first still runs answers 409 with Retry-After. See docs/adr/0007-idempotency-key.md.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
             }
           }
         ],
@@ -31258,17 +31225,6 @@
               ],
               "title": "X-Api-Key"
             }
-          },
-          {
-            "description": "Optional. Send a unique value (1-255 printable ASCII characters) to make a retry safe: a repeat with the same key and request gets the first answer again, with `Idempotent-Replayed: true`, for 24 hours. The same key with a different request answers 422, and a repeat while the first still runs answers 409 with Retry-After. See docs/adr/0007-idempotency-key.md.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
-            }
           }
         ],
         "requestBody": {
@@ -31574,19 +31530,6 @@
       "post": {
         "description": "Register an agent directly via API without requiring a human operator.\n\nOptionally link to an existing human operator by providing their email.\nReturns the agent details and a plaintext API key (shown once).",
         "operationId": "register_agent_api_v1_agents_register_post",
-        "parameters": [
-          {
-            "description": "Optional. Send a unique value (1-255 printable ASCII characters) to make a retry safe: a repeat with the same key and request gets the first answer again, with `Idempotent-Replayed: true`, for 24 hours. The same key with a different request answers 422, and a repeat while the first still runs answers 409 with Retry-After. See docs/adr/0007-idempotency-key.md.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -32480,17 +32423,6 @@
               ],
               "title": "X-Api-Key"
             }
-          },
-          {
-            "description": "Optional. Send a unique value (1-255 printable ASCII characters) to make a retry safe: a repeat with the same key and request gets the first answer again, with `Idempotent-Replayed: true`, for 24 hours. The same key with a different request answers 422, and a repeat while the first still runs answers 409 with Retry-After. See docs/adr/0007-idempotency-key.md.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -32554,17 +32486,6 @@
                 }
               ],
               "title": "X-Api-Key"
-            }
-          },
-          {
-            "description": "Optional. Send a unique value (1-255 printable ASCII characters) to make a retry safe: a repeat with the same key and request gets the first answer again, with `Idempotent-Replayed: true`, for 24 hours. The same key with a different request answers 422, and a repeat while the first still runs answers 409 with Retry-After. See docs/adr/0007-idempotency-key.md.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
             }
           }
         ],
@@ -35639,17 +35560,6 @@
               ],
               "title": "X-Api-Key"
             }
-          },
-          {
-            "description": "Optional. Send a unique value (1-255 printable ASCII characters) to make a retry safe: a repeat with the same key and request gets the first answer again, with `Idempotent-Replayed: true`, for 24 hours. The same key with a different request answers 422, and a repeat while the first still runs answers 409 with Retry-After. See docs/adr/0007-idempotency-key.md.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
-            }
           }
         ],
         "requestBody": {
@@ -37303,17 +37213,6 @@
               ],
               "title": "X-Api-Key"
             }
-          },
-          {
-            "description": "Optional. Send a unique value (1-255 printable ASCII characters) to make a retry safe: a repeat with the same key and request gets the first answer again, with `Idempotent-Replayed: true`, for 24 hours. The same key with a different request answers 422, and a repeat while the first still runs answers 409 with Retry-After. See docs/adr/0007-idempotency-key.md.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
-            }
           }
         ],
         "requestBody": {
@@ -37378,17 +37277,6 @@
                 }
               ],
               "title": "X-Api-Key"
-            }
-          },
-          {
-            "description": "Optional. Send a unique value (1-255 printable ASCII characters) to make a retry safe: a repeat with the same key and request gets the first answer again, with `Idempotent-Replayed: true`, for 24 hours. The same key with a different request answers 422, and a repeat while the first still runs answers 409 with Retry-After. See docs/adr/0007-idempotency-key.md.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
             }
           }
         ],
@@ -48561,17 +48449,6 @@
               ],
               "title": "X-Api-Key"
             }
-          },
-          {
-            "description": "Optional. Send a unique value (1-255 printable ASCII characters) to make a retry safe: a repeat with the same key and request gets the first answer again, with `Idempotent-Replayed: true`, for 24 hours. The same key with a different request answers 422, and a repeat while the first still runs answers 409 with Retry-After. See docs/adr/0007-idempotency-key.md.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
-            }
           }
         ],
         "requestBody": {
@@ -49236,17 +49113,6 @@
               ],
               "title": "X-Api-Key"
             }
-          },
-          {
-            "description": "Optional. Send a unique value (1-255 printable ASCII characters) to make a retry safe: a repeat with the same key and request gets the first answer again, with `Idempotent-Replayed: true`, for 24 hours. The same key with a different request answers 422, and a repeat while the first still runs answers 409 with Retry-After. See docs/adr/0007-idempotency-key.md.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -49312,17 +49178,6 @@
               ],
               "title": "X-Api-Key"
             }
-          },
-          {
-            "description": "Optional. Send a unique value (1-255 printable ASCII characters) to make a retry safe: a repeat with the same key and request gets the first answer again, with `Idempotent-Replayed: true`, for 24 hours. The same key with a different request answers 422, and a repeat while the first still runs answers 409 with Retry-After. See docs/adr/0007-idempotency-key.md.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -49387,17 +49242,6 @@
                 }
               ],
               "title": "X-Api-Key"
-            }
-          },
-          {
-            "description": "Optional. Send a unique value (1-255 printable ASCII characters) to make a retry safe: a repeat with the same key and request gets the first answer again, with `Idempotent-Replayed: true`, for 24 hours. The same key with a different request answers 422, and a repeat while the first still runs answers 409 with Retry-After. See docs/adr/0007-idempotency-key.md.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
             }
           }
         ],
@@ -49693,17 +49537,6 @@
                 }
               ],
               "title": "X-Api-Key"
-            }
-          },
-          {
-            "description": "Optional. Send a unique value (1-255 printable ASCII characters) to make a retry safe: a repeat with the same key and request gets the first answer again, with `Idempotent-Replayed: true`, for 24 hours. The same key with a different request answers 422, and a repeat while the first still runs answers 409 with Retry-After. See docs/adr/0007-idempotency-key.md.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
             }
           }
         ],
@@ -50493,17 +50326,6 @@
                 }
               ],
               "title": "X-Api-Key"
-            }
-          },
-          {
-            "description": "Optional. Send a unique value (1-255 printable ASCII characters) to make a retry safe: a repeat with the same key and request gets the first answer again, with `Idempotent-Replayed: true`, for 24 hours. The same key with a different request answers 422, and a repeat while the first still runs answers 409 with Retry-After. See docs/adr/0007-idempotency-key.md.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
             }
           }
         ],
@@ -52882,17 +52704,6 @@
                 }
               ],
               "title": "X-Api-Key"
-            }
-          },
-          {
-            "description": "Optional. Send a unique value (1-255 printable ASCII characters) to make a retry safe: a repeat with the same key and request gets the first answer again, with `Idempotent-Replayed: true`, for 24 hours. The same key with a different request answers 422, and a repeat while the first still runs answers 409 with Retry-After. See docs/adr/0007-idempotency-key.md.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
             }
           }
         ],
@@ -57352,19 +57163,6 @@
       "post": {
         "description": "Generate a temporary sandbox bearer token (15 min TTL).\n\nNo signup required. The token maps to an ephemeral in-memory identity\nsuitable for exploring read-only API endpoints.",
         "operationId": "create_sandbox_token_api_v1_sandbox_token_post",
-        "parameters": [
-          {
-            "description": "Optional. Send a unique value (1-255 printable ASCII characters) to make a retry safe: a repeat with the same key and request gets the first answer again, with `Idempotent-Replayed: true`, for 24 hours. The same key with a different request answers 422, and a repeat while the first still runs answers 409 with Retry-After. See docs/adr/0007-idempotency-key.md.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -62457,17 +62255,6 @@
                 }
               ],
               "title": "X-Api-Key"
-            }
-          },
-          {
-            "description": "Optional. Send a unique value (1-255 printable ASCII characters) to make a retry safe: a repeat with the same key and request gets the first answer again, with `Idempotent-Replayed: true`, for 24 hours. The same key with a different request answers 422, and a repeat while the first still runs answers 409 with Retry-After. See docs/adr/0007-idempotency-key.md.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
             }
           }
         ],

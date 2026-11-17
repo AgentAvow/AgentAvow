@@ -22,10 +22,13 @@ from src.errors.handlers import PROBLEM_MEDIA_TYPE, install_problem_handlers
 from src.idempotency import (
     HEADER,
     IN_FLIGHT_TTL_SECONDS,
+    INVALID_CREDENTIAL,
     MAX_STORED_BODY_BYTES,
     RECORD_TTL_SECONDS,
+    SECRET_FIELD_RE,
     IdempotencyMiddleware,
     caller_subject,
+    carries_secret,
     is_covered,
     storage_key,
     valid_key,
@@ -107,6 +110,11 @@ def _build_app(counter: Counter, redis_factory=_redis) -> FastAPI:
     async def beacon(event: str):
         counter.calls += 1
         return {"n": counter.calls}
+
+    @app.post("/api/v1/leaky")
+    async def leaky():
+        counter.calls += 1
+        return {"n": counter.calls, "nested": {"signing_secret": "whsec_x"}}
 
     @app.post("/api/v1/auth/login")
     async def login():
@@ -332,8 +340,8 @@ def test_excluded_paths(path):
 
 @pytest.mark.parametrize("path", [
     "/api/v1/watches", "/api/v1/account/claims", "/api/v1/account/claims/1/verify",
-    "/api/v1/account/alert-webhook/rotate-secret", "/api/v1/webhooks",
-    "/api/v1/account/api-keys", "/api/v1/public/send-setup",
+    "/api/v1/account/alert-webhook/test", "/api/v1/webhooks/w1",
+    "/api/v1/account/github-app/claim-repo", "/api/v1/public/send-setup",
 ])
 def test_covered_paths(path):
     assert is_covered("POST", path) and is_covered("PATCH", path)
@@ -409,8 +417,8 @@ def test_caller_subject():
     tok = create_access_token(sub, "human")
     assert caller_subject({b"authorization": f"Bearer {tok}".encode()}) == f"sub:{sub}"
     assert caller_subject({}) == "anon"
-    bad = caller_subject({b"authorization": b"Bearer not-a-jwt"})
-    assert bad.startswith("cred:") and "not-a-jwt" not in bad
+    assert caller_subject({b"authorization": b"Bearer not-a-jwt"}) == INVALID_CREDENTIAL
+    assert caller_subject({b"authorization": b"Basic abc"}) == INVALID_CREDENTIAL
     # The API key decides, as in get_current_entity.
     both = {b"x-api-key": b"k", b"authorization": f"Bearer {tok}".encode()}
     assert caller_subject(both).startswith("apikey:")
@@ -508,7 +516,7 @@ def test_openapi_documents_the_optional_header():
                 if p["name"] == HEADER and p["in"] == "header"]
 
     for path, method in [("/api/v1/watches", "post"), ("/api/v1/account/claims", "post"),
-                         ("/api/v1/webhooks", "post"),
+                         ("/api/v1/account/github-app/claim-repo", "post"),
                          ("/api/v1/webhooks/{webhook_id}", "patch")]:
         (p,) = params(path, method)
         assert p["required"] is False
@@ -520,3 +528,194 @@ def test_openapi_documents_the_optional_header():
                          ("/api/v1/watches", "get")]:
         assert params(path, method) == []
     assert "/mcp" not in paths
+    # Routes that mint secrets do not document it either.
+    assert params("/api/v1/account/api-keys", "post") == []
+
+
+# --- secrets are never stored ----------------------------------------------------
+
+
+@pytest.mark.parametrize("path", [
+    "/api/v1/account/api-keys", "/api/v1/account/alert-webhook/rotate-secret",
+    "/api/v1/webhooks", "/api/v1/agents", "/api/v1/agents/register",
+    "/api/v1/agents/abc/rotate-key", "/api/v1/agents/abc/recover-key",
+    "/api/v1/a2a/agent-card/import", "/api/v1/bots/bootstrap", "/api/v1/bots/import-source",
+    "/api/v1/attestation-providers/register", "/api/v1/organizations/o1/api-keys",
+    "/api/v1/migration/moltbook", "/api/v1/sandbox/token",
+    "/api/v1/marketplace/l1/purchase", "/api/v1/marketplace/purchases/t1/confirm",
+    "/api/v1/marketplace/purchases/t1/cancel", "/api/v1/marketplace/purchases/t1/refund",
+    "/api/v1/marketplace/capabilities/l1/adopt",
+])
+def test_routes_that_mint_secrets_are_excluded(path):
+    assert not is_covered("POST", path) and not is_covered("PATCH", path)
+
+
+def test_secret_route_patterns_match_whole_paths_only():
+    assert is_covered("PATCH", "/api/v1/webhooks/w1")
+    assert is_covered("POST", "/api/v1/agents/claim")
+    assert is_covered("PATCH", "/api/v1/agents/a1/api-keys/k1")
+
+
+def test_carries_secret():
+    assert carries_secret({"api_key": "ag_live_x"}) and not carries_secret({"key": "step1"})
+    assert carries_secret({"a": [{"client_secret": "pi_x"}]})
+    assert carries_secret({"claim_token": "t"}) and carries_secret({"API_KEY": "k"})
+    assert not carries_secret({"key_id": "k", "page_key": "p", "max_tokens_per_call": 5, "token": None})
+    assert not carries_secret({"has_secret": True, "secret": ""})
+
+
+async def test_answer_with_a_secret_is_not_stored(client, counter):
+    key = _key()
+    a = await client.post("/api/v1/leaky", headers={HEADER: key})
+    b = await client.post("/api/v1/leaky", headers={HEADER: key})
+    assert a.status_code == b.status_code == 200
+    assert REPLAYED not in b.headers and counter.calls == 2
+    rkey = storage_key("anon", "POST", "/api/v1/leaky", key)
+    assert not await _redis().exists(rkey)
+
+
+def _api_routes(routes, prefix=""):
+    """(path, APIRoute) for every route, also with FastAPI's lazily included routers."""
+    from fastapi.routing import APIRoute
+
+    for r in routes:
+        if isinstance(r, APIRoute):
+            yield prefix + r.path, r
+        elif hasattr(r, "original_router"):
+            yield from _api_routes(r.original_router.routes,
+                                   prefix + r.include_context.prefix)
+
+
+def _schema_secret_fields(schema, components, seen=frozenset(), at=""):
+    out: list[str] = []
+    if not isinstance(schema, dict):
+        return out
+    ref = schema.get("$ref")
+    if ref:
+        name = ref.rsplit("/", 1)[-1]
+        if name in seen:
+            return out
+        return _schema_secret_fields(components.get(name, {}), components, seen | {name}, at)
+    for name, sub in (schema.get("properties") or {}).items():
+        if SECRET_FIELD_RE.match(name) and sub.get("type") in (None, "string"):
+            out.append(f"{at}.{name}")
+        out += _schema_secret_fields(sub, components, seen, f"{at}.{name}")
+    for k in ("items", "additionalProperties"):
+        out += _schema_secret_fields(schema.get(k), components, seen, at + "[]")
+    for k in ("allOf", "anyOf", "oneOf"):
+        for sub in schema.get(k) or []:
+            out += _schema_secret_fields(sub, components, seen, at)
+    return out
+
+
+def test_no_covered_route_documents_a_secret_in_its_answer():
+    """Walk every covered operation's response schemas: a secret-named field means
+    the route belongs in SECRET_ROUTES (src/idempotency.py)."""
+    from src.main import app
+
+    doc = app.openapi()
+    components = doc.get("components", {}).get("schemas", {})
+    leaks = {}
+    for path, ops in doc["paths"].items():
+        for method, op in ops.items():
+            if not isinstance(op, dict) or not is_covered(method, path):
+                continue
+            fields: list[str] = []
+            for resp in (op.get("responses") or {}).values():
+                for media in (resp.get("content") or {}).values():
+                    fields += _schema_secret_fields(media.get("schema"), components)
+            if fields:
+                leaks[f"{method.upper()} {path}"] = sorted(set(fields))
+    assert not leaks, f"covered routes answer secret-named fields: {leaks}"
+
+
+def test_no_covered_route_returns_a_secret_named_literal():
+    """Untyped (dict) answers are not in the schema: read each covered endpoint's
+    source for a secret-named dict key instead."""
+    import inspect
+    import re
+
+    from src.main import app
+
+    literal = re.compile(r"""["'](\w+)["']\s*:""")
+    leaks = {}
+    for path, route in _api_routes(app.routes):
+        for method in route.methods:
+            if not is_covered(method, path):
+                continue
+            try:
+                src = inspect.getsource(route.endpoint)
+            except (OSError, TypeError):
+                continue
+            names = {n for n in literal.findall(src) if SECRET_FIELD_RE.match(n)}
+            if names:
+                leaks[f"{method} {path}"] = sorted(names)
+    assert not leaks, f"covered routes build secret-named answers: {leaks}"
+
+
+def test_covered_route_walk_sees_the_routes():
+    from src.main import app
+
+    covered = {(m, p) for p, r in _api_routes(app.routes) for m in r.methods
+               if is_covered(m, p)}
+    assert ("POST", "/api/v1/watches") in covered
+    assert ("POST", "/api/v1/account/claims") in covered
+    assert len(covered) > 100
+
+
+# --- credentials are checked before a replay -------------------------------------
+
+
+async def test_logged_out_token_cannot_replay(main_client):
+    tok = await _token(main_client)
+    h = {"Authorization": f"Bearer {tok}", HEADER: _key()}
+    body = {"surface": "github", "owner": "acme", "repo": f"tool-{uuid.uuid4().hex[:6]}"}
+    a = await main_client.post("/api/v1/watches", json=body, headers=h)
+    assert a.status_code == 201
+    out = await main_client.post("/api/v1/auth/logout",
+                                 headers={"Authorization": f"Bearer {tok}"})
+    assert out.status_code == 200, out.text
+    b = await main_client.post("/api/v1/watches", json=body, headers=h)
+    problem = _assert_problem(b, 401, "unauthorized")
+    assert problem["detail"] == "Token has been revoked"
+    assert REPLAYED not in b.headers
+    assert len(main_client.scans) == 1
+    # A different body is refused the same way, before a 422 could say anything.
+    c = await main_client.post("/api/v1/watches", json={**body, "repo": "x"}, headers=h)
+    _assert_problem(c, 401, "unauthorized")
+
+
+async def test_revoked_api_key_cannot_replay(main_client):
+    tok = await _token(main_client)
+    auth = {"Authorization": f"Bearer {tok}"}
+    created = await main_client.post("/api/v1/account/api-keys", json={"label": "idem"},
+                                     headers=auth)
+    assert created.status_code == 201, created.text
+    raw, key_id = created.json()["key"], created.json()["id"]
+    h = {"X-API-Key": raw, HEADER: _key()}
+    body = {"surface": "github", "owner": "acme", "repo": f"tool-{uuid.uuid4().hex[:6]}"}
+    a = await main_client.post("/api/v1/watches", json=body, headers=h)
+    assert a.status_code == 201, a.text
+    b = await main_client.post("/api/v1/watches", json=body, headers=h)
+    assert b.headers[REPLAYED] == "true"
+    revoked = await main_client.delete(f"/api/v1/account/api-keys/{key_id}", headers=auth)
+    assert revoked.status_code == 204, revoked.text
+    c = await main_client.post("/api/v1/watches", json=body, headers=h)
+    _assert_problem(c, 401, "unauthorized")
+    assert REPLAYED not in c.headers
+    assert len(main_client.scans) == 1
+
+
+async def test_api_key_create_ignores_the_header(main_client):
+    tok = await _token(main_client)
+    h = {"Authorization": f"Bearer {tok}", HEADER: _key()}
+    a = await main_client.post("/api/v1/account/api-keys", json={"label": "a"}, headers=h)
+    b = await main_client.post("/api/v1/account/api-keys", json={"label": "a"}, headers=h)
+    assert a.status_code == b.status_code == 201
+    assert a.json()["key"] != b.json()["key"] and REPLAYED not in b.headers
+
+
+async def test_invalid_token_with_a_key_runs_as_unkeyed(main_client):
+    h = {"Authorization": "Bearer not-a-jwt", HEADER: _key()}
+    r = await main_client.post("/api/v1/watches", json={"owner": "a", "repo": "b"}, headers=h)
+    assert r.status_code == 401 and REPLAYED not in r.headers
