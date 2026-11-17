@@ -73,6 +73,8 @@ services:
     volumes:
       - ./digest_history.json:/app/digest_history.json:ro
       - ./data/launch-scans:/app/data/launch-scans:ro
+      # read-only: lets the admin Do not connect review mark the library run's own answers
+      - ./data/catalog-growth:/app/data/catalog-growth:ro
     depends_on:
       postgres:
         condition: service_healthy
