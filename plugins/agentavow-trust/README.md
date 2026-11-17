@@ -118,13 +118,6 @@ example-server https://mcp.example.com/mcp K7Q2M-9XA3B
   happens to be named AgentAvow, such as a checkout of this repo or the plugin's own
   install folder, does not count, and neither does a word that only contains "allow"
   (such as "shallow") in a command about another cache folder.
-- If you work on AgentAvow itself and this check gets in your way, start Claude Code
-  with `AGENTAVOW_MAINTAINER=1` in its environment (for example
-  `AGENTAVOW_MAINTAINER=1 claude`, or an export in your shell profile). It turns off
-  only this own-files check; Do not connect answers still ask. The hook reads the
-  variable from the environment Claude Code started with, so a command Claude runs
-  cannot turn it on. Anything that can change Claude Code's own environment, such as
-  the `env` block in its settings files, can.
 
 Settings, all optional, read from the environment and never sent anywhere:
 

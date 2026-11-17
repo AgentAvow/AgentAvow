@@ -55,7 +55,6 @@ _HERE = pathlib.Path(__file__).resolve().parent
 # Stored grades first so an install is not held up; one bounded fresh scan at most;
 # anything slow, unknown or unscannable stays silent (fail-open).
 INSTALL_ENV = "AGENTAVOW_INSTALL_CHECKS"  # "off" disables package-install checks
-MAINTAINER_ENV = "AGENTAVOW_MAINTAINER"  # "1" turns off the own-files ask
 PKG_CAP = 5            # packages checked per command
 PKG_BUDGET = 14.0      # seconds for all package lookups in one command (hook timeout 20)
 FRESH_MAX = 1          # fresh scans per command for a package with no stored grade
@@ -550,6 +549,24 @@ def _is_cache_parent(prefix: str, cwd: object, has_cd: bool, sets_home: bool) ->
         return True
 
 
+def _literally_cache_parent(prefix: str, cwd: object, sets_home: bool) -> bool:
+    """Whether ``prefix``, the whole word up to the whitespace before an ``agentavow``
+    segment, read literally (a `[` or `,` as part of a folder name), resolves to the
+    cache folder's parent. The token stops cut ``["/a/AgentAvow"`` down to the path, but
+    a real folder can be named ``p,q`` or ``a[b``, and a link under it can point at
+    ~/.cache, so the segment is kept when either reading lands there."""
+    p = prefix if sets_home else _HOME_VAR.sub("~", prefix)
+    p = os.path.expanduser(p)
+    if not os.path.isabs(p):
+        if not isinstance(cwd, str) or not cwd:
+            return False
+        p = os.path.join(os.path.expanduser(cwd), p)
+    try:
+        return os.path.realpath(p).lower() == os.path.realpath(_own_dir().parent).lower()
+    except Exception:
+        return True
+
+
 def _other_agentavow_dirs(text: str, cwd: object = None) -> str:
     """``text`` with each ``<parent>/agentavow`` segment blanked out when that parent is
     a plain folder whose real path is not the cache folder's parent (a checkout of this
@@ -569,6 +586,11 @@ def _other_agentavow_dirs(text: str, cwd: object = None) -> str:
         while start > 0 and not text[start - 1].isspace() and text[start - 1] not in _TOKEN_STOP:
             start -= 1
         if _is_cache_parent(text[start:m.end(1)], cwd, has_cd, sets_home):
+            return m.group(0)
+        whole = m.start(1)
+        while whole > 0 and not text[whole - 1].isspace():
+            whole -= 1
+        if whole < start and _literally_cache_parent(text[whole:m.end(1)], cwd, sets_home):
             return m.group(0)
         return parent + "/_"
     return _SEGMENT.sub(blank, text)
@@ -648,15 +670,6 @@ def _touches_own_files(payload: dict) -> bool:
     return False
 
 
-def _maintainer() -> bool:
-    """AGENTAVOW_MAINTAINER=1 in the environment Claude Code was started with turns off the
-    own-files ask, for people who work on AgentAvow itself. Only this process's environment
-    counts: a command that sets the variable runs in its own shell, which this hook never
-    sees. The Do not connect install asks are unaffected (AGENTAVOW_INSTALL_CHECKS)."""
-    import os
-    return os.environ.get(MAINTAINER_ENV, "").strip().lower() in ("1", "on", "true", "yes")
-
-
 def _ask_about_allow_list() -> None:
     reason = ("AgentAvow: this reads or changes AgentAvow's own files (~/.cache/agentavow: "
               "the grades, the list of servers you allowed past a Do not connect answer, "
@@ -675,7 +688,7 @@ def main() -> None:
     if not isinstance(payload, dict) or payload.get("hook_event_name") not in (None, "PreToolUse"):
         return
     try:
-        if _touches_own_files(payload) and not _maintainer():
+        if _touches_own_files(payload):
             _ask_about_allow_list()
             return
     except Exception:
