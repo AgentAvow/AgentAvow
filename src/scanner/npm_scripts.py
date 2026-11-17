@@ -1169,7 +1169,8 @@ def _hook_code(scripts: dict[str, str], hook: str, main: str,
     frontier = list(files)
     seen_files = set(files)
     walked = 0
-    for _depth in range(_MAX_HOOK_DEPTH):
+    core: list[str] = list(files)  # run directly, plus their first level of requires
+    for depth in range(_MAX_HOOK_DEPTH):
         nxt: list[str] = []
         for path in frontier:
             if not path.endswith(_JS_FILE_EXTS) or walked > _MAX_WALK_BYTES:
@@ -1184,29 +1185,40 @@ def _hook_code(scripts: dict[str, str], hook: str, main: str,
                     seen_files.add(hit)
                     files.append(hit)
                     nxt.append(hit)
+        if depth == 0:
+            core.extend(nxt)
         if not nxt:
             break
         frontier = nxt
-    return cmds, files
+    return cmds, files, core
 
 
-def _signal_order(files: list[str], texts: dict[str, str]) -> list[str]:
-    """The files to read for signals, within ``_MAX_SIGNAL_BYTES``: everything when it
-    fits, otherwise the ones carrying the most suspect words first."""
-    if sum(len(texts.get(p) or "") for p in files) <= _MAX_SIGNAL_BYTES:
-        return files
+def _signal_order(files: list[str], core: list[str], texts: dict[str, str]) -> list[str]:
+    """The files to read for signals. ``core`` (what the hook runs directly and its
+    first level of requires) is always read; the rest within ``_MAX_SIGNAL_BYTES``,
+    the ones carrying the most suspect words first. Each file is charged only for what
+    the signal read takes of it (``MAX_SIGNAL_TEXT``), so huge padding files cannot
+    use the budget up."""
+    from src.scanner.install_signals import MAX_SIGNAL_TEXT, clip
+
+    def cost(p: str) -> int:
+        return min(len(texts.get(p) or ""), MAX_SIGNAL_TEXT)
+
+    rest = [p for p in files if p not in set(core)]
+    used = sum(cost(p) for p in core)
+    if used + sum(cost(p) for p in rest) <= _MAX_SIGNAL_BYTES:
+        return [*core, *rest]
 
     def score(p: str) -> int:
-        t = texts.get(p) or ""
+        t = clip(texts.get(p) or "")
         return -sum(w in t for w in _SUSPECT_WORDS)
 
-    out, used = [], 0
-    for p in sorted(files, key=score):
-        n = len(texts.get(p) or "")
-        if used + n > _MAX_SIGNAL_BYTES and out:
+    out = list(core)
+    for p in sorted(rest, key=score):
+        if used + cost(p) > _MAX_SIGNAL_BYTES:
             continue
         out.append(p)
-        used += n
+        used += cost(p)
     return out
 
 
@@ -1237,21 +1249,28 @@ def escalate_suspicious_install_hooks(findings: list, texts: dict[str, str]) -> 
         return
     scripts = {k: v for k, v in scripts.items() if isinstance(k, str) and isinstance(v, str)}
     main = data.get("main") if isinstance(data.get("main"), str) else ""
-    for f in hooks:
-        hook = _HOOK_NAME_RE.match(f.name).group(1)
-        cmds, files = _hook_code(scripts, hook, main, texts)
-        signals: set[str] = set()
-        for c in cmds:
-            signals |= shell_signals(c)
-        for p in _signal_order(files, texts):
+    cache: dict[str, set[str]] = {}  # a file run by several hooks is read once
+
+    def file_signals(p: str) -> set[str]:
+        if p not in cache:
             text = texts.get(p) or ""
             low = p.lower()
             if low.endswith(_SH_FILE_EXTS):
-                signals |= shell_signals(text)
+                cache[p] = shell_signals(text)
             elif low.endswith(".py"):
-                signals |= py_signals(text)
+                cache[p] = py_signals(text)
             else:
-                signals |= js_signals(text)
+                cache[p] = js_signals(text)
+        return cache[p]
+
+    for f in hooks:
+        hook = _HOOK_NAME_RE.match(f.name).group(1)
+        cmds, files, core = _hook_code(scripts, hook, main, texts)
+        signals: set[str] = set()
+        for c in cmds:
+            signals |= shell_signals(c)
+        for p in _signal_order(files, core, texts):
+            signals |= file_signals(p)
         reason = suspicious_reason(signals)
         if reason:
             f.severity = "high"

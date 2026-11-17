@@ -392,15 +392,27 @@ _LOG_CALLS = frozenset({"print", "debug", "info", "warning", "warn", "error", "c
 
 
 def _cmdclass_keys(tree: ast.AST) -> dict[str, set[str]]:
-    """Class name -> the command names it is registered under in any ``{'install':
-    Cls}``-shaped dict of the file (a cmdclass passed inline or built in a name)."""
+    """Class name -> the command names it is registered under anywhere in the file:
+    ``{'install': Cls}``, ``dict(install=Cls)`` and ``cmds['install'] = Cls``."""
     out: dict[str, set[str]] = {}
+
+    def add(key: object, value: ast.AST) -> None:
+        if isinstance(key, str) and isinstance(value, ast.Name):
+            out.setdefault(value.id, set()).add(key)
+
     for node in ast.walk(tree):
         if isinstance(node, ast.Dict):
             for k, v in zip(node.keys, node.values):
-                if (isinstance(k, ast.Constant) and isinstance(k.value, str)
-                        and isinstance(v, ast.Name)):
-                    out.setdefault(v.id, set()).add(k.value)
+                if isinstance(k, ast.Constant):
+                    add(k.value, v)
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id == "dict":
+            for kw in node.keywords:
+                add(kw.arg, kw.value)
+        elif isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant):
+                    add(t.slice.value, node.value)
     return out
 
 

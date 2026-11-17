@@ -107,9 +107,11 @@ _JS_USERNAME_USE_RE = re.compile(
     r"""(?<![\w$])(?:([A-Za-z_$][\w$]*)|userInfo\s*\(\s*\))\s*\.\s*username\b""")
 # A statement that uses the user name for a local path (a per-user cache or temp dir),
 # not to send it anywhere.
-_PATH_USE_RE = re.compile(
+_LOCAL_USE_RE = re.compile(
     r"""/tmp/|\bpath\s*\.\s*(?:join|resolve)\b|\.cache\b|\bmkdir|\bwriteFile|\breadFile"""
-    r"""|\bexistsSync\b|\bhomedir\b|\btmpdir\b|\bchown""")
+    r"""|\bexistsSync\b|\bhomedir\b|\btmpdir\b|\bchown"""
+    # ... or one that only shows it to the person installing (a thank-you banner)
+    r"""|\bconsole\s*\.\s*(?:log|info|warn|error)\s*\(|\bprocess\s*\.\s*std(?:out|err)\b""")
 _SEND_USE_RE = re.compile(
     r"""https?:|\brequest\s*\(|\bfetch\s*\(|\blookup\s*\(|\.get\s*\("""
     r"""|\bsend\s*\(|\baxios\b|\bdns\b|encodeURIComponent|JSON\.stringify""")
@@ -201,13 +203,16 @@ def _statement(text: str, pos: int, end: int) -> str:
 
 def _js_username_sent(text: str) -> bool:
     """The user name read from ``os.userInfo()`` and used anywhere but a local path
-    (``/tmp/tool-${info.username}``). One pass for the bound names, one for the uses."""
+    (``/tmp/tool-${info.username}``) or a line printed to the installer
+    (``console.log(`Thanks ${…username}!`)``), unless that statement also sends
+    something. A property in a payload object (``{username: …}``) or a variable later
+    put in a URL still counts. One pass for the bound names, one for the uses."""
     names = {m.group(1) for m in _JS_USERINFO_VAR_RE.finditer(text)}
     for m in _JS_USERNAME_USE_RE.finditer(text):
         if m.group(1) is not None and m.group(1) not in names:
             continue
         stmt = _statement(text, m.start(), m.end())
-        if not _PATH_USE_RE.search(stmt) or _SEND_USE_RE.search(stmt):
+        if not _LOCAL_USE_RE.search(stmt) or _SEND_USE_RE.search(stmt):
             return True
     return False
 
