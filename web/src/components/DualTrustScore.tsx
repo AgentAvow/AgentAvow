@@ -25,6 +25,7 @@ const ATTESTATION_WEIGHTS = { verification: 0.25, age: 0.08, scan_score: 0.05 }
 const COMMUNITY_WEIGHTS = { activity: 0.18, reputation: 0.14, community: 0.18 }
 // external_reputation (0.12) is excluded from dual display — it feeds into overall only
 
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper co-located with the component it serves; HMR falls back to a full reload here
 export function computeDualTrust(components: TrustComponents | null | undefined): DualTrust | null {
   if (!components) return null
 
@@ -59,6 +60,7 @@ export function computeDualTrust(components: TrustComponents | null | undefined)
 }
 
 // Fallback: estimate from single overall score when components unavailable
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper co-located with the component it serves; HMR falls back to a full reload here
 export function estimateFromOverall(score: number | null | undefined): DualTrust | null {
   if (score == null) return null
   const pct = Math.round(score * 100)

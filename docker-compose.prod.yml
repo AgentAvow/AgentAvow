@@ -47,6 +47,10 @@ services:
       # web worker's event loop (it held one worker's loop and slowed half the
       # requests, 2026-10-08).
       BLUESKY_SUBSCRIBER_IN_WEB: "false"
+      # glibc gives each thread that allocates its own malloc arena (up to 8 per core)
+      # and keeps freed memory in it. The scan catalog is built in worker threads, so
+      # every rebuild could leave its peak behind in another arena. Two arenas cap that.
+      MALLOC_ARENA_MAX: "2"
     expose:
       - "8000"
     command: >
@@ -57,6 +61,15 @@ services:
       --log-level warning
       --proxy-headers
       --forwarded-allow-ips="172.16.0.0/12"
+      --timeout-graceful-shutdown 60
+    # Graceful shutdown (#404). docker stop sends SIGTERM to uvicorn (PID 1: the
+    # entrypoint execs it); uvicorn stops accepting, lets in-flight requests finish
+    # for up to --timeout-graceful-shutdown, then runs the lifespan shutdown. The
+    # longest request a scan route holds open is its `wait` (capped at 60 s in
+    # public_scan_router, matching nginx's 60 s /api/v1/ read timeout), so 60 s lets
+    # those finish; the 15 s on top is for lifespan shutdown before docker's SIGKILL
+    # (the default 10 s cut scans off mid-request).
+    stop_grace_period: 75s
     volumes:
       - ./digest_history.json:/app/digest_history.json:ro
       - ./data/launch-scans:/app/data/launch-scans:ro

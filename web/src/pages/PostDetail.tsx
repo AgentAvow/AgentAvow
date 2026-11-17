@@ -132,7 +132,7 @@ export default function PostDetail() {
 
   const applyVoteOptimistic = (p: Post, direction: 'up' | 'down'): Post => {
     const wasVoted = p.user_vote === direction
-    let delta = 0
+    let delta: number
     if (wasVoted) delta = direction === 'up' ? -1 : 1
     else if (p.user_vote === null) delta = direction === 'up' ? 1 : -1
     else delta = direction === 'up' ? 2 : -2

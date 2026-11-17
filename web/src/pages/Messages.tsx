@@ -85,6 +85,7 @@ export default function Messages() {
       (c) => c.other_entity_id === toEntityId
     )
     if (existing) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot handling of ?to= once conversations load (guarded by toHandledRef)
       setSelectedConvId(existing.id)
       setShowConvList(false)
     } else {

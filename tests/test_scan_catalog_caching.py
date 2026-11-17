@@ -85,11 +85,56 @@ async def test_concurrent_cold_calls_do_one_read(fetch, clock):
     assert all(len(r) == 3 for r in results)
 
 
+async def _refill_done():
+    task = m._COMMUNITY_TASK
+    if task is not None:
+        await task[1]
+
+
 async def test_cache_expires_after_ttl(fetch, clock):
     await m._community_rows(None)
     clock["now"] += m.COMMUNITY_ROWS_TTL_SECONDS + 0.01
-    await m._community_rows(None)
+    await m._community_rows(None)  # served stale, refill in the background
+    await _refill_done()
     assert fetch["calls"] == 2
+
+
+async def test_stale_rows_served_without_waiting_then_refreshed(fetch, clock):
+    await m._community_rows(None)
+    fetch["result"] = _community(5)
+    fetch["delay"] = 0.05
+    clock["now"] += m.COMMUNITY_ROWS_TTL_SECONDS + 1
+    stale = await m._community_rows(None)
+    assert len(stale) == 3  # the caller did not wait on the DB read
+    await _refill_done()
+    assert len(await m._community_rows(None)) == 5
+    assert fetch["calls"] == 2
+
+
+async def test_too_stale_rows_are_read_by_the_caller(fetch, clock):
+    await m._community_rows(None)
+    fetch["result"] = _community(5)
+    clock["now"] += m.COMMUNITY_ROWS_TTL_SECONDS + m.COMMUNITY_ROWS_MAX_STALE_SECONDS + 1
+    assert len(await m._community_rows(None)) == 5
+    assert fetch["calls"] == 2
+
+
+async def test_failed_background_refill_keeps_serving_rows(fetch, clock):
+    await m._community_rows(None)
+    fetch["result"] = None  # DB error on the refill
+    clock["now"] += m.COMMUNITY_ROWS_TTL_SECONDS + 1
+    assert len(await m._community_rows(None)) == 3
+    await _refill_done()
+    assert len(await m._community_rows(None)) == 3
+
+
+async def test_write_during_refill_leaves_rows_expired(fetch, clock):
+    fetch["delay"] = 0.05
+    task = asyncio.ensure_future(m._community_rows(None))
+    await asyncio.sleep(0.01)
+    m._COMMUNITY_GEN += 1  # a write lands while the read is in flight
+    await task
+    assert m._COMMUNITY_CACHE[1] <= clock["now"]  # the next read refills again
 
 
 async def test_invalidation_clears_both_caches(fetch, clock, monkeypatch):
@@ -118,7 +163,10 @@ async def test_capture_community_scan_invalidates(fetch, clock):
     await p._capture_community_scan(
         "acme", "tool", {"trust_score": None, "findings": {}}, _DB(),
     )
-    assert m._COMMUNITY_CACHE is None
+    # rows kept (the next visitor is served at once) but expired, and a refill started
+    assert m._COMMUNITY_CACHE is not None and m._COMMUNITY_CACHE[1] <= clock["now"]
+    await _refill_done()
+    assert fetch["calls"] == 2 and m._COMMUNITY_CACHE[1] > clock["now"]
 
 
 async def test_error_path_is_not_cached(fetch, clock):
@@ -172,7 +220,7 @@ async def test_list_handler_leaves_cached_rows_untouched(fetch, clock, monkeypat
 async def test_flagged_stat_identical_before_and_after_caching(fetch, clock, monkeypatch):
     monkeypatch.setattr(m, "_CATALOG_CACHE", m._build_catalog(_fixture_rows()))
     community = await m._community_rows(None)
-    uncached = m._compute_flagged_stat(m._CATALOG_CACHE, community)
+    uncached = await m._compute_stat(m._CATALOG_CACHE, community)
     first = await m.flagged_stat(db=None)
     second = await m.flagged_stat(db=None)
     assert first == second == uncached
@@ -198,12 +246,16 @@ async def test_flagged_stat_cache_hit_skips_recount(fetch, clock, monkeypatch):
     # community TTL refill with equal rows keeps the stat cached, no refresh started ...
     clock["now"] += m.COMMUNITY_ROWS_TTL_SECONDS + 1
     await m.flagged_stat(db=None)
+    await _refill_done()
+    await m.flagged_stat(db=None)
     assert calls["n"] == 1 and fetch["calls"] == 2
     assert m._FLAGGED_STAT_TASK is None
     # ... changed rows: the old value is served, one background refresh recomputes
     fetch["result"] = _community(4)
     clock["now"] += m.COMMUNITY_ROWS_TTL_SECONDS + 1
-    old = await m.flagged_stat(db=None)
+    old = await m.flagged_stat(db=None)  # stale rows served, community refill started
+    await _refill_done()
+    await m.flagged_stat(db=None)  # new rows seen: stat refresh in the background
     assert calls["n"] == 1
     await m._FLAGGED_STAT_TASK[1]
     assert calls["n"] == 2
@@ -386,8 +438,12 @@ async def test_view_cache_follows_community_refill_and_catalog_reset(
     clock["now"] += m.COMMUNITY_ROWS_TTL_SECONDS - 1
     await _list(**HOME)
     assert view_spy["n"] == 1
-    # the community rows refill (new fill) -> recompute, even with equal rows
+    # past the TTL the old fill is served (cached view) while the rows refill ...
     clock["now"] += 2
+    await _list(**HOME)
+    assert view_spy["n"] == 1
+    await _refill_done()
+    # ... then the new fill -> recompute, even with equal rows
     await _list(**HOME)
     assert view_spy["n"] == 2 and fetch["calls"] == 2
     # a new catalog object -> recompute

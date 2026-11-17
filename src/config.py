@@ -1,10 +1,52 @@
+"""Application settings: the one place the backend reads its environment.
+
+Every setting is a field on ``Settings``. Values come from the process environment
+and ``.env``, and are type-checked when the module is imported; a bad value stops the
+import with an error that names the variable and never prints its value.
+
+``validate_startup()`` adds the checks that only make sense for the web service
+(``src/main.py`` calls it at import): in production it refuses the default
+``JWT_SECRET`` and a database or Redis on localhost. Staging and local development
+legitimately use localhost, so those refusals apply to production only.
+
+Code outside this module should read ``settings`` rather than ``os.environ``;
+``tests/test_no_direct_env_reads.py`` enforces that with an AST check. See
+``docs/adr/0003-settings-validated-at-startup.md``.
+"""
 from __future__ import annotations
 
+import base64
+import ipaddress
+import logging
 import secrets
+from urllib.parse import urlsplit
 
+from pydantic import ValidationError, field_validator
 from pydantic_settings import BaseSettings
+from pydantic_settings import SettingsError as _PydanticSettingsError
 
 _DEFAULT_SECRET = "CHANGE-ME-IN-PRODUCTION"
+
+logger = logging.getLogger(__name__)
+
+# ENVIRONMENT values and the spellings accepted for them.
+ENVIRONMENTS = ("local", "staging", "production")
+_ENVIRONMENT_ALIASES = {
+    "local": "local",
+    "dev": "local",
+    "development": "local",
+    "test": "local",
+    "testing": "local",
+    "staging": "staging",
+    "stage": "staging",
+    "production": "production",
+    "prod": "production",
+}
+
+
+class ConfigError(RuntimeError):
+    """The configuration is invalid or unsafe. The message names each bad variable
+    and never contains a value."""
 
 
 class Settings(BaseSettings):
@@ -17,6 +59,13 @@ class Settings(BaseSettings):
     # rebrand is a one-line change and the new name isn't leaked publicly early.
     badge_brand: str = "AgentAvow"
     debug: bool = False
+    # local | staging | production. Empty: production when DEBUG is false, local
+    # when DEBUG is true (prod runs with DEBUG=false and doesn't set this). The
+    # localhost and default-secret refusals in validate_startup() apply to
+    # production only. See effective_environment.
+    environment: str = ""
+    # json | text. Empty: text when DEBUG is true, json otherwise (src/observability).
+    log_format: str = ""
     api_v1_prefix: str = "/api/v1"
     base_url: str = "http://localhost:5173"
 
@@ -540,15 +589,202 @@ class Settings(BaseSettings):
     email_retry_max_attempts: int = 3
     email_retry_base_delay: float = 1.0  # seconds, doubles each retry
 
+    # "Email me the setup" (POST /api/v1/public/send-setup, src/api/send_setup_router.py):
+    # one fixed email with the Claude Code plugin commands, for phone visitors. The
+    # address is never stored; rate limits key on the client IP and a keyed hash of the
+    # address that expires with the window. False = the endpoint answers 404.
+    send_setup_enabled: bool = True
+    send_setup_per_ip_per_hour: int = 3
+    send_setup_per_ip_per_day: int = 10
+    send_setup_per_address_per_day: int = 2
+
     # Error tracking
     sentry_dsn: str | None = None
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
+    # --- Format checks (run wherever settings load) ---------------------------
+    # Error messages here must never include the value: they end up in logs.
 
-settings = Settings()
+    @field_validator("environment")
+    @classmethod
+    def _check_environment(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if not v:
+            return ""
+        if v not in _ENVIRONMENT_ALIASES:
+            raise ValueError("must be one of local, staging, production")
+        return _ENVIRONMENT_ALIASES[v]
+
+    @field_validator("log_format")
+    @classmethod
+    def _check_log_format(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if v not in ("", "json", "text"):
+            raise ValueError("must be json or text (or empty for the default)")
+        return v
+
+    @field_validator("database_url")
+    @classmethod
+    def _check_database_url(cls, v: str) -> str:
+        if not urlsplit(v).scheme.startswith("postgresql"):
+            raise ValueError(
+                "must be a PostgreSQL URL (postgresql+asyncpg://user:pass@host:5432/db)"
+            )
+        return v
+
+    @field_validator(
+        "send_setup_per_ip_per_hour", "send_setup_per_ip_per_day",
+        "send_setup_per_address_per_day",
+    )
+    @classmethod
+    def _check_send_setup_limit(cls, v: int) -> int:
+        if not 1 <= v <= 1000:
+            raise ValueError("must be between 1 and 1000")
+        return v
+
+    @field_validator("redis_url")
+    @classmethod
+    def _check_redis_url(cls, v: str) -> str:
+        if urlsplit(v).scheme not in ("redis", "rediss", "unix"):
+            raise ValueError("must be a Redis URL (redis://host:6379/0)")
+        return v
+
+    @property
+    def effective_environment(self) -> str:
+        """ENVIRONMENT when set, else production unless DEBUG is true."""
+        if self.environment:
+            return self.environment
+        return "local" if self.debug else "production"
+
+    @property
+    def is_production(self) -> bool:
+        return self.effective_environment == "production"
+
+
+def _env_name(field: str) -> str:
+    return field.upper()
+
+
+def load_settings(**overrides: object) -> Settings:
+    """Build Settings, turning pydantic's errors into a ConfigError that names each
+    bad variable without echoing its value (pydantic's own message includes it)."""
+    try:
+        return Settings(**overrides)  # type: ignore[arg-type]
+    except ValidationError as exc:
+        problems = []
+        for err in exc.errors(include_input=False, include_url=False):
+            field = ".".join(str(p) for p in err.get("loc", ())) or "?"
+            msg = str(err.get("msg", "invalid value"))
+            if msg.startswith("Value error, "):
+                msg = msg[len("Value error, "):]
+            problems.append(f"{_env_name(field)}: {msg}")
+        raise ConfigError(_format_problems(problems)) from None
+    except _PydanticSettingsError as exc:
+        # e.g. CORS_ORIGINS that isn't valid JSON. The message names the field only.
+        raise ConfigError(_format_problems([str(exc)])) from None
+
+
+def _format_problems(problems: list[str]) -> str:
+    lines = "\n".join(f"  - {p}" for p in problems)
+    return f"Invalid configuration ({len(problems)} problem(s)):\n{lines}"
+
+
+# --- Startup checks for the web service -------------------------------------
+
+_LOOPBACK_NAMES = {"localhost", "localhost.localdomain", "ip6-localhost", "ip6-loopback"}
+
+
+def is_loopback_url(url: str) -> bool:
+    """True when the URL points at this machine: localhost, a loopback or unspecified
+    address, or a unix socket."""
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").strip().lower().rstrip(".")
+    except ValueError:
+        return False
+    if parts.scheme == "unix":
+        return True
+    if not host:
+        return False
+    if host in _LOOPBACK_NAMES or host.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_loopback or ip.is_unspecified
+
+
+def _is_ed25519_seed(value: str) -> bool:
+    """Same decoding as src/signing.py: base64.b64decode, then 32 bytes."""
+    try:
+        return len(base64.b64decode(value)) == 32
+    except (ValueError, TypeError):
+        return False
+
+
+def validate_startup(s: Settings, log: logging.Logger | None = None) -> list[str]:
+    """Refuse an unsafe configuration before the web service serves anything.
+
+    Raises ConfigError listing every refused setting by name (never by value).
+    Returns the warnings it logged: settings that look wrong for production but
+    that prod may legitimately leave at their defaults today.
+    """
+    log = log or logger
+    problems: list[str] = []
+    warnings: list[str] = []
+
+    # Outside debug, the default JWT secret means anyone can mint tokens. (In debug
+    # the module replaces it with a random one at import.)
+    if s.jwt_secret == _DEFAULT_SECRET and not s.debug:
+        problems.append("JWT_SECRET: still the default placeholder; set a long random value")
+
+    # A signing key that is set but unusable would otherwise fail on the first
+    # signed response (src/signing.py), not at startup.
+    for name, value in (
+        ("ATTESTATION_SIGNING_KEY_ED25519", s.attestation_signing_key_ed25519),
+        ("TRUST_V2_SIGNING_KEY_ED25519", s.trust_v2_signing_key_ed25519),
+    ):
+        if value and not _is_ed25519_seed(value):
+            problems.append(f"{name}: must be a base64-encoded 32-byte Ed25519 seed")
+
+    if s.environment == "production" and s.debug:
+        problems.append("DEBUG: must be false when ENVIRONMENT=production")
+
+    if s.is_production:
+        for name, value in (("DATABASE_URL", s.database_url), ("REDIS_URL", s.redis_url)):
+            if is_loopback_url(value):
+                problems.append(f"{name}: points at localhost in production")
+
+        # Warnings only: unsure every one of these is set on the prod host yet.
+        if is_loopback_url(s.base_url):
+            warnings.append("BASE_URL points at localhost in production")
+        elif urlsplit(s.base_url).scheme != "https":
+            warnings.append("BASE_URL is not an https URL in production")
+        if any(is_loopback_url(o) for o in s.cors_origins):
+            warnings.append("CORS_ORIGINS includes a localhost origin in production")
+        if s.sso_enabled and is_loopback_url(s.sso_callback_base_url):
+            warnings.append("SSO_CALLBACK_BASE_URL points at localhost in production")
+        if s.jwt_secret != _DEFAULT_SECRET and len(s.jwt_secret) < 32:
+            warnings.append("JWT_SECRET is shorter than 32 characters")
+        if not s.attestation_signing_key_ed25519:
+            warnings.append("ATTESTATION_SIGNING_KEY_ED25519 is not set")
+
+    for w in warnings:
+        log.warning("Config check: %s", w)
+    if problems:
+        raise ConfigError(
+            _format_problems(problems)
+            + f"\n(environment: {s.effective_environment}; set ENVIRONMENT to "
+            "local, staging or production)"
+        )
+    return warnings
+
+
+settings = load_settings()
 
 # If debug mode uses the default secret, replace it with a random one so
-# even dev tokens are unpredictable.  Non-debug mode crashes in main.py.
+# even dev tokens are unpredictable.  Non-debug mode is refused by validate_startup().
 if settings.debug and settings.jwt_secret == _DEFAULT_SECRET:
     settings.jwt_secret = secrets.token_urlsafe(64)

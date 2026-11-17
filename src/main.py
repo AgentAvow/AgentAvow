@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import uuid
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
-from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.api.a2a_router import router as a2a_router
 from src.api.account_claims_router import router as account_claims_router
@@ -89,6 +87,7 @@ from src.api.scan_catalog_router import router as scan_catalog_router
 from src.api.search_router import router as search_router
 from src.api.security_attestation_router import router as security_attestation_router
 from src.api.semantic_search_router import router as semantic_search_router
+from src.api.send_setup_router import router as send_setup_router
 from src.api.social_router import router as social_router
 from src.api.sso_router import router as sso_router
 from src.api.submolt_router import router as submolt_router
@@ -107,8 +106,9 @@ from src.api.x402_router import router as x402_router
 from src.bridges.mcp_streamable import mcp_asgi_app
 from src.bridges.mcp_streamable import session_manager as mcp_session_manager
 from src.config import settings
+from src.errors.handlers import install_problem_handlers
 from src.feeds.bluesky.feed_router import router as bluesky_feed_router
-from src.logging_config import setup_logging
+from src.observability import ObservabilityMiddleware, setup_logging
 
 setup_logging()
 
@@ -431,7 +431,7 @@ try:
     Instrumentator(
         should_group_status_codes=True,
         should_ignore_untemplated=True,
-        excluded_handlers=["/health", "/metrics"],
+        excluded_handlers=["/health", "/livez", "/readyz", "/metrics"],
     ).instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 except ImportError:
     pass  # prometheus-fastapi-instrumentator not installed (dev/test)
@@ -504,15 +504,21 @@ async def custom_redoc() -> HTMLResponse:
     return HTMLResponse(_REDOC_HTML)
 
 
-# --- Startup safety checks ---
-if settings.jwt_secret == "CHANGE-ME-IN-PRODUCTION":
-    _msg = (
-        "JWT_SECRET is set to the default value. "
-        "Set a strong, random JWT_SECRET in .env before deploying to production."
-    )
-    if not settings.debug:
-        raise RuntimeError(_msg)
-    logging.getLogger(__name__).warning(_msg)
+# --- Startup safety checks (src/config.py validate_startup) ---
+# Raises ConfigError naming each refused setting; uvicorn then exits non-zero.
+from src.config import validate_startup as _validate_startup  # noqa: E402
+
+_validate_startup(settings)
+
+
+# Optional Idempotency-Key on POST and PATCH (src/idempotency, #407). Added first so
+# it is the innermost middleware: CORS, security headers and the request id still
+# wrap a replayed answer.
+from src.idempotency import IdempotencyMiddleware  # noqa: E402
+from src.idempotency import install_openapi as _install_idempotency_openapi  # noqa: E402
+
+app.add_middleware(IdempotencyMiddleware)
+_install_idempotency_openapi(app)
 
 
 app.add_middleware(
@@ -520,18 +526,11 @@ app.add_middleware(
     allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-API-Key", "X-Provider-Key"],
+    allow_headers=[
+        "Authorization", "Content-Type", "X-Request-ID", "X-API-Key", "X-Provider-Key",
+        "Idempotency-Key",
+    ],
 )
-
-
-@app.middleware("http")
-async def request_id_middleware(request: Request, call_next) -> Response:
-    """Attach a unique request ID for log correlation."""
-    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4())[:8])
-    request.state.request_id = request_id
-    response: Response = await call_next(request)
-    response.headers["X-Request-ID"] = request_id
-    return response
 
 
 @app.middleware("http")
@@ -541,39 +540,6 @@ async def usage_scope_http_middleware(request: Request, call_next) -> Response:
     from src.usage_scope import usage_scope_middleware
 
     return await usage_scope_middleware(request, call_next)
-
-
-@app.middleware("http")
-async def request_logging_middleware(request: Request, call_next) -> Response:
-    """Log every request with method, path, status, and timing."""
-    import time as _time
-
-    # Skip health checks to reduce noise
-    if request.url.path == "/health":
-        return await call_next(request)
-
-    start = _time.monotonic()
-    response: Response = await call_next(request)
-    duration_ms = round((_time.monotonic() - start) * 1000, 1)
-
-    request_id = getattr(request.state, "request_id", "-")
-    entity_id = getattr(request.state, "entity_id", "-")
-    client_ip = request.client.host if request.client else "-"
-
-    logger.info(
-        "%s %s %s %.1fms",
-        request.method, request.url.path, response.status_code, duration_ms,
-        extra={
-            "request_id": request_id,
-            "method": request.method,
-            "path": request.url.path,
-            "status_code": response.status_code,
-            "duration_ms": duration_ms,
-            "client_ip": client_ip,
-            "entity_id": entity_id,
-        },
-    )
-    return response
 
 
 @app.middleware("http")
@@ -707,80 +673,21 @@ async def rate_limit_headers_middleware(request: Request, call_next) -> Response
     return response
 
 
+# Health probes: polled every few seconds, so never logged per request.
+_PROBE_PATHS = frozenset({"/health", "/livez", "/readyz"})
+
+# Request id, W3C trace context and the access log (src/observability, #405). Added
+# last so it is the outermost middleware: every line logged under it, from any
+# middleware or route, carries the request's request_id and trace_id.
+app.add_middleware(ObservabilityMiddleware, skip_log_paths=_PROBE_PATHS)
+
+
 logger = logging.getLogger(__name__)
 
 
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(
-    request: Request, exc: RequestValidationError,
-) -> JSONResponse:
-    request_id = getattr(request.state, "request_id", "unknown")
-
-    def _sanitize_value(v: object) -> object:
-        """Recursively make a value JSON-serializable."""
-        if isinstance(v, (str, int, float, bool, type(None))):
-            return v
-        if isinstance(v, dict):
-            return {k: _sanitize_value(val) for k, val in v.items()}
-        if isinstance(v, (list, tuple)):
-            return [_sanitize_value(item) for item in v]
-        return str(v)
-
-    def _sanitize_errors(errors: list[dict]) -> list[dict]:
-        """Make validation error dicts JSON-serializable.
-
-        Pydantic/FastAPI may put non-serializable objects (e.g. ValueError)
-        in the ``ctx`` field. Convert them recursively.
-        """
-        sanitized = []
-        for err in errors:
-            clean = dict(err)
-            if "ctx" in clean:
-                clean["ctx"] = _sanitize_value(clean["ctx"])
-            sanitized.append(clean)
-        return sanitized
-
-    return JSONResponse(
-        status_code=422,
-        content={
-            "detail": _sanitize_errors(exc.errors()),
-            "request_id": request_id,
-        },
-    )
-
-
-@app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(
-    request: Request, exc: StarletteHTTPException,
-) -> JSONResponse:
-    request_id = getattr(request.state, "request_id", "unknown")
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "detail": exc.detail,
-            "request_id": request_id,
-        },
-    )
-
-
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(
-    request: Request, exc: Exception,
-) -> JSONResponse:
-    request_id = getattr(request.state, "request_id", "unknown")
-    logger.error(
-        "Unhandled exception [request_id=%s]: %s",
-        request_id,
-        exc,
-        exc_info=True,
-    )
-    return JSONResponse(
-        status_code=500,
-        content={
-            "detail": "Internal server error",
-            "request_id": request_id,
-        },
-    )
+# Every API error answers as RFC 9457 problem+json from one code catalog (#409,
+# src/errors). The old "detail" and "request_id" fields keep their values.
+install_problem_handlers(app)
 
 
 app.include_router(account_router, prefix=settings.api_v1_prefix)
@@ -875,6 +782,7 @@ app.include_router(sandbox_stats_router, prefix=settings.api_v1_prefix)
 # generic /public/scan/{owner}/{repo}/... routes.
 app.include_router(erc8004_router, prefix=settings.api_v1_prefix)
 app.include_router(public_scan_router, prefix=settings.api_v1_prefix)
+app.include_router(send_setup_router, prefix=settings.api_v1_prefix)
 # The Claude Code plugin's once-a-day active request (counts protected machines).
 app.include_router(plugin_active_router, prefix=settings.api_v1_prefix)
 app.include_router(preflight_router, prefix=settings.api_v1_prefix)
@@ -935,6 +843,82 @@ async def health_check() -> JSONResponse:
 
     status_code = 503 if health["status"] == "degraded" else 200
     return JSONResponse(content=health, status_code=status_code)
+
+
+# --- Liveness and readiness (#404) --------------------------------------------------
+# /health above stays exactly as it is: the deploy script, rollback, capacity and
+# health-check scripts and outside monitors all read its body and `status: ok`.
+# /livez and /readyz sit beside it for probes that need the two answers apart.
+# Neither is rate limited (no limiter dependency), logged per request, counted by
+# Prometheus or listed in the OpenAPI document.
+
+# Seconds each readiness check may take before it counts as failed.
+_READYZ_TIMEOUT_SECONDS = 2.0
+# /readyz is public, so a burst must not turn into a burst of DB queries: each worker
+# reuses its last answer for this long, and concurrent callers share one check.
+_READYZ_CACHE_SECONDS = 1.0
+_readyz_cache: tuple[float, int, dict] | None = None  # (monotonic time, status, body)
+_readyz_lock = asyncio.Lock()
+
+
+@app.get("/livez", include_in_schema=False)
+async def livez() -> JSONResponse:
+    """Liveness: the process is up and serving. Calls no dependency."""
+    return JSONResponse(content={"status": "ok"}, headers={"Cache-Control": "no-store"})
+
+
+async def _ready_database() -> None:
+    from sqlalchemy import text
+
+    from src.database import async_session
+
+    async with async_session() as db:
+        await db.execute(text("SELECT 1"))
+
+
+async def _ready_redis() -> None:
+    from src.redis_client import get_redis
+
+    if not await get_redis().ping():
+        raise RuntimeError("redis ping returned false")
+
+
+async def _readiness_check(check) -> str:
+    """Run one dependency check with a short timeout. Returns ok, timeout or error;
+    never the exception text, which can carry hosts or connection strings."""
+    try:
+        await asyncio.wait_for(check(), timeout=_READYZ_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return "timeout"
+    except Exception:
+        return "error"
+    return "ok"
+
+
+@app.get("/readyz", include_in_schema=False)
+async def readyz() -> JSONResponse:
+    """Readiness: Postgres and Redis both answer within a short timeout.
+
+    200 when both are ok; 503 naming the dependency that failed otherwise. The answer
+    is cached in-process for ``_READYZ_CACHE_SECONDS``."""
+    global _readyz_cache
+    async with _readyz_lock:
+        now = time.monotonic()
+        if _readyz_cache is None or now - _readyz_cache[0] >= _READYZ_CACHE_SECONDS:
+            database, redis_state = await asyncio.gather(
+                _readiness_check(_ready_database), _readiness_check(_ready_redis),
+            )
+            checks = {"database": database, "redis": redis_state}
+            failed = [name for name, state in checks.items() if state != "ok"]
+            body: dict = {"status": "ready" if not failed else "not_ready", "checks": checks}
+            if failed:
+                body["failed"] = failed
+                logger.warning("readyz: not ready (%s)", ", ".join(failed))
+            _readyz_cache = (time.monotonic(), 503 if failed else 200, body)
+        _, status_code, body = _readyz_cache
+    return JSONResponse(
+        content=body, status_code=status_code, headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get(f"{settings.api_v1_prefix}/ping")

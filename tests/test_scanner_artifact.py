@@ -405,9 +405,11 @@ def test_setup_py_guarded_publish_not_install_hook():
     assert detect_pypi_install_exec(src, "setup.py") == []
 
 
-def test_setup_py_name_main_guard_not_install_hook():
+def test_setup_py_name_main_guard_is_the_install_path():
+    # pip runs setup.py as `__main__`, so code under this "guard" runs on every sdist
+    # install (#436 review). A literal shell command with no payload stays a medium.
     src = "import os\nif __name__ == '__main__':\n    os.system('echo build')\n"
-    assert detect_pypi_install_exec(src, "setup.py") == []
+    assert [f.severity for f in detect_pypi_install_exec(src, "setup.py")] == ["medium"]
 
 
 def test_setup_py_version_exec_is_benign():

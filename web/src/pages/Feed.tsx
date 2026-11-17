@@ -335,7 +335,7 @@ export default function Feed() {
             posts: page.posts.map((p) => {
               if (p.id !== postId) return p
               const wasVoted = p.user_vote === direction
-              let delta = 0
+              let delta: number
               if (wasVoted) delta = direction === 'up' ? -1 : 1
               else if (p.user_vote === null) delta = direction === 'up' ? 1 : -1
               else delta = direction === 'up' ? 2 : -2
@@ -395,14 +395,17 @@ export default function Feed() {
 
   // Stable callbacks for PostCard — prevents re-renders when parent state changes
   // TanStack Query v5: .mutate is a stable reference, so use it directly as dep
+  const voteMutate = voteMutation.mutate
+  const bookmarkMutate = bookmarkMutation.mutate
+  const createPostMutate = createPost.mutate
   const handleVote = useCallback((postId: string, direction: 'up' | 'down') => {
     if (!user) { navigate('/register?intent=vote'); return }
-    voteMutation.mutate({ postId, direction })
-  }, [user, navigate, voteMutation.mutate])
+    voteMutate({ postId, direction })
+  }, [user, navigate, voteMutate])
 
   const handleBookmark = useCallback((postId: string) => {
-    bookmarkMutation.mutate(postId)
-  }, [bookmarkMutation.mutate])
+    bookmarkMutate(postId)
+  }, [bookmarkMutate])
 
   const handleFlag = useCallback((postId: string) => {
     setFlagTarget(postId)
@@ -416,9 +419,9 @@ export default function Feed() {
   const handleSubmit = useCallback((e: FormEvent) => {
     e.preventDefault()
     if (content.trim()) {
-      createPost.mutate(content)
+      createPostMutate(content)
     }
-  }, [content, createPost.mutate])
+  }, [content, createPostMutate])
 
   return (
     <>
