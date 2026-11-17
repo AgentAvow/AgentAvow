@@ -44,7 +44,7 @@ import sys
 import time
 import urllib.error
 
-__version__ = "0.1.42"
+__version__ = "0.1.43"
 
 TIMEOUT = 12  # seconds per scan: an install is rare, so a slower fresh scan is fine
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -505,6 +505,8 @@ _STANDALONE = re.compile(r"(?<![\w.@-])agentavow(?![\w.-])")
 _REPO_SLUG = re.compile(r"agentavow/agentavow|(?:github(?:usercontent)?|gitlab)\.com/+agentavow")
 _PATH_PART = re.compile(r"/agentavow(?![\w.-])")
 _CACHE_DIR = re.compile(r"\.cache\b|xdg_cache_home")
+# "allow" starting a word (allowed, allow.key, allow-list), not inside one (shallow, swallow).
+_ALLOW_WORD = re.compile(r"(?<![a-z])allow")
 _GLOB_AFTER_CACHE = re.compile(r"\.cache/+[^\s/]*[*?\[]")
 # `cd` into a folder named agentavow (the whole name: a checkout at AgentAvow-wt-x is not).
 _CD_INTO = re.compile(r"\b(?:cd|pushd|chdir)\b[\s(]+[^;&|\n]*(?<![\w.@-])agentavow(?![\w.-])")
@@ -523,7 +525,7 @@ _REPO_SLUG_ANY_CASE = re.compile(r"agentavow/agentavow|(?:github(?:usercontent)?
 _MAKES_LINK = re.compile(r"\bln\b|symlink|\bmount\b|\bbindfs\b", re.IGNORECASE)
 _UNRESOLVED = re.compile(r"[*?\[\]${}()`]")
 _HOME_VAR = re.compile(r"\$(?:home\b|\{home\})", re.IGNORECASE)
-_TOKEN_STOP = set(";&|<>=(")
+_TOKEN_STOP = set(";&|<>=([,")  # `[` and `,` end a token: ["/a/AgentAvow", ...]
 
 
 def _is_cache_parent(prefix: str, cwd: object, has_cd: bool, sets_home: bool) -> bool:
@@ -547,6 +549,24 @@ def _is_cache_parent(prefix: str, cwd: object, has_cd: bool, sets_home: bool) ->
         return True
 
 
+def _literally_cache_parent(prefix: str, cwd: object, sets_home: bool) -> bool:
+    """Whether ``prefix``, the whole word up to the whitespace before an ``agentavow``
+    segment, read literally (a `[` or `,` as part of a folder name), resolves to the
+    cache folder's parent. The token stops cut ``["/a/AgentAvow"`` down to the path, but
+    a real folder can be named ``p,q`` or ``a[b``, and a link under it can point at
+    ~/.cache, so the segment is kept when either reading lands there."""
+    p = prefix if sets_home else _HOME_VAR.sub("~", prefix)
+    p = os.path.expanduser(p)
+    if not os.path.isabs(p):
+        if not isinstance(cwd, str) or not cwd:
+            return False
+        p = os.path.join(os.path.expanduser(cwd), p)
+    try:
+        return os.path.realpath(p).lower() == os.path.realpath(_own_dir().parent).lower()
+    except Exception:
+        return True
+
+
 def _other_agentavow_dirs(text: str, cwd: object = None) -> str:
     """``text`` with each ``<parent>/agentavow`` segment blanked out when that parent is
     a plain folder whose real path is not the cache folder's parent (a checkout of this
@@ -566,6 +586,11 @@ def _other_agentavow_dirs(text: str, cwd: object = None) -> str:
         while start > 0 and not text[start - 1].isspace() and text[start - 1] not in _TOKEN_STOP:
             start -= 1
         if _is_cache_parent(text[start:m.end(1)], cwd, has_cd, sets_home):
+            return m.group(0)
+        whole = m.start(1)
+        while whole > 0 and not text[whole - 1].isspace():
+            whole -= 1
+        if whole < start and _literally_cache_parent(text[whole:m.end(1)], cwd, sets_home):
             return m.group(0)
         return parent + "/_"
     return _SEGMENT.sub(blank, text)
@@ -606,10 +631,10 @@ def _shell_names_own_files(command: str, cwd: object = None) -> bool:
         return True
     standalone = bool(_STANDALONE.search(t))
     if _CACHE_DIR.search(s) and (standalone or _GLOB_AFTER_CACHE.search(s)
-                                 or "allow" in s):
+                                 or _ALLOW_WORD.search(s)):
         return True
     cd_in = bool(_CD_INTO.search(t)) and not _cd_cannot_reach_own_dir(s, cwd)
-    return standalone and (cd_in or bool(re.search(r"allow|scanned", s)))
+    return standalone and (cd_in or bool(re.search(r"\b(?:allow|scanned)", s)))
 
 
 def _path_in_own_dir(raw: str, cwd: object) -> bool:
