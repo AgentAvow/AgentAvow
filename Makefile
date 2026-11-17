@@ -1,5 +1,5 @@
 .PHONY: setup dev test lint ast-verify migrate db-start db-stop db-status clean corpus \
-	check web-typecheck doc-parity
+	check web-typecheck doc-parity openapi openapi-check openapi-venv
 
 # Virtualenv the targets below run from. Override per call, e.g. `make check VENV=.venv312`.
 VENV ?= .venv
@@ -54,6 +54,30 @@ doc-parity:
 web-typecheck:
 	@test -d web/node_modules || { echo "web/node_modules missing: run 'cd web && npm ci' first"; exit 1; }
 	cd web && npx tsc -b
+
+# The OpenAPI document's text depends on the FastAPI/pydantic versions, so it is generated
+# in its own venv with the versions pinned in docs/api/openapi-toolchain.txt.
+# `make openapi-venv` builds it once (and again after the pins change). PYTHON picks the
+# interpreter it is built from (3.11+).
+OPENAPI_VENV ?= .venv-openapi
+PYTHON ?= python3
+openapi-venv:
+	$(PYTHON) -m venv $(OPENAPI_VENV)
+	$(OPENAPI_VENV)/bin/pip install -q -e ".[prod,dev]" -c docs/api/openapi-toolchain.txt
+
+# Regenerate the committed OpenAPI document (docs/api/openapi.json) from the code.
+# Run it after any route or model change and commit the result. Needs no database.
+openapi:
+	@test -x $(OPENAPI_VENV)/bin/python3 || { echo "$(OPENAPI_VENV) missing: run 'make openapi-venv' first"; exit 1; }
+	$(OPENAPI_VENV)/bin/python3 scripts/openapi/generate.py
+
+# The two API contract gates CI runs: the committed document is current, and it has no
+# breaking change against origin/main (BASE=<ref> to compare with another branch).
+BASE ?= origin/main
+openapi-check:
+	@test -x $(OPENAPI_VENV)/bin/python3 || { echo "$(OPENAPI_VENV) missing: run 'make openapi-venv' first"; exit 1; }
+	$(OPENAPI_VENV)/bin/python3 scripts/openapi/generate.py --check
+	$(OPENAPI_VENV)/bin/python3 scripts/openapi/breaking.py --base-ref $(BASE)
 
 # Run Alembic migration
 migrate:

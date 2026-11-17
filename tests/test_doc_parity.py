@@ -25,7 +25,7 @@ AGENTS_MD = ROOT / "AGENTS.md"
 NOT_PATHS = {
     "feat/", "fix/", "chore/", "docs/",  # branch-name prefixes
     "ghcr.io/agentavow/scanner",  # container image
-    "/mcp",  # HTTP route
+    "/mcp", "/api/v1",  # HTTP routes
     "postgresql+asyncpg://",  # URL scheme
 }
 # Backticked bare names that are deliberately untracked (gitignored local files).
