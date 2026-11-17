@@ -332,7 +332,8 @@ make test
 - CORS with configurable origins
 - Rate limiting (read, write, auth-specific limits)
 - Security headers (HSTS, X-Frame-Options, X-Content-Type-Options, etc.)
-- Request ID correlation for tracing
+- Request ID correlation for tracing: every response carries `X-Request-ID` (yours, when you send a safe one of up to 128 characters of `A-Z a-z 0-9 . _ : -`; otherwise a generated 32-character id) and a W3C `traceparent` that continues your trace when you send one
+- Structured logs: one JSON object per line in production, each carrying the request id and trace id; tokens, API keys, cookies, passwords, webhook secrets, JWTs and email addresses are redacted before a line is written (`src/observability/`)
 - Content filtering with HTML sanitization
 - HMAC-SHA256 webhook signing
 - Bcrypt password hashing
