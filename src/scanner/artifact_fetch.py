@@ -565,12 +565,12 @@ class _BoundedMembers:
         """Account one archive entry before anything is read. Raises on a bomb.
 
         Returns False when this one member must not be read: its own compression
-        ratio is implausible and it is a file the static engine never reads (data,
-        binaries, test fixtures). Real packages ship such data (onnx's all-zero
+        ratio is implausible and it is not source or a manifest anywhere in the tree
+        (data blobs, binaries, models). Real packages ship such data (onnx's all-zero
         ``.pb`` test tensors), so it is skipped unread and recorded rather than
-        failing the scan. A member the engine WOULD read (source, manifests) still
-        fails the scan: skipping it would let a payload padded with zeros vanish
-        into a clean result. The archive-wide guards always raise.
+        failing the scan. Any source or manifest member, including in test, example
+        and doc folders, still fails the scan: skipping it would let a payload
+        padded with zeros vanish into a clean result. The archive-wide guards always raise.
         """
         self.entries += 1
         if self.entries > HARD_ENTRY_COUNT:
@@ -586,7 +586,9 @@ class _BoundedMembers:
         if (compressed is not None and size >= _RATIO_MEMBER_FLOOR
                 and size > MAX_MEMBER_RATIO * max(1, compressed)):
             _tier, scannable = _member_class(name)
-            if scannable:
+            if scannable or _scan_helpers()[4](name):
+                # Any source file, wherever it sits: test, example and doc folders
+                # are read too (payloads, imported "testing" modules).
                 raise ArtifactFetchError(
                     f"member compression ratio is implausible (zip bomb?): {name}")
             self.report.add(name, size, "implausible compression ratio", False)

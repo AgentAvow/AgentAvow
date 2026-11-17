@@ -83,7 +83,12 @@ def test_zip_member_with_absurd_ratio_is_skipped_unread(monkeypatch):
     assert report.oversized_scannable == 0  # a .dat blob is not source
 
 
-@pytest.mark.parametrize("name", ["pkg/evil.py", "setup.py", "pkg/run.sh"])
+@pytest.mark.parametrize("name", [
+    "pkg/evil.py", "setup.py", "pkg/run.sh",
+    # test / example / doc paths are read by the engine too (review of #442)
+    "pkg/testing/__init__.py", "pkg/examples/x.py", "pkg/tests/test_x.py",
+    "docs/conf.py", "pkg/example_run.py", "pkg/conftest.py",
+])
 def test_source_member_with_absurd_ratio_still_fails_the_scan(name):
     # Source padded with zeros/newlines would otherwise be skipped and the package
     # could read Safe with its payload unread (review of #442). Code the engine
