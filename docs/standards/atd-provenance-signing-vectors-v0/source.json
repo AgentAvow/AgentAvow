@@ -1,0 +1,61 @@
+{
+  "note": "Source for the atd-provenance-signing-v0 corpus. Every key in this file is a TEST key, generated locally for this corpus on 2026-10-05 with node:crypto generateKeyPairSync('ed25519'). None of them is, or is derived from, the production AgentAvow signing key (which lives only in ATTESTATION_SIGNING_KEY_ED25519 and is never committed). The private parts (d) are published here on purpose so that `node generate.mjs` rebuilds the vector file byte for byte. Do not reuse these keys for anything.",
+  "spec_ref": "agentnameservice/agent-trust-discovery#27 at 3971f5e",
+  "issuer": {
+    "iss": "did:web:agentgraph.co",
+    "jwks_url": "https://agentgraph.co/.well-known/jwks.json",
+    "signal": "did:web:agentgraph.co.safety.score",
+    "signal_note": "vendor.dimension.name (#16). The vendor segment is the id with its trailing .dimension.name peeled off from the right, so a did:web vendor keeps its dots; spec 3a requires it to equal the signed iss, so the signal is registered under the issuer DID itself."
+  },
+  "other_issuer": {
+    "iss": "did:web:other.example",
+    "jwks_url": "https://other.example/.well-known/jwks.json",
+    "note": "A second, fully legitimate issuer that publishes its own key. Used by wrong-iss (its genuine credential presented on agentgraph's signal) and by unpublished-key (its key, presented under agentgraph's iss with the envelope jwks pointing at other.example)."
+  },
+  "foreign_signal": "did:web:trustmodel.example.safety.score",
+  "keys": {
+    "signing": {
+      "role": "did:web:agentgraph.co's current key; its kid is the RFC 7638 thumbprint, computed by generate.mjs",
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "x": "b91pTrNuHVs7jP0r_Av3op9xiPm-ARgr_ebcWqqALhM",
+      "d": "il92RMXgUsfaYyZ0xZ_cuRcII7T1mSPCaBhJqKYWE8M"
+    },
+    "legacy": {
+      "role": "a second key did:web:agentgraph.co publishes under a stable name rather than a thumbprint (mirrors AgentAvow's live kid style, agentgraph-security-v1); used only by the kid-not-thumbprint vector",
+      "kid": "agentgraph-test-legacy-v1",
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "x": "3j__uOSLsiQn88IbUFZa7KmGmC92Z4ov6Tmx8SI08so",
+      "d": "MSZ4mTcaAo7gHalqWwl8okAY1h_9CoIEaljbeHT42V0"
+    },
+    "other": {
+      "role": "did:web:other.example's key, published by that issuer under its thumbprint and NOT by did:web:agentgraph.co; used by the wrong-iss and unpublished-key vectors",
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "x": "M6zZxXIvGc-b29RyY3jxbD8q67OuX3zjhavmmVjoy4I",
+      "d": "PC18uGLquWeHFcQsvnl4pVQKJYEmpIyQvl0QyFcGG2o"
+    }
+  },
+  "payload": {
+    "sub": "github:example/example-mcp-server",
+    "subjectClass": "tool",
+    "issued_at": "2026-10-01T00:00:00Z",
+    "expires_at": "2026-10-02T00:00:00Z",
+    "dimension": "safety",
+    "score": 62,
+    "riskCodes": ["SAFETY_UNSAFE_EXEC", "SAFETY_VULNERABLE_DEPENDENCY"]
+  },
+  "observation": {
+    "evidenceUrl": "https://agentavow.com/api/v1/public/scan/github/example/example-mcp-server",
+    "stored_riskCodes_order": ["SAFETY_VULNERABLE_DEPENDENCY", "SAFETY_UNSAFE_EXEC"],
+    "explanation": "2 findings: unsafe exec of a model-supplied string; one dependency with a known vulnerability.",
+    "rewritten_explanation": "test data, ignore",
+    "backstop_threshold": 70,
+    "foreign_subject": "github:example/other-mcp-server"
+  },
+  "policy": {
+    "evaluation_time": "2026-10-01T01:00:00Z",
+    "max_age_seconds": 86400
+  }
+}
