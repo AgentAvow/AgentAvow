@@ -19,7 +19,7 @@ router = APIRouter(prefix="/legal", tags=["legal"])
 
 _PRIVACY_CLAUSES: list[tuple[str, str]] = [
     ('1. Overview',
-     'Effective November 12, 2026. AgentAvow checks whether a software tool is '
+     'Effective November 16, 2026. AgentAvow checks whether a software tool is '
      'safe for an AI agent to connect to: a GitHub repository, a published '
      'package, a live MCP server, an agent skill, or an A2A agent card. This policy explains what we receive when '
      'you use agentavow.com, our public API, or our connector for AI '
@@ -58,7 +58,14 @@ _PRIVACY_CLAUSES: list[tuple[str, str]] = [
      'stored). If you watch a '
      'tool: the tools you watch and any webhook URL you configure (its signing '
      'secret is stored encrypted). If you scan a private repository with a '
-     'GitHub token, the token is used for that scan only and is not stored.'),
+     'GitHub token, the token is used for that scan only and is not stored.'
+     ' If you ask us to email you the Claude Code setup (the "Email me '
+     'the setup" button), we use your email address only to send that '
+     'one email, through Resend. We do not store the address in our '
+     'database or our logs, and we do not add it to any list. To stop '
+     'the button being used for spam, we keep a keyed one-way hash of '
+     'the address for one day, which only lets us limit how often the '
+     'same address gets the email.'),
     ('5. Logs, metrics and analytics',
      '<ul><li><strong>Server logs</strong> (IP address, User-Agent, the '
      'requested path including the tool checked, time, status) are kept to '
@@ -95,7 +102,8 @@ _PRIVACY_CLAUSES: list[tuple[str, str]] = [
      'account.</li><li><strong>What those analytics record:</strong> pages you '
      'view, submitting a check box (not what you typed), results shown, clicks '
      'on our add and install links, copies of an install command or a badge, '
-     'and steps in creating an account. Each record holds the event, the '
+     'sending yourself the setup or sharing a page link (never the email '
+     'address), and steps in creating an account. Each record holds the event, the '
      'identifier, the page path, the time, a one-way hash of the IP address of '
      'the request, and a coarse label for the kind of client (browser, bot or '
      'unknown). We do not store the IP address itself or the User-Agent. The '

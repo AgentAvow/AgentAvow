@@ -587,6 +587,15 @@ class Settings(BaseSettings):
     email_retry_max_attempts: int = 3
     email_retry_base_delay: float = 1.0  # seconds, doubles each retry
 
+    # "Email me the setup" (POST /api/v1/public/send-setup, src/api/send_setup_router.py):
+    # one fixed email with the Claude Code plugin commands, for phone visitors. The
+    # address is never stored; rate limits key on the client IP and a keyed hash of the
+    # address that expires with the window. False = the endpoint answers 404.
+    send_setup_enabled: bool = True
+    send_setup_per_ip_per_hour: int = 3
+    send_setup_per_ip_per_day: int = 10
+    send_setup_per_address_per_day: int = 2
+
     # Error tracking
     sentry_dsn: str | None = None
 
@@ -612,6 +621,16 @@ class Settings(BaseSettings):
             raise ValueError(
                 "must be a PostgreSQL URL (postgresql+asyncpg://user:pass@host:5432/db)"
             )
+        return v
+
+    @field_validator(
+        "send_setup_per_ip_per_hour", "send_setup_per_ip_per_day",
+        "send_setup_per_address_per_day",
+    )
+    @classmethod
+    def _check_send_setup_limit(cls, v: int) -> int:
+        if not 1 <= v <= 1000:
+            raise ValueError("must be between 1 and 1000")
         return v
 
     @field_validator("redis_url")
