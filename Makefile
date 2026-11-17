@@ -1,5 +1,5 @@
 .PHONY: setup dev test lint ast-verify migrate db-start db-stop db-status clean corpus \
-	check web-typecheck doc-parity
+	check web-typecheck doc-parity openapi openapi-check
 
 # Virtualenv the targets below run from. Override per call, e.g. `make check VENV=.venv312`.
 VENV ?= .venv
@@ -54,6 +54,18 @@ doc-parity:
 web-typecheck:
 	@test -d web/node_modules || { echo "web/node_modules missing: run 'cd web && npm ci' first"; exit 1; }
 	cd web && npx tsc -b
+
+# Regenerate the committed OpenAPI document (docs/api/openapi.json) from the code.
+# Run it after any route or model change and commit the result. Needs no database.
+openapi:
+	$(VENV)/bin/python3 scripts/openapi/generate.py
+
+# The two API contract gates CI runs: the committed document is current, and it has no
+# breaking change against origin/main (BASE=<ref> to compare with another branch).
+BASE ?= origin/main
+openapi-check:
+	$(VENV)/bin/python3 scripts/openapi/generate.py --check
+	$(VENV)/bin/python3 scripts/openapi/breaking.py --base-ref $(BASE)
 
 # Run Alembic migration
 migrate:

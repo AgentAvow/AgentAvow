@@ -131,6 +131,12 @@ publishes `ghcr.io/agentavow/scanner`.
   `src/jobs/mcp_health.py` and the digest in `tests/test_mcp_card_trust_adoption_c.py`.
   Any change to it also needs a manual Rescan of the published ChatGPT app by the
   owner. Schema changes are additive only; flag them in the PR description.
+- **The REST API document is committed.** After a route or model change, run
+  `make openapi` and commit `docs/api/openapi.json`; CI fails when it is stale or when
+  it breaks a client against the base branch (`make openapi-check`). New routes go
+  under `/api/v1`; exceptions go in `docs/api/route-allowlist.json` with a reason, and
+  owner-approved breaks in `docs/api/approved-breaks.json`. This diff does not cover
+  `/mcp`; the snapshot guards above still do (`docs/adr/0006-api-contract.md`).
 - **Merge only on an explicit green.** A watcher that errored or a pending job is not a
   pass.
 - **No AI-attribution trailers** (`Co-Authored-By: Claude`, `Claude-Session:`,

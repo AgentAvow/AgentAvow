@@ -218,6 +218,8 @@ VITE_API_BASE_URL=http://localhost:8000/api/v1
 
 The public scanning API needs **no authentication**. All app endpoints use the `/api/v1` prefix; interactive API docs are at `/api/v1/docs` (Swagger) and `/api/v1/redoc` (`/docs` is the product documentation). `GET /health` (no prefix) checks DB + Redis connectivity. `GET /livez` answers 200 whenever the process is up (no dependency calls), and `GET /readyz` answers 200 when DB and Redis both respond within 2 s, or 503 naming the one that failed.
 
+The OpenAPI document is committed at [`docs/api/openapi.json`](docs/api/openapi.json) and served live at `/api/v1/openapi.json`. CI fails a PR when the committed file is stale (`make openapi` regenerates it) or when it breaks a client compared with the base branch: a removed route, parameter or response field, a changed type, or a newly required field. New public routes go under `/api/v1`. The `/mcp` connector is not in the document; its tool list has its own snapshot tests. See [ADR 0006](docs/adr/0006-api-contract.md).
+
 ### Public scan API (no auth)
 
 | Endpoint | Path | Description |
