@@ -73,6 +73,12 @@ def hook(tmp_path, monkeypatch):
         if how == "new-slow":
             clock.now += 13
             raise socket.timeout("timed out")
+        if how == "new-still-scanning":  # the fresh scan answers 202: still scanning
+            raise pc._QueuedError("still checking")
+        if how == "new-unreachable":  # the fresh scan cannot connect (or times out connecting)
+            raise urllib.error.URLError(socket.timeout("connect timed out"))
+        if how == "new-busy":
+            raise urllib.error.HTTPError(path, 503, "busy", {}, io.BytesIO(b"{}"))
         return json.loads(json.dumps(BAD if how == "new-bad" else SAFE))
 
     monkeypatch.setattr(pc, "_fetch", fetch)
@@ -118,17 +124,16 @@ def test_a_slow_package_does_not_let_the_next_one_through(hook, monkeypatch, cap
     pi, pc, calls, plan = hook
     plan.update(slow="new-slow", target="stored-safe")
     if order == ("target", "slow"):
-        # target first: graded from its stored grade; the slow one alone is a note only
+        # target first: graded from its stored grade; the slow one is not checked yet
         out = _run(pi, monkeypatch, capsys, "npm i target slow")
-        assert _decision(out) is None
-        assert "❔ npm package 'slow': not checked (AgentAvow is busy right now)" in out[
-            "systemMessage"]
+        assert _decision(out) == "ask"
+        assert f"❔ {pi.NOT_YET}: slow" in out["hookSpecificOutput"]["permissionDecisionReason"]
         return
     plan["target"] = "new-bad"  # would have been caught, had it been checked
     out = _run(pi, monkeypatch, capsys, "npm i slow target")
     assert _decision(out) == "ask"
     reason = out["hookSpecificOutput"]["permissionDecisionReason"]
-    assert f"❔ {pi.NOT_YET}: target" in reason
+    assert f"❔ {pi.NOT_YET}: slow, target" in reason
     assert reason.endswith(f"AgentAvow says: {pi.NOT_YET_SAID}. Continue anyway?")
 
 
@@ -140,7 +145,7 @@ def test_slow_decoy_then_stored_package_out_of_time_asks(hook, monkeypatch, caps
     out = _run(pi, monkeypatch, capsys, "npm i slow target")
     assert ("target", True) not in calls  # never asked: no time left
     assert _decision(out) == "ask"
-    assert f"❔ {pi.NOT_YET}: target" in out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert f"❔ {pi.NOT_YET}: slow, target" in out["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 def test_codex_second_never_graded_package_is_denied(hook, monkeypatch, capsys):
@@ -156,7 +161,7 @@ def test_codex_slow_decoy_is_denied(hook, monkeypatch, capsys):
     plan.update(slow="new-slow", target="new-bad")
     out = _run(pi, monkeypatch, capsys, "npm i slow target", codex=True)
     assert _decision(out) == "deny"
-    assert f"{pi.NOT_YET}: target" in out["systemMessage"]
+    assert f"{pi.NOT_YET}: slow, target" in out["systemMessage"]
 
 
 # --- controls ---------------------------------------------------------------------
@@ -172,12 +177,49 @@ def test_one_never_graded_package_gets_the_fresh_scan_and_is_graded(hook, monkey
     assert _decision(out) == "ask" and "Do not connect" in out["systemMessage"]
 
 
-def test_one_never_graded_slow_package_alone_is_a_note(hook, monkeypatch, capsys):
+@pytest.mark.parametrize("how", ["new-slow", "new-still-scanning"])
+def test_one_never_graded_package_whose_scan_does_not_finish_asks(hook, monkeypatch, capsys,
+                                                                   how):
+    """AgentAvow answered (202) but its own fresh scan did not finish in time."""
     pi, pc, calls, plan = hook
-    plan.update(slow="new-slow")
-    out = _run(pi, monkeypatch, capsys, "npm i slow")
-    assert _decision(out) is None
-    assert "not checked (AgentAvow is busy right now)" in out["systemMessage"]
+    plan.update(pkg=how)
+    out = _run(pi, monkeypatch, capsys, "npm i pkg@1.0.15")
+    assert _decision(out) == "ask"
+    assert f"❔ {pi.NOT_YET}: pkg@1.0.15" in out["hookSpecificOutput"][
+        "permissionDecisionReason"]
+
+
+@pytest.mark.parametrize("how", ["new-slow", "new-still-scanning"])
+def test_codex_still_checking_gives_a_way_forward(hook, monkeypatch, capsys, how):
+    pi, pc, calls, plan = hook
+    plan.update(pkg=how)
+    out = _run(pi, monkeypatch, capsys, "npm i pkg@1.0.15", codex=True)
+    assert _decision(out) == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert ("AgentAvow is checking pkg@1.0.15 now; run the same command again in a minute "
+            "or two and it will have a grade.") in reason
+    assert "switch AgentAvow's hooks off in Codex (/hooks) for this session" in reason
+    assert f"AgentAvow says: {pi.NOT_YET_SAID}" in reason
+
+
+def test_retry_once_the_grade_is_stored_passes_silently(hook, monkeypatch, capsys):
+    pi, pc, calls, plan = hook
+    plan.update(pkg="new-still-scanning")
+    assert _decision(_run(pi, monkeypatch, capsys, "npm i pkg@1.0.15", codex=True)) == "deny"
+    plan.update(pkg="stored-safe")  # a minute later: the scan finished and is stored
+    assert _run(pi, monkeypatch, capsys, "npm i pkg@1.0.15", codex=True) == {}
+    assert _run(pi, monkeypatch, capsys, "npm i pkg@1.0.15") == {}  # Claude Code too
+
+
+@pytest.mark.parametrize("how", ["new-unreachable", "new-busy"])
+def test_fresh_scan_unreachable_is_a_note_only(hook, monkeypatch, capsys, how):
+    """Connection failure, connection timeout or 5xx on the fresh scan: never a stop."""
+    pi, pc, calls, plan = hook
+    plan.update(pkg=how)
+    for codex in (False, True):
+        out = _run(pi, monkeypatch, capsys, "npm i pkg", codex=codex)
+        assert _decision(out) is None
+        assert "not checked (AgentAvow is busy right now)" in out["systemMessage"]
 
 
 @pytest.mark.parametrize("how", ["offline", "timeout", "busy"])

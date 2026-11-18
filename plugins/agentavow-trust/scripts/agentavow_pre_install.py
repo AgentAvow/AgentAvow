@@ -732,8 +732,15 @@ def _check_packages(command: str, pc, cache: dict, now: float
                 except pc._UnscannableError as e:
                     lines.append(_not_graded_line(t, str(e), pc))
                     continue
+                except (pc._QueuedError, TimeoutError):  # TimeoutError: a read timeout
+                    # AgentAvow answered (202) and is scanning it, but the scan did not
+                    # finish in time: not checked yet, put to the person. A retry in a
+                    # minute or two finds the stored grade.
+                    not_yet.append(shown)
+                    continue
                 except Exception:
-                    # AgentAvow slow or down for this scan: a note, never a stop.
+                    # Unreachable for this scan (offline, connection timeout, 408 / 429 /
+                    # 5xx): a note, never a stop.
                     lines.append(_not_graded_line(t, "", pc, busy=True))
                     continue
             except pc._UnscannableError as e:
@@ -769,8 +776,15 @@ def _check_packages(command: str, pc, cache: dict, now: float
                 f"({', '.join(sorted(pins[(registry, low)]))}) and "
                 f"{', '.join(missing)} could not be checked, so it is not known whether the "
                 "release that gets installed is safe.")
+    _RETRY.clear()
+    if not_yet:
+        _RETRY.append(f"AgentAvow is checking {', '.join(not_yet)} now; run the same command "
+                      "again in a minute or two and it will have a grade.")
     if out_of_time and reachable:
-        not_yet += out_of_time  # an earlier package used the time up: not a down API
+        # an earlier package used the time up: not a down API
+        _RETRY.append(f"AgentAvow ran out of time before it reached {', '.join(out_of_time)};"
+                      " run the same command again in a minute or two.")
+        not_yet += out_of_time
     elif out_of_time:
         lines.append(f"❔ not checked: {', '.join(out_of_time)} — AgentAvow did not answer "
                      "in time for this command. The install goes ahead.")
@@ -790,6 +804,7 @@ TOO_MANY = "too many packages in one command to check them all"
 TOO_MANY_SERVERS = "too many servers in one step to check them all"
 NOT_YET = "not checked yet"
 NOT_YET_SAID = "not every package in this command has a grade yet"
+_RETRY: list[str] = []  # how to go ahead once a not-yet-checked package has its grade
 
 
 def _other_index_line(t: dict, pc) -> str:
@@ -1108,11 +1123,17 @@ def _ask_about_allow_list(codex: bool = False) -> None:
 
 
 def codex_deny_reason(body: str, targets: list[dict], pkg_lines: list[str],
-                      said: str = DECISION_PHRASES["do_not_connect"]) -> str:
+                      said: str = DECISION_PHRASES["do_not_connect"], retry: str = "") -> str:
     """Why a Codex step was stopped and how to go ahead anyway. Codex has no "ask", so
     a Do not connect answer is a deny (owner's call, 2026-11-17); the person can still
-    do it themselves outside Codex."""
+    do it themselves outside Codex. ``retry``: for a package that is still being
+    checked, the way forward (run the same command again shortly)."""
     what = "add this server" if targets and not pkg_lines else "install this"
+    if retry:
+        return (body + f"\nAgentAvow says: {said}, so it stopped this step (Codex cannot ask "
+                f"you first). {retry} Or, to {what} without waiting, switch AgentAvow's hooks "
+                "off in Codex (/hooks) for this session. Do not try to install it another "
+                "way from here.")
     return (body + f"\nAgentAvow says: {said}, so it stopped this "
             f"step (Codex cannot ask you first). If you reviewed the report and still want to "
             f"{what}, run the same command yourself in your own terminal outside Codex, or "
@@ -1210,7 +1231,8 @@ def main() -> None:
     said = (DECISION_PHRASES["do_not_connect"] if any(ln.startswith("⛔") for ln in lines)
             else too_many[0] if too_many else UNCHECKED_PIN)
     if needs_decision and codex:
-        reason = codex_deny_reason(body, targets, pkg_lines, said)
+        reason = codex_deny_reason(body, targets, pkg_lines, said,
+                                   " ".join(_RETRY) if said == NOT_YET_SAID else "")
         out["hookSpecificOutput"]["permissionDecision"] = "deny"
         out["hookSpecificOutput"]["permissionDecisionReason"] = reason
         out["hookSpecificOutput"]["additionalContext"] = (
