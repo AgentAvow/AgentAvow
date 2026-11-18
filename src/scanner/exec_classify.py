@@ -55,6 +55,8 @@ CAPABILITY_LABELS: dict[str, str] = {
     "browser:session_persist": "Saves browser session state (cookies / storage) to disk",
     "browser:real_profile": "Can run the browser with your real browser profile (your "
                             "logged-in sessions)",
+    # A hook a skill writes into the agent's settings (src/scanner/skill_settings_hook.py)
+    "agent:settings_hook": "Installs a hook into your agent's settings",
 }
 
 _URL_RE = re.compile(r"https?://", re.IGNORECASE)
