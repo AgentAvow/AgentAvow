@@ -2593,8 +2593,11 @@ def _scan_oversized_text(
     seen: set[tuple[str, str]] = set()
     for text, is_head in windows:
         try:
+            # A window has no frontmatter and no whole-file context: the strict engine
+            # grades a SKILL.md window (skill_body_prose=False).
             found, _pos, _sup = _scan_content(
-                text, file_path, allowlist, payloads_full_severity=payloads_full_severity)
+                text, file_path, allowlist, payloads_full_severity=payloads_full_severity,
+                skill_body_prose=False)
         except Exception:  # noqa: BLE001 — a window that fails to scan is just unread
             continue
         for f in found:
@@ -4081,11 +4084,16 @@ _PAYLOAD_SECRET_NAMES = frozenset({
 })
 
 
+# Line breaks str.splitlines() honours and str.split("\n") does not.
+_SPLITLINES_ONLY_RE = re.compile("[\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
+
+
 def _scan_content(
     content: str, file_path: str,
     allowlist: set[tuple[str, str]] | None = None,
     *, metadata_text: bool = False, payloads_full_severity: bool = False,
     not_test: bool = False, dev_tooling_runs: bool = False,
+    skill_body_prose: bool = True,
 ) -> tuple[list[Finding], list[str], int]:
     """Scan file content for security issues and positive signals.
 
@@ -4098,6 +4106,11 @@ def _scan_content(
 
     ``payloads_full_severity`` (artifact scans): in a downgraded file, payload-shaped
     defects keep their severity and are marked ``Finding.payload`` (see above).
+
+    ``skill_body_prose`` (default on): a file named SKILL.md has its body graded for
+    prompt injection by ``src.scanner.skill_prose`` (the skill path's rules). Off for
+    text that is not a whole SKILL.md (the skill path's frontmatter blob, an oversized
+    file's windows): the strict line engine grades every line.
 
     Returns (findings, positive_signals, suppressed_count).
     """
@@ -4139,6 +4152,21 @@ def _scan_content(
     # prompt-injection / hidden-unicode there even if they look doc-ish.
     is_metadata = Path(file_path).name.lower() in AGENT_METADATA_FILES
     lines = content.split("\n")
+    # A SKILL.md BODY (below its frontmatter) is graded for prompt injection with the
+    # skill path's prose rules (src/scanner/skill_prose.py), so a repository scan and a
+    # skill scan read the same line the same way: a warning that quotes an attack is
+    # medium, the attack itself stays high. The frontmatter (the always-loaded name and
+    # description) keeps the strict line engine. ``skill_body_prose=False`` keeps the
+    # strict engine for the whole text (the skill path's frontmatter blob).
+    skill_prose_lines: list[tuple[int, str, str, str, str]] = []
+    skill_body_from = len(lines)  # 0-based index of the first body line
+    if skill_body_prose and Path(file_path).name.lower() == "skill.md":
+        from src.scanner import skill_prose
+        # One line per "\n", as ``lines`` counts them (splitlines also splits on \r,
+        #  , ...), so line numbers agree.
+        flat = _SPLITLINES_ONLY_RE.sub(" ", content)
+        skill_body_from = skill_prose.body_offset(flat)
+        skill_prose_lines = skill_prose.grade_lines(flat, file_path, skip_frontmatter=True)
     # Which lines each regex can match on (see src/scanner/prefilter.py).
     lf = LineFilter(content)
 
@@ -4355,6 +4383,8 @@ def _scan_content(
 
     def _check_injection(line: str, idx: int, stripped: str) -> None:
         """Prompt injection / tool poisoning on one line (one finding per line)."""
+        if idx >= skill_body_from:
+            return  # a SKILL.md body line: graded by skill_prose (above)
         # Check prompt injection / tool-description poisoning (metadata files also get the
         # wider tool-poisoning shapes that would be noisy on code lines).
         for name, pattern, severity in injection_plan[0](idx, injection_plan[1]):
@@ -5190,6 +5220,19 @@ def _scan_content(
                 remediation=_why("text in an agent tool's description (read by the model "
                                  "that calls the tool)", "prompt_injection", "defect"),
             ))
+
+    # A SKILL.md body: the skill path's prose grades (see ``skill_prose_lines`` above).
+    for line_no, rule_name, sev, why, line in skill_prose_lines:
+        if _is_allowlisted(file_path, rule_name, allowlist):
+            continue
+        findings.append(Finding(
+            category="prompt_injection",
+            name=rule_name + (f" ({why})" if why else ""),
+            severity=sev,
+            file_path=file_path,
+            line_number=line_no,
+            snippet=line.strip()[:120],
+        ))
 
     # A suppressed line that fell through (it matched a critical/high PATTERN) but
     # classified as a capability or a low/medium is what the suppression was for.
