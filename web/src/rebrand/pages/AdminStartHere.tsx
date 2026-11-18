@@ -17,6 +17,7 @@ interface Row {
   cc_new_machines_30d?: number | null
   d1_cohort?: number | null; d1_returned?: number | null
   d7_cohort?: number | null; d7_returned?: number | null
+  d7w_cohort?: number | null; d7w_returned?: number | null
   calls_claude_code?: number | null; calls_claude?: number | null; calls_chatgpt?: number | null
   checks_total?: number | null; checks_claude_code?: number | null; checks_claude?: number | null
   checks_chatgpt?: number | null; checks_cursor?: number | null; checks_vscode?: number | null
@@ -83,6 +84,9 @@ export default function StartHerePanel() {
   const sevenDayPartial = latest && latest.day < SEVEN_DAY_COMPLETE_FROM
   const d7 = pct(sum(rows, (r) => r.d7_returned), sum(rows, (r) => r.d7_cohort))
   const d1 = pct(sum(rows, (r) => r.d1_returned), sum(rows, (r) => r.d1_cohort))
+  // Any day within the week: only rows that carry it (snapshots from 2026-11-17 on).
+  const d7wRows = rows.filter((r) => r.d7w_cohort != null)
+  const d7w = d7wRows.length ? pct(sum(d7wRows, (r) => r.d7w_returned), sum(d7wRows, (r) => r.d7w_cohort)) : 'Not ready'
   // Hand-run checks: only the days the checks counter covers, so this matches the MCP
   // panel's "Hand-run checks". Earlier days' raw tool calls are shown apart, not added.
   const checkDays = rows.filter((r) => r.checks_total != null)
@@ -140,7 +144,7 @@ export default function StartHerePanel() {
         <Card
           label="Came back a week later"
           value={`${d7} · next day ${d1}`}
-          meaning="For each day in the window: of the machines first seen exactly 7 days earlier, how many connected again that day. 'Next day' is the same for machines first seen the day before."
+          meaning={<>For each day in the window: of the machines first seen exactly 7 days earlier, how many connected again that day. 'Next day' is the same for machines first seen the day before. Came back any day within 7 days: <span className="font-semibold tabular-nums">{d7w}</span>.</>}
           tip="Connecting, not being protected. Exact-day return is noisy for a tool used a few times a week, and IP changes lower it. Owner machines excluded."
         />
         <Card

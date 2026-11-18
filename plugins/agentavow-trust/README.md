@@ -144,6 +144,28 @@ Then add an MCP server and start a new session. The hook reports a line such as:
 ⚠️ MCP 'example' (https://mcp.example.com/mcp): Review before you connect — one high finding: shell command built from user input · AgentAvow 66/100.
 ```
 
+## Works in Codex too
+
+The same plugin runs in OpenAI's Codex (CLI and desktop app):
+
+```
+codex plugin marketplace add AgentAvow/AgentAvow
+codex plugin add agentavow-trust@agentavow
+```
+
+Codex asks you to review the plugin's hooks before they run: at the next start it
+shows "Hooks need review"; pick "Trust all and continue" (or use `/hooks`). It asks
+again after each plugin update. Until you trust them, only the connector and the
+skill work, and `codex exec` skips untrusted hooks without a word.
+
+In Codex the session-start check reads the servers in `~/.codex/config.toml` (and a
+trusted project's `.codex/config.toml`), and the install check watches
+`codex mcp add <name> --url <url>`, `codex mcp add <name> -- <command>` and the package
+installs listed above. Codex hooks cannot ask, so where Claude Code asks, Codex stops
+the step and says why, with the report and how to go ahead anyway (run it yourself in
+your own terminal outside Codex, or switch AgentAvow's hooks off in `/hooks`). Review
+before you connect is still a one-line note.
+
 ## The sandbox result in the line
 
 AgentAvow runs every npm and PyPI package it grades in an isolated gVisor sandbox on its own
@@ -210,7 +232,7 @@ AgentAvow, so it never sends it.
 **Once a day** (the first session start of each UTC day, even when there is nothing new
 to check) the session-start hook sends one more small request, a POST to
 `https://agentavow.com/api/v1/public/plugin/active` with the same install ID header and
-a body of `{"version": "0.1.43", "app": "desktop"}`: the plugin version and the app
+a body of `{"version": "0.1.44", "app": "desktop"}`: the plugin version and the app
 type, one of `desktop`, `cli`, `sdk`, `cloud` or `other`, read from Claude Code's
 `CLAUDE_CODE_ENTRYPOINT`. No tool, server, path or repo name goes in it. It lets
 AgentAvow count the machines the plugin protects, including the many days the hook

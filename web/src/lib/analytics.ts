@@ -186,6 +186,15 @@ export function trackPluginCommandCopy(): void {
   }
 }
 
+/** Same as trackPluginCommandCopy, for a copy button: checks the copied text instead of the selection. */
+export function trackPluginCommandText(text: string): void {
+  try {
+    if (PLUGIN_COMMAND.test(text)) trackCta('copy_plugin_cmd')
+  } catch {
+    // Silently ignore
+  }
+}
+
 /** The pages that report their own actions (page views come from the layout's guest_page_view). */
 export type ActionArea = 'browse' | 'trust_index' | 'certified' | 'preflight' | 'dev'
 
