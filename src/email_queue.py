@@ -28,6 +28,13 @@ class _QueuedEmail(NamedTuple):
     subject: str
     html_body: str
     attempts: int
+    private: bool = False
+
+
+def recipient_for_log(to: str, private: bool) -> str:
+    """What a log line says about the recipient. A private send (an address we promised
+    not to keep, such as "Email me the setup") never writes the address to the logs."""
+    return "<private recipient>" if private else to
 
 
 _queue: collections.deque[_QueuedEmail] = collections.deque(maxlen=500)
@@ -84,19 +91,19 @@ def _check_rate_limit_memory() -> bool:
 # ---------------------------------------------------------------------------
 
 
-async def _raw_send(to: str, subject: str, html_body: str) -> bool:
+async def _raw_send(to: str, subject: str, html_body: str, *, private: bool = False) -> bool:
     """Import and call the actual send function (avoids circular import)."""
     from src.email import _send_via_resend, _send_via_smtp
 
     if settings.resend_api_key:
-        return await _send_via_resend(to, subject, html_body)
+        return await _send_via_resend(to, subject, html_body, private=private)
 
     if settings.smtp_host:
-        return await _send_via_smtp(to, subject, html_body)
+        return await _send_via_smtp(to, subject, html_body, private=private)
 
     logger.info(
         "Email (dev mode, no provider):\n  To: %s\n  Subject: %s",
-        to,
+        recipient_for_log(to, private),
         subject,
     )
     return True
@@ -107,13 +114,15 @@ async def _send_with_retry(
     subject: str,
     html_body: str,
     max_attempts: int | None = None,
+    *,
+    private: bool = False,
 ) -> bool:
     """Try sending up to *max_attempts* times with exponential backoff."""
     attempts = max_attempts or settings.email_retry_max_attempts
     delay = settings.email_retry_base_delay
 
     for attempt in range(1, attempts + 1):
-        ok = await _raw_send(to, subject, html_body)
+        ok = await _raw_send(to, subject, html_body, private=private)
         if ok:
             return True
         if attempt < attempts:
@@ -122,7 +131,7 @@ async def _send_with_retry(
                 attempt,
                 attempts,
                 delay,
-                to,
+                recipient_for_log(to, private),
                 subject,
             )
             await asyncio.sleep(delay)
@@ -131,7 +140,7 @@ async def _send_with_retry(
             logger.error(
                 "Email send failed after %d attempts — to=%s subject=%s",
                 attempts,
-                to,
+                recipient_for_log(to, private),
                 subject,
             )
     return False
@@ -142,7 +151,9 @@ async def _send_with_retry(
 # ---------------------------------------------------------------------------
 
 
-async def send_email_rated(to: str, subject: str, html_body: str) -> bool:
+async def send_email_rated(
+    to: str, subject: str, html_body: str, *, private: bool = False,
+) -> bool:
     """Send an email with rate limiting and retry.
 
     * If under the per-minute rate limit → send immediately (with retry).
@@ -154,13 +165,13 @@ async def send_email_rated(to: str, subject: str, html_body: str) -> bool:
         logger.warning(
             "Email rate limit reached (%d/min), queuing email to=%s subject=%s",
             settings.email_rate_limit_per_minute,
-            to,
+            recipient_for_log(to, private),
             subject,
         )
-        _queue.append(_QueuedEmail(to, subject, html_body, 0))
+        _queue.append(_QueuedEmail(to, subject, html_body, 0, private))
         return True  # queued, will be sent later
 
-    return await _send_with_retry(to, subject, html_body)
+    return await _send_with_retry(to, subject, html_body, private=private)
 
 
 async def flush_email_queue() -> int:
@@ -179,7 +190,9 @@ async def flush_email_queue() -> int:
             )
             break
         item = _queue.popleft()
-        ok = await _send_with_retry(item.to, item.subject, item.html_body)
+        ok = await _send_with_retry(
+            item.to, item.subject, item.html_body, private=item.private,
+        )
         if ok:
             sent += 1
     return sent

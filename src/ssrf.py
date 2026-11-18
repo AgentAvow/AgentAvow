@@ -203,11 +203,24 @@ def build_ssrf_safe_transport(**transport_kwargs):
                 # unvalidated lookup: a DNS server that fails the guard's lookups and
                 # then answers with an internal address would get an unpinned connection.
                 raise httpx.ConnectError(f"could not resolve host: {host}", request=request)
-            # Connect to the validated IP; keep the original Host header (set at Request
+            # Connect to a validated IP; keep the original Host header (set at Request
             # creation) and force TLS SNI + cert verification against the real hostname.
-            request.url = request.url.copy_with(host=ips[0])
+            # If connecting fails, try the next address in getaddrinfo's order (RFC 6724),
+            # so an AAAA-first answer on a box without IPv6 routing still reaches the v4
+            # address. Every address in ``ips`` was validated above, and nothing is
+            # resolved again here, so the rebind protection holds. Only connect-phase
+            # failures fall through: nothing was sent yet. A read error or any response
+            # ends the loop. This is one pass over the addresses, not a retry.
+            original_url = request.url
             request.extensions = {**request.extensions, "sni_hostname": host}
-            return await super().handle_async_request(request)
+            for i, ip in enumerate(ips):
+                request.url = original_url.copy_with(host=ip)
+                try:
+                    return await super().handle_async_request(request)
+                except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                    if i == len(ips) - 1:
+                        raise
+                    logger.debug("connect to %s (%s) failed, trying next: %s", host, ip, exc)
 
     return _SsrfSafeTransport(**transport_kwargs)
 

@@ -2,7 +2,9 @@
 //
 // What it sends: a PageView when the page opens, and one custom event the first time
 // someone copies the install command. Nothing else:
-//   - no Advanced Matching (init gets no user data, and the page has no form to read),
+//   - no Advanced Matching: init gets no user data. The page's "Email me the setup" field
+//     is never passed to Meta, and Automatic Advanced Matching must stay OFF in Meta Events
+//     Manager for this pixel (it can read form fields on its own; privacy policy section 5),
 //   - automatic events off (autoConfig false: no button-click or page-metadata events),
 //   - no SPA page views (disablePushState), and no Conversions API on our servers.
 //

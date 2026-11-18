@@ -45,6 +45,7 @@ function TierNumber({ value, level, axis }: { value: number; level: number; axis
   )
 }
 
+/* eslint-disable react-hooks/static-components -- Icon is picked from a module-level lookup of stable components, not created during render */
 function TierIcon({ axis, level, size }: { axis: 'attestation' | 'community'; level: number; size: number }) {
   const Icon = axis === 'attestation' ? getAttestationIcon(level) : getCommunityIcon(level)
   const gradient = getTierGradient(level, axis)
@@ -67,6 +68,7 @@ function TierIcon({ axis, level, size }: { axis: 'attestation' | 'community'; le
     </span>
   )
 }
+/* eslint-enable react-hooks/static-components */
 
 // ─── Overall score pill for micro/small lists ───
 function OverallPill({ score }: { score: number }) {

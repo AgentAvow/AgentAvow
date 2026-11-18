@@ -64,6 +64,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   )
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- context hook co-located with its provider; HMR falls back to a full reload here
 export function useToast() {
   return useContext(ToastContext)
 }

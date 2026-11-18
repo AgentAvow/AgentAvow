@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 
 import httpx
+from packaging.version import InvalidVersion, Version
 
 OSV_QUERY_URL = "https://api.osv.dev/v1/query"
 _HTTP_TIMEOUT = 8.0
@@ -145,10 +146,12 @@ def _parse_version(eco: str, v: str):
     if not v:
         return None
     if eco == "PyPI":
+        # ``packaging`` is a declared runtime dependency. Imported at module level so a
+        # missing install fails loudly: caught here, it read every PyPI version as
+        # unparseable in prod (mcp-server-git, 2026-11-16).
         try:
-            from packaging.version import Version
             return Version(v)
-        except Exception:
+        except InvalidVersion:
             return None
     # npm / crates: semver. Pre-release sorts before the release.
     core, _, pre = v.lstrip("v").partition("-")

@@ -141,6 +141,7 @@ export default function AvatarPickerPage() {
   // Default to self
   useEffect(() => {
     if (!selectedEntity && allEntities.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time default selection once entities load
       setSelectedEntity(allEntities[0])
       setSelected(allEntities[0].avatar_url)
     }

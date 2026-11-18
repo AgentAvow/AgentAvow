@@ -193,7 +193,9 @@ def main(argv: list[str] | None = None) -> int:
                    help="stop cleanly when peak RSS passes this (set under the container "
                         "--memory limit)")
     args = p.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    from src.observability import setup_logging
+
+    setup_logging()
     for noisy in ("httpx", "httpcore"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     if args.job == "status":

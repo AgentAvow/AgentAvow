@@ -21,7 +21,7 @@ import signal
 
 from src.config import settings
 from src.feeds.bluesky.subscriber import BLUESKY_JETSTREAM_LOCK, run_subscriber
-from src.logging_config import setup_logging
+from src.observability import setup_logging
 from src.worker_lock import run_exclusively
 
 logger = logging.getLogger(__name__)
