@@ -41,6 +41,12 @@ Scanning is free and needs no account.
 | SessionStart hook | At the start of a session, grades each MCP server this session can use (user scope, this project, and the servers your installed plugins bring) that it has not seen before, and the project's direct dependencies: package.json `dependencies` (or `devDependencies` when there are none), requirements.txt, pyproject `[project].dependencies`, and Cargo.toml `[dependencies]` (Rust crates). In a workspace root with no manifest of its own, it reads the manifests one folder down (up to 5 sub-projects; never in your home folder). Up to 8 dependencies per start, re-graded only when the declared version changes; `AGENTAVOW_PRECHECK_DEPS=off` turns the dependency pass off. A server whose check has no answer within the start's time limit (a first scan can take a minute or more) is named as still being checked and asked about again at the next start until its answer shows (at most 5 starts or 24 hours; then it is reported once as "not checked: check timed out" and checked again in a week). Servers for other projects are counted and graded when you open them. Claude opens its first reply with a one-line summary (how many Safe / Review / Don't connect, the one needing attention), and keeps one line per server and dependency for when you ask. Dependencies are already installed: their answer is advice, never a stop. | Claude Code, Cowork |
 | PreToolUse gate | Before each MCP tool call, checks the answer on file for that server. Stops a call to a server whose answer is "Do not connect" (and, as before, one in the blocked tier), unless you allowed that one server; asks before a tool whose definition changed since it was scanned. "Review before you connect" never prompts. | Claude Code, Cowork |
 
+When a server, package or dependency is pinned to an exact version (`npx -y name@1.2.3`,
+`npm install name@1.2.3`, `pip install name==1.2.3`, `uvx name@1.2.3`, `uvx --from
+name==1.2.3 …`, or an exact version in package.json or requirements.txt), the hooks grade
+that version, not the latest one. A range or a tag (`^1.2`, `>=1`, `latest`, `next`) is
+graded at the latest version.
+
 The session-start hook and the skill warn; a low score adds context and you decide.
 The gate is the one part that can stop a call, and by default only for a server whose
 answer is "Do not connect" (a critical finding, a planted credential leaving the sandbox,
@@ -232,7 +238,7 @@ AgentAvow, so it never sends it.
 **Once a day** (the first session start of each UTC day, even when there is nothing new
 to check) the session-start hook sends one more small request, a POST to
 `https://agentavow.com/api/v1/public/plugin/active` with the same install ID header and
-a body of `{"version": "0.1.44", "app": "desktop"}`: the plugin version and the app
+a body of `{"version": "0.1.45", "app": "desktop"}`: the plugin version and the app
 type, one of `desktop`, `cli`, `sdk`, `cloud` or `other`, read from Claude Code's
 `CLAUDE_CODE_ENTRYPOINT`. No tool, server, path or repo name goes in it. It lets
 AgentAvow count the machines the plugin protects, including the many days the hook

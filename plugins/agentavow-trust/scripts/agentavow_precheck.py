@@ -76,7 +76,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.44"
+__version__ = "0.1.45"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -139,26 +139,130 @@ RETRY_QUEUED = 10 * 60  # seconds before a queued dependency is asked about agai
 
 def _strip_npm_version(spec: str) -> str:
     """'@scope/name@1.2' -> '@scope/name'; 'name@1.2' -> 'name'."""
+    return _split_npm_spec(spec)[0]
+
+
+def _split_npm_spec(spec: str) -> tuple[str, str]:
+    """'@scope/name@1.2.3' -> ('@scope/name', '1.2.3'); 'name' -> ('name', '')."""
     if spec.startswith("@"):
         parts = spec.split("@")  # ['', 'scope/name', '1.2']
-        return "@" + parts[1] if len(parts) >= 2 else spec
-    return spec.split("@", 1)[0]
+        if len(parts) < 2:
+            return spec, ""
+        return "@" + parts[1], "@".join(parts[2:])
+    pkg, _, ver = spec.partition("@")
+    return pkg, ver
 
 
 def _strip_pypi_version(spec: str) -> str:
-    """'mcp-server-git==0.1' / 'pkg[extra]>=1' -> 'mcp-server-git' / 'pkg'."""
-    return re.split(r"[=<>!~\[]", spec, 1)[0].strip()
+    """'mcp-server-git==0.1' / 'pkg[extra]>=1' / 'pkg@1.2' -> 'mcp-server-git' / 'pkg'."""
+    return _split_pypi_spec(spec)[0]
+
+
+def _split_pypi_spec(spec: str) -> tuple[str, str]:
+    """'pkg[extra]==1.2.3' -> ('pkg', '==1.2.3'); 'pkg@1.2.3' (uvx) -> ('pkg', '@1.2.3')."""
+    spec = spec.strip()
+    pkg = re.split(r"[=<>!~\[@;\s]", spec, 1)[0].strip()
+    rest = spec[len(pkg):].strip()
+    if rest.startswith("["):  # extras: pkg[cli]==1.0
+        rest = rest.split("]", 1)[1].strip() if "]" in rest else ""
+    return pkg, rest.split(";", 1)[0].strip()  # drop environment markers
+
+
+# An exact release, as opposed to a range or a tag. A pinned server or package is graded
+# at that release (the API's ``?version=``); a range ("^1.2", ">=1", "1.x"), a tag
+# ("latest", "next") or no spec is graded at the latest release, as before.
+_NPM_EXACT = re.compile(r"^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
+_PYPI_EXACT = re.compile(
+    r"^(?:\d+!)?\d+(?:\.\d+)*(?:[-_.]?(?:a|b|rc|c|alpha|beta|pre|preview)[-_.]?\d*)?"
+    r"(?:[-_.]?(?:post|rev|r)[-_.]?\d*)?(?:[-_.]?dev[-_.]?\d*)?"
+    r"(?:\+[a-z0-9]+(?:[-_.][a-z0-9]+)*)?$", re.IGNORECASE)
+
+
+def _exact_version(registry: str, spec: str) -> str | None:
+    """The exact release a version spec pins, or None for a range, a tag or no spec.
+    npm: '1.2.3', '=1.2.3', 'v1.2.3'. PyPI: '==1.2.3', '===1.2.3', and uv's '@1.2.3'."""
+    s = (spec or "").strip()
+    if registry == "npm":
+        s = s[1:].strip() if s.startswith("=") else s
+        if not _NPM_EXACT.match(s):
+            return None
+        return s[1:] if s[:1] in ("v", "V") else s
+    if registry == "pypi":
+        for op in ("===", "==", "@"):
+            if s.startswith(op):
+                v = s[len(op):].strip()
+                return v if _PYPI_EXACT.match(v) else None
+    return None
+
+
+def _pinned_name(registry: str, pkg: str, version: str | None) -> str:
+    """How a package is named to the person: 'name@1.2.3' (npm), 'name==1.2.3' (PyPI),
+    or the bare name when no exact release is pinned."""
+    if not version:
+        return pkg
+    return f"{pkg}=={version}" if registry == "pypi" else f"{pkg}@{version}"
+
+
+def _target_coord(t: dict) -> str:
+    """A server target as shown in a line: its URL, or 'registry:name' with the pinned
+    release when there is one ('npm:name@1.2.3')."""
+    if t["kind"] == "mcp":
+        return t["url"]
+    return f"{t['registry']}:{_pinned_name(t['registry'], t['pkg'], t.get('version'))}"
+
+
+def _package_target(name: str, registry: str, pkg: str, version: str | None) -> dict:
+    """A package server target. A pinned one carries ``version`` and an id of its own
+    ('npm:name==1.2.3'), so a grade for one release never answers for another and the
+    latest release's grade never answers for a pin (or the other way round)."""
+    t = {"name": name, "kind": "package", "registry": registry, "pkg": pkg,
+         "id": f"{registry}:{pkg}" + (f"=={version}" if version else "")}
+    if version:
+        t["version"] = version
+    return t
+
+
+# Runner flags whose NEXT token is a value, never the package (npx / bunx / pnpm dlx;
+# uvx / pipx run), so ``uvx --python 3.12 pkg`` is not read as a package named '3.12'.
+# ``--flag=value`` is one token and needs no entry.
+_RUNNER_VALUE_FLAGS = frozenset({
+    # npx / bunx / pnpm dlx
+    "--registry", "--cache", "--userconfig", "--prefix", "-w", "--workspace", "-C", "--dir",
+    "-c", "--call", "--loglevel", "--node-options", "--shell", "--script-shell",
+    # uvx / uv tool run
+    "--python", "--with", "--with-editable", "--with-requirements", "--index",
+    "--default-index", "-i", "--index-url", "--extra-index-url", "-f", "--find-links",
+    "--constraints", "--overrides", "--build-constraints", "--exclude-newer",
+    "--exclude-newer-package", "--prerelease", "--resolution", "--index-strategy",
+    "--keyring-provider", "-P", "--upgrade-package", "--reinstall-package",
+    "--refresh-package", "--no-build-package", "--no-binary-package", "--config-setting",
+    "--config-settings-package", "--link-mode", "--cache-dir", "--directory", "--project",
+    "--config-file", "--color", "--python-preference", "--allow-insecure-host",
+    "--env-file", "--torch-backend", "--fork-strategy",
+    # pipx run
+    "--pip-args", "--backend", "--suffix",
+})
 
 
 def _pkg_from_args(args: list[str], flag_takes_pkg: tuple[str, ...]) -> str | None:
     """First real package token in a runner's args, honoring a 'flag then package'
-    form (npx -p PKG, uvx --from PKG)."""
-    want_next = False
+    form (npx -p PKG, uvx --from PKG, --package=PKG) and skipping the value of a flag
+    that takes one (uvx --python 3.12 PKG)."""
+    want_next = skip_next = False
     for a in args:
         if want_next:
             return a
+        if skip_next:
+            skip_next = False
+            continue
         if a in flag_takes_pkg:
             want_next = True
+            continue
+        flag, eq, value = a.partition("=")
+        if eq and value and flag in flag_takes_pkg:
+            return value
+        if a in _RUNNER_VALUE_FLAGS:
+            skip_next = True
             continue
         if a.startswith("-") or a in ("run", "--"):
             continue
@@ -252,15 +356,13 @@ def _resolve_target(name: str, cfg: dict) -> dict | None:
     if runner in _NPM_RUNNERS:
         spec = _pkg_from_args(args, ("-p", "--package"))
         if spec:
-            pkg = _strip_npm_version(spec)
-            return {"name": name, "kind": "package", "registry": "npm",
-                    "pkg": pkg, "id": f"npm:{pkg}"}
+            pkg, ver = _split_npm_spec(spec)
+            return _package_target(name, "npm", pkg, _exact_version("npm", ver))
     elif runner in _PYPI_RUNNERS:
-        spec = _pkg_from_args(args, ("--from",))
+        spec = _pkg_from_args(args, ("--from", "--spec"))
         if spec:
-            pkg = _strip_pypi_version(spec)
-            return {"name": name, "kind": "package", "registry": "pypi",
-                    "pkg": pkg, "id": f"pypi:{pkg}"}
+            pkg, ver = _split_pypi_spec(spec)
+            return _package_target(name, "pypi", pkg, _exact_version("pypi", ver))
     return None
 
 
@@ -730,9 +832,18 @@ def _deps_enabled() -> bool:
 
 
 def _dep(registry: str, pkg: str, spec: str) -> dict:
+    """A dependency or an installed package. One pinned to an exact release is graded at
+    that release; its id ('dep:npm:name==1.2.3') differs from every range/unpinned id
+    ('dep:npm:name@^1.2', and those written before pins were graded), so the two kinds
+    of grade never answer for each other."""
     spec = (spec or "").strip()
-    return {"name": f"{DEP_PREFIX}{registry}:{pkg}", "kind": "package", "registry": registry,
-            "pkg": pkg, "spec": spec, "id": f"{DEP_PREFIX}{registry}:{pkg}@{spec}"}
+    t = {"name": f"{DEP_PREFIX}{registry}:{pkg}", "kind": "package", "registry": registry,
+         "pkg": pkg, "spec": spec, "id": f"{DEP_PREFIX}{registry}:{pkg}@{spec}"}
+    version = _exact_version(registry, spec)
+    if version:
+        t["version"] = version
+        t["id"] = f"{DEP_PREFIX}{registry}:{pkg}=={version}"
+    return t
 
 
 def _npm_deps(data: object) -> list[dict]:
@@ -1520,10 +1631,20 @@ def _record(target: dict, result: dict, now: float) -> dict:
     else:
         rec["registry"] = target["registry"]
         rec["pkg"] = target["pkg"]
-        rec["report_url"] = f"{WEB}/check/pkg/{target['registry']}/{target['pkg']}"
+        rec["report_url"] = _package_report_url(target)
+        if target.get("version"):
+            rec["version"] = target["version"]
         result = dict(result, tool_digests={}, tool_manifest_digest=None)  # not live-served
     rec.update(result)
     return rec
+
+
+def _package_report_url(target: dict) -> str:
+    """The package's report page; a pinned release's page when one is pinned."""
+    url = f"{WEB}/check/pkg/{target['registry']}/{target['pkg']}"
+    if target.get("version"):
+        url += "?version=" + urllib.parse.quote(str(target["version"]), safe="")
+    return url
 
 
 def _drifted(entry: dict) -> bool:
@@ -1743,6 +1864,8 @@ def _scan(target: dict, force: bool = False, stored: bool = False) -> dict:
             params["force"] = "true"  # the definitions changed; a cached grade is stale
         return _verdict(_fetch("/mcp", params))
     params = {"stored": "true"} if stored else {}
+    if target.get("version"):
+        params["version"] = str(target["version"])  # the pinned release, not the latest
     return _verdict(_fetch(f"/package/{target['registry']}/{target['pkg']}", params))
 
 
@@ -2004,7 +2127,7 @@ def _pending(cache: dict, t: dict, entry: object, now: float, asked: bool,
     RETRY_UNSCANNABLE, like an unscannable server: "timed_out"."""
     if isinstance(entry, dict) and entry.get("id") == t["id"] and "approved_at" in entry:
         return ""
-    coord = t["url"] if t["kind"] == "mcp" else f"{t['registry']}:{t['pkg']}"
+    coord = _target_coord(t)
     prior = entry if (isinstance(entry, dict) and entry.get("id") == t["id"]
                       and "pending_since" in entry) else {}
     try:
@@ -2085,7 +2208,7 @@ def _main() -> None:
             lines.append(f"➖ MCP '{t['name']}' ({t['host']}): not scanned — its URL looks "
                          "like it contains a secret, so it was not sent to AgentAvow.")
             continue
-        coord = t["url"] if t["kind"] == "mcp" else f"{t['registry']}:{t['pkg']}"
+        coord = _target_coord(t)
         if t["id"] not in results:  # the same coordinate under two names scans once
             if time.monotonic() - started > BUDGET:
                 # Out of time: not asked this session. Said, not silently skipped.

@@ -185,9 +185,11 @@ def test_public_url_is_sanitized_before_it_leaves_the_machine(hook):
 
 def test_stdio_package_targets(hook):
     npm = hook._resolve_target("a", {"command": "npx", "args": ["-y", "@scope/pkg@1.2"]})
-    pypi = hook._resolve_target("b", {"command": "uvx", "args": ["mcp-server-git==0.1"]})
-    assert npm["id"] == "npm:@scope/pkg"
+    pypi = hook._resolve_target("b", {"command": "uvx", "args": ["mcp-server-git>=0.1"]})
+    pinned = hook._resolve_target("b", {"command": "uvx", "args": ["mcp-server-git==0.1"]})
+    assert npm["id"] == "npm:@scope/pkg"  # '1.2' is a range, so the latest is graded
     assert pypi["id"] == "pypi:mcp-server-git"
+    assert pinned["id"] == "pypi:mcp-server-git==0.1" and pinned["version"] == "0.1"
     assert hook._resolve_target("c", {"command": "node", "args": ["server.js"]}) is None
 
 

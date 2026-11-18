@@ -53,7 +53,7 @@ import sys
 import time
 import urllib.error
 
-__version__ = "0.1.44"
+__version__ = "0.1.45"
 
 TIMEOUT = 12  # seconds per scan: an install is rare, so a slower fresh scan is fine
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -323,11 +323,70 @@ _VALUE_FLAGS = {
     "--trusted-host", "--cache-dir", "--log", "--proxy", "--timeout", "--retries",
     "-e", "--editable", "--extra", "--optional", "-G", "--with", "--tag", "--save-prefix",
 }
+# Per installer: more flags that take a value (so ``pip install --progress-bar off x`` is
+# not read as a package named 'off'), and flags in the shared list above that are plain
+# switches for that installer (``bun add -p x``: -p is --production, x is the package).
+_PIP_GENERAL = {
+    "--log", "--log-file", "--local-log", "--proxy", "--retries", "--timeout",
+    "--exists-action", "--trusted-host", "--cert", "--client-cert", "--cache-dir",
+    "--python", "--keyring-provider", "--use-feature", "--use-deprecated",
+    "--resume-retries",
+}
+_UV_COMMON = {
+    "--index", "--default-index", "--index-strategy", "--keyring-provider", "-P",
+    "--upgrade-package", "--reinstall-package", "--resolution", "--prerelease",
+    "--fork-strategy", "--exclude-newer", "--exclude-newer-package", "--no-build-package",
+    "--no-binary-package", "--refresh-package", "-C", "--config-setting",
+    "--config-settings-package", "--link-mode", "--cache-dir", "--config-file",
+    "--directory", "--project", "--color", "--python-preference", "--allow-insecure-host",
+    "--constraints", "--build-constraints", "--overrides", "--torch-backend",
+}
+_JS_COMMON = {
+    "--loglevel", "--cache", "--userconfig", "--globalconfig", "--omit", "--include",
+    "--cpu", "--os", "--libc", "--ca", "--cafile", "--cert", "--key", "--https-proxy",
+    "--noproxy", "--network-concurrency", "--network-timeout", "-F",
+}
+_EXTRA_VALUE_FLAGS: dict[str, set[str]] = {
+    "npm": _JS_COMMON | {"--install-strategy", "--before", "--otp", "--auth-type", "--scope",
+                         "--location", "--lockfile-version", "--script-shell",
+                         "--replace-registry-host", "--audit-level", "--fetch-retries",
+                         "--fetch-timeout", "--maxsockets", "--node-options"},
+    "pnpm": _JS_COMMON | {"--reporter", "--store-dir", "--virtual-store-dir", "--modules-dir",
+                          "--lockfile-dir", "--config-dir", "--resolution-mode",
+                          "--node-linker", "--package-import-method", "--child-concurrency",
+                          "--save-catalog-name", "--allow-build"},
+    "yarn": _JS_COMMON | {"--modules-folder", "--cache-folder", "--mutex", "--use-yarnrc",
+                          "--global-folder", "--link-folder"},
+    "bun": _JS_COMMON | {"--backend", "--concurrent-scripts", "--linker", "--config"},
+    "pip": _PIP_GENERAL | {"--upgrade-strategy", "--config-settings", "--global-option",
+                           "--build-option", "--install-option", "--no-binary",
+                           "--only-binary", "--progress-bar", "--root-user-action",
+                           "--report", "--build-constraint", "--uploaded-prior-to"},
+    "uv-pip": _UV_COMMON | {"--no-binary", "--only-binary", "--python-platform",
+                            "--no-build-isolation-package", "--build-constraint"},
+    "uv-add": _UV_COMMON | {"-m", "--marker", "--rev", "--branch", "--package", "--script",
+                            "--bounds", "-r", "-c"},
+    "poetry": {"-E", "--extras", "--source", "--markers", "-P"},
+    "pipx": {"--pip-args", "--suffix", "--preinstall", "--backend"},
+}
+_SWITCHES: dict[str, set[str]] = {
+    "npm": {"-p", "-f"},             # --parseable, --force
+    "pnpm": {"-p", "-f", "-w"},      # -w is --workspace-root
+    "yarn": {"-p", "-f"},
+    "bun": {"-p", "-f"},             # --production, --force
+    "uv-add": {"-e", "--editable"},  # uv add --editable is a switch
+    "poetry": {"-e", "--editable"},
+    "pipx": {"-f", "-e", "--editable"},  # --force; pipx's --editable is a switch
+}
+_FLAGS_BY_INSTALLER = {k: frozenset((_VALUE_FLAGS | _EXTRA_VALUE_FLAGS[k])
+                                    - _SWITCHES.get(k, set()))
+                       for k in _EXTRA_VALUE_FLAGS}
 _NPM_NAME = re.compile(r"^(@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*$")
 
 
-def _install_argv(argv: list[str]) -> tuple[str, list[str]] | None:
-    """(registry, the args after the install verb) when ``argv`` installs packages."""
+def _installer(argv: list[str]) -> tuple[str, str, list[str]] | None:
+    """(registry, installer, the args after the install verb) when ``argv`` installs
+    packages. ``installer`` picks the flags that take a value (_FLAGS_BY_INSTALLER)."""
     while argv and (_ENV_ASSIGN.match(argv[0]) or argv[0] in ("sudo", "env", "time",
                                                                "command", "exec")):
         argv = argv[1:]
@@ -335,18 +394,24 @@ def _install_argv(argv: list[str]) -> tuple[str, list[str]] | None:
         return None
     tool = argv[0].rsplit("/", 1)[-1]
     if tool in _JS_VERBS and argv[1] in _JS_VERBS[tool]:
-        return "npm", argv[2:]
+        return "npm", tool, argv[2:]
     if tool in ("pip", "pip3") and argv[1] == "install":
-        return "pypi", argv[2:]
+        return "pypi", "pip", argv[2:]
     if tool.startswith("python") and argv[1:4] == ["-m", "pip", "install"]:
-        return "pypi", argv[4:]
+        return "pypi", "pip", argv[4:]
     if tool == "uv" and argv[1:3] == ["pip", "install"]:
-        return "pypi", argv[3:]
+        return "pypi", "uv-pip", argv[3:]
     if tool in ("uv", "poetry") and argv[1] == "add":
-        return "pypi", argv[2:]
+        return "pypi", "uv-add" if tool == "uv" else "poetry", argv[2:]
     if tool == "pipx" and argv[1] == "install":
-        return "pypi", argv[2:]
+        return "pypi", "pipx", argv[2:]
     return None
+
+
+def _install_argv(argv: list[str]) -> tuple[str, list[str]] | None:
+    """(registry, the args after the install verb) when ``argv`` installs packages."""
+    hit = _installer(argv)
+    return (hit[0], hit[2]) if hit else None
 
 
 def _npm_spec(token: str) -> tuple[str, str] | None:
@@ -383,10 +448,11 @@ def _package_installs(command: str, pc) -> list[tuple[str, str, str]]:
             argv = shlex.split(seg)
         except ValueError:
             continue
-        hit = _install_argv(argv)
+        hit = _installer(argv)
         if not hit:
             continue
-        registry, args = hit
+        registry, installer, args = hit
+        value_flags = _FLAGS_BY_INSTALLER[installer]
         skip_next = False
         for a in args:
             if skip_next:
@@ -394,7 +460,7 @@ def _package_installs(command: str, pc) -> list[tuple[str, str, str]]:
                 continue
             if a == "--":
                 continue
-            if a in _VALUE_FLAGS:
+            if a in value_flags:
                 skip_next = True
                 continue
             if a.startswith("-"):
@@ -424,11 +490,17 @@ def _is_deprecation_only(r: dict) -> bool:
 _CHEAP_GAPS = frozenset({"oversized_files", "package_skipped"})
 
 
+def _pkg_coord(t: dict, pc) -> str:
+    """"npm package 'name'", or "npm package 'name@1.2.3'" for an exact pin."""
+    name = pc._pinned_name(t["registry"], t["pkg"], t.get("version"))
+    return f"{t['registry']} package '{name}'"
+
+
 def _package_line(t: dict, r: dict, pc) -> str | None:
     """The one line for a package install, or None when there is nothing to say (Safe,
     with everything read)."""
-    coord = f"{t['registry']} package '{t['pkg']}'"
-    url = f"{pc.WEB}/check/pkg/{t['registry']}/{t['pkg']}"
+    coord = _pkg_coord(t, pc)
+    url = pc._package_report_url(t)
     d = pc._dval(r)
     if d == "safe":
         if _CHEAP_GAPS & set(r.get("gaps") or []):
@@ -445,7 +517,7 @@ def _package_line(t: dict, r: dict, pc) -> str | None:
 
 def _not_graded_line(t: dict, reason: str, pc, busy: bool = False) -> str:
     """A package AgentAvow could not grade: said once, so silence never reads as clean."""
-    coord = f"{t['registry']} package '{t['pkg']}'"
+    coord = _pkg_coord(t, pc)
     if busy:
         return (f"❔ {coord}: not checked (AgentAvow is busy right now). "
                 "The install goes ahead.")
@@ -569,7 +641,13 @@ def _targets_for(payload: dict, pc) -> list[dict]:
 # Verdict -> what the person sees
 # --------------------------------------------------------------------------- #
 def _coord(t: dict) -> str:
-    return t["url"] if t["kind"] == "mcp" else f"{t['registry']}:{t['pkg']}"
+    """'https://…' for a URL server; 'npm:name', or 'npm:name@1.2.3' / 'pypi:name==1.2.3'
+    for a server pinned to an exact release."""
+    if t["kind"] == "mcp":
+        return t["url"]
+    ver = t.get("version")
+    sep = "==" if t["registry"] == "pypi" else "@"
+    return f"{t['registry']}:{t['pkg']}" + (f"{sep}{ver}" if ver else "")
 
 
 def _report_url(t: dict, pc) -> str:
