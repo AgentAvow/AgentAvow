@@ -44,7 +44,8 @@ def _snap(tmp_path, monkeypatch):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     for attr, name in (("SEEN_PATH", "seen.json"), ("CHECKED_PATH", "checked.json"),
-                       ("FIRST_CHECKED_PATH", "first.json"), ("CLOUD_PATH", "cloud.json")):
+                       ("FIRST_CHECKED_PATH", "first.json"), ("CLOUD_PATH", "cloud.json"),
+                       ("CODEX_CHECKED_PATH", "codex.json")):
         monkeypatch.setattr(mod, attr, str(tmp_path / name))
     monkeypatch.setattr(mod, "DATA", str(tmp_path))
     monkeypatch.setattr(mod, "_salt", lambda: "test-salt")

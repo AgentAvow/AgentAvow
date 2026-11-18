@@ -217,7 +217,9 @@ def test_retention_window_columns_append_at_the_end():
     snap = _snapshot_module()
     new = ["d7w_cohort", "d7w_returned", "returning_machines",
            "returning_machines_excl_cloud"]
-    assert snap.COLUMNS[-len(new):] == new
+    # Appended after cc_machines_plugin/checked_machines_plugin, before the Codex columns.
+    start = snap.COLUMNS.index("checked_machines_plugin") + 1
+    assert snap.COLUMNS[start:start + len(new)] == new
     for col in new:
         assert col in md._TRAFFIC_INT_COLUMNS, col
     # The old columns keep their place, so earlier rows line up.
@@ -315,3 +317,77 @@ def test_rolling_drops_old_entries():
     snap = _snapshot_module()
     assert snap._rolling({"a": "2026-10-01", "b": "2026-11-19", "c": 3}, "2026-11-20", 30) == {
         "b": "2026-11-19"}
+
+
+@pytest.mark.parametrize("ua,codex", [
+    ("agentavow-precheck/0.1.44 (plugin; codex)", True),
+    ("agentavow-preinstall/0.1.44 (plugin; codex)", True),
+    ("agentavow-precheck/0.1.44 (manual; codex)", True),
+    ("agentavow-precheck/0.1.44 (plugin)", False),
+    ("agentavow-preinstall/0.1.44 (plugin)", False),
+    ("agentavow-gate/0.1.44 (plugin)", False),
+    ("codex_cli_rs/0.169 (Mac OS; codex)", False),  # not one of the plugin's hooks
+    ("agentavow-precheck/0.1.44 (plugin; codexy)", False),
+])
+def test_snapshot_tells_codex_plugin_requests_apart(ua, codex):
+    assert _snapshot_module().is_codex_plugin_request(ua) is codex
+
+
+def _run_snapshot(snap, monkeypatch, tmp_path, rows, owner=frozenset(), day="2026-11-20"):
+    for name in ("SEEN_PATH", "CHECKED_PATH", "FIRST_CHECKED_PATH", "CLOUD_PATH",
+                 "CODEX_CHECKED_PATH"):
+        monkeypatch.setattr(snap, name, str(tmp_path / f"{name}.json"))
+    monkeypatch.setattr(snap, "DATA", str(tmp_path))
+    monkeypatch.setattr(snap, "_nginx_rows", lambda since_hours: rows)
+    monkeypatch.setattr(snap, "_owner_ips", lambda: set(owner))
+    monkeypatch.setattr(snap, "_salt", lambda: "test-salt")
+    monkeypatch.setattr(snap, "_redis_counts", lambda d: {})
+    return snap.snapshot(day, 24)
+
+
+def _log(ip: str, ua: str, day: str = "2026-11-20") -> dict:
+    return {"time": f"{day}T10:00:00+00:00", "remote_addr": ip, "http_user_agent": ua,
+            "request": "GET /api/v1/public/scan/x HTTP/1.1", "status": 200}
+
+
+def test_snapshot_counts_codex_plugin_machines_apart_from_claude_code(monkeypatch, tmp_path):
+    snap = _snapshot_module()
+    rows = [
+        _log("10.0.0.1", "agentavow-precheck/0.1.44 (plugin)"),            # Claude Code
+        _log("10.0.0.2", "agentavow-preinstall/0.1.44 (plugin)"),          # Claude Code
+        _log("10.0.0.3", "agentavow-precheck/0.1.44 (plugin; codex)"),     # Codex
+        _log("10.0.0.3", "agentavow-preinstall/0.1.44 (plugin; codex)"),   # Codex, again
+        _log("10.0.0.4", "agentavow-preinstall/0.1.44 (plugin; codex)"),   # Codex
+        _log("10.0.0.9", "agentavow-precheck/0.1.44 (plugin; codex)"),     # owner, Codex
+    ]
+    row = _run_snapshot(snap, monkeypatch, tmp_path, rows, owner={"10.0.0.9"})
+    assert row["codex_plugin_machines"] == 2  # 10.0.0.3 and .4; the owner is left out
+    assert row["codex_plugin_reqs"] == 3
+    assert row["codex_checked_machines_7d"] == 2
+    # The Claude Code counts see only the untagged requests.
+    assert (row["hook_machines_nginx"], row["hook_reqs"]) == (1, 1)
+    assert (row["preinstall_machines"], row["preinstall_reqs"]) == (1, 1)
+    assert (row["checked_machines"], row["checked_machines_excl_owner"]) == (2, 2)
+    assert row["checked_machines_7d"] == 2
+    assert row["owner_hook_reqs"] == 0
+
+
+def test_snapshot_codex_checked_machines_7d_rolls_over_the_week(monkeypatch, tmp_path):
+    snap = _snapshot_module()
+    first = [_log("10.0.0.3", "agentavow-precheck/0.1.44 (plugin; codex)", "2026-11-18")]
+    _run_snapshot(snap, monkeypatch, tmp_path, first, day="2026-11-18")
+    second = [_log("10.0.0.4", "agentavow-precheck/0.1.44 (plugin; codex)", "2026-11-20")]
+    row = _run_snapshot(snap, monkeypatch, tmp_path, second, day="2026-11-20")
+    assert row["codex_plugin_machines"] == 1
+    assert row["codex_checked_machines_7d"] == 2  # .3 two days ago, .4 today
+    later = _run_snapshot(snap, monkeypatch, tmp_path, [], day="2026-11-25")
+    assert later["codex_checked_machines_7d"] == 1  # 11-18 has left the 7-day window
+
+
+def test_codex_plugin_columns_append_at_the_end():
+    snap = _snapshot_module()
+    new = ["codex_plugin_machines", "codex_plugin_reqs", "codex_checked_machines_7d"]
+    assert snap.COLUMNS[-len(new):] == new
+    for col in new:
+        assert col in md._TRAFFIC_INT_COLUMNS, col
+    assert snap.COLUMNS[-len(new) - 1] == "returning_machines_excl_cloud"

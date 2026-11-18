@@ -1200,6 +1200,7 @@ _TRAFFIC_INT_COLUMNS = (
     "tool_gate_machines", "tool_gate_reqs", "a2a_card_fetches", "a2a_card_fetchers",
     "cc_machines_plugin", "checked_machines_plugin",
     "d7w_cohort", "d7w_returned", "returning_machines", "returning_machines_excl_cloud",
+    "codex_plugin_machines", "codex_plugin_reqs", "codex_checked_machines_7d",
 )
 _TRAFFIC_NOTES = [
     "checked_machines_7d and cc_machines_7d are rolling 7-day counts of distinct machines, "
@@ -1214,6 +1215,12 @@ _TRAFFIC_NOTES = [
     "this day, not only on this day. returning_machines = this day's machines, owner "
     "excluded, first seen on an earlier day; _excl_cloud also drops machines seen on a "
     "cloud entrypoint in the last 30 days. From 2026-11-17.",
+    "codex_plugin_machines / codex_plugin_reqs = distinct machines and requests, owner "
+    "excluded, where the plugin's session-start or install-time hook ran in Codex (plugin "
+    "0.1.44+ tags its User-Agent '(plugin; codex)'); codex_checked_machines_7d = the same "
+    "machines over the last 7 days. From 2026-11-18 these requests are left out of the "
+    "Claude Code hook_*, preinstall_* and checked_machines* columns; earlier days had no "
+    "Codex plugin traffic, so those series carry on unbroken.",
     "checked_machines = distinct machines where the plugin checked something on its own "
     "that day (session-start hook or install-time hook), excluding the owner's test "
     "machines in the _excl_owner variant. This is the headline usage number: the plugin "
@@ -1335,7 +1342,8 @@ async def traffic_metrics(
                     "preinstall_reqs", "cc_machines_7d", "checked_machines_7d",
                     "d7_cohort", "d7_returned", "d7w_cohort", "d7w_returned",
                     "returning_machines", "gate_machines", "tool_gate_machines",
-                    "a2a_card_fetches")
+                    "a2a_card_fetches", "codex_plugin_machines", "codex_plugin_reqs",
+                    "codex_checked_machines_7d")
     }
     latest = rows[-1] if rows else None
     # Plugin installs by the hooks' random install ID (src/install_activity): kept apart
