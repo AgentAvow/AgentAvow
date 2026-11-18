@@ -15,14 +15,18 @@ highlight until a person has read its finding. So:
   time. First the ones a person confirmed in the last 7 days, newest first (a tool that
   no longer reads Do not connect, or reads it for a different reason than the one the
   reviewer read, drops out). Then, to fill the card, tools scanned in the last 7 days
-  whose answer needs no judgment, read from structured fields of the cached scan,
-  never from reason text: a known-malicious package (``incident_history.
-  current_version_affected``: this version has a malware advisory; or
-  ``supply_chain.malicious``: OpenSSF MAL advisory ids) or a planted credential the
-  sandbox saw leaving (``behavioral.canary_exfil`` or a
-  ``credential_canary_exfiltrated`` finding on a finished, non-advisory run). A tool a
-  person marked Not confirmed for its current reason stays off. Each item says why it
-  is listed: ``listed_because`` = ``confirmed`` | ``known_malicious`` | ``sandbox``.
+  whose answer needs no judgment, found from structured fields of the cached scan
+  (free text is never searched for a signal): a known-malicious package
+  (``incident_history.current_version_affected``: this version itself has a malware
+  advisory), a known-malicious dependency (``supply_chain.malicious``: OpenSSF MAL
+  advisory ids), or a planted credential the sandbox saw leaving (``behavioral.canary_exfil`` or a
+  ``credential_canary_exfiltrated`` finding on a finished, non-advisory run, stamped
+  with the scanned version). ``auto_kind`` requires that ``decide()`` over the cached
+  scan and its version-checked sandbox block reads Do not connect for the same rule as
+  the row's stored reason, and that the cache is not older than the row. A tool a
+  person marked Not confirmed stays off for as long as that review stands. Each item
+  says why it is listed: ``listed_because`` = ``confirmed`` | ``known_malicious`` |
+  ``malicious_dependency`` | ``sandbox``. One worker rebuilds the card at a time.
 * ``/public/trust-index/most-checked-week`` lists the top 5 tools by checks in the last
   7 days (``src.tool_checks``), each with its answer and Certified mark. A tool that
   reads Do not connect is left out unless a person confirmed it (same rule). Empty
@@ -33,6 +37,8 @@ here changes a scan, a score or any other public number.
 """
 from __future__ import annotations
 
+import asyncio
+import functools
 import hashlib
 import json
 import logging
@@ -61,12 +67,17 @@ CARD_LIMIT = 5
 MIN_TOOLS = 3          # most-checked shows only once this many tools have...
 MIN_CHECKS = 3         # ...at least this many checks each
 CACHE_TTL = 600
-DNC_CACHE_KEY = "trust_index:dnc_week:v1"
+DNC_CACHE_KEY = "trust_index:dnc_week:v2"
+DNC_LAST_KEY = "trust_index:dnc_week:last:v2"
+DNC_LOCK_KEY = "trust_index:dnc_week:lock"
 CHECKED_CACHE_KEY = "trust_index:most_checked:v1"
 CANDIDATES_MAX = 200
 JSONL_TAIL = 5000
 SHORTLIST_LIMIT = 3    # the owner reads at most this many a week
 AUTO_LOOKUPS_MAX = 300  # cached scans read per card build for the automatic fill
+AUTO_CONCURRENCY = 16   # cached-scan / sandbox reads in flight at once
+REBUILD_LOCK_TTL = 10   # seconds one worker holds the card-rebuild lock
+LAST_GOOD_TTL = 24 * 3600  # the last built card, served while another worker rebuilds
 
 
 def _now() -> datetime:
@@ -145,36 +156,53 @@ async def cached_scan(row: Any) -> dict | None:
         return None
 
 
-async def cached_behavioral(data: dict) -> dict | None:
-    """The sandbox block cached for a scan's coordinate, by the same key the result page
-    reads it with. Cache only: never starts a sandbox run."""
+def _scan_version(data: dict, surface: str | None) -> str | None:
+    """The exact release a cached package scan resolved (npm / PyPI / docker), else None."""
+    if surface not in ("npm", "pypi", "docker"):
+        return None
+    pkg = data.get("package_coordinate") if isinstance(data.get("package_coordinate"),
+                                                       dict) else {}
+    ver = data.get("package_version") or pkg.get("version")
+    return (str(ver).strip() or None) if ver else None
+
+
+async def cached_behavioral(data: dict, row: Any | None = None) -> dict | None:
+    """The sandbox block cached for a scan's coordinate, found the way the result page
+    finds it (``_package_sandbox_input``), and checked against the scan's version: a
+    block stamped for another release is a miss. Cache only: never starts a sandbox run.
+    A run still pending has no say, so it reads as None."""
     try:
         from src.api.public_scan_router import (
             _behavioral_plan,
             _behavioral_target,
-            _behavioral_version,
             _declared_egress,
             _get_cached_behavioral,
+            _package_sandbox_input,
         )
 
-        target = _behavioral_target(data)
+        coords = _cache_coords(row) if row is not None else None
+        inp = _package_sandbox_input(data, coords)
+        target = _behavioral_target(inp)
         if target is None:
             return None
         surface, name = target
-        return await _get_cached_behavioral(
-            surface, str(name), _declared_egress(data), _behavioral_plan(data, surface),
-            _behavioral_version(data))
+        block = await _get_cached_behavioral(
+            surface, str(name), _declared_egress(inp), _behavioral_plan(inp, surface),
+            _scan_version(data, surface))
+        if not isinstance(block, dict) or block.get("pending"):
+            return None
+        return block
     except Exception:
         logger.debug("cached sandbox lookup failed", exc_info=True)
         return None
 
 
 def auto_reason(data: dict | None, block: dict | None) -> str | None:
-    """Why a Do not connect answer needs no person's read, from structured fields only:
-    ``sandbox`` (a planted credential left the sandbox on a finished, non-advisory run),
-    ``known_malicious`` (this version has a malware advisory, or a dependency has an
-    OpenSSF MAL advisory), else None. Mirrors the first Do not connect rules of
-    ``src.scanner.verdict.decide``."""
+    """Which no-judgment Do not connect rule the structured fields show, in the order
+    ``src.scanner.verdict.decide`` applies them: ``sandbox`` (a planted credential left
+    the sandbox on a finished, non-advisory run), ``known_malicious`` (this version of
+    the tool itself has a malware advisory), ``malicious_dependency`` (a dependency has
+    an OpenSSF MAL advisory), else None. Never reads reason text."""
     from src.scanner.verdict import is_advisory_block
 
     if isinstance(block, dict) and block.get("ran") and not block.get("pending") \
@@ -190,8 +218,109 @@ def auto_reason(data: dict | None, block: dict | None) -> str | None:
     sc = data.get("supply_chain")
     mal = sc.get("malicious") if isinstance(sc, dict) else None
     if isinstance(mal, list) and any(mal):
-        return "known_malicious"
+        return "malicious_dependency"
     return None
+
+
+@functools.lru_cache(maxsize=1)
+def _rule_reasons() -> tuple[str, str, str]:
+    """The reasons ``decide()`` gives for its three no-judgment rules, taken from
+    ``decide()`` itself so a wording change there cannot drift from here:
+    (canary, this version malicious, malicious-dependency prefix)."""
+    from src.scanner.verdict import decide
+
+    canary = decide({"behavioral": {"ran": True, "canary_exfil": ["x"]}}).reason
+    malware = decide({"incident_history": {"current_version_affected": True}}).reason
+    marker = "MAL-0000-0"
+    dep = decide({"supply_chain": {"malicious": [marker]}}).reason
+    return canary, malware, dep[:dep.index(marker)] if marker in dep else dep
+
+
+def rule_kind(reason: str | None) -> str | None:
+    """The no-judgment rule a Do not connect reason names (``sandbox`` /
+    ``known_malicious`` / ``malicious_dependency``), ignoring the "sandbox still
+    running" / "waiting for a sandbox slot" suffix and which MAL id a dependency reason
+    names. None for any other reason."""
+    from src.scanner.verdict import PENDING_SUFFIX, QUEUED_SUFFIX
+
+    r = str(reason or "")
+    for suffix in (PENDING_SUFFIX, QUEUED_SUFFIX):
+        if r.endswith(suffix):
+            r = r[:-len(suffix)]
+    canary, malware, dep_prefix = _rule_reasons()
+    if r == canary:
+        return "sandbox"
+    if r == malware:
+        return "known_malicious"
+    if dep_prefix and r.startswith(dep_prefix):
+        return "malicious_dependency"
+    return None
+
+
+AUTO_SKEW = timedelta(minutes=15)
+
+
+async def auto_kind(row: Any) -> str | None:
+    """Why this row's Do not connect answer needs no person's read, or None. Rests on the
+    same result the row shows:
+
+    * the row reads Do not connect and its reason names a no-judgment rule;
+    * a cached scan is at hand and is not older than the row (``scanned_at`` versus
+      ``last_scanned_at``), so a leftover cache from an earlier scan never decides;
+    * ``decide()`` over that scan with the version-checked cached sandbox block (folded
+      in as the result page folds it) reads Do not connect for the same rule, and the
+      structured fields (``auto_reason``) agree;
+    * for the sandbox rule, the block is stamped with the scan's own version (an
+      unstamped block never earns the tag)."""
+    if getattr(row, "decision", None) != DNC:
+        return None
+    kind = rule_kind(getattr(row, "decision_reason", None))
+    if kind is None:
+        return None
+    data = await cached_scan(row)
+    if data is None:
+        return None
+    seen = _aware(getattr(row, "last_scanned_at", None))
+    try:
+        scanned = _aware(datetime.fromisoformat(str(data.get("scanned_at")).replace(
+            "Z", "+00:00"))) if data.get("scanned_at") else None
+    except ValueError:
+        scanned = None
+    if seen is not None and (scanned is None or scanned < seen - AUTO_SKEW):
+        return None
+    block = await cached_behavioral(data, row)
+    try:
+        from src.api.public_scan_router import _apply_behavioral_score
+        from src.scanner.verdict import decide
+
+        applied = _apply_behavioral_score(data, block) if block else data
+        d = decide({**applied, "behavioral": block})
+    except Exception:
+        logger.debug("auto decision failed", exc_info=True)
+        return None
+    if d.decision != DNC or rule_kind(d.reason) != kind or auto_reason(data, block) != kind:
+        return None
+    if kind == "sandbox":
+        coords = _cache_coords(row)
+        ver = _scan_version(data, coords[0] if coords else None)
+        stamped = (block or {}).get("version")
+        if not stamped or not ver or str(stamped) != ver:
+            return None
+    return kind
+
+
+async def _gather_kinds(rows: list[Any]) -> list[str | None]:
+    """``auto_kind`` for each row, a few at a time (Redis reads only, no DB)."""
+    sem = asyncio.Semaphore(AUTO_CONCURRENCY)
+
+    async def one(r: Any) -> str | None:
+        async with sem:
+            try:
+                return await auto_kind(r)
+            except Exception:
+                return None
+
+    return list(await asyncio.gather(*(one(r) for r in rows)))
 
 
 async def build_dnc_week(db: AsyncSession, now: datetime | None = None) -> dict[str, Any]:
@@ -229,38 +358,38 @@ async def build_dnc_week(db: AsyncSession, now: datetime | None = None) -> dict[
 async def _auto_items(db: AsyncSession, by_key: dict[str, Any], listed: set[str],
                       since: datetime, room: int) -> list[dict[str, Any]]:
     """Up to ``room`` tools scanned since ``since`` whose Do not connect answer needs no
-    person's read (``auto_reason``), newest scan first."""
+    person's read (``auto_kind``), newest scan first. A tool a person marked Not
+    confirmed stays off for as long as that review stands, whatever its reason reads
+    now (the owner can confirm it instead)."""
     recent = []
     for k, r in by_key.items():
         seen = _aware(getattr(r, "last_scanned_at", None))
-        if k in listed or getattr(r, "decision", None) != DNC or seen is None or seen < since:
+        if (k in listed or getattr(r, "decision", None) != DNC or seen is None
+                or seen < since or rule_kind(getattr(r, "decision_reason", None)) is None):
             continue
         recent.append((seen, k, r))
     recent.sort(key=lambda t: (-t[0].timestamp(), t[1]))
     recent = recent[:AUTO_LOOKUPS_MAX]
     if not recent:
         return []
-    kept_off = {rv.page_key: rv for rv in (await db.execute(
-        select(DncReview).where(DncReview.page_key.in_({k for _, k, _ in recent}),
-                                DncReview.verdict == "not_confirmed")
-    )).scalars().all()}
+    kept_off = set((await db.execute(
+        select(DncReview.page_key).where(DncReview.page_key.in_({k for _, k, _ in recent}),
+                                         DncReview.verdict == "not_confirmed")
+    )).scalars().all())
+    recent = [t for t in recent if t[1] not in kept_off]
     out: list[dict[str, Any]] = []
-    for seen, k, r in recent:
-        rv = kept_off.get(k)
-        if rv is not None and _status(rv, r) == "not_confirmed":
-            continue  # a person read it and kept it off; a new reason lets it back
-        data = await cached_scan(r)
-        if data is None:
-            continue
-        why = auto_reason(data, await cached_behavioral(data))
-        if why is None:
-            continue
-        out.append({**_row_public(r), "decision": DNC,
-                    "decision_reason": r.decision_reason,
-                    "listed_because": why, "confirmed_at": None,
-                    "scanned_at": seen.isoformat()})
-        if len(out) >= room:
-            break
+    for i in range(0, len(recent), AUTO_CONCURRENCY):
+        chunk = recent[i:i + AUTO_CONCURRENCY]
+        kinds = await _gather_kinds([r for _, _, r in chunk])
+        for (seen, _k, r), why in zip(chunk, kinds):
+            if why is None:
+                continue
+            out.append({**_row_public(r), "decision": DNC,
+                        "decision_reason": r.decision_reason,
+                        "listed_because": why, "confirmed_at": None,
+                        "scanned_at": seen.isoformat()})
+            if len(out) >= room:
+                return out
     return out
 
 
@@ -269,7 +398,7 @@ async def build_most_checked(db: AsyncSession, counts: dict[str, int] | None = N
     from src import tool_checks
 
     if counts is None:
-        counts = await tool_checks.week_counts()
+        counts = await tool_checks.week_counts() or {}
     ranked = sorted(((k, n) for k, n in counts.items() if n >= MIN_CHECKS),
                     key=lambda kv: (-kv[1], kv[0]))
     # A few spares past the limit, so dropped tools still leave a full card.
@@ -303,13 +432,50 @@ async def build_most_checked(db: AsyncSession, counts: dict[str, int] | None = N
 async def dnc_week(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Up to 5 tools that read Do not connect now: first those a person confirmed in the
     last 7 days (newest first, still for the same reason), then tools scanned this week
-    that are known malicious or leaked a planted credential in the sandbox."""
+    that are known malicious, ship a known-malicious dependency, or leaked a planted
+    credential in the sandbox."""
     hit = await cache.get(DNC_CACHE_KEY)
     if isinstance(hit, dict):
         return hit
-    data = await build_dnc_week(db)
-    await cache.set(DNC_CACHE_KEY, data, ttl=CACHE_TTL)
+    locked = await _take_rebuild_lock()
+    if not locked:
+        # Another worker is rebuilding: serve the last card, or wait briefly for theirs.
+        last = await cache.get(DNC_LAST_KEY)
+        if isinstance(last, dict):
+            return last
+        for _ in range(12):
+            await asyncio.sleep(0.25)
+            hit = await cache.get(DNC_CACHE_KEY)
+            if isinstance(hit, dict):
+                return hit
+    try:
+        data = await build_dnc_week(db)
+        await cache.set(DNC_CACHE_KEY, data, ttl=CACHE_TTL)
+        await cache.set(DNC_LAST_KEY, data, ttl=LAST_GOOD_TTL)
+    finally:
+        if locked:
+            await _release_rebuild_lock()
     return data
+
+
+async def _take_rebuild_lock() -> bool:
+    """One worker rebuilds the card at a time (Redis SET NX, a few seconds). True when
+    this caller holds the lock, or when Redis cannot be asked (then everyone builds)."""
+    try:
+        from src.redis_client import get_redis
+
+        return bool(await get_redis().set(DNC_LOCK_KEY, "1", nx=True, ex=REBUILD_LOCK_TTL))
+    except Exception:
+        return True
+
+
+async def _release_rebuild_lock() -> None:
+    try:
+        from src.redis_client import get_redis
+
+        await get_redis().delete(DNC_LOCK_KEY)
+    except Exception:
+        logger.debug("card rebuild lock not released", exc_info=False)
 
 
 @public_router.get("/most-checked-week", dependencies=[Depends(rate_limit_reads)])
@@ -423,11 +589,13 @@ async def build_shortlist(db: AsyncSession, counts: dict[str, int] | None = None
     """This week's shortlist for a person's read: at most SHORTLIST_LIMIT tools that read
     Do not connect now and that people or agents checked this week, most checks first.
     A tool a person already read (confirmed / not confirmed) is skipped unless its
-    reason changed since."""
+    reason changed since, and so is one that goes on the public card by itself
+    (``auto_kind``: known malicious, a malicious dependency, or a planted credential
+    seen leaving the sandbox), since it needs no read."""
     from src import tool_checks
 
     if counts is None:
-        counts = await tool_checks.week_counts()
+        counts = await tool_checks.week_counts() or {}
     if rows is None:
         rows = await catalog_rows(db)
     dnc: dict[str, Any] = {}
@@ -446,7 +614,7 @@ async def build_shortlist(db: AsyncSession, counts: dict[str, int] | None = None
     out: list[dict] = []
     for k in ranked:
         r, rv = dnc[k], reviews.get(k)
-        if _status(rv, r) in ("confirmed", "not_confirmed"):
+        if _status(rv, r) in ("confirmed", "not_confirmed") or await auto_kind(r):
             continue
         out.append(_candidate(k, r, rv, growth=False, checks=counts[k],
                               top=await top_critical(r)))
@@ -498,8 +666,14 @@ async def list_candidates(
 
     rows = await catalog_rows(db)
     counts = await tool_checks.week_counts()
+    # None = the check counts could not be read: the panel says so instead of "nothing
+    # needs a look", and the shortlist stays empty.
+    unavailable = counts is None
+    counts = counts or {}
     return {"window_days": WINDOW_DAYS, "shortlist_limit": SHORTLIST_LIMIT,
-            "shortlist": await build_shortlist(db, counts=counts, rows=rows),
+            "counts_unavailable": unavailable,
+            "shortlist": [] if unavailable else await build_shortlist(
+                db, counts=counts, rows=rows),
             "items": await build_candidates(db, rows=rows, counts=counts)}
 
 
@@ -551,6 +725,7 @@ async def record_review(
                               "decision": row.decision})
     await db.commit()
     await cache.invalidate(DNC_CACHE_KEY)
+    await cache.invalidate(DNC_LAST_KEY)
     await cache.invalidate(CHECKED_CACHE_KEY)
     return {"page_key": key, "verdict": review.verdict,
             "reviewed_at": _aware(review.reviewed_at).isoformat()}

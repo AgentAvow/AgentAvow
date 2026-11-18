@@ -51,6 +51,19 @@ class FakeRedis:
     def __init__(self) -> None:
         self.z: dict[str, dict[str, float]] = {}
         self.expire: dict[str, int] = {}
+        self.kv: dict[str, str] = {}
+
+    async def get(self, key):
+        return self.kv.get(key)
+
+    async def set(self, key, value, nx=False, ex=None):
+        if nx and key in self.kv:
+            return None
+        self.kv[key] = value
+        return True
+
+    async def delete(self, key):
+        return 1 if self.kv.pop(key, None) is not None else 0
 
     async def zincrby(self, key, amount, member):
         d = self.z.setdefault(key, {})
@@ -446,6 +459,15 @@ async def test_admin_read_carries_shortlist_and_full_list(client, db, catalog, f
 
 
 # --- the card's automatic fill: structured signals only -----------------------------------
+CANARY, MALWARE, DEP_PREFIX = ti._rule_reasons()
+MAL_DATA = {"trust_score": 10, "incident_history": {"current_version_affected": True}}
+DEP_DATA = {"trust_score": 10, "supply_chain": {"malicious": ["MAL-2026-7"]}}
+
+
+def _scan(extra: dict, *, at: datetime | None = None) -> dict:
+    return {**extra, "scanned_at": (at or NOW).isoformat()}
+
+
 def test_auto_reason_reads_structured_fields_only():
     canary = {"ran": True, "canary_exfil": [{"host": "x"}]}
     rule = {"ran": True, "findings": [{"rule": "credential_canary_exfiltrated"}]}
@@ -455,10 +477,9 @@ def test_auto_reason_reads_structured_fields_only():
     assert ti.auto_reason({}, {**canary, "pending": True}) is None
     assert ti.auto_reason({}, {**canary, "ran": False}) is None
     assert ti.auto_reason({}, {**canary, "plan": "live-probe"}) is None
-    assert ti.auto_reason({"incident_history": {"current_version_affected": True}}, None) \
-        == "known_malicious"
-    assert ti.auto_reason({"supply_chain": {"malicious": ["MAL-2026-1"]}}, None) \
-        == "known_malicious"
+    assert ti.auto_reason(MAL_DATA, None) == "known_malicious"
+    # A dependency on the MAL list is its own kind, not "this package is malicious".
+    assert ti.auto_reason(DEP_DATA, None) == "malicious_dependency"
     # History only (an older version), an empty MAL list, or reason text: not automatic.
     assert ti.auto_reason({"incident_history": {"has_incident": True,
                                                 "current_version_affected": False}}, None) is None
@@ -468,51 +489,191 @@ def test_auto_reason_reads_structured_fields_only():
                           None) is None
 
 
-@pytest.mark.asyncio
-async def test_card_confirmed_first_then_automatic(db, catalog, monkeypatch):
-    catalog.extend([
-        _row("acme/confirmed", decision="do_not_connect", days_ago=3),
-        _row("acme/malware", decision="do_not_connect", days_ago=1),
-        _row("acme/leak", decision="do_not_connect", days_ago=2),
-        _row("acme/plain-critical", decision="do_not_connect", days_ago=1),
-        _row("acme/kept-off", decision="do_not_connect", days_ago=1),
-        _row("acme/old-malware", decision="do_not_connect", days_ago=20),
-        _row("acme/now-safe", decision="safe", score=90, days_ago=1),
-    ])
-    db.add_all([_review("acme/confirmed", "confirmed"), _review("acme/kept-off", "not_confirmed")])
-    await db.flush()
-    mal = {"incident_history": {"current_version_affected": True}}
-    scans = {"acme/malware": mal, "acme/leak": {"leak": True}, "acme/plain-critical": {},
-             "acme/kept-off": mal, "acme/old-malware": mal, "acme/now-safe": mal}
+def test_rule_kind_ignores_pending_suffix_and_mal_id():
+    from src.scanner.verdict import PENDING_SUFFIX, QUEUED_SUFFIX
+    assert ti.rule_kind(CANARY) == "sandbox"
+    assert ti.rule_kind(MALWARE + PENDING_SUFFIX) == "known_malicious"
+    assert ti.rule_kind(f"{DEP_PREFIX}evil@1.0 (MAL-1){QUEUED_SUFFIX}") == "malicious_dependency"
+    assert ti.rule_kind(f"{DEP_PREFIX}other@2.0 (MAL-9)") == "malicious_dependency"
+    assert ti.rule_kind("1 critical finding: eval of input") is None
+    assert ti.rule_kind(None) is None
 
+
+def _patch_lookups(monkeypatch, scans: dict, blocks: dict | None = None):
     async def scan(row):
-        return scans.get(row.full_name)
+        return scans.get(row.full_name or row.name)
 
-    async def sandbox(data):
-        return {"ran": True, "canary_exfil": ["h"]} if data.get("leak") else None
+    async def sandbox(data, row=None):
+        return (blocks or {}).get((row.full_name or row.name) if row is not None else None)
 
     monkeypatch.setattr(ti, "cached_scan", scan)
     monkeypatch.setattr(ti, "cached_behavioral", sandbox)
+
+
+@pytest.mark.asyncio
+async def test_card_confirmed_first_then_automatic_with_tags(db, catalog, monkeypatch):
+    catalog.extend([
+        _row("acme/confirmed", decision="do_not_connect", days_ago=3),
+        _row("acme/malware", decision="do_not_connect", reason=MALWARE, days_ago=1),
+        _row("acme/dep", decision="do_not_connect", reason=f"{DEP_PREFIX}x@1 (MAL-1)",
+             days_ago=1.5),
+        _row("acme/plain-critical", decision="do_not_connect", days_ago=1),
+        _row("acme/old-malware", decision="do_not_connect", reason=MALWARE, days_ago=20),
+        _row("acme/now-safe", decision="safe", score=90, days_ago=1),
+    ])
+    db.add(_review("acme/confirmed", "confirmed"))
+    await db.flush()
+    _patch_lookups(monkeypatch, {
+        "acme/malware": _scan(MAL_DATA), "acme/dep": _scan(DEP_DATA),
+        "acme/plain-critical": _scan(MAL_DATA), "acme/old-malware": _scan(MAL_DATA),
+        "acme/now-safe": _scan(MAL_DATA)})
     data = await ti.build_dnc_week(db, now=NOW)
     got = [(i["name"], i["listed_because"]) for i in data["items"]]
     assert got == [("acme/confirmed", "confirmed"), ("acme/malware", "known_malicious"),
-                   ("acme/leak", "sandbox")]
+                   ("acme/dep", "malicious_dependency")]
     assert data["items"][0]["confirmed_at"] and data["items"][1]["confirmed_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_not_confirmed_stays_off_even_when_only_the_suffix_moves(db, catalog,
+                                                                      monkeypatch):
+    from src.scanner.verdict import PENDING_SUFFIX
+    catalog.append(_row("acme/kept-off", decision="do_not_connect",
+                        reason=MALWARE + PENDING_SUFFIX))
+    db.add(_review("acme/kept-off", "not_confirmed", reason=MALWARE))
+    await db.flush()
+    _patch_lookups(monkeypatch, {"acme/kept-off": _scan(MAL_DATA)})
+    assert (await ti.build_dnc_week(db, now=NOW))["items"] == []
+    # ...and when the reason changes for real, the review still keeps it off.
+    catalog[0] = _row("acme/kept-off", decision="do_not_connect", reason=CANARY)
+    assert (await ti.build_dnc_week(db, now=NOW))["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_auto_needs_the_cache_to_match_the_row(db, catalog, monkeypatch):
+    catalog.extend([
+        # The cache is from an older scan than the row.
+        _row("acme/old-cache", decision="do_not_connect", reason=MALWARE, days_ago=1),
+        # The cache shows a malicious dependency, the row a malware advisory.
+        _row("acme/other-rule", decision="do_not_connect", reason=MALWARE, days_ago=1),
+        # The cache reads clean now.
+        _row("acme/clean-cache", decision="do_not_connect", reason=MALWARE, days_ago=1),
+    ])
+    _patch_lookups(monkeypatch, {
+        "acme/old-cache": _scan(MAL_DATA, at=NOW - timedelta(days=3)),
+        "acme/other-rule": _scan(DEP_DATA),
+        "acme/clean-cache": _scan({"trust_score": 90}),
+    })
+    assert (await ti.build_dnc_week(db, now=NOW))["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_sandbox_tag_needs_a_block_stamped_with_the_scanned_version(db, catalog,
+                                                                         monkeypatch):
+    catalog.extend([
+        _row("leaky", surface="npm", decision="do_not_connect", reason=CANARY),
+        _row("unstamped", surface="npm", decision="do_not_connect", reason=CANARY),
+    ])
+    pkg = {"trust_score": 70, "package_version": "1.2.3"}
+    _patch_lookups(
+        monkeypatch, {"leaky": _scan(pkg), "unstamped": _scan(pkg)},
+        {"leaky": {"ran": True, "version": "1.2.3", "canary_exfil": ["h"]},
+         "unstamped": {"ran": True, "canary_exfil": ["h"]}})
+    items = (await ti.build_dnc_week(db, now=NOW))["items"]
+    assert [(i["name"], i["listed_because"]) for i in items] == [("leaky", "sandbox")]
+
+
+@pytest.mark.asyncio
+async def test_auto_item_through_the_real_cache_lookups(db, catalog, fake_cache, fake_redis):
+    """No stand-ins for cached_scan / cached_behavioral: the stale scan copy is found
+    under the public scan cache key, and the sandbox block under the result page's key,
+    with a block for another release ignored."""
+    import json
+
+    from src.api.public_scan_router import (
+        _CACHE_PREFIX,
+        _STALE_CACHE_PREFIX,
+        _behavioral_cache_key,
+    )
+    catalog.extend([
+        _row("leaky-pkg", surface="npm", decision="do_not_connect", reason=CANARY),
+        _row("old-run-pkg", surface="npm", decision="do_not_connect", reason=CANARY),
+        _row("mal-pkg", surface="pypi", decision="do_not_connect", reason=MALWARE),
+    ])
+    for name, surf in (("leaky-pkg", "npm"), ("old-run-pkg", "npm")):
+        # Only the 7-day stale copy is left: the fresh 1-hour copy expired.
+        fake_cache.data[f"{_STALE_CACHE_PREFIX}{surf}/{name}"] = _scan(
+            {"trust_score": 70, "package_version": "2.0.0"})
+    fake_redis.kv[_behavioral_cache_key("npm", "leaky-pkg", set(), None)] = json.dumps(
+        {"ran": True, "version": "2.0.0", "canary_exfil": ["evil.example"]})
+    fake_redis.kv[_behavioral_cache_key("npm", "old-run-pkg", set(), None)] = json.dumps(
+        {"ran": True, "version": "1.0.0", "canary_exfil": ["evil.example"]})
+    fake_cache.data[f"{_CACHE_PREFIX}pypi/mal-pkg"] = _scan(MAL_DATA)
+    items = (await ti.build_dnc_week(db, now=NOW))["items"]
+    assert sorted((i["name"], i["listed_because"]) for i in items) == [
+        ("leaky-pkg", "sandbox"), ("mal-pkg", "known_malicious")]
 
 
 @pytest.mark.asyncio
 async def test_card_automatic_fill_respects_the_cap(db, catalog, monkeypatch):
     for i in range(7):
-        catalog.append(_row(f"acme/m{i}", decision="do_not_connect", days_ago=1 + i / 10))
-
-    async def scan(row):
-        return {"supply_chain": {"malicious": ["MAL-1"]}}
-
-    async def sandbox(data):
-        return None
-
-    monkeypatch.setattr(ti, "cached_scan", scan)
-    monkeypatch.setattr(ti, "cached_behavioral", sandbox)
+        catalog.append(_row(f"acme/m{i}", decision="do_not_connect", reason=MALWARE,
+                            days_ago=1 + i / 10))
+    _patch_lookups(monkeypatch, {f"acme/m{i}": _scan(MAL_DATA) for i in range(7)})
     data = await ti.build_dnc_week(db, now=NOW)
     assert [i["name"] for i in data["items"]] == [f"acme/m{i}" for i in range(ti.CARD_LIMIT)]
     assert {i["listed_because"] for i in data["items"]} == {"known_malicious"}
+
+
+@pytest.mark.asyncio
+async def test_shortlist_skips_tools_the_card_lists_by_itself(db, catalog, monkeypatch):
+    catalog.extend([_row("acme/malware", decision="do_not_connect", reason=MALWARE),
+                    _row("acme/needs-read", decision="do_not_connect")])
+    _patch_lookups(monkeypatch, {"acme/malware": _scan(MAL_DATA)})
+    items = await ti.build_shortlist(db, counts={"/check/acme/malware": 50,
+                                                 "/check/acme/needs-read": 2})
+    assert [i["name"] for i in items] == ["acme/needs-read"]
+
+
+# --- the counter failing is not "nothing to look at" ---------------------------------------
+@pytest.mark.asyncio
+async def test_week_counts_none_on_redis_error(monkeypatch):
+    import src.redis_client as rc
+
+    def boom():
+        raise ConnectionError("redis down")
+
+    monkeypatch.setattr(rc, "get_redis", boom)
+    assert await tool_checks.week_counts() is None
+
+
+@pytest.mark.asyncio
+async def test_admin_read_flags_unavailable_counts(client, db, catalog, fake_cache,
+                                                   monkeypatch):
+    monkeypatch.setattr(ti, "growth_review_keys", lambda since: {})
+
+    async def counts(today=None, days=7):
+        return None
+
+    monkeypatch.setattr(tool_checks, "week_counts", counts)
+    catalog.append(_row("acme/bad", decision="do_not_connect"))
+    admin = await _user(client, db, "admin", admin=True)
+    body = (await client.get(ADMIN_URL, headers=_auth(admin))).json()
+    assert body["counts_unavailable"] is True
+    assert body["shortlist"] == []
+    assert [i["page_key"] for i in body["items"]] == ["/check/acme/bad"]
+
+
+# --- one rebuild at a time ------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_card_rebuild_lock_serves_the_last_card(client, catalog, fake_cache, fake_redis):
+    fake_redis.kv[ti.DNC_LOCK_KEY] = "1"  # another worker is rebuilding
+    last = {"window_days": 7, "items": [{"name": "from-last"}]}
+    fake_cache.data[ti.DNC_LAST_KEY] = last
+    r = await client.get(DNC_URL)
+    assert r.status_code == 200 and r.json() == last
+    # With the lock free, this caller builds, stores both copies and frees the lock.
+    del fake_redis.kv[ti.DNC_LOCK_KEY]
+    r = await client.get(DNC_URL)
+    assert r.json()["items"] == []
+    assert ti.DNC_CACHE_KEY in fake_cache.data and ti.DNC_LOCK_KEY not in fake_redis.kv

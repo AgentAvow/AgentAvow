@@ -97,8 +97,11 @@ async def record_check(page_key: str, today: date | None = None) -> None:
         logger.debug("tool check not recorded", exc_info=False)
 
 
-async def week_counts(today: date | None = None, days: int = WINDOW_DAYS) -> dict[str, int]:
-    """{page_key: checks} over the last ``days`` UTC days, today included."""
+async def week_counts(today: date | None = None,
+                      days: int = WINDOW_DAYS) -> dict[str, int] | None:
+    """{page_key: checks} over the last ``days`` UTC days, today included. None when the
+    counts could not be read (a Redis error), so a caller can tell "no checks" from
+    "counts unavailable"."""
     out: dict[str, int] = {}
     try:
         from src.redis_client import get_redis
@@ -111,7 +114,8 @@ async def week_counts(today: date | None = None, days: int = WINDOW_DAYS) -> dic
                 k = member.decode() if isinstance(member, bytes) else str(member)
                 out[k] = out.get(k, 0) + int(score)
     except Exception:
-        logger.debug("tool check counts unavailable", exc_info=False)
+        logger.warning("tool check counts unavailable", exc_info=False)
+        return None
     return out
 
 

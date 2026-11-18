@@ -90,23 +90,25 @@ function Row({ c, onDone }: { c: Candidate; onDone: () => void }) {
 
 export default function DncReviewPanel() {
   const qc = useQueryClient()
-  const { data, isLoading, isError } = useQuery<{ shortlist: Candidate[]; items: Candidate[] }>({
+  const { data, isLoading, isError } = useQuery<{ shortlist: Candidate[]; items: Candidate[]; counts_unavailable?: boolean }>({
     queryKey: ['admin-dnc-reviews'],
     queryFn: async () => (await api.get('/admin/dnc-reviews')).data,
     staleTime: 60_000,
   })
   const shortlist = data?.shortlist || []
   const items = data?.items || []
+  const countsDown = !!data?.counts_unavailable
   const [showAll, setShowAll] = useState(false)
   const refresh = () => qc.invalidateQueries({ queryKey: ['admin-dnc-reviews'] })
   return (
     <Section
       title="Do not connect: this week's shortlist"
       scope={isLoading ? 'loading…' : 'Last 7 days'}
-      note="Up to 3 a week, the ones people actually checked. Confirm the ones you're happy to show on the Trust Index; Claude brings a two-line read on each on Mondays. Known-malicious packages and planted credentials seen leaving the sandbox go on the card by themselves."
+      note="Up to 3 a week, the ones people actually checked. Confirm the ones you're happy to show on the Trust Index; Claude brings a two-line read on each on Mondays. Known-malicious packages, known-malicious dependencies and planted credentials seen leaving the sandbox go on the card by themselves, unless you marked them Not confirmed."
     >
       {isError && <p className="text-[13px] text-danger">Could not load the shortlist.</p>}
-      {!isLoading && !isError && !shortlist.length && <p className="text-[13px] text-text-muted">Nothing needs a look this week.</p>}
+      {!isLoading && !isError && countsDown && <p className="text-[13px] text-warning">This week's check counts could not be loaded, so there is no shortlist right now. Try again later; the full list below still works.</p>}
+      {!isLoading && !isError && !countsDown && !shortlist.length && <p className="text-[13px] text-text-muted">Nothing needs a look this week.</p>}
       <div className="grid gap-3">
         {shortlist.map((c) => <Row key={c.page_key} c={c} onDone={refresh} />)}
       </div>
@@ -118,7 +120,7 @@ export default function DncReviewPanel() {
           </button>
           {showAll && (
             <>
-              <p className="mt-2 text-[12px] text-text-muted">For reference only: every tool that reads Do not connect and was checked or re-scanned in the last 7 days. Nothing here needs a read.</p>
+              <p className="mt-2 text-[12px] text-text-muted">For reference only: every tool that reads Do not connect and was checked or re-scanned in the last 7 days.</p>
               <div className="mt-3 grid gap-3">
                 {items.map((c) => <Row key={c.page_key} c={c} onDone={refresh} />)}
               </div>

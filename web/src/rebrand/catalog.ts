@@ -178,12 +178,13 @@ export interface WeeklyTool {
 }
 
 /** "Do not connect this week": answers a person confirmed in the last 7 days first, then
- * ones that need no judgment (known malicious, a planted credential seen leaving the
- * sandbox). `listed_because` says which; `confirmed_at` is null on the automatic ones. */
+ * ones that need no judgment (this version is known malicious, a known-malicious
+ * dependency, a planted credential seen leaving the sandbox). `listed_because` says
+ * which; `confirmed_at` is null on the automatic ones. */
 export interface DncWeekItem extends WeeklyTool {
   decision: 'do_not_connect'
   decision_reason: string | null
-  listed_because?: 'confirmed' | 'known_malicious' | 'sandbox'
+  listed_because?: 'confirmed' | 'known_malicious' | 'malicious_dependency' | 'sandbox'
   confirmed_at: string | null
   scanned_at?: string | null
 }

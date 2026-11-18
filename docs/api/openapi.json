@@ -56626,7 +56626,7 @@
     },
     "/api/v1/public/trust-index/do-not-connect-week": {
       "get": {
-        "description": "Up to 5 tools that read Do not connect now: first those a person confirmed in the\nlast 7 days (newest first, still for the same reason), then tools scanned this week\nthat are known malicious or leaked a planted credential in the sandbox.",
+        "description": "Up to 5 tools that read Do not connect now: first those a person confirmed in the\nlast 7 days (newest first, still for the same reason), then tools scanned this week\nthat are known malicious, ship a known-malicious dependency, or leaked a planted\ncredential in the sandbox.",
         "operationId": "dnc_week_api_v1_public_trust_index_do_not_connect_week_get",
         "responses": {
           "200": {

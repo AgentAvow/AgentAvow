@@ -80,12 +80,14 @@ function WeeklyCard({ title, note, children }: { title: string; note: string; ch
 const DNC_LISTED_TAG: Record<NonNullable<DncWeekItem['listed_because']>, string> = {
   confirmed: 'confirmed by a person',
   known_malicious: 'known malicious',
+  malicious_dependency: 'known-malicious dependency',
   sandbox: 'seen in the sandbox',
 }
 
 /** "Do not connect this week": answers a person read and confirmed first (owner rule
- * 2026-11-11), then ones that need no judgment (known malicious, a planted credential
- * seen leaving the sandbox), re-checked by the API at read time. Hidden when empty. */
+ * 2026-11-11), then ones that need no judgment (this version known malicious, a
+ * known-malicious dependency, a planted credential seen leaving the sandbox), re-checked
+ * by the API at read time. Hidden when empty. */
 function DncThisWeek() {
   const { data, isLoading } = useQuery({
     queryKey: ['weekly-dnc'], queryFn: fetchDncWeek, staleTime: 300_000, refetchInterval: 600_000,
@@ -94,7 +96,7 @@ function DncThisWeek() {
   const items = data || []
   if (!items.length) return null
   return (
-    <WeeklyCard title="Do not connect this week" note="Do not connect answers from the last 7 days: the ones a person read and confirmed first, then known-malicious packages and tools that leaked a planted credential in our sandbox. A tool leaves the list when a new check changes its answer.">
+    <WeeklyCard title="Do not connect this week" note="Do not connect answers from the last 7 days: the ones a person read and confirmed first, then packages whose version is known malicious, tools that ship a known-malicious dependency, and tools that leaked a planted credential in our sandbox. A tool leaves the list when a new check changes its answer.">
       {items.map((it) => (
         <Link key={it.page_path} to={rp(`/rebrand${it.page_path}`)} onClick={() => trackPageAction('trust_index', 'open_dnc_week')} className="block py-2 px-2 rounded-lg hover:bg-surface-hover/50 transition-colors min-w-0">
           <div className="flex items-baseline justify-between gap-3 min-w-0">
