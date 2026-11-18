@@ -306,6 +306,7 @@ or your machine. Scan results for public tools are public.
 - How scoring works: https://agentavow.com/docs/how-grading-works
 - Verify a result yourself: https://agentavow.com/docs/verify-attestations
 - Questions or problems: support@agentavow.com
+- Security issues: security@agentavow.com, see `SECURITY.md`
 
 ## License
 

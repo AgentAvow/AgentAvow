@@ -143,6 +143,7 @@ const RebrandSettings = lazyWithReload(() => import('./rebrand/pages/Settings'))
 const RebrandAvatar = lazyWithReload(() => import('./rebrand/pages/Avatar'))
 const RebrandSandbox = lazyWithReload(() => import('./rebrand/pages/Sandbox'))
 const RebrandClaudeCode = lazyWithReload(() => import('./rebrand/pages/ClaudeCode'))
+const RebrandCodex = lazyWithReload(() => import('./rebrand/pages/Codex'))
 const RebrandGet = lazyWithReload(() => import('./rebrand/pages/Get'))
 const RebrandTeams = lazyWithReload(() => import('./rebrand/pages/Teams'))
 
@@ -305,6 +306,7 @@ function AppRoutes() {
           <Route path="avatar" element={<RebrandAvatar />} />
           <Route path="sandbox" element={<RebrandSandbox />} />
           <Route path="claude-code" element={<RebrandClaudeCode />} />
+          <Route path="codex" element={<RebrandCodex />} />
           <Route path="get" element={<RebrandGet />} />
           <Route path="teams" element={<RebrandTeams />} />
           <Route path="legal" element={<RebrandLegal />} />

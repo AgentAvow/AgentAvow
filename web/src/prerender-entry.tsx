@@ -16,6 +16,7 @@ import Browse from './rebrand/pages/Browse'
 import Certified from './rebrand/pages/Certified'
 import Check from './rebrand/pages/Check'
 import ClaudeCode from './rebrand/pages/ClaudeCode'
+import Codex from './rebrand/pages/Codex'
 import FAQ from './rebrand/pages/FAQ'
 import ForDevelopers from './rebrand/pages/ForDevelopers'
 import Get from './rebrand/pages/Get'
@@ -49,6 +50,7 @@ const PAGES: Record<string, ReactNode> = {
   '/preflight': <Preflight />,
   '/sandbox': <Sandbox />,
   '/claude-code': <ClaudeCode />,
+  '/codex': <Codex />,
   '/get': <Get />,
   '/teams': <Teams />,
 }
