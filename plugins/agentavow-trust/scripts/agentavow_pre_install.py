@@ -31,6 +31,15 @@ allows nothing however it reaches the file.
 The graded server is written to the same cache the session-start hook reads, so it is
 not reported a second time at the next session start. Reuses the precheck's target
 resolution and scan code (same file, same directory) so the two never disagree.
+
+In Codex (which runs this same plugin's hooks): servers are added with
+``codex mcp add <name> --url <url>`` or ``codex mcp add <name> -- <command…>`` (its shell
+tool reaches hooks as "Bash"), or written into a config.toml ``[mcp_servers.<name>]``
+table (its apply_patch tool, which the Write|Edit matcher selects). A Codex hook cannot
+ask, so Do not connect is a deny whose reason says what was found, links the report and
+says how to go ahead anyway; a step that names AgentAvow's own files is a deny too.
+Review, Safe and not-scannable stay notes, exactly as in Claude Code. Claude Code's
+output is unchanged (tests/test_agentavow_claude_pins.py).
 """
 from __future__ import annotations
 
@@ -44,7 +53,7 @@ import sys
 import time
 import urllib.error
 
-__version__ = "0.1.43"
+__version__ = "0.1.44"
 
 TIMEOUT = 12  # seconds per scan: an install is rare, so a slower fresh scan is fine
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -77,6 +86,105 @@ def _precheck():
 # What is being added?
 # --------------------------------------------------------------------------- #
 _MCP_ADD = re.compile(r"\bclaude\s+mcp\s+add(?:-json)?\b")
+_CODEX_MCP_ADD = re.compile(r"\bcodex\s+mcp\s+add\b")
+# `codex mcp add` flags whose NEXT token is their value (codex-cli 0.169).
+_CODEX_VALUE_FLAGS = {"--env", "--url", "--bearer-token-env-var", "--oauth-client-id",
+                      "--oauth-client-secret", "--oauth-client-registration",
+                      "--oauth-resource", "-c", "--config", "--enable", "--disable"}
+
+
+def _server_from_codex_mcp_add(command: str) -> tuple[str, dict] | None:
+    """``codex mcp add [flags] <name> --url <url>`` or ``codex mcp add [flags] <name> --
+    <command> [args…]`` -> (name, config) in the shape the precheck reads. None when the
+    command is something else."""
+    m = _CODEX_MCP_ADD.search(command)
+    if not m:
+        return None
+    try:
+        argv = shlex.split(_strip_redirections(command[m.start():]))
+    except ValueError:
+        return None
+    rest = argv[3:]
+    name: str | None = None
+    url: str | None = None
+    stdio: list[str] = []
+    i = 0
+    while i < len(rest):
+        a = rest[i]
+        if a in ("&&", "||", ";", "|", "&"):
+            break
+        if a == "--":
+            stdio = rest[i + 1:]
+            break
+        if a.startswith("--url="):
+            url = a.split("=", 1)[1]
+        elif a == "--url":
+            url = rest[i + 1] if i + 1 < len(rest) else None
+            i += 2
+            continue
+        elif a in _CODEX_VALUE_FLAGS:
+            i += 2
+            continue
+        elif a.startswith("-"):
+            pass
+        elif name is None:
+            name = a
+        i += 1
+    for j, a in enumerate(stdio):  # the command ends where the next one starts
+        if a in ("&&", "||", ";", "|", "&"):
+            stdio = stdio[:j]
+            break
+    if not name:
+        return None
+    if url:
+        return name, {"url": url}
+    if stdio:
+        return name, {"command": stdio[0], "args": stdio[1:]}
+    return None
+
+
+# An apply_patch body: "*** Add File: <path>" / "*** Update File: <path>", then lines
+# that start with "+" (added), "-" (removed) or " " (kept).
+_PATCH_FILE = re.compile(r"^\*\*\* (?:Add|Update) File: (.+?)\s*$")
+
+
+def _servers_from_codex_patch(patch: str, pc) -> list[tuple[str, dict]]:
+    """MCP servers a Codex apply_patch adds or changes in a ``config.toml`` (Codex's
+    own config, user or project): every ``[mcp_servers.<name>]`` table in the patched
+    text whose lines the patch adds. Best effort; unreadable -> []."""
+    out: list[tuple[str, dict]] = []
+    path: str | None = None
+    new_lines: list[str] = []
+    added: list[str] = []
+
+    def flush() -> None:
+        if not path or not path.replace("\\", "/").endswith("config.toml"):
+            return
+        servers = pc._codex_server_map(pc._toml_load("\n".join(new_lines)))
+        if not servers:  # a hunk that cut a table in two: read the added lines alone
+            servers = pc._codex_server_map(pc._mini_toml("\n".join(new_lines)))
+        touched = "\n".join(added)
+        for name, cfg in servers.items():
+            values = [cfg.get("url"), cfg.get("command")]
+            if name in touched or any(isinstance(v, str) and v and v in touched
+                                      for v in values):
+                out.append((name, cfg))
+
+    for line in (patch or "").splitlines():
+        m = _PATCH_FILE.match(line)
+        if m or line.startswith("*** End Patch") or line.startswith("*** Delete File:"):
+            flush()
+            path, new_lines, added = (m.group(1) if m else None), [], []
+            continue
+        if path is None or line.startswith(("@@", "*** ")):
+            continue
+        if line.startswith("+"):
+            new_lines.append(line[1:])
+            added.append(line[1:])
+        elif line.startswith(" "):
+            new_lines.append(line[1:])
+    flush()
+    return out[:3]
 
 
 def _server_from_mcp_add(command: str) -> tuple[str, dict] | None:
@@ -427,7 +535,14 @@ def _targets_for(payload: dict, pc) -> list[dict]:
     if not isinstance(inp, dict):
         return []
     found: list[tuple[str, dict]] = []
-    if tool == "Bash":
+    if pc._in_codex():
+        if tool == "Bash":
+            hit = _server_from_codex_mcp_add(_command_text(inp))
+            if hit:
+                found.append(hit)
+        elif tool == "apply_patch":
+            found.extend(_servers_from_codex_patch(_command_text(inp), pc))
+    elif tool == "Bash":
         hit = _server_from_mcp_add(str(inp.get("command") or ""))
         if hit:
             found.append(hit)
@@ -654,6 +769,15 @@ def _path_in_own_dir(raw: str, cwd: object) -> bool:
         return False
 
 
+def _command_text(inp: dict) -> str:
+    """A shell command or patch as text. Codex sends a string; a list of words (an
+    older shell tool) is joined back into one command."""
+    cmd = inp.get("command")
+    if isinstance(cmd, list):
+        return shlex.join(str(a) for a in cmd)
+    return str(cmd or "")
+
+
 def _touches_own_files(payload: dict) -> bool:
     """Whether Claude is about to run something that names AgentAvow's own files, or to
     write or edit a file in its folder. Only the person may allow a Do not connect
@@ -662,6 +786,11 @@ def _touches_own_files(payload: dict) -> bool:
     if not isinstance(inp, dict):
         return False
     tool = str(payload.get("tool_name") or "")
+    if tool == "apply_patch":  # Codex: a patch names the files it writes
+        return any(_path_in_own_dir(m.group(1), payload.get("cwd"))
+                   for m in map(_PATCH_FILE.match, _command_text(inp).splitlines()) if m)
+    if tool == "Bash" and isinstance(inp.get("command"), list):
+        return _shell_names_own_files(_command_text(inp), payload.get("cwd"))
     if tool == "Bash":
         return _shell_names_own_files(str(inp.get("command") or ""), payload.get("cwd"))
     if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
@@ -670,14 +799,33 @@ def _touches_own_files(payload: dict) -> bool:
     return False
 
 
-def _ask_about_allow_list() -> None:
+def _ask_about_allow_list(codex: bool = False) -> None:
     reason = ("AgentAvow: this reads or changes AgentAvow's own files (~/.cache/agentavow: "
               "the grades, the list of servers you allowed past a Do not connect answer, "
               "and the key behind its confirmation codes). Only approve it if you asked "
               "for this yourself.")
+    if codex:  # Codex cannot ask: stop it, and say how the person does it themselves
+        reason = ("AgentAvow: this reads or changes AgentAvow's own files (~/.cache/agentavow: "
+                  "the grades, the list of servers you allowed past a Do not connect answer, "
+                  "and the key behind its confirmation codes). Codex cannot ask you first, "
+                  "so AgentAvow stopped it. If you asked for this yourself, do it in your "
+                  "own terminal outside Codex, or switch AgentAvow's hooks off in Codex "
+                  "(/hooks) for this session.")
     print(json.dumps({"systemMessage": reason, "hookSpecificOutput": {
-        "hookEventName": "PreToolUse", "permissionDecision": "ask",
+        "hookEventName": "PreToolUse", "permissionDecision": "deny" if codex else "ask",
         "permissionDecisionReason": reason}}))
+
+
+def codex_deny_reason(body: str, targets: list[dict], pkg_lines: list[str]) -> str:
+    """Why a Codex step was stopped and how to go ahead anyway. Codex has no "ask", so
+    a Do not connect answer is a deny (owner's call, 2026-11-17); the person can still
+    do it themselves outside Codex."""
+    what = "add this server" if targets and not pkg_lines else "install this"
+    return (body + f"\nAgentAvow says: {DECISION_PHRASES['do_not_connect']}, so it stopped this "
+            f"step (Codex cannot ask you first). If you reviewed the report and still want to "
+            f"{what}, run the same command yourself in your own terminal outside Codex, or "
+            "switch AgentAvow's hooks off in Codex (/hooks) for this session. Do not retry "
+            "it another way from here.")
 
 
 def main() -> None:
@@ -688,20 +836,28 @@ def main() -> None:
     if not isinstance(payload, dict) or payload.get("hook_event_name") not in (None, "PreToolUse"):
         return
     try:
+        codex = _precheck().detect_host(payload) == "codex"
+    except Exception:
+        codex = False
+    try:
         if _touches_own_files(payload):
-            _ask_about_allow_list()
+            _ask_about_allow_list(codex)
             return
     except Exception:
         pass
     try:
         pc = _precheck()
         pc.UA_PRODUCT = "agentavow-preinstall"  # count install-time checks separately
+        if codex:
+            pc._set_host(payload)
+            pc._set_session_cwd(payload)
         targets = _targets_for(payload, pc)
     except Exception:
         return
     command = ""
     if payload.get("tool_name") == "Bash" and isinstance(payload.get("tool_input"), dict):
-        command = str(payload["tool_input"].get("command") or "")
+        command = (_command_text(payload["tool_input"]) if codex
+                   else str(payload["tool_input"].get("command") or ""))
     if not targets and not (command and _install_checks_enabled()
                             and _package_installs(command, pc)):
         return
@@ -749,7 +905,15 @@ def main() -> None:
                                         "you continue; they decide whether to proceed.",
         },
     }
-    if needs_decision:
+    if needs_decision and codex:
+        reason = codex_deny_reason(body, targets, pkg_lines)
+        out["hookSpecificOutput"]["permissionDecision"] = "deny"
+        out["hookSpecificOutput"]["permissionDecisionReason"] = reason
+        out["hookSpecificOutput"]["additionalContext"] = (
+            reason + "\nTell the user this in one line; do not try to add or install it "
+                     "another way.")
+        out["systemMessage"] = reason
+    elif needs_decision:
         out["hookSpecificOutput"]["permissionDecision"] = "ask"
         out["hookSpecificOutput"]["permissionDecisionReason"] = (
             body + f"\nAgentAvow says: {DECISION_PHRASES['do_not_connect']}. Continue anyway?")

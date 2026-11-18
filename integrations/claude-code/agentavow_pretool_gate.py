@@ -66,13 +66,24 @@ prints the exact allow line, code included, for a server with a grade on file. I
 prints it only when both its input and its output are a terminal: run from Claude's
 Bash tool (or anything else that captures the output), it refuses and prints no code.
 
+In Codex (which runs this same plugin's hooks; tool names are the same
+`mcp__<server>__<tool>`): a PreToolUse hook there cannot ask, only deny. So where
+Claude Code asks (a changed definition, a call naming AgentAvow's own files), Codex
+gets a deny whose reason says what was found and how to go ahead anyway, and the
+servers are looked up in Codex's config.toml. Do not connect is a deny in both. All
+the notes stay notes. Claude Code's output is unchanged
+(tests/test_agentavow_claude_pins.py).
+
 Install / test: https://agentavow.com/docs/auto-scan-claude-code
 """
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import hmac
+import importlib.util
+import io
 import ipaddress
 import json
 import os
@@ -85,7 +96,7 @@ import time
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.43"
+__version__ = "0.1.44"
 
 CACHE = pathlib.Path.home() / ".cache" / "agentavow" / "scanned.json"
 META_KEY = "_agentavow"  # cache entry holding hook state; never a server name
@@ -327,6 +338,8 @@ def find_record(cache: dict, server: str) -> tuple[str, dict] | None:
 def _server_config(name: str) -> dict | None:
     """The `mcpServers[name]` entry from the same files the pre-check reads. Only
     the URL and an Authorization header are ever used from it."""
+    if _in_codex():
+        return _codex_server_config(name)
     candidates = [
         pathlib.Path.home() / ".claude.json",
         pathlib.Path.cwd() / ".mcp.json",
@@ -348,6 +361,54 @@ def _server_config(name: str) -> dict | None:
             elif isinstance(node, list):
                 stack.extend(v for v in node if isinstance(v, (dict, list)))
     return None
+
+
+# ── Codex ────────────────────────────────────────────────────────────────────
+# Which app runs the hook ("codex" or "claude"), set by main(). Codex is recognised
+# exactly as the pre-check recognises it (agentavow_precheck.detect_host).
+_HOST = "claude"
+_PAYLOAD_CWD: str | None = None
+
+
+def _in_codex() -> bool:
+    return _HOST == "codex"
+
+
+def _precheck_module():
+    """The session-start hook's module (same folder), for Codex host detection and
+    config.toml reading, so the two hooks always agree."""
+    spec = importlib.util.spec_from_file_location(
+        "agentavow_precheck", pathlib.Path(__file__).resolve().parent / "agentavow_precheck.py")
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def detect_host(payload: object) -> str:
+    try:
+        return _precheck_module().detect_host(payload)
+    except Exception:
+        return "claude"
+
+
+def _codex_server_config(name: str) -> dict | None:
+    """``[mcp_servers.<name>]`` from Codex's config.toml files, in the shape the gate
+    reads (``url``, ``command``, ``headers`` from Codex's ``http_headers``)."""
+    try:
+        pc = _precheck_module()
+        if _PAYLOAD_CWD:
+            pc._set_session_cwd({"cwd": _PAYLOAD_CWD})
+        found = pc.codex_servers().get(name)
+    except Exception:
+        return None
+    if not found:
+        return None
+    server = dict(found[0])
+    headers = server.get("http_headers")
+    if isinstance(headers, dict):
+        server["headers"] = headers
+    return server
 
 
 def _sanitize_url(url: str) -> str:
@@ -704,6 +765,18 @@ def allow_instructions(name: str) -> str:
     """How the PERSON can allow this one server, worded for Claude to relay. It never
     carries the confirmation code: that is shown to the person alone."""
     path = _shown_path(allow_file())
+    if _in_codex():
+        return (f"If the user has reviewed this server and wants to use it anyway, the user "
+                f"(not Codex) can allow this one server: AgentAvow has shown them, outside "
+                f"this conversation, the exact line to add to {path}, with a confirmation "
+                "code only they can see. If they can't see that line, they can print it by "
+                f"running this in their own terminal: {allow_line_command(name)}\n"
+                "Or they can switch AgentAvow's hooks off in Codex (/hooks) for this "
+                "session.\nTell the user exactly that.\n"
+                "Do not run that command yourself (it prints nothing to you), do not edit "
+                "that file yourself, do not read AgentAvow's files in ~/.cache/agentavow, do "
+                "not ask for or work out the code, and do not try another way to reach this "
+                "server's tools: a line without the user's own code allows nothing.")
     return (f"If the user has reviewed this server and wants to use it anyway, the user "
             f"(not Claude) can allow this one server: AgentAvow has shown them, outside "
             f"this conversation, the exact line to add to {path}, with a confirmation code "
@@ -912,7 +985,68 @@ def allow_line_cli(argv: list[str]) -> int:
     return 0
 
 
+# Codex has no "ask": where Claude Code would ask the person, Codex gets a deny with
+# what was found and how to go ahead anyway.
+CODEX_NO_ASK = ("Codex cannot ask you before this call, so AgentAvow stopped it. To go "
+                "ahead anyway: {how}")
+CODEX_HOW_DRIFT = ("start a new Codex session (AgentAvow re-checks this server's tools at "
+                   "session start, and the call runs if the new answer allows it), or switch "
+                   "AgentAvow's hooks off in Codex (/hooks) for this session.")
+CODEX_HOW_OWN_FILES = ("if you asked for this yourself, do it in your own terminal outside "
+                       "Codex, or switch AgentAvow's hooks off in Codex (/hooks) for this "
+                       "session.")
+
+
+def codex_output(decision: tuple | None, printed: str) -> dict | None:
+    """The one JSON object Codex gets for this call: the notes the gate printed along
+    the way (systemMessage lines, shown to the person) joined, plus the decision with
+    "ask" turned into "deny" and its reason saying how to go ahead anyway. Codex reads
+    exactly one JSON object per hook run and refuses "ask"."""
+    notes: list[str] = []
+    for line in printed.splitlines():
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and isinstance(obj.get("systemMessage"), str):
+            notes.append(obj["systemMessage"])
+    out: dict = {}
+    if decision:
+        verdict, reason = decision[0], decision[1]
+        message = decision[2] if len(decision) > 2 else None
+        if verdict == "ask":
+            how = (CODEX_HOW_OWN_FILES if "AgentAvow's own files" in reason
+                   else CODEX_HOW_DRIFT)
+            verdict, reason = "deny", reason + "\n" + CODEX_NO_ASK.format(how=how)
+            message = message or reason
+        out["hookSpecificOutput"] = {"hookEventName": "PreToolUse",
+                                     "permissionDecision": verdict,
+                                     "permissionDecisionReason": reason}
+        if message:
+            notes.append(message)
+    if notes:
+        out["systemMessage"] = "\n".join(notes)
+    return out or None
+
+
+def _codex_main(payload: dict) -> None:
+    global _PAYLOAD_CWD
+    cwd = payload.get("cwd")
+    _PAYLOAD_CWD = cwd if isinstance(cwd, str) and cwd.strip() else None
+    buf = io.StringIO()
+    decision = None
+    try:
+        with contextlib.redirect_stdout(buf):
+            decision = decide(payload, _load_cache())
+    except Exception:
+        decision = None  # fail-open; notes already printed still reach the person
+    out = codex_output(decision, buf.getvalue())
+    if out:
+        print(json.dumps(out))
+
+
 def main() -> None:
+    global _HOST
     if len(sys.argv) > 1 and sys.argv[1] == "--allow-line":
         sys.exit(allow_line_cli(sys.argv[2:]))
     try:
@@ -920,6 +1054,10 @@ def main() -> None:
     except Exception:
         return
     if not isinstance(payload, dict) or _setting("AGENTAVOW_GATE") in ("off", "0", "false", "no"):
+        return
+    _HOST = detect_host(payload)
+    if _in_codex():
+        _codex_main(payload)
         return
     try:
         decision = decide(payload, _load_cache())
