@@ -91,6 +91,8 @@ def test_versions_agree():
     assert hook.__version__ == plugin["version"] == market["plugins"][0]["version"]
     assert gate.__version__ == plugin["version"]
     assert _load(PLUGIN_DIR / "scripts" / "agentavow_pre_install.py").__version__ == plugin["version"]
+    codex = json.loads((PLUGIN_DIR / ".codex-plugin" / "plugin.json").read_text())
+    assert codex["version"] == plugin["version"]
 
 
 def test_plugin_registers_both_hooks_with_short_timeouts():
@@ -615,6 +617,39 @@ def test_plugin_manifest_carries_every_directory_listing_field():
     for field in ("documentationUrl", "supportUrl", "privacyPolicyUrl", "termsOfServiceUrl"):
         assert urllib.parse.urlsplit(plugin[field]).scheme == "https", field
     assert (PLUGIN_DIR / plugin["icon"]).is_file()
+
+
+def test_codex_manifest_loads_the_same_plugin():
+    """Codex reads .codex-plugin/plugin.json before .claude-plugin/plugin.json
+    (DISCOVERABLE_PLUGIN_MANIFEST_PATHS in openai/codex, rust-v0.169.1), so this file is
+    what Codex loads. It has to name the same plugin and point at the same components
+    Codex otherwise finds by default (skills/, hooks/hooks.json, .mcp.json), with every
+    path written ./relative as Codex requires. The awesome-codex-plugins generator copies
+    only the paths named here (scripts/ included, which the hooks run), and its
+    validator needs interface.displayName, shortDescription and a composerIcon under
+    50 KB."""
+    claude = json.loads((PLUGIN_DIR / ".claude-plugin" / "plugin.json").read_text())
+    codex = json.loads((PLUGIN_DIR / ".codex-plugin" / "plugin.json").read_text())
+    assert codex["name"] == claude["name"]
+    assert codex["license"] == claude["license"] == "MIT"
+    assert codex["mcpServers"] == claude["mcpServers"] == "./.mcp.json"
+    assert codex["commands"] == claude["commands"]
+    assert codex["skills"] == "./skills/" and codex["hooks"] == "./hooks/hooks.json"
+    assert codex["scripts"] == "./scripts/"
+    for key in ("skills", "hooks", "mcpServers", "scripts"):
+        rel = codex[key]
+        assert rel.startswith("./") and ".." not in rel, key
+        assert (PLUGIN_DIR / rel).exists(), key
+    assert (PLUGIN_DIR / "scripts" / "run_hook.sh").is_file()
+    ui = codex["interface"]
+    assert ui["displayName"] == claude["displayName"]
+    assert 0 < len(ui["shortDescription"]) <= 30
+    for key in ("composerIcon", "logo"):
+        icon = PLUGIN_DIR / ui[key]
+        assert ui[key].startswith("./") and icon.is_file()
+        assert icon.stat().st_size <= 50 * 1024
+    assert codex["repository"].startswith("https://github.com/")
+    assert (PLUGIN_DIR / "SECURITY.md").is_file() and (PLUGIN_DIR / "LICENSE").is_file()
 
 
 def test_verdict_records_what_the_scan_could_not_read():

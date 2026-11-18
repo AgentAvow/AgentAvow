@@ -124,7 +124,9 @@ publishes `ghcr.io/agentavow/scanner`.
   (`.claude-plugin/marketplace.json` → `plugins/agentavow-trust`) reaches everyone who
   has it installed, and a push touching `sdk/mcp-server/**` is mirrored to
   AgentAvow/agentavow-trust-mcp (`mirror-mcp-server.yml`), which Glama builds from.
-  Everything goes through a PR.
+  A push touching `plugins/agentavow-trust/**` is also mirrored to
+  AgentAvow/agentavow-codex-plugin (`mirror-codex-plugin.yml`), which Codex plugin
+  lists read. Everything goes through a PR.
 - **The hosted `/mcp` tool list is pinned.** `_TOOLS` in `src/bridges/mcp_streamable.py`
   is guarded by `tests/fixtures/mcp_tools_list_snapshot.json`,
   `tests/fixtures/mcp_wire_2025_11_25/tools_list.json`, `EXPECTED_TOOLS_LIST_SHA256` in
@@ -176,6 +178,7 @@ change, add `agent:needs-product`, explain why in one comment, and stop.
 - **Plugin version bumps** (`agentavow-trust`): the version has to match in all of
   these places, and `tests/test_agentavow_precheck.py::test_versions_agree` enforces it:
   - `plugins/agentavow-trust/.claude-plugin/plugin.json` (`version`)
+  - `plugins/agentavow-trust/.codex-plugin/plugin.json` (`version`; Codex reads this one)
   - `.claude-plugin/marketplace.json` (`plugins[0].version`)
   - `__version__` in `plugins/agentavow-trust/scripts/agentavow_{precheck,pretool_gate,pre_install}.py`
 

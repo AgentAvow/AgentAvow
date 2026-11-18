@@ -1,0 +1,40 @@
+name: Mirror Codex plugin
+
+# Copies plugins/agentavow-trust (MIT, with its own LICENSE, SECURITY.md and
+# .codex-plugin/plugin.json) to the public AgentAvow/agentavow-codex-plugin
+# repo, so Codex plugin lists that read a repo's root (the
+# hashgraph-online/awesome-codex-plugins generator) find the plugin there.
+# One-way: never edit the mirror by hand; it is force-updated from this
+# folder's history.
+on:
+  push:
+    branches: [main]
+    paths: ["plugins/agentavow-trust/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror-codex-plugin
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Split plugins/agentavow-trust and push to the mirror
+        env:
+          DEPLOY_KEY: ${{ secrets.CODEX_PLUGIN_MIRROR_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/mirror_key
+          chmod 600 ~/.ssh/mirror_key
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/mirror_key -o IdentitiesOnly=yes"
+          git subtree split --prefix=plugins/agentavow-trust -b mirror-split
+          git push --force git@github.com:AgentAvow/agentavow-codex-plugin.git mirror-split:main
