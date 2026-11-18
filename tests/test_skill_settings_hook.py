@@ -129,8 +129,121 @@ def test_python_script_that_merges_a_session_start_hook():
     )
     notes = _notes({"SKILL.md": FRONT, "install.py": script})
     assert len(notes) == 1 and notes[0].file_path == "install.py"
-    # Single-quoted Python dict: the path and the write are seen, the command is not.
-    assert notes[0].name == PREFIX + ".claude/settings.json"
+    assert notes[0].line_number == 6
+    assert notes[0].name == PREFIX + ".claude/settings.json, runs node ~/.x/start.js"
+
+
+# ── review round 1: a write elsewhere in the file is not a write to the settings ────
+
+AUDIT = (
+    "\n## Audit\n\n"
+    "List the PreToolUse and SessionStart hooks found in ~/.claude/settings.json and\n"
+    "say which commands they run.\n\n"
+    "## Report\n\n"
+    "Add a summary table to report.md. Install nothing.\n"
+)
+
+
+@pytest.mark.parametrize("body", [
+    # Read-only audit; the "Add" is in another section.
+    AUDIT,
+    # Same section, but a blank line between the path and the verb.
+    "\nRead the PreToolUse hooks in ~/.claude/settings.json.\n\nThen add a line to notes.md.\n",
+    # Same paragraph, but the verb's sentence is about something else.
+    "\nRead the PreToolUse hooks in ~/.claude/settings.json. Then add a row to report.md.\n",
+    # A list item of its own.
+    "\n- Read ~/.claude/settings.json and print its PreToolUse hooks.\n- Add the count to "
+    "report.md.\n",
+])
+def test_prose_window_stays_in_its_paragraph(body):
+    assert _notes({"SKILL.md": FRONT + body}) == []
+
+
+def test_prose_twin_same_paragraph_install_is_noted():
+    body = ("\nTo block pushes, add a PreToolUse hook to ~/.claude/settings.json that runs\n"
+            "the bundled guard.\n")
+    notes = _notes({"SKILL.md": FRONT + body})
+    assert [(n.file_path, n.line_number) for n in notes] == [("SKILL.md", 6)]
+
+
+def test_prose_fence_that_rewrites_the_settings_is_noted():
+    body = ("\nRun:\n\n```bash\njq '.hooks.PreToolUse += [{\"matcher\": \"Bash\"}]' "
+            "~/.claude/settings.json > /tmp/s && mv /tmp/s ~/.claude/settings.json\n```\n")
+    notes = _notes({"SKILL.md": FRONT + body})
+    assert len(notes) == 1 and notes[0].line_number == 9
+
+
+_PY_REPORT = (
+    "import json, pathlib\n"
+    "p = pathlib.Path.home() / '.claude/settings.json'\n"
+    "hooks = json.loads(p.read_text()).get('hooks', {}).get('PreToolUse', [])\n"
+    "with open('report.json', 'w') as f:\n"
+    "    json.dump(hooks, f)\n"
+    "out = open('report.txt', 'w')\n"
+    "out.write(str(len(hooks)))\n"
+)
+_JS_REPORT = (
+    "const fs = require('fs');\n"
+    "const p = require('os').homedir() + '/.claude/settings.json';\n"
+    "const s = JSON.parse(fs.readFileSync(p, 'utf8'));\n"
+    "fs.writeFileSync('report.txt', JSON.stringify(s.hooks.PreToolUse));\n"
+)
+_SH_REPORT = "#!/bin/bash\nS=~/.claude/settings.json\njq '.hooks.PreToolUse' \"$S\" > report.txt\n"
+
+
+@pytest.mark.parametrize("name,script", [
+    ("audit.py", _PY_REPORT), ("audit.js", _JS_REPORT), ("audit.sh", _SH_REPORT)])
+def test_script_writing_another_file_gets_no_note(name, script):
+    assert _notes({"SKILL.md": FRONT, name: script}) == []
+
+
+_PY_WRITE = (
+    "import json\nS = '/home/u/.claude/settings.json'\n"
+    "cfg = {'hooks': {'PreToolUse': []}}\n"
+    "with open(S, 'w') as f:\n    json.dump(cfg, f)\n"
+)
+_JS_WRITE = (
+    "const fs = require('fs');\nconst S = `${process.env.HOME}/.claude/settings.json`;\n"
+    "const c = {hooks: {SessionStart: []}};\nfs.writeFileSync(S, JSON.stringify(c));\n"
+)
+_SH_WRITE = (
+    "#!/bin/bash\nS=\"$HOME/.claude/settings.json\"\n"
+    "jq '.hooks.PreToolUse += []' \"$S\" > /tmp/s && mv /tmp/s \"$S\"\n"
+)
+
+
+@pytest.mark.parametrize("name,script,line", [
+    ("install.py", _PY_WRITE, 4), ("install.js", _JS_WRITE, 4), ("install.sh", _SH_WRITE, 3)])
+def test_script_writing_the_bound_settings_name_is_noted(name, script, line):
+    notes = _notes({"SKILL.md": FRONT, name: script})
+    assert [(n.file_path, n.line_number) for n in notes] == [(name, line)]
+
+
+def test_path_built_from_parts_counts():
+    script = (
+        "import json\nfrom pathlib import Path\n"
+        "settings = Path.home() / \".claude\" / \"settings.json\"\n"
+        "cfg = json.loads(settings.read_text())\n"
+        "cfg.setdefault(\"hooks\", {})[\"PreToolUse\"] = []\n"
+        "settings.write_text(json.dumps(cfg))\n"
+    )
+    notes = _notes({"SKILL.md": FRONT, "install.py": script})
+    assert len(notes) == 1 and notes[0].line_number == 6
+    assert notes[0].name == PREFIX + "~/.claude/settings.json"
+    joined = ("import json, os\n"
+              "p = os.path.join(os.path.expanduser('~'), '.codex', 'hooks.json')\n"
+              "json.dump({'hooks': {'SessionStart': []}}, open(p, 'w'))\n")
+    notes = _notes({"SKILL.md": FRONT, "install.py": joined})
+    assert len(notes) == 1 and notes[0].name == PREFIX + "~/.codex/hooks.json"
+
+
+@pytest.mark.xfail(strict=True, reason="a settings path built across several lines (home "
+                   "and '.claude' on one, 'settings.json' on the next) is not followed")
+def test_gap_path_built_across_lines():
+    script = ("import json\nfrom pathlib import Path\nd = Path.home() / '.claude'\n"
+              "p = d / 'settings.json'\n"
+              "p.write_text(json.dumps({'hooks': {'PreToolUse': []}}))\n")
+    assert _notes({"SKILL.md": FRONT, "install.py": script})
 
 
 @pytest.mark.parametrize("body", [
