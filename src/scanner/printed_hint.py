@@ -28,6 +28,28 @@ was. ``files`` is the whole package for an artifact scan (exported names are fol
 into every file that mentions them) or just the one file for a per-file scan, where a
 name that leaves the file keeps its severity.
 
+Audit class 1 (2026-11-14) added, for JS / TS:
+
+* a field of an object literal (``{ fixHint: msg }``, ``notes: ["Install … with: curl
+  … | bash"]``): accepted when the object is not handed straight to a runner and no code
+  that can hold the object could pass that field to an exec sink
+  (``shown_text.code_key_exec_site``). "Can hold the object" is
+  :func:`import_component`: the files that load the hint's file (its possible entry
+  points; test modules and test / build configs are not) plus everything those load.
+  When that set is unknown (``import(x)``, an unresolvable alias) every file counts. A
+  command-shaped field name (``command``, ``install_cmd``, ``steps``) is accepted only
+  when nothing in that set can start a process at all (``_PROCESS_CAPABILITY_RE``: a
+  browser page's copy);
+* a spread into an array (``[...(bad ? [msg] : []), "…"]``);
+* an exported function named as a message builder (``…Message``, ``…Hint``,
+  ``…Usage``, ``_MESSAGE_FN_RE``): every caller in view is still followed, and callers
+  outside the scanned files (a repository scan reads a capped set) are taken at the
+  name's word;
+* ``vscode.window.show{Information,Warning,Error}Message(msg)`` as output;
+* a test module is never a namespace consumer (``vi.mock("./m", …)``).
+
+Go and Rust have their own walk (``src.scanner.shown_native``).
+
 Not applied to shell scripts, package.json lifecycle scripts, Markdown / agent
 instruction files or any other format: those are unchanged.
 """
@@ -52,6 +74,12 @@ WHY = ("Install command shown to a person (printed, logged, or put in an error "
        "message); no code in the package runs it. Reported for visibility.")
 
 _MAX_STEPS = 400  # total climb steps per question (bounded work on a huge bundle)
+# Names of exported functions whose result is text for a person (``…Message``,
+# ``…Hint``, ``…HelpText``, ``…_usage``): see ``_JsFlow.follow_function``.
+_MESSAGE_FN_RE = re.compile(
+    r"(?:[a-z0-9](?:Message|Hint|Hints|Warning|Notice|HelpText|Usage|Instructions|Remedy|"
+    r"Banner|Tip|Tips)|_(?:message|hint|hints|warning|notice|help_text|usage|instructions|"
+    r"remedy|banner|tip|tips))$")
 
 
 def is_supported(path: str) -> bool:
@@ -294,6 +322,8 @@ _SAFE_METHODS = frozenset({
     "padStart", "padEnd", "toUpperCase", "toLowerCase", "split", "includes",
     "startsWith", "endsWith", "indexOf", "length", "at", "charAt",
 })
+_VSCODE_MESSAGES = frozenset({"showInformationMessage", "showWarningMessage",
+                              "showErrorMessage"})
 _CONSOLE_METHODS = frozenset({"log", "error", "warn", "info", "debug", "trace"})
 # Method names a package's own output layer uses. Accepted only when the package defines
 # the method and no definition of it runs anything.
@@ -686,6 +716,202 @@ def _def_bodies(text: str, name: str) -> list[str]:
     return out
 
 
+# -- import-connected files ------------------------------------------------------------
+_SPEC_RE = re.compile(
+    r"""(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*|\bexport\s*\*\s*from\s*)(['"])"""
+    r"""([^'"\n]{1,300})\1""")
+# A load whose target the text does not say: `import(x)`, `require(dir + f)`, a template.
+_DYNAMIC_LOAD_RE = re.compile(
+    r"""(?<![\w$.])(?:import|require)\s*\(\s*(?!['"]|\s*\))|"""
+    r"""(?<![\w$.])(?:import|require)\s*\(\s*`[^`]*\$\{""")
+# A path-like string that may name another file to load (`new Worker("./w.js")`,
+# `fork(join(__dirname, "child.js"))`, `new URL("./x.mjs", import.meta.url)`).
+_FILE_STR_RE = re.compile(r"""['"`]([\w./@-]{1,200}\.(?:[cm]?[jt]sx?))['"`]""")
+_JS_RESOLVE_SUFFIXES = ("", ".ts", ".tsx", ".js", ".mjs", ".cjs", ".jsx", ".mts", ".cts",
+                        "/index.ts", "/index.tsx", "/index.js", "/index.mjs", "/index.cjs")
+_BARE_ALIAS_RE = re.compile(r"^(?:@/|~/|#|src/|lib/|app/|\.\.?$)")
+
+
+def _posix_join(base_dir: str, rel: str) -> str:
+    parts = [p for p in base_dir.split("/") if p] if base_dir else []
+    for seg in rel.split("/"):
+        if seg in ("", "."):
+            continue
+        if seg == "..":
+            if not parts:
+                return ""
+            parts.pop()
+        else:
+            parts.append(seg)
+    return "/".join(parts)
+
+
+def _dynamic_load(text: str) -> bool:
+    """``import(…)`` / ``require(…)`` with an argument that is not one plain string
+    literal (read on tokens, so a regex or a string that says ``require(`` is not
+    one). A file that does not tokenize cleanly counts as one."""
+    t = _Toks(text)
+    if not t.clean:
+        return True
+    for name in ("import", "require"):
+        for k in t.by_val.get(name, []):
+            if t.is_p(k - 1, ".", "?.") or not t.is_p(k + 1, "("):
+                continue
+            close = t.match.get(k + 1)
+            if close is None:
+                return True
+            if close == k + 3 and t.typ[k + 2] in ("str", "tpl"):
+                continue
+            if t.typ[k + 2] in ("str", "tpl") and t.is_p(k + 3, ","):
+                continue  # `import("./x.js", { with: … })`
+            if close == k + 2:
+                continue
+            if name == "require" and t.is_id(k - 1, "function"):
+                continue
+            return True
+    return False
+
+
+def _dir_of(p: str) -> str:
+    d = str(Path(p).parent).replace("\\", "/")
+    return "" if d == "." else d
+
+
+# Anything that can start a process, or ask another process to (a desktop shell's
+# bridge). Generous: a false match only keeps the finding.
+_PROCESS_CAPABILITY_RE = re.compile(
+    r"child_process|\bexeca\b|cross-spawn|shelljs|['\"]zx['\"/]|\bBun\s*\.\s*(?:spawn|\$)|"
+    r"\bDeno\s*\.\s*(?:Command|run)\b|\b(?:spawn|spawnSync|execSync|execFile|execFileSync|"
+    r"exec|fork|system|popen)\s*\(|(?<![\w}$])\$\s*`|\bFunction\s*\(|\beval\s*\(|"
+    r"@tauri-apps|__TAURI|\belectron\b|ipcRenderer|\bnode-pty\b|\bvm\s*\.\s*run|"
+    r"\bimport\s*\(|\brequire\s*\(\s*[^'\"`\s)]|\bWorker\s*\(|"
+    r"\bwebview\b|postMessage\s*\(")
+_DEV_CONFIG_RE = re.compile(
+    r"(?:^|/)(?:vitest|jest|playwright|karma|ava|mocha|cypress|wdio|vite)"
+    r"(?:\.[\w-]+)?\.(?:config|conf|workspace|setup)\.[cm]?[jt]s$|(?:^|/)\.mocharc\.[cm]?js$")
+_ASSET_EXTS = frozenset({
+    ".json", ".css", ".scss", ".sass", ".less", ".svg", ".png", ".jpg", ".jpeg", ".gif",
+    ".webp", ".ico", ".md", ".txt", ".html", ".wasm", ".node", ".yaml", ".yml", ".toml",
+    ".woff", ".woff2", ".ttf",
+})
+
+
+def import_component(path: str, files: dict[str, str]) -> set[str] | None:
+    """The JS / TS files of ``files`` that can hold a value made in ``path`` or share a
+    process with it: every file that loads ``path`` directly or transitively (its
+    possible entry points), plus everything those files load. A load is a static or
+    dynamic ``import``, ``require``, ``export … from``, or a string naming another
+    file (a worker script, a forked child). None (use every file) when one of them
+    loads something its text does not name (``import(x)``), imports a path alias no
+    file matches, or the tree is too big to walk."""
+    js = [p for p in files if Path(p.lower()).suffix in JS_EXTS
+          and not p.lower().endswith(_DTS_SUFFIXES)]
+    if path not in js or len(js) > 20000:
+        return None
+    jset = set(js)
+    by_base: dict[str, list[str]] = {}
+    for p in js:
+        by_base.setdefault(Path(p).name, []).append(p)
+    # Workspace / own package names: `import x from "@scope/pkg/sub"` stays inside.
+    pkg_dirs: dict[str, str] = {}
+    for p, text in files.items():
+        if Path(p).name == "package.json" and text:
+            m = re.search(r'"name"\s*:\s*"([^"]+)"', text)
+            if m:
+                pkg_dirs[m.group(1)] = _dir_of(p)
+
+    def pkg_root(p: str) -> str:
+        """``dir/`` of the nearest package.json above ``p`` ("" for the top)."""
+        d = _dir_of(p)
+        while d:
+            if d + "/package.json" in files:
+                return d + "/"
+            d = _dir_of(d)
+        return ""
+
+    def resolve(src: str, spec: str) -> list[str] | None:
+        if Path(spec.split("?")[0]).suffix.lower() in _ASSET_EXTS:
+            return []  # data / assets: no code to follow
+        if spec.startswith("."):
+            base = _posix_join(_dir_of(src), spec)
+            cands = [base + s for s in _JS_RESOLVE_SUFFIXES]
+            if base.endswith((".js", ".mjs", ".cjs", ".jsx")):  # TS source of a .js import
+                stem = base.rsplit(".", 1)[0]
+                cands += [stem + s for s in (".ts", ".tsx", ".mts", ".cts")]
+            return [c for c in cands if c in jset][:1]
+        for name, d in pkg_dirs.items():
+            if spec == name or spec.startswith(name + "/"):
+                pre = (d + "/") if d else ""
+                return [p for p in js if p.startswith(pre)] if pre else list(js)
+        if _BARE_ALIAS_RE.match(spec):
+            # A path alias (`@/lib/api`): every file of the same package whose path
+            # ends like it; none found means it cannot be resolved here.
+            tail = re.sub(r"^(?:@/|~/|#/?)", "", spec).strip("/")
+            if not tail or tail in (".", ".."):
+                return None
+            root = pkg_root(src)
+            hits = [p for p in js if p.startswith(root) and any(
+                p == root + tail + s or p.endswith("/" + tail + s)
+                for s in _JS_RESOLVE_SUFFIXES[1:])]
+            return hits or None
+        return []  # a dependency outside the scanned files
+
+    fwd: dict[str, set[str]] = {}
+    unresolved: set[str] = set()
+    for cur in js:
+        text = files.get(cur) or ""
+        out: set[str] = set()
+        for m in _SPEC_RE.finditer(text):
+            r = resolve(cur, m.group(2))
+            if r is None:
+                unresolved.add(cur)
+            else:
+                out.update(r)
+        for m in _FILE_STR_RE.finditer(text):
+            spec = m.group(1)
+            if spec.startswith("."):
+                r = resolve(cur, spec) or []
+            elif "/" in spec:
+                r = [p for p in js if p == spec or p.endswith("/" + spec)]
+            else:  # a bare file name: any file of that name in the same package
+                root = pkg_root(cur)
+                r = [p for p in by_base.get(spec, []) if p.startswith(root)]
+            out.update(r)
+        out.discard(cur)
+        fwd[cur] = out
+    rev: dict[str, set[str]] = {p: set() for p in js}
+    for p, outs in fwd.items():
+        for q in outs:
+            rev[q].add(p)
+    from src.scanner.test_files import is_test_code, judged
+    up = {path}
+    todo = [path]
+    while todo:
+        for q in rev[todo.pop()]:
+            if q in up:
+                continue
+            if (judged(q) and is_test_code(q, files.get(q) or "")) \
+                    or _DEV_CONFIG_RE.search(q):
+                continue  # a test module / test or build config: the maintainer's entry
+                # point, not a user's
+            up.add(q)
+            todo.append(q)
+    seen = set(up)
+    todo = list(up)
+    while todo:
+        for q in fwd[todo.pop()]:
+            if q not in seen:
+                seen.add(q)
+                todo.append(q)
+    for p in seen:
+        if p in unresolved:
+            return None
+        text = files.get(p) or ""
+        if _DYNAMIC_LOAD_RE.search(text) and _dynamic_load(text):
+            return None
+    return seen
+
+
 class _JsFlow:
     """Follow one value through JS code (module docstring)."""
 
@@ -698,6 +924,8 @@ class _JsFlow:
         self._catch_ok: bool | None = None
         self.uses = 0
         self._console_ok: bool | None = None
+        self.field_memo: dict[tuple[str, str], bool] = {}
+        self.comp_memo: dict[str, set[str] | None] = {}
         self.code_paths = [p for p in files if Path(p.lower()).suffix in JS_EXTS
                            and not p.lower().endswith(_DTS_SUFFIXES)]
 
@@ -739,8 +967,18 @@ class _JsFlow:
         # `key: "curl … | bash"` in an object literal bound to a top-level constant.
         if t.is_p(a - 1, ":") and a == b and t.is_p(b + 1, ",", "}") \
                 and (t.typ[a - 2] in ("id", "str")) and t.is_p(a - 3, "{", ","):
-            self.property_value(path, t, a)
-            return
+            try:
+                self.property_value(path, t, a)
+                return
+            except _UnclassifiedError as exc:
+                # Not a property of a top-level constant read by `.key`: judge it as
+                # a field of an object literal (``shown_field``) instead.
+                why = str(exc)
+                try:
+                    self.value(path, a, b)
+                    return
+                except _UnclassifiedError as exc2:
+                    raise _UnclassifiedError(f"{why}; {exc2}") from None
         self.value(path, a, b)
 
     # -- property of a top-level object constant ---------------------------------
@@ -907,7 +1145,72 @@ class _JsFlow:
             if t.is_p(p, "+="):
                 self.assigned(path, t, p)
                 return
+            if t.is_p(p, ":"):
+                self.shown_field(path, t, p, b)
+                return
+            if t.is_p(p, "..."):
+                # Spread into an array literal: its elements carry the value.
+                o = self.enclosing_open(t, p)
+                if o != -1 and t.is_p(o, "[") and t.is_p(b + 1, ",", "]"):
+                    r = self.in_open(path, t, o, a, b)
+                    if r is not None:
+                        a, b = r
+                        continue
+                    return
+                raise _UnclassifiedError("value spread into a call or object")
             raise _UnclassifiedError(f"value after {t.val[p] or t.typ[p]}")
+
+    def shown_field(self, path: str, t: _Toks, colon: int, b: int) -> None:
+        """The value is a field of an object literal (``{ fixHint: msg }``,
+        ``notes: ["Install … with: curl … | bash"]``). Accepted when the field name is
+        not command-shaped, the object is not an argument of a call that runs things,
+        and no code in view could hand that field to an exec sink
+        (``shown_text.code_key_exec_site``)."""
+        from src.scanner.shown_text import code_key_exec_site, shown_field_key
+        if not t.is_p(b + 1, ",", "}"):
+            raise _UnclassifiedError("value after : (not a whole field value)")
+        k = colon - 1
+        if t.typ[k] == "id":
+            key = t.val[k]
+        elif t.typ[k] == "str":
+            key = self.files[path][t.st[k] + 1:t.en[k] - 1]
+        else:
+            raise _UnclassifiedError("value after : (computed key)")
+        if not t.is_p(k - 1, "{", ","):
+            raise _UnclassifiedError("value after : (not an object field)")
+        o = self.enclosing_open(t, colon)
+        if o == -1 or not t.is_p(o, "{") or t.match.get(o) is None:
+            raise _UnclassifiedError("value after : (not an object literal)")
+        before = o - 1
+        if not (t.is_p(before, "(", ",", "=", ":", "[", "?", "||", "??", "&&", "...")
+                or t.is_id(before, "return", "yield", "await")):
+            raise _UnclassifiedError("value after : (block label or odd position)")
+        if path not in self.comp_memo:
+            self.comp_memo[path] = (import_component(path, self.files)
+                                    if self.package else None)
+        comp = self.comp_memo[path]
+        no_process = comp is not None and not any(
+            _PROCESS_CAPABILITY_RE.search(self.files.get(p) or "") for p in comp)
+        if not shown_field_key(key) and not no_process:
+            raise _UnclassifiedError(f"field {key} is command-shaped")
+        # The object handed straight to something that runs (`execa(cmd, { … })`).
+        g = self.enclosing_open(t, o)
+        if g != -1 and t.is_p(g, "("):
+            c = self.callee(t, g)
+            if c is not None and c[0] and re.fullmatch(_JS_RUN_CALL + r"|run\w*|call",
+                                                       c[0][-1]):
+                raise _UnclassifiedError(f"object passed to {c[0][-1]}()")
+        if no_process:
+            return  # nothing in reach can start a process
+        if (path, key) not in self.field_memo:
+            # Only JS / TS code can read a field of a JS object (a shell script's
+            # `$remedy` is another variable).
+            scope = comp if comp is not None else (self.code_paths if self.package
+                                                   else [path])
+            js = {p: self.files[p] for p in scope}
+            self.field_memo[(path, key)] = code_key_exec_site(key, path, js) is None
+        if not self.field_memo[(path, key)]:
+            raise _UnclassifiedError(f"field {key} may reach an exec sink")
 
     def postfix(self, t: _Toks, b: int) -> int | None:
         """Absorb `.method(...)`, `.prop`, `[i]` applied to the value; each called
@@ -1094,6 +1397,16 @@ class _JsFlow:
             names, first, is_new = c
             if not names:
                 raise _UnclassifiedError("unknown callee")
+            if (len(names) == 3 and names[1] == "window" and names[2] in _VSCODE_MESSAGES
+                    and a == o + 1 and t.is_p(b + 1, ",", ")")
+                    and _binding_spec(self.files[path], names[0]) == "vscode"):
+                # A VS Code notification (`vscode.window.showWarningMessage(msg)`),
+                # shown in the editor's UI; only as its message (first) argument.
+                text = self.files[path]
+                if _decl_re(names[0]).search(text) or re.search(
+                        r"(?<![\w$.])" + re.escape(names[0]) + r"\s*=(?!=)", text):
+                    raise _UnclassifiedError(f"{names[0]} is rebound in this file")
+                return None
             return self.call(path, t, o, names, first, is_new)
         if v == "[":
             j = o - 1
@@ -1252,13 +1565,22 @@ class _JsFlow:
                 ft, r) != -1 and ft.is_p(self.enclosing_open(ft, r), "{") \
                 and not self.has_q_left(ft, r + 1):
             return  # `{ name: … }`: an object key
-        if ft.is_p(r + 1, "=", "+=") and not ft.is_p(r - 1, ",", "{", "["):
+        if ft.is_p(r + 1, "=", "+=") and (
+                not ft.is_p(r - 1, ",", "{", "[")
+                or (ft.is_p(r - 1, "{") and self.block_brace(ft, r - 1))):
             return  # overwritten / appended to: a write, not a read
         if ft.is_id(r - 1, "var", "let", "const", "function", "class"):
             raise _UnclassifiedError("name redeclared")
         if self.specifier(ft, r, fp):
             return
         self.value(fp, r, r)
+
+    @staticmethod
+    def block_brace(t: _Toks, o: int) -> bool:
+        """The ``{`` at ``o`` opens a statement block (``if (…) {``, ``else {``, a
+        function body), not a destructuring pattern or an object literal."""
+        return (o == 0 or t.is_p(o - 1, ")", "=>", ";", "{", "}")
+                or t.is_id(o - 1, "else", "try", "finally", "do"))
 
     def specifier(self, t: _Toks, r: int, path: str) -> bool:
         """``import { NAME } from …`` / ``export { NAME }``: neutral in a package
@@ -1366,7 +1688,11 @@ class _JsFlow:
         self.followed.add(key)
         self.check_name_unmentioned(name, path, exclude=None)
         files = self.scope_files(path, True) if self.package else [path]
-        if not self.package and self.mentions_exported(path, name):
+        # A message builder (`formatUnsupportedNodeVersionMessage`, `installHint`):
+        # its callers outside the files in view are taken at its name's word. Every
+        # caller IN view is still followed, and any that runs the text keeps it.
+        message_fn = bool(_MESSAGE_FN_RE.search(name)) and self.mentions_exported(path, name)
+        if not self.package and self.mentions_exported(path, name) and not message_fn:
             raise _UnclassifiedError("function leaves the file (export)")
         if self.package:
             self.check_namespace_imports(path)
@@ -1394,7 +1720,7 @@ class _JsFlow:
                 if self.specifier(ft, r, fp):
                     continue
                 raise _UnclassifiedError(f"function {name} used other than by a call")
-        if self.uses == used_before:
+        if self.uses == used_before and not message_fn:
             raise _UnclassifiedError("never read: nothing shows it to a person")
 
     def function_name_decl_at(self, t: _Toks, r: int) -> bool:
@@ -1467,14 +1793,26 @@ class _JsFlow:
             return
         rx = re.compile(r"""['"`][^'"`\n]*[/'"`]""" + re.escape(stem)
                         + r"""(?:\.[cm]?[jt]sx?)?['"`]""")
+        from src.scanner.test_files import is_test_code, judged
         for fp in self.code_paths:
             text = self.files[fp]
             if stem not in text:
                 continue
+            if fp != path and judged(fp) and is_test_code(fp, text):
+                # A test module (`vi.mock("./m", async (orig) => ({ ...await orig() }))`)
+                # runs only in the maintainer's test runner, never for a user.
+                continue
             ft = self.toks(fp)
             for m in rx.finditer(text):
                 k = ft.at(m.start())
-                if k < 0 or ft.typ[k] != "str":
+                # The whole specifier must be ONE string token (`"a").x["m"]` spans two).
+                if k < 0 or ft.typ[k] != "str" or ft.st[k] != m.start() \
+                        or ft.en[k] != m.end():
+                    continue
+                # A TypeScript type position: `typeof import("./m")` loads nothing.
+                if (Path(fp).suffix.lower() in (".ts", ".tsx", ".mts", ".cts")
+                        and ft.is_p(k - 1, "(") and ft.is_id(k - 2, "import")
+                        and ft.is_id(k - 3, "typeof")):
                     continue
                 # Allowed: `import { a, b } from "./m"` / `export { a } from "./m"`.
                 if ft.is_id(k - 1, "from") and ft.is_p(k - 2, "}"):

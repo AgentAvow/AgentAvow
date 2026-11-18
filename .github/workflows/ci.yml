@@ -72,7 +72,7 @@ jobs:
       - name: Test
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/agentgraph_test
-          REDIS_URL: redis://localhost:6379/0
+          REDIS_URL: redis://localhost:6379/15
           # .env is no longer tracked (004fc83), so CI has to opt into debug itself:
           # without it settings refuse the default JWT_SECRET and every module errors.
           DEBUG: "true"

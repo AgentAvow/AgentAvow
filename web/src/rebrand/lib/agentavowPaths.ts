@@ -60,7 +60,7 @@ export const AGENTAVOW_PATHS: AgentAvowPath[] = [
     key: 'codex', label: 'Codex', tag: 'Checks when you ask',
     text: 'Add the connector to Codex.',
     snippet: codexCmd(AGENTAVOW_MCP),
-    links: [{ label: 'Setup →', href: '/rebrand/docs/mcp-connector' }],
+    links: [{ label: 'Setup →', href: '/rebrand/docs/codex' }],
   },
   {
     key: 'cursor', label: 'Cursor', tag: 'Checks when you ask',

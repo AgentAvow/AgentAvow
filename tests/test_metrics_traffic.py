@@ -165,6 +165,65 @@ def test_reach_fields_count_seven_days_and_retention():
     assert (fields["d1_cohort"], fields["d1_returned"]) == (1, 0)
 
 
+def test_reach_fields_week_window_retention_counts_any_later_day():
+    """d7w_returned counts a cohort machine back on any day after its first, through this
+    day; d7_returned only counts it back on this exact day. Owner is left out of both."""
+    snapshot = _snapshot_module()
+    day = "2026-11-10"
+    seen = {
+        # first seen day0 (11-03), back on day3 only: d7w yes, d7 no
+        "back_day3": ["2026-11-03", "2026-11-06"],
+        # back today: both
+        "back_today": ["2026-11-03", day],
+        # never back
+        "gone": ["2026-11-03", "2026-11-03"],
+        # owner, back today: excluded everywhere
+        "owner": ["2026-11-03", day],
+        # older machine, not in the cohort
+        "regular": ["2026-10-20", day],
+        # first seen today: not returning
+        "brand_new": [day, day],
+    }
+    today = {"back_today", "owner", "regular", "brand_new"}
+    fields = snapshot._reach_fields(seen, {}, today, day, {"owner"})
+    assert (fields["d7_cohort"], fields["d7_returned"]) == (3, 1)
+    assert (fields["d7w_cohort"], fields["d7w_returned"]) == (3, 2)
+    # today's non-owner machines (3) minus the one first seen today
+    assert fields["returning_machines"] == 2
+
+
+def test_reach_fields_week_window_ignores_a_last_seen_past_the_day():
+    """On a re-run of an older day, a last_seen past that day is not counted as a return
+    (it may fall outside the window); being in that day's log still counts."""
+    snapshot = _snapshot_module()
+    day = "2026-11-10"
+    seen = {"later_only": ["2026-11-03", "2026-11-12"],
+            "later_and_today": ["2026-11-03", "2026-11-12"]}
+    fields = snapshot._reach_fields(seen, {}, {"later_and_today"}, day, set())
+    assert (fields["d7w_cohort"], fields["d7w_returned"]) == (2, 1)
+
+
+def test_activation_fields_returning_machines_excl_cloud():
+    snap = _snapshot_module()
+    day = "2026-11-20"
+    seen = {"laptop": ["2026-11-01", day], "cloudbox": ["2026-11-01", day],
+            "fresh": [day, day], "owner": ["2026-11-01", day]}
+    today = {"laptop", "cloudbox", "fresh", "owner"}
+    out = snap._activation_fields(seen, {}, {}, {"cloudbox"}, today, set(), day, {"owner"})
+    assert out["returning_machines_excl_cloud"] == 1  # laptop only
+
+
+def test_retention_window_columns_append_at_the_end():
+    snap = _snapshot_module()
+    new = ["d7w_cohort", "d7w_returned", "returning_machines",
+           "returning_machines_excl_cloud"]
+    assert snap.COLUMNS[-len(new):] == new
+    for col in new:
+        assert col in md._TRAFFIC_INT_COLUMNS, col
+    # The old columns keep their place, so earlier rows line up.
+    assert snap.COLUMNS.index("d7_returned") < snap.COLUMNS.index("cc_machines_plugin")
+
+
 def test_snapshot_columns_cover_the_new_surfaces_and_checks():
     snap = _snapshot_module()
     new = [f"calls_{s}" for s in ("cursor", "vscode", "codex")] + [

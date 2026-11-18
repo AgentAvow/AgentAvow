@@ -19,6 +19,7 @@ Full docs in one file: [llms-full.txt](https://agentavow.com/llms-full.txt)
 - MCP server (streamable HTTP): https://agentavow.com/mcp
 - [MCP connector guide](https://agentavow.com/docs/mcp-connector)
 - [Auto-scan in Claude Code](https://agentavow.com/docs/auto-scan-claude-code)
+- [Use AgentAvow in Codex](https://agentavow.com/docs/codex)
 - [Gate CI and agents on the answer](https://agentavow.com/docs/gate-on-the-grade)
 
 ## How it works
