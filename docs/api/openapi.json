@@ -24544,7 +24544,7 @@
     },
     "/api/v1/admin/dnc-reviews": {
       "get": {
-        "description": "Do not connect answers from the last 7 days waiting for (or carrying) a person's\nread. Full admin only.",
+        "description": "This week's shortlist (at most 3 Do not connect tools people checked, waiting for\na person's read) and, for reference, every Do not connect answer from the last 7\ndays. Full admin only.",
         "operationId": "list_candidates_api_v1_admin_dnc_reviews_get",
         "parameters": [
           {
@@ -56626,7 +56626,7 @@
     },
     "/api/v1/public/trust-index/do-not-connect-week": {
       "get": {
-        "description": "Up to 5 tools whose Do not connect answer a person confirmed in the last 7 days,\nnewest first, that still read Do not connect for the same reason now.",
+        "description": "Up to 5 tools that read Do not connect now: first those a person confirmed in the\nlast 7 days (newest first, still for the same reason), then tools scanned this week\nthat are known malicious, ship a known-malicious dependency, or leaked a planted\ncredential in the sandbox.",
         "operationId": "dnc_week_api_v1_public_trust_index_do_not_connect_week_get",
         "responses": {
           "200": {

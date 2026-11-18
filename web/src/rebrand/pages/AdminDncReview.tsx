@@ -1,10 +1,13 @@
 /**
- * "Do not connect review": the admin queue behind the Trust Index card "Do not connect
- * this week". Owner rule (2026-11-11): no Do not connect result is highlighted to the
- * public until a person has read its finding. Lists every catalog tool that reads Do not
- * connect now and was checked in the last 7 days, with its reason and top critical
- * finding; Confirm puts it on the card, Not confirmed keeps it off. Full admins only:
- * the dashboard does not render this for a viewer, and the API refuses one.
+ * "Do not connect: this week's shortlist": the admin read behind the Trust Index card
+ * "Do not connect this week". Owner rule (2026-11-11): no Do not connect result is
+ * highlighted to the public until a person has read its finding, except the ones that
+ * need no judgment (known malicious, a planted credential seen leaving the sandbox),
+ * which the API adds to the card on its own. The default view is the API's shortlist:
+ * at most 3 Do not connect tools people actually checked this week, most checks first,
+ * skipping ones already read unless the reason changed. The full list from the last 7
+ * days stays behind a collapsed toggle, as a reference only. Full admins only: the
+ * dashboard does not render this for a viewer, and the API refuses one.
  */
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -24,6 +27,7 @@ interface Candidate {
   decision_reason: string | null
   last_scanned_at: string | null
   from_catalog_growth: boolean
+  checks_week: number
   top_critical: { category?: string | null; name?: string | null; file_path?: string | null; line_number?: number | null } | null
   status: 'pending' | 'changed' | 'confirmed' | 'not_confirmed'
   reviewed_at: string | null
@@ -54,7 +58,7 @@ function Row({ c, onDone }: { c: Candidate; onDone: () => void }) {
           {c.full_name || c.name} ↗
         </Link>
         <span className="font-mono text-[10.5px] text-text-muted uppercase tracking-wide">
-          {c.surface}{c.trust_score != null ? ` · trust ${c.trust_score}` : ''}{c.from_catalog_growth ? ' · catalog growth' : ''}
+          {c.surface}{c.trust_score != null ? ` · trust ${c.trust_score}` : ''}{c.checks_week > 0 ? ` · ${c.checks_week} ${c.checks_week === 1 ? 'check' : 'checks'} this week` : ''}{c.from_catalog_growth ? ' · catalog growth' : ''}
         </span>
       </div>
       <p className="mt-1.5 text-[13px]"><span className="font-semibold text-danger">Do not connect</span>{c.decision_reason ? <span className="text-text-muted"> — {c.decision_reason}</span> : null}</p>
@@ -86,35 +90,43 @@ function Row({ c, onDone }: { c: Candidate; onDone: () => void }) {
 
 export default function DncReviewPanel() {
   const qc = useQueryClient()
-  const { data, isLoading, isError } = useQuery<{ items: Candidate[] }>({
+  const { data, isLoading, isError } = useQuery<{ shortlist: Candidate[]; items: Candidate[]; counts_unavailable?: boolean }>({
     queryKey: ['admin-dnc-reviews'],
     queryFn: async () => (await api.get('/admin/dnc-reviews')).data,
     staleTime: 60_000,
   })
+  const shortlist = data?.shortlist || []
   const items = data?.items || []
-  // Default view: what is new this week, i.e. the library run's own Do not connect
-  // answers plus any read whose reason has since changed. The daily refresh re-checks
-  // every tool, so "checked in the last 7 days" alone lists every Do not connect.
-  const fresh = items.filter((c) => c.from_catalog_growth || c.status === 'changed')
-  const open = items.filter((c) => c.status === 'pending' || c.status === 'changed').length
+  const countsDown = !!data?.counts_unavailable
   const [showAll, setShowAll] = useState(false)
-  const shown = showAll ? items : fresh
+  const refresh = () => qc.invalidateQueries({ queryKey: ['admin-dnc-reviews'] })
   return (
     <Section
-      title="Do not connect review"
-      scope={isLoading ? 'loading…' : `Last 7 days · ${fresh.length} new · ${open} to read · ${items.length} in all`}
-      note="New by default: Do not connect answers from this week's library run, plus any whose reason changed since your last read. “Show all” adds every tool that reads Do not connect and was re-checked in the last 7 days. Read the finding on its result page, then Confirm (it can appear on the Trust Index card “Do not connect this week”) or Not confirmed (it stays off every highlight)."
+      title="Do not connect: this week's shortlist"
+      scope={isLoading ? 'loading…' : 'Last 7 days'}
+      note="Up to 3 a week, the ones people actually checked. Confirm the ones you're happy to show on the Trust Index; Claude brings a two-line read on each on Mondays. Known-malicious packages, known-malicious dependencies and planted credentials seen leaving the sandbox go on the card by themselves, unless you marked them Not confirmed."
     >
-      {isError && <p className="text-[13px] text-danger">Could not load the review list.</p>}
-      {!isLoading && !isError && !items.length && <p className="text-[13px] text-text-muted">Nothing reads Do not connect from the last 7 days.</p>}
-      {!isLoading && !isError && items.length > 0 && !shown.length && <p className="text-[13px] text-text-muted">Nothing new from this week's library run.</p>}
+      {isError && <p className="text-[13px] text-danger">Could not load the shortlist.</p>}
+      {!isLoading && !isError && countsDown && <p className="text-[13px] text-warning">This week's check counts could not be loaded, so there is no shortlist right now. Try again later; the full list below still works.</p>}
+      {!isLoading && !isError && !countsDown && !shortlist.length && <p className="text-[13px] text-text-muted">Nothing needs a look this week.</p>}
       <div className="grid gap-3">
-        {shown.map((c) => <Row key={c.page_key} c={c} onDone={() => qc.invalidateQueries({ queryKey: ['admin-dnc-reviews'] })} />)}
+        {shortlist.map((c) => <Row key={c.page_key} c={c} onDone={refresh} />)}
       </div>
-      {items.length > fresh.length && (
-        <button type="button" onClick={() => setShowAll((v) => !v)} className="mt-3 text-[12.5px] font-semibold text-primary-light hover:text-primary">
-          {showAll ? 'Show new only' : `Show all ${items.length}`}
-        </button>
+      {!isLoading && !isError && items.length > 0 && (
+        <div className="mt-4">
+          <button type="button" onClick={() => setShowAll((v) => !v)} aria-expanded={showAll}
+            className="text-[12.5px] font-semibold text-primary-light hover:text-primary">
+            {showAll ? 'Hide the full list' : 'Show all Do not connect from the last 7 days'}
+          </button>
+          {showAll && (
+            <>
+              <p className="mt-2 text-[12px] text-text-muted">For reference only: every tool that reads Do not connect and was checked or re-scanned in the last 7 days.</p>
+              <div className="mt-3 grid gap-3">
+                {items.map((c) => <Row key={c.page_key} c={c} onDone={refresh} />)}
+              </div>
+            </>
+          )}
+        </div>
       )}
     </Section>
   )
