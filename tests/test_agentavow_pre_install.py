@@ -758,7 +758,7 @@ updated: $(date '+%Y-%m-%d %H:%M')
 ---
 ## Summary
 The owner approved the plan (no change to minimumReleaseAgeExclude or allowBuilds
-without raising it). The allowed-servers list and the agentavow folder are untouched.
+without raising it). Scanned twice; nothing else is allowed through.
 """
 
 
@@ -778,6 +778,10 @@ def test_a_heredoc_that_only_writes_text_does_not_ask(hook, monkeypatch, capsys,
 @pytest.mark.parametrize("cmd", [
     # the file written is AgentAvow's own
     "cat > ~/.cache/agentavow/allowed-servers.txt <<EOF\nx\nEOF",
+    # a body that names our folder or files: the folder and file checks read every body
+    "cat > ~/.cache/herdr/x.md <<'EOF'\nThe allowed-servers list is untouched.\nEOF",
+    "cat > ~/.cache/herdr/x.md <<'EOF'\nsee ~/.cache/agentavow for the grades\nEOF",
+    "cat > ~/.cache/herdr/x.md <<'EOF'\nThe agentavow folder is untouched.\nEOF",
     "cat <<EOF >> $HOME/.cache/agentavow/scanned.json\n{}\nEOF",
     # an unquoted body runs its substitutions
     "cat > ~/.cache/herdr/x.md <<EOF\nkey: $(cat ~/.cache/agentavow/allow.key)\nEOF",
@@ -802,3 +806,35 @@ def test_a_heredoc_that_only_writes_text_does_not_ask(hook, monkeypatch, capsys,
 def test_a_heredoc_that_names_or_runs_our_files_still_asks(hook, monkeypatch, capsys, cmd):
     mod, _ = hook
     _ask_reason(mod, monkeypatch, capsys, _bash(cmd))
+
+
+# The blanking keeps every body when the shell might not read the command the way the
+# simple line-by-line view does.
+@pytest.mark.parametrize("cmd", [
+    # a line outside the bodies is left open
+    'echo "a\ncat > /tmp/f <<EOF\nx\nEOF\necho "',
+    "echo 'a\ncat > /tmp/f <<EOF\nx\nEOF\necho '",
+    "echo a \\\ncat > /tmp/f <<EOF\nx\nEOF",
+    "x=$(echo a\ncat > /tmp/f <<EOF\nx\nEOF\n)",
+    "x=`echo a\ncat > /tmp/f <<EOF\nx\nEOF\n`",
+    # a substitution in an unquoted body that isn't one simple command
+    "cat > /tmp/f <<EOF\n$(date; date)\nEOF",
+    "cat > /tmp/f <<EOF\n$(date | cat)\nEOF",
+    "cat > /tmp/f <<EOF\n$(echo $(date))\nEOF",
+    "cat > /tmp/f <<EOF\n$(date # note)\nEOF",
+    "cat > /tmp/f <<EOF\n$(echo \\x)\nEOF",
+    "cat > /tmp/f <<EOF\n$(echo \")\")\nEOF",
+    "cat > /tmp/f <<EOF\n$((1 + 2))\nEOF",
+    "cat > /tmp/f <<EOF\n$(date\n)\nEOF",
+])
+def test_heredoc_bodies_are_kept_when_the_command_is_not_simple(hook, cmd):
+    mod, _ = hook
+    assert mod._blank_data_heredocs(cmd) == cmd
+
+
+def test_a_simple_status_write_is_blanked(hook):
+    mod, _ = hook
+    cmd = ("cat > /tmp/s.md <<EOF\nupdated: $(date '+%Y-%m-%d %H:%M')\nallowBuilds\nEOF\n"
+           "cat /tmp/s.md | sed -n 2p")
+    out = mod._blank_data_heredocs(cmd)
+    assert "allowBuilds" not in out and "date '+%Y-%m-%d %H:%M'" in out

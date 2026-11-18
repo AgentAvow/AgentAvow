@@ -123,8 +123,9 @@ example-server https://mcp.example.com/mcp K7Q2M-9XA3B
   names it. A Claude command that runs `--allow-line` asks too. A different folder that
   happens to be named AgentAvow, such as a checkout of this repo or the plugin's own
   install folder, does not count, and neither does a word that only contains "allow"
-  (such as "shallow") in a command about another cache folder. A heredoc that only
-  writes text to a file is judged by the file it writes, not by its text.
+  (such as "shallow") in a command about another cache folder. In a heredoc that only
+  writes text to a file, a word such as "allowBuilds" in that text doesn't count; the
+  folder's name or one of its files' names still does.
 
 Settings, all optional, read from the environment and never sent anywhere:
 

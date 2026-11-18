@@ -1052,29 +1052,71 @@ _SED_PRINT = re.compile(r"^(?:\d+|\$)(?:,(?:\d+|\$))?[pd]$")
 _SEGMENT_SPLIT = re.compile(r"\|\||&&|[;|&\n]")
 
 
+# A substitution kept from an unquoted body must be one simple command with nothing the
+# shell could read as structure (nesting, parentheses, a comment, an escape, `;`, `|`):
+# then its first closing `)` or backtick is the real one. Anything else keeps the body.
+_SIMPLE_SUB = re.compile(r"""^[A-Za-z0-9_ \t'"+%:./=,@-]*$""")
+
+
+def _simple_sub(text: str) -> bool:
+    return (bool(_SIMPLE_SUB.match(text)) and text.count("'") % 2 == 0
+            and text.count('"') % 2 == 0)
+
+
 def _substitutions(line: str) -> list[str] | None:
     """The `$(...)` and backtick substitutions an unquoted heredoc line runs, or None
-    when one is not closed on the line (a substitution spanning lines keeps the body)."""
+    when one isn't a simple command closed on the line (then the body is kept)."""
     out, i = [], 0
     while i < len(line):
         if line.startswith("$(", i):
-            depth, j = 1, i + 2
-            while j < len(line) and depth:
-                depth += {"(": 1, ")": -1}.get(line[j], 0)
-                j += 1
-            if depth:
+            j = line.find(")", i + 2)
+            if j < 0 or not _simple_sub(line[i + 2:j]):
                 return None
-            out.append(line[i + 2:j - 1])
-            i = j
+            out.append(line[i + 2:j])
+            i = j + 1
         elif line[i] == "`":
             j = line.find("`", i + 1)
-            if j < 0:
+            if j < 0 or not _simple_sub(line[i + 1:j]):
                 return None
             out.append(line[i + 1:j])
             i = j + 1
         else:
             i += 1
     return out
+
+
+def _line_closed(line: str) -> bool:
+    """A line outside every heredoc body ends with nothing open: no quote, `$(` or
+    backtick, and no trailing backslash. Otherwise the shell carries it onto the next
+    line, and a line that looks like a heredoc header may not be one."""
+    quote, depth, tick, i = "", 0, False, 0
+    while i < len(line):
+        ch = line[i]
+        if quote == "'":
+            quote = "" if ch == "'" else quote
+        elif ch == "\\":
+            if i + 1 >= len(line):
+                return False
+            i += 1
+        elif quote == '"':
+            if ch == '"':
+                quote = ""
+            elif line.startswith("$(", i):
+                depth, i = depth + 1, i + 1
+            elif ch == "`":
+                tick = not tick
+        elif ch in "'\"":
+            quote = ch
+        elif line.startswith("$(", i):
+            depth, i = depth + 1, i + 1
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "`":
+            tick = not tick
+        i += 1
+    return not quote and depth == 0 and not tick
 
 
 def _only_reads(text: str) -> bool:
@@ -1126,7 +1168,7 @@ def _blank_data_heredocs(command: str) -> str:
                 subs.extend(found)
         outside.append(lines[i])
         i = end + 1
-    if len(outside) == len(lines):
+    if len(outside) == len(lines) or not all(_line_closed(x) for x in outside):
         return command
     text = "\n".join(outside)
     if not _only_reads(_HEREDOC_OP.sub("", text)) or not all(_only_reads(s) for s in subs):
@@ -1143,8 +1185,12 @@ def _shell_names_own_files(command: str, cwd: object = None) -> bool:
     neither does a folder named AgentAvow anywhere but the cache folder: the test is
     where a folder sits (its parent, or the working directory for a relative `cd`),
     never what a checkout or worktree is called."""
-    raw = re.sub(r"[\"'`\\]", "", _blank_data_heredocs(command))
+    raw = re.sub(r"[\"'`\\]", "", command)
     s = raw.lower()
+    # The folder and file checks always read the whole command, heredoc bodies included.
+    # Only the loose "allow" / "scanned" word matches read it with data-only heredoc
+    # bodies blanked, so text such as "allowBuilds" in a status report doesn't ask.
+    loose = re.sub(r"[\"'`\\]", "", _blank_data_heredocs(command)).lower()
     if _NAMED_FILE.search(s):
         return True
     t = _other_agentavow_dirs(_REPO_SLUG_ANY_CASE.sub("", raw), cwd).lower()
@@ -1152,10 +1198,10 @@ def _shell_names_own_files(command: str, cwd: object = None) -> bool:
         return True
     standalone = bool(_STANDALONE.search(t))
     if _CACHE_DIR.search(s) and (standalone or _GLOB_AFTER_CACHE.search(s)
-                                 or _ALLOW_WORD.search(s)):
+                                 or _ALLOW_WORD.search(loose)):
         return True
     cd_in = bool(_CD_INTO.search(t)) and not _cd_cannot_reach_own_dir(s, cwd)
-    return standalone and (cd_in or bool(re.search(r"\b(?:allow|scanned)", s)))
+    return standalone and (cd_in or bool(re.search(r"\b(?:allow|scanned)", loose)))
 
 
 def _path_in_own_dir(raw: str, cwd: object) -> bool:
