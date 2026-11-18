@@ -972,6 +972,86 @@ def script_output_run(path: str, texts: dict[str, str]) -> tuple[str, int] | Non
     return None
 
 
+# Program output handed to a shell: a pipe into one, or a command substitution that is
+# eval'd, sourced, given to `sh -c` / `sh <(…)` or run as the command word.
+_PIPE_INTO_SHELL_RE = re.compile(
+    r"(?<!\|)\|(?!\|)\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:\S+=\S*\s+)*)?"
+    r"(?:xargs\s+(?:-\S+\s+)*)?(?:\S*/)?(?:(?:ba|z|da|k|fi)?sh|eval|source|iex|"
+    r"Invoke-Expression)\b")
+_SUBST_RUN_SRC = (
+    r"(?:\b(?:eval|source|iex|Invoke-Expression)\s+|"
+    r"(?:^\s*|[;&|({]\s*|\b(?:then|do|else|if|while|until)\s+|!\s*)\.\s+|"
+    r"\b(?:ba|z|da|k)?sh\s+(?:-\w+\s+)*{bare})"
+    r"(?:\\?[\"'])?(?:{subst}|`|<\()")
+_BARE_CMD = r"|(?:^\s*|[;&|{]\s*|\b(?:then|do|else|if|while|until)\s+|!\s*)"
+_SUBST_RUN_RE = re.compile(
+    _SUBST_RUN_SRC.replace("{bare}", _BARE_CMD).replace("{subst}", r"\$\("))
+# In a Makefile `$(X)` is a make variable; the shell's substitution is `$$(`.
+_SUBST_RUN_MAKE_RE = re.compile(
+    _SUBST_RUN_SRC.replace("{bare}", _BARE_CMD).replace("{subst}", r"\$\$\("))
+# In program source a `$(` / backtick at the start of a statement is code (jQuery, a
+# template literal), not a shell command word.
+_SUBST_RUN_CODE_RE = re.compile(
+    _SUBST_RUN_SRC.replace("{bare}", "").replace("{subst}", r"\$\("))
+# The stage right before the pipe is a download: the "curl/wget piped to shell" rule's
+# own shape (`curl … | sh`, `iwr … | iex`), reported by that rule on this line.
+_REMOTE_STAGE_RE = re.compile(
+    r"(?:curl|wget)\s+[^|]*$|\b(?:iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^|]*$")
+# A substitution whose command is a download.
+_REMOTE_SUBST_RE = re.compile(
+    r"^\s*(?:sudo\s+)?(?:curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b")
+_SEGMENT_SEP_RE = re.compile(r"&&|\|\||;")
+_SINGLE_PIPE_RE = re.compile(r"(?<!\|)\|(?!\|)")
+
+
+def program_output_run(texts: dict[str, str]) -> tuple[str, int] | None:
+    """Where some file of ``texts`` runs a LOCAL program's output in a shell: a pipe
+    into ``sh`` / ``eval`` / ``source`` (``go run ./cli | sh`` in a Makefile,
+    ``cargo run | sh`` in a build script, a ``//go:generate`` line) or a command
+    substitution that is eval'd, sourced or run (``eval "$(cargo run)"``). Producers
+    that fetch from the network (``curl … | sh``) are left out: that is the install
+    one-liner itself, which has its own finding. Used to keep the finding on a Go /
+    Rust / JS / Python string that only reaches stdout or stderr, since this
+    program's output may be the one that is run. Prose is skipped (README, docs),
+    except files an agent is given as instructions other than a README.
+    ``(file, 1-based line)`` or None."""
+    from src.scanner.package_context import is_agent_instruction_file
+    for fp, text in texts.items():
+        if not text or ("|" not in text and "$(" not in text and "`" not in text
+                        and "<(" not in text):
+            continue
+        low = fp.lower()
+        if low.endswith(_PROSE_SUFFIXES) and (
+                Path(low).name.startswith("readme") or not is_agent_instruction_file(fp)):
+            continue
+        name = Path(low).name
+        subst_re = _SUBST_RUN_CODE_RE if Path(low).suffix in _CODE_LANG_SUFFIXES \
+            else _SUBST_RUN_MAKE_RE if name in ("makefile", "gnumakefile") \
+            or name.endswith(".mk") else _SUBST_RUN_RE
+        for i, line in enumerate(text.split("\n")):
+            s = line.lstrip()
+            if (s.startswith("#") and not s.startswith("#!")) or (
+                    s.startswith("//") and not s.startswith("//go:generate")):
+                continue
+            for m in _PIPE_INTO_SHELL_RE.finditer(line):
+                stage = _SINGLE_PIPE_RE.split(_SEGMENT_SEP_RE.split(line[:m.start()])[-1])[-1]
+                if stage.strip(" \t\"'`(") and not _REMOTE_STAGE_RE.search(stage):
+                    return fp, i + 1
+            for m in subst_re.finditer(line):
+                rest = line[m.end():]
+                if m.group(0).endswith("`"):
+                    inner = rest.split("`", 1)[0]
+                else:
+                    depth, j = 1, 0
+                    while j < len(rest) and depth:
+                        depth += {"(": 1, ")": -1}.get(rest[j], 0)
+                        j += 1
+                    inner = rest[:j - 1] if not depth else rest
+                if inner.strip(" \t\"'") and not _REMOTE_SUBST_RE.search(inner):
+                    return fp, i + 1
+    return None
+
+
 # ---------------------------------------------------------------------------------
 # A field of an object literal in code (audit class 1, 2026-11-14)
 # ---------------------------------------------------------------------------------

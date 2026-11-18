@@ -665,6 +665,7 @@ def calibrate_package_findings(findings: list, fetched) -> list:
             # A package that declares tools somewhere (litellm's MCP gateway), but this
             # file declares none and the line is a bare label or a delimiter constant.
             _lower(f, WHY_PROMPT_STRUCTURE)
+    restore_hints_when_output_run(findings, pkg.texts)
     return findings
 
 
@@ -729,6 +730,33 @@ def recheck_printed_hints(findings: list, texts: dict[str, str]) -> list:
             continue
         _recheck_hint(f, hints, texts, replaced)
     _lower_shown_in_tree(findings, texts, hints, replaced, code_hints=True)
+    restore_hints_when_output_run(findings, texts)
+    return findings
+
+
+def restore_hints_when_output_run(findings: list, texts: dict[str, str]) -> list:
+    """A printed hint in a program (Go, Rust, JS / TS, Python) was lowered because it
+    only reaches stdout / stderr / an error message. That output is not only shown
+    when some file in view runs a local program's output in a shell (``go run ./cli
+    | sh`` in a Makefile, ``eval "$(cargo run)"``, a build script or a
+    ``//go:generate`` line; ``shown_text.program_output_run``): the hint gets its
+    severity back. Mutates and returns ``findings``."""
+    from src.scanner.shown_native import is_supported as native_supported
+    from src.scanner.shown_text import program_output_run
+    run: list = []
+    for f in findings:
+        if f.name not in _HINT_RULES or f.severity != "low" or f.remediation != WHY_HINT:
+            continue
+        path = getattr(f, "file_path", "") or ""
+        if not (is_supported(path) or native_supported(path)):
+            continue
+        pre = getattr(f, "pre_hint", None) or getattr(f, "hint_pre", None)
+        if pre is None:
+            continue
+        if not run:
+            run.append(program_output_run(texts))
+        if run[0] is not None:
+            _restore(f, pre)
     return findings
 
 
@@ -850,6 +878,8 @@ def _printed_hint(hints: Hints, text: str | None, f) -> bool:
 
 
 def _lower(f, why: str) -> None:
+    if getattr(f, "pre_hint", None) is None and getattr(f, "hint_pre", None) is None:
+        f.hint_pre = (f.severity, getattr(f, "payload", None), f.remediation)
     f.severity = "low"
     f.remediation = why
     if hasattr(f, "payload"):

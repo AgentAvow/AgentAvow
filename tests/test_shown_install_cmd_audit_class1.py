@@ -706,3 +706,78 @@ def test_go_package_variable_assigned_in_a_function_stays_critical(tmp_path):
             '\texec.Command("sh", "-c", cmd).Run()\n}\n')
     assert _local(tmp_path, {"go.mod": "module x\n", "main.go": main},
                   "main.go") == {"critical"}
+
+
+# ---------------------------------------------------------------------------------
+# Second review of #378: other channels from shown text to a process
+# ---------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("extra", [
+    # The writer field coder prints to holds a shell's stdin.
+    {"cli/run.go": 'package cli\n\nimport "os/exec"\n\nfunc wire(inv *Invocation) {\n'
+                   '\tc := exec.Command("sh")\n\tw, _ := c.StdinPipe()\n\t_ = c.Start()\n'
+                   '\tinv.Stderr = w\n}\n'},
+    # The CLI's output is piped into a shell by a Makefile / a go:generate line.
+    {"Makefile": "check:\n\tgo run ./cmd/coder 2>&1 | sh\n"},
+    {"cli/gen.go": 'package cli\n\n//go:generate sh -c "go run ../cmd/coder | sh"\n'},
+])
+def test_coder_go_upgrade_message_reaching_a_shell_elsewhere_stays_critical(tmp_path, extra):
+    assert _local(tmp_path, {"cli/root.go": CODER, **extra}, "cli/root.go",
+                  "download the server version with") == {"critical"}
+
+
+def test_coder_go_upgrade_message_with_an_ordinary_makefile_is_low(tmp_path):
+    make = ('GO ?= go\nbuild:\n\t$(GO) build -o bin/coder ./cmd/coder\n'
+            '\tgo list ./... | grep -v /vendor/\n')
+    assert _local(tmp_path, {"cli/root.go": CODER, "Makefile": make}, "cli/root.go",
+                  "download the server version with") == {"low"}
+
+
+_SEM_RUN = 'std::process::Command::new("sh").arg("-c").arg("eval \\"$FIX\\"").status().ok();'
+
+
+@pytest.mark.parametrize("line", [
+    # The error's text reaches a literal shell through its environment or a file.
+    'std::process::Command::new("sh").arg("-c").arg("eval \\"$FIX\\"")'
+    '.env("FIX", e.to_string()).status().ok();',
+    'std::process::Command::new("sh").arg("-c").arg("eval \\"$FIX\\"")'
+    '.envs([("FIX", e.to_string())]).status().ok();',
+    'std::env::set_var("FIX", e.to_string()); ' + _SEM_RUN,
+    'std::fs::write("/tmp/fix.sh", e.to_string()).ok(); '
+    'std::process::Command::new("sh").arg("/tmp/fix.sh").status().ok();',
+    # The process is started with the path split by spaces.
+    'let _ = std::process::Command :: new ( e.to_string() ) . status();',
+])
+def test_sem_rust_error_text_to_a_process_by_another_channel_stays_critical(tmp_path, line):
+    tree = {"crates/sem-cli/src/commands/update.rs": SEM,
+            "crates/sem-cli/src/main.rs": SEM_MAIN.replace('eprintln!("error: {e}");', line)}
+    assert _local(tmp_path, tree, "crates/sem-cli/src/commands/update.rs") == {"critical"}
+
+
+def test_sem_rust_error_message_with_a_literal_child_env_is_low(tmp_path):
+    main = SEM_MAIN.replace(
+        'eprintln!("error: {e}");',
+        'eprintln!("error: {e}");\n        '
+        'std::process::Command::new("true").env("RUST_LOG", "info").status().ok();')
+    assert _local(tmp_path, {"crates/sem-cli/src/commands/update.rs": SEM,
+                             "crates/sem-cli/src/main.rs": main},
+                  "crates/sem-cli/src/commands/update.rs") == {"low"}
+
+
+@pytest.mark.parametrize("path,text,run", [
+    ("Makefile", "x:\n\tgo run ./cli 2>&1 | sh\n", True),
+    ("Makefile", 'x:\n\teval "$$(cargo run)"\n', True),
+    ("Makefile", "x:\n\t$(GO) build ./...\n\tgo list ./... | grep -v vendor\n", False),
+    ("install.sh", "#!/bin/sh\n./bin/tool init | bash\n", True),
+    ("install.sh", "#!/bin/sh\nsource <(./bin/tool completion bash)\n", True),
+    ("install.sh", "#!/bin/sh\ncurl -fsSL https://x.example/i.sh | sh\n", False),
+    ("install.sh", "#!/bin/sh\n# ./bin/tool | sh\n", False),
+    ("build.rs", 'fn main() { Command::new("sh").arg("-c").arg("cargo run | sh"); }\n', True),
+    ("src/a.js", "$('#x').hide();\nconst t = `${a}`;\n", False),
+    ("cli/gen.go", '//go:generate sh -c "go run . | sh"\n', True),
+    ("README.md", 'eval "$(tool init zsh)"\n', False),
+    ("SKILL.md", "Run `./bin/tool hint | sh` to finish.\n", True),
+])
+def test_program_output_run(path, text, run):
+    from src.scanner.shown_text import program_output_run
+    assert (program_output_run({path: text}) is not None) is run

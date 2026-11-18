@@ -221,6 +221,7 @@ _GO_STD_STREAM_RE = re.compile(
 _GO_ERROR = frozenset({"fmt.Errorf", "errors.New", "errors.Errorf", "xerrors.Errorf",
                        "xerrors.New", "errors.Wrap", "errors.Wrapf", "pkgerrors.Errorf"})
 _RUST_FORMAT = frozenset({"format", "concat"})
+_RUST_STD_PRINT = frozenset({"println", "eprintln", "print", "eprint"})
 _RUST_PRINT = frozenset({
     "println", "eprintln", "print", "eprint", "panic", "unreachable", "todo",
     "unimplemented", "warn", "error", "info", "debug", "trace", "log::warn",
@@ -236,13 +237,54 @@ _RUST_PASSTHRU = frozenset({"into", "to_string", "to_owned", "as_str", "trim", "
 # `if let Err(msg) = …`, `let s = format!("{e}")`), so an error value counts as shown
 # only when no process in view takes anything but literals, no child's stdin is
 # opened and Go's `log` output stays on a standard stream.
-_GO_EXEC_CALL_RE = re.compile(r"(?:exec\.Command(?:Context)?|syscall\.Exec|os\.StartProcess)\s*\(")
+_GO_EXEC_CALL_RE = re.compile(
+    r"(?:\bexec(?:abs)?\.Command(?:Context)?|\b(?:syscall|unix)\.Exec|\bos\.StartProcess)\s*\(")
 _RUST_EXEC_CALL_RE = re.compile(r"(?:Command::new|\.args?)\s*\(")
 _GO_STDIN_RE = re.compile(r"\.StdinPipe\s*\(|\.Stdin\s*=[^=]")
 _RUST_STDIN_RE = re.compile(
     r"\.stdin\s*\((?!\s*(?:std::process::)?Stdio::(?:null|inherit)\(\)\s*\))")
-_GO_LOG_REDIRECT_RE = re.compile(r"\blog\.SetOutput\s*\((?!\s*os\.Std(?:err|out)\s*\))")
-_STR_BLANK_RE = re.compile(r'"(?:[^"\\\n]|\\.)*"|`[^`]*`')
+# Any logger's output (`log.SetOutput`, `log.Default().SetOutput`, `l.SetOutput`) sent
+# somewhere other than a standard stream.
+_GO_LOG_REDIRECT_RE = re.compile(r"\.SetOutput\s*\((?!\s*os\.Std(?:err|out)\s*\))")
+# Other ways an error's text reaches a process or a file a process may run (second
+# review of #378): the child's environment, its argv set by hand, an exec.Cmd literal,
+# a fork/exec call, a function value of exec.Command, inherited file descriptors, a
+# written file, a swapped standard stream. Matched on the text with strings blanked.
+_GO_RISK_RE = re.compile(
+    r"\b(?:syscall|unix)\.(?:ForkExec|StartProcess|Exec\w*|Syscall\w*|RawSyscall\w*|"
+    r"Dup\d?|Open\w*|Creat)\b"
+    r"|\bexec\.Cmd\s*\{|\bnew\s*\(\s*exec\.Cmd\s*\)|=\s*exec\.Cmd\b|\bProcAttr\s*\{"
+    r"|\bexec(?:abs)?\.Command(?:Context)?\b(?!\s*\()"
+    r"|\.(?:Args|ExtraFiles)\s*=[^=]"
+    r"|\b(?:os|ioutil)\.(?:WriteFile|Create\w*|OpenFile|NewFile|Pipe|TempFile)\s*\("
+    r"|\bos\.Std(?:in|out|err)\s*=[^=]")
+# Go imports that start processes under another name: an aliased or dot import of
+# os/exec / syscall / x/sys, cgo, or a library that runs shell code.
+_GO_RISK_IMPORT_RE = re.compile(
+    r'(?m)^\s*(?:import\s+)?(?:(?!_\s)[A-Za-z_]\w*|\.)\s+"(?:os/exec|syscall|'
+    r'golang\.org/x/sys/(?:unix|execabs|windows))"'
+    r'|^\s*import\s+"C"'
+    r'|"(?:mvdan\.cc/sh[^"]*|github\.com/bitfield/script[^"]*|github\.com/go-cmd/cmd|'
+    r'github\.com/codeskyblue/go-sh|github\.com/traefik/yaegi[^"]*|'
+    r'github\.com/creack/pty|github\.com/(?:google/goexpect|Netflix/go-expect)|'
+    r'golang\.org/x/sys/execabs)"')
+# `cmd.Env = append(os.Environ(), "K=v")`: the child's environment, checked like an
+# argument list once the parent's own environment is taken out.
+_GO_ENV_ASSIGN_RE = re.compile(r"\.Env\s*=(?!=)([^\n]*)")
+_GO_ENV_KEEP_RE = re.compile(r"\bappend\b|\bos\.Environ\s*\(\s*\)|[\w.]+\.Env\b")
+_RUST_RISK_RE = re.compile(
+    r"\bfs::write\b|\bFile::(?:create\w*|options)\b|\bOpenOptions\b|\bfrom_raw_fd\b"
+    r"|\bNamedTempFile\b|\btempfile\b"
+    r"|\b(?:libc|nix)::|\bstd::os::unix::process\b|\bCommandExt\b"
+    r"|\bCommand\s+as\b|\bprocess\s+as\b|\btype\s+\w+\s*=\s*(?:[\w:]*::)?Command\b"
+    r"|\bCommand::new\b(?!\s*\()"
+    r"|\bcmd!|\bduct::|\bxshell\b|\bcmd_lib\b|\brun_cmd!|\brun_fun!|\bsubprocess::"
+    r"|\brun_script\b|\basync_process\b|\bexpectrl\b|\brexpect\b|\bportable_pty\b"
+    r"|\bpty_process\b|\bdup2?\b|\bset_output_capture\b|\bgag::"
+    # loggers that write to files without a File in user code
+    r"|\btracing_appender\b|\blog4rs\b|\bfern\b|\bflexi_logger\b|\bWriteLogger\b")
+_RUST_FFI_RE = re.compile(r'\bextern\s+"(?:C|system)"')
+_RUST_ENV_CALL_RE = re.compile(r"(?:\.envs?|\bset_var)\s*\(")
 _ARG_ID_RE = re.compile(r"(?<![\w.:])[A-Za-z_]\w*")
 _RUST_PATH_PARAM_RE = (r"\b{}\s*:\s*(?:&\s*)?(?:mut\s+)?(?:std::path::|std::ffi::)?"
                        r"(?:Path|PathBuf|OsStr|OsString)\b")
@@ -265,28 +307,81 @@ def _arg_ids_plain(args: str, text: str, rust: bool) -> bool:
     return True
 
 
+def _flat(text: str, rust: bool) -> str | None:
+    """``text`` as code only: comments dropped, every string and char literal blanked
+    to ``""`` / ``''``, and ``a . b`` / ``a :: b`` closed up. None when it does not
+    tokenize cleanly."""
+    t = _Toks(text, rust)
+    if not t.clean:
+        return None
+    out: list[str] = []
+    for k in range(len(t)):
+        if k:
+            out.append("\n" if "\n" in text[t.en[k - 1]:t.st[k]] else " ")
+        typ = t.typ[k]
+        out.append('""' if typ == "str" else "''" if typ == "char"
+                   else text[t.st[k]:t.en[k]])
+    return re.sub(r"\s*(::|\.)\s*", r"\1", "".join(out))
+
+
+def _call_args(flat: str, start: int) -> str:
+    depth, j = 1, start
+    while j < len(flat) and depth and j - start < 2000:
+        if flat[j] == "(":
+            depth += 1
+        elif flat[j] == ")":
+            depth -= 1
+        j += 1
+    return flat[start:j - 1]
+
+
+def _output_swapped(text: str, rust: bool) -> bool:
+    """Could the program's standard output / error be something other than the
+    terminal: a standard stream reassigned or dup'ed, or (Rust) captured?"""
+    flat = _flat(text, rust)
+    if flat is None:
+        return True
+    if rust:
+        return bool(re.search(r"\bdup[23]?\b|\bset_output_capture\b|\bgag::|\b(?:libc|nix)::",
+                              flat) or _RUST_FFI_RE.search(text))
+    return bool(re.search(r"\bos\.Std(?:out|err)\s*=[^=]|\b(?:syscall|unix)\.Dup\d?\b", flat)
+                or re.search(r'(?m)^\s*import\s+"C"', text))
+
+
 def _err_to_exec(text: str, rust: bool) -> bool:
-    """Could an error's text reach a process in ``text``: a process-starting call that
-    takes a non-literal argument, an opened child stdin, or (Go) ``log`` output sent
-    somewhere other than a standard stream?"""
-    if (_RUST_STDIN_RE if rust else _GO_STDIN_RE).search(text):
+    """Could an error's text reach a process in ``text``? Yes when a process-starting
+    call takes a non-literal argument, a child's stdin is opened, (Go) a logger's
+    output goes somewhere other than a standard stream, or any other channel to a
+    process is in view: the child's environment (``cmd.Env``, ``os.Setenv``,
+    ``.env(…)``, ``set_var``) unless it takes only literals, argv set by hand
+    (``cmd.Args =``, an ``exec.Cmd`` literal), a fork / exec call, an aliased or
+    function-valued ``exec.Command`` / ``Command::new``, cgo / FFI / libc, a library
+    that runs shell code, or a file written at all (the text may be run from it)."""
+    flat = _flat(text, rust)
+    if flat is None:
         return True
-    if not rust and _GO_LOG_REDIRECT_RE.search(text):
-        return True
+    if rust:
+        if _RUST_STDIN_RE.search(flat) or _RUST_RISK_RE.search(flat) \
+                or _RUST_FFI_RE.search(text):
+            return True
+        for m in _RUST_ENV_CALL_RE.finditer(flat):
+            if not _arg_ids_plain(_call_args(flat, m.end()), text, rust):
+                return True
+    else:
+        flat = re.sub(r"\b_\s*=\s*exec\.Command\b(?!\s*\()", "", flat)  # keeps an import
+        if _GO_STDIN_RE.search(flat) or _GO_LOG_REDIRECT_RE.search(flat) \
+                or _GO_RISK_RE.search(flat) or _GO_RISK_IMPORT_RE.search(text):
+            return True
+        for m in re.finditer(r"\b(?:os|syscall)\.Setenv\s*\(", flat):
+            if not _arg_ids_plain(_call_args(flat, m.end()), text, rust):
+                return True
+        for m in _GO_ENV_ASSIGN_RE.finditer(flat):
+            if not _arg_ids_plain(_GO_ENV_KEEP_RE.sub(" ", m.group(1)), text, rust):
+                return True
     call_re = _RUST_EXEC_CALL_RE if rust else _GO_EXEC_CALL_RE
-    if not call_re.search(text):
-        return False
-    flat = _STR_BLANK_RE.sub(lambda m: '""', text)
     for m in call_re.finditer(flat):
-        depth, j = 1, m.end()
-        while j < len(flat) and depth and j - m.end() < 2000:
-            if flat[j] == "(":
-                depth += 1
-            elif flat[j] == ")":
-                depth -= 1
-            j += 1
-        args = flat[m.end():j - 1]
-        if not rust and m.group(0).startswith("exec.CommandContext"):
+        args = _call_args(flat, m.end())
+        if not rust and "CommandContext" in m.group(0):
             args = args.split(",", 1)[1] if "," in args else ""  # the context
         if not _arg_ids_plain(args, text, rust):
             return True
@@ -306,6 +401,7 @@ class _Flow:
         self.steps = 0
         self.followed: set[tuple] = set()
         self._err_ok: bool | None = None
+        self._out_ok: bool | None = None
 
     def toks(self, path: str) -> _Toks:
         t = self._toks.get(path)
@@ -352,21 +448,36 @@ class _Flow:
         name = sep.join(reversed(parts))
         return name + ("()" if self.rust else "")
 
-    def require_errors_shown(self) -> None:
-        if self._err_ok is None:
-            from src.scanner.test_files import judged
-            self._err_ok = not any(
-                _err_to_exec(text, self.rust) for p, text in self.files.items()
+    def _code(self):
+        from src.scanner.test_files import judged
+        return [text for p, text in self.files.items()
                 if text and Path(p).suffix.lower() in self.exts and not judged(p)
-                and not p.endswith("_test.go"))
+                and not p.endswith("_test.go")]
+
+    def require_errors_shown(self) -> None:
+        """An error value (or a print whose sink the walk cannot see, such as a writer
+        field or a Rust logger) counts as shown only while no code in view has any
+        channel by which text could reach a process (:func:`_err_to_exec`)."""
+        if self._err_ok is None:
+            self._err_ok = not any(_err_to_exec(text, self.rust) for text in self._code())
         if not self._err_ok:
-            raise _UnclassifiedError("some code hands an error's text to a process")
+            raise _UnclassifiedError("some code can hand an error's text to a process")
+        self.require_output_shown()
+
+    def require_output_shown(self) -> None:
+        """A print to stdout / stderr counts as shown only while no code in view swaps
+        those streams (``os.Stderr = w``, ``dup2``, an output capture)."""
+        if self._out_ok is None:
+            self._out_ok = not any(_output_swapped(text, self.rust) for text in self._code())
+        if not self._out_ok:
+            raise _UnclassifiedError("standard output may be sent somewhere else")
 
     def require_log_shown(self) -> None:
         """Go ``log.*`` prints only while no code in view sends its output elsewhere."""
-        if any(_GO_LOG_REDIRECT_RE.search(text or "") for p, text in self.files.items()
-               if Path(p).suffix.lower() in self.exts):
+        if any(_GO_LOG_REDIRECT_RE.search(_flat(text, False) or ".SetOutput(")
+               for text in self._code()):
             raise _UnclassifiedError("log output sent somewhere other than a standard stream")
+        self.require_output_shown()
 
     def func_bounds(self, t: _Toks, k: int) -> tuple[int, int, str | None]:
         """(body `{`, body `}`, function name) of the function holding token ``k``."""
@@ -449,7 +560,14 @@ class _Flow:
         if name is None:
             raise _UnclassifiedError("value passed to an unknown call")
         if self.rust:
+            if name in _RUST_STD_PRINT:
+                self.require_output_shown()
+                return None
             if name in _RUST_PRINT:
+                # A panic message goes through the panic hook, a log line through
+                # whatever logger is set up: sinks the walk does not see, so they are
+                # held to the same bar as an error value.
+                self.require_errors_shown()
                 return None
             if name in _RUST_FORMAT:
                 return (o - 2, close)
@@ -459,15 +577,22 @@ class _Flow:
             if name in ("write", "writeln"):
                 first = self.first_arg(t, o)
                 if re.fullmatch(r"(?:std::)?io::std(?:err|out)\(\)(?:\.lock\(\))?", first):
+                    self.require_output_shown()
                     return None
             raise _UnclassifiedError(f"value passed to {name}")
         if name in _GO_PRINT:
             if name.startswith("log."):
                 self.require_log_shown()
+            self.require_output_shown()
             return None
         if name in _GO_FPRINT:
             first = self.first_arg(t, o)
             if _GO_STD_STREAM_RE.match(first) and a > o + 1:
+                if not re.fullmatch(r"os\.Std(?:err|out)", first):
+                    # A writer field (`inv.Stderr`, `cmd.ErrOrStderr()`) can hold any
+                    # writer, a child's stdin or a file included.
+                    self.require_errors_shown()
+                self.require_output_shown()
                 return None
             raise _UnclassifiedError(f"Fprint to {first or 'an unknown writer'}")
         if name in _GO_FORMAT:
