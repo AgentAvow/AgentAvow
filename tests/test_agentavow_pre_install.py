@@ -379,14 +379,18 @@ def test_do_not_connect_asks_first(hook, monkeypatch, capsys):
     assert "⛔ pypi package 'evil-pkg': Do not connect" in hso["permissionDecisionReason"]
 
 
-def test_never_graded_gets_one_fresh_scan_then_silence(hook, monkeypatch, capsys):
+def test_never_graded_gets_one_fresh_scan_then_asks(hook, monkeypatch, capsys):
     mod, pc = hook
     out, calls = _run_pkgs(mod, pc, monkeypatch, capsys, "npm i new-a new-b",
                            {"new-a": _pkg("safe", "nothing found"), "new-b": _pkg("safe", "x")},
                            queued=("new-a", "new-b"))
-    assert out == {}
-    # stored then ONE fresh scan for new-a; new-b gets no fresh scan (FRESH_MAX = 1)
+    # stored then ONE fresh scan for new-a; new-b gets no fresh scan (FRESH_MAX = 1), so
+    # it has no grade, and that is put to the person rather than passed in silence.
     assert calls == [("new-a", True), ("new-a", False), ("new-b", True)]
+    h = out["hookSpecificOutput"]
+    assert h["permissionDecision"] == "ask"
+    assert "❔ not checked yet: new-b" in h["permissionDecisionReason"]
+    assert "new-a" not in h["permissionDecisionReason"]
 
 
 def test_unscannable_says_not_checked_and_offline_stays_silent(hook, monkeypatch, capsys):

@@ -424,6 +424,7 @@ _WRAPPERS: dict[str, frozenset[str]] = {
     "sudo": frozenset({"-u", "--user", "-g", "--group", "-C", "--close-from", "-D",
                        "--chdir", "-h", "--host", "-p", "--prompt", "-r", "--role", "-t",
                        "--type", "-U", "--other-user", "-T", "--command-timeout"}),
+    "doas": frozenset({"-u", "-C"}),
     "env": frozenset({"-u", "--unset", "-C", "--chdir", "-S", "--split-string", "-P"}),
     "time": frozenset({"-o", "--output", "-f", "--format"}),
     "nice": frozenset({"-n", "--adjustment"}),
@@ -435,7 +436,7 @@ _WRAPPERS: dict[str, frozenset[str]] = {
 
 def _unwrap(argv: list[str]) -> tuple[list[str], list[str]]:
     """(the ``VAR=value`` settings, the command itself) for ``argv`` with any leading
-    settings and wrapper commands (sudo, env, time, nice, nohup, command, exec) and their
+    settings and wrapper commands (sudo, doas, env, time, nice, nohup, command, exec) and their
     flags taken off."""
     settings: list[str] = []
     i, n = 0, len(argv)
@@ -686,7 +687,13 @@ def _check_packages(command: str, pc, cache: dict, now: float
     conflicting = {k for k, v in pins.items() if len(v) > 1}
     answered: set[tuple[str, str, str | None]] = set()
     over_cap: list[str] = []    # past the first PKG_CAP names: put to the person
-    out_of_time: list[str] = []  # the time budget ran out first: said, never silent
+    # No grade yet although AgentAvow is answering: queued with the one fresh scan already
+    # spent (or no time left for it), or the time budget ran out before its turn (a slow
+    # earlier package). Put to the person, like over_cap. Only when AgentAvow is not
+    # answering at all (offline, timeouts, 5xx) does the install go ahead with a note.
+    not_yet: list[str] = []
+    out_of_time: list[str] = []  # budget ran out before asking; not_yet if reachable
+    reachable = False            # AgentAvow gave any answer during this command
     for p in pkgs:
         registry, pkg, spec = p["registry"], p["pkg"], p["spec"]
         t = pc._dep(registry, pkg, spec)
@@ -709,24 +716,34 @@ def _check_packages(command: str, pc, cache: dict, now: float
             pc.TIMEOUT = min(TIMEOUT, max(1.0, left))
             try:
                 r = pc._scan(t, stored=True)
+                reachable = True
             except pc._QueuedError:
-                # never graded: one bounded fresh scan, else stay silent
+                # Never graded: one bounded fresh scan. Without one it is not checked yet,
+                # and that is put to the person (AgentAvow answered, so it is reachable).
+                reachable = True
                 left = PKG_BUDGET - (time.monotonic() - started)
                 if fresh >= FRESH_MAX or left <= 3:
+                    not_yet.append(shown)
                     continue
                 fresh += 1
                 pc.TIMEOUT = min(TIMEOUT, left)
                 try:
                     r = pc._scan(t)
+                except pc._UnscannableError as e:
+                    lines.append(_not_graded_line(t, str(e), pc))
+                    continue
                 except Exception:
+                    # AgentAvow slow or down for this scan: a note, never a stop.
+                    lines.append(_not_graded_line(t, "", pc, busy=True))
                     continue
             except pc._UnscannableError as e:
                 # The API's answer about the target (not found, not scannable): say it was
                 # not checked rather than stay silent beside an install that goes ahead.
+                reachable = True
                 lines.append(_not_graded_line(t, str(e), pc))
                 continue
             except urllib.error.HTTPError as e:
-                if e.code == 429 or e.code >= 500:
+                if e.code in (408, 429) or e.code >= 500:
                     lines.append(_not_graded_line(t, "", pc, busy=True))
                 continue
             except Exception:
@@ -752,9 +769,15 @@ def _check_packages(command: str, pc, cache: dict, now: float
                 f"({', '.join(sorted(pins[(registry, low)]))}) and "
                 f"{', '.join(missing)} could not be checked, so it is not known whether the "
                 "release that gets installed is safe.")
-    if out_of_time:
-        lines.append(f"❔ not checked: {', '.join(out_of_time)} — AgentAvow ran out of time "
-                     "for this command. The install goes ahead.")
+    if out_of_time and reachable:
+        not_yet += out_of_time  # an earlier package used the time up: not a down API
+    elif out_of_time:
+        lines.append(f"❔ not checked: {', '.join(out_of_time)} — AgentAvow did not answer "
+                     "in time for this command. The install goes ahead.")
+    if not_yet:
+        needs = True
+        lines.append(f"❔ {NOT_YET}: {', '.join(not_yet)} — AgentAvow has no grade for "
+                     f"{'it' if len(not_yet) == 1 else 'them'} in time for this command.")
     if over_cap:
         needs = True
         lines.append(f"❔ {TOO_MANY}: AgentAvow checks the first {PKG_CAP} packages named; "
@@ -765,6 +788,8 @@ def _check_packages(command: str, pc, cache: dict, now: float
 UNCHECKED_PIN = "not every version this command names could be checked"
 TOO_MANY = "too many packages in one command to check them all"
 TOO_MANY_SERVERS = "too many servers in one step to check them all"
+NOT_YET = "not checked yet"
+NOT_YET_SAID = "not every package in this command has a grade yet"
 
 
 def _other_index_line(t: dict, pc) -> str:
@@ -1180,6 +1205,8 @@ def main() -> None:
     # Do not connect, unless the only reason to stop is something left unchecked: more
     # servers or packages than one step checks, or one of several pinned releases.
     too_many = [p for p in (TOO_MANY, TOO_MANY_SERVERS) if any(p in ln for ln in lines)]
+    if not too_many and any(ln.startswith(f"❔ {NOT_YET}:") for ln in lines):
+        too_many = [NOT_YET_SAID]
     said = (DECISION_PHRASES["do_not_connect"] if any(ln.startswith("⛔") for ln in lines)
             else too_many[0] if too_many else UNCHECKED_PIN)
     if needs_decision and codex:

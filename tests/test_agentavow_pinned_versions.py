@@ -789,7 +789,7 @@ def test_out_of_time_packages_are_named_not_dropped(tmp_path, pc, pi, monkeypatc
     monkeypatch.setattr(pi, "PKG_BUDGET", 0.0)
     monkeypatch.setattr(pc, "_fetch", lambda path, params: pytest.fail("no time to ask"))
     lines, needs, checked = pi._check_packages("npm i p1 p2@1.0.0", pc, {}, time.time())
-    assert lines == ["❔ not checked: p1, p2@1.0.0 — AgentAvow ran out of time for this "
+    assert lines == ["❔ not checked: p1, p2@1.0.0 — AgentAvow did not answer in time for this "
                      "command. The install goes ahead."]
     assert (needs, checked) == (False, 0)  # slow is not a reason to stop (fail-open)
 
