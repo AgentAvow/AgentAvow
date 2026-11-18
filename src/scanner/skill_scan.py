@@ -341,6 +341,13 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md",
     result.findings.extend(_bc_findings)
     result.coverage_gaps.update(_bc_gaps)
 
+    # 2d. a hook the skill writes into the agent's own settings (~/.claude/settings.json,
+    # ~/.codex/config.toml, .cursor/hooks.json): a low capability note, never scored
+    # (src/scanner/skill_settings_hook.py).
+    from src.scanner.skill_settings_hook import settings_hook_findings
+    for path in sorted(files):
+        result.findings.extend(settings_hook_findings(path, files[path] or ""))
+
     # 3. lifecycle-hook / plugin escalation
     for path, text in files.items():
         base = path.rsplit("/", 1)[-1].lower()
