@@ -255,7 +255,40 @@ def _install_checks_enabled() -> bool:
     return os.environ.get(INSTALL_ENV, "").strip().lower() not in ("off", "0", "false", "no")
 
 
-_SEGMENTS = re.compile(r"&&|\|\||;|\n|\||&")  # run after _strip_redirections
+def _split_segments(command: str) -> list[str]:
+    """``command`` cut into simple commands at ``&& || ; | &`` and newlines that sit
+    outside quotes (run after _strip_redirections). A ``;`` inside a quoted argument,
+    such as a pip environment marker in ``'pkg==1.0; python_version>"3"'``, does not
+    end the command."""
+    out: list[str] = []
+    cur: list[str] = []
+    i, n, quote = 0, len(command), ""
+    while i < n:
+        c = command[i]
+        if quote:
+            cur.append(c)
+            if c == "\\" and quote == '"' and i + 1 < n:
+                cur.append(command[i + 1])
+                i += 1
+            elif c == quote:
+                quote = ""
+            i += 1
+            continue
+        if c == "\\" and i + 1 < n:
+            cur.append(command[i:i + 2])
+            i += 2
+            continue
+        if c in "'\"":
+            quote = c
+        elif c in ";|&\n":
+            out.append("".join(cur))
+            cur = []
+            i += 2 if command[i:i + 2] in ("&&", "||") else 1
+            continue
+        cur.append(c)
+        i += 1
+    out.append("".join(cur))
+    return out
 
 
 def _strip_redirections(command: str) -> str:
@@ -415,10 +448,18 @@ def _install_argv(argv: list[str]) -> tuple[str, list[str]] | None:
 
 
 def _npm_spec(token: str) -> tuple[str, str] | None:
+    """(package, version spec) for one npm install argument. An alias
+    (``name@npm:other@1.2.3``, or ``npm:other@1.2.3``) installs ``other``, so the
+    target is what is returned and graded, never the alias name."""
     low = token.strip()
-    if not low or low.startswith(("file:", "link:", "git", "http", ".", "/", "~", "npm:",
+    if low[:4].lower() == "npm:":
+        return _npm_spec(low[4:]) if low[4:5] else None
+    if not low or low.startswith(("file:", "link:", "git", "http", ".", "/", "~",
                                   "workspace:", "github:")) or low.endswith((".tgz", ".tar.gz")):
         return None
+    _, sep, rest = low[1:].partition("@") if low.startswith("@") else low.partition("@")
+    if sep and rest[:4].lower() == "npm:":
+        return _npm_spec(rest)  # name@npm:target@ver -> the target
     if "/" in low and not low.startswith("@"):
         return None  # owner/repo GitHub shorthand: no registry grade
     if low.startswith("@"):
@@ -437,13 +478,48 @@ def _pypi_spec(token: str, pc) -> tuple[str, str] | None:
     return pc._pypi_name_spec(t)
 
 
-def _package_installs(command: str, pc) -> list[tuple[str, str, str]]:
-    """Every (registry, package, version spec) a shell command installs, in order,
-    de-duplicated, capped at PKG_CAP. A bare ``npm install`` (lockfile), a requirements
-    file, local paths, git URLs and tarballs are not registry packages and are skipped."""
-    out: list[tuple[str, str, str]] = []
-    seen: set[tuple[str, str]] = set()
-    for seg in _SEGMENTS.split(_strip_redirections(command or "")):
+# Flags (and environment settings) that install from somewhere other than the public
+# npm registry / PyPI. AgentAvow grades the public package, which may not be the one a
+# private or extra index serves under the same name, so such a package is named as not
+# checked rather than graded as if it came from the public registry.
+_OTHER_INDEX_FLAGS = frozenset({
+    "--registry", "-i", "--index-url", "--extra-index-url", "-f", "--find-links",
+    "--index", "--default-index",
+})
+_OTHER_INDEX_ENV = frozenset({
+    "npm_config_registry", "pip_index_url", "pip_extra_index_url", "pip_find_links",
+    "uv_index_url", "uv_extra_index_url", "uv_index", "uv_default_index", "uv_find_links",
+})
+
+
+def _other_index(argv: list[str], args: list[str], installer: str) -> bool:
+    """Whether this install names a registry or package index other than the default."""
+    for a in argv:
+        if not _ENV_ASSIGN.match(a):
+            break
+        if a.split("=", 1)[0].lower() in _OTHER_INDEX_ENV:
+            return True
+    js = installer in _JS_VERBS
+    flags = {"--registry"} if js else _OTHER_INDEX_FLAGS | {"--source"}
+    for a in args:
+        if a == "--":
+            break
+        flag = a.split("=", 1)[0]
+        if flag in flags or (js and flag.startswith("--@") and flag.endswith(":registry")):
+            return True
+    return False
+
+
+def _parse_installs(command: str, pc) -> list[dict]:
+    """Every package a shell command installs, in order: {registry, pkg, spec, version
+    (the exact pin or None), other_index}. One entry per (registry, name, exact pin), so
+    ``npm i foo@1.0.0 foo@1.0.15`` checks both releases; the packages of the first
+    PKG_CAP names are kept. A bare ``npm install`` (lockfile), a requirements file, local
+    paths, git URLs and tarballs are not registry packages and are skipped."""
+    out: list[dict] = []
+    seen: set[tuple[str, str, str | None]] = set()
+    names: list[tuple[str, str]] = []
+    for seg in _split_segments(_strip_redirections(command or "")):
         try:
             argv = shlex.split(seg)
         except ValueError:
@@ -452,6 +528,7 @@ def _package_installs(command: str, pc) -> list[tuple[str, str, str]]:
         if not hit:
             continue
         registry, installer, args = hit
+        other = _other_index(argv, args, installer)
         value_flags = _FLAGS_BY_INSTALLER[installer]
         skip_next = False
         for a in args:
@@ -468,12 +545,24 @@ def _package_installs(command: str, pc) -> list[tuple[str, str, str]]:
             parsed = _npm_spec(a) if registry == "npm" else _pypi_spec(a, pc)
             if not parsed:
                 continue
-            key = (registry, parsed[0].lower())
+            version = pc._exact_version(registry, parsed[1])
+            name_key = (registry, parsed[0].lower())
+            key = (*name_key, version)
             if key in seen:
                 continue
+            if name_key not in names:
+                if len(names) >= PKG_CAP:
+                    continue
+                names.append(name_key)
             seen.add(key)
-            out.append((registry, parsed[0], parsed[1]))
-    return out[:PKG_CAP]
+            out.append({"registry": registry, "pkg": parsed[0], "spec": parsed[1],
+                        "version": version, "other_index": other})
+    return out
+
+
+def _package_installs(command: str, pc) -> list[tuple[str, str, str]]:
+    """Every (registry, package, version spec) a shell command installs (_parse_installs)."""
+    return [(p["registry"], p["pkg"], p["spec"]) for p in _parse_installs(command, pc)]
 
 
 def _is_deprecation_only(r: dict) -> bool:
@@ -534,7 +623,7 @@ def _check_packages(command: str, pc, cache: dict, now: float
     if not _install_checks_enabled():
         return [], False, 0
     try:
-        pkgs = _package_installs(command, pc)
+        pkgs = _parse_installs(command, pc)
     except Exception:
         return [], False, 0
     lines: list[str] = []
@@ -542,8 +631,21 @@ def _check_packages(command: str, pc, cache: dict, now: float
     checked = 0
     fresh = 0
     started = time.monotonic()
-    for registry, pkg, spec in pkgs:
+    # A name given with more than one exact release (``foo@1.0.0 foo@1.0.15``): every
+    # release is checked and the worst answer counts. If one of them gets no answer, the
+    # install is put to the person, since which release lands is not known.
+    pins: dict[tuple[str, str], set[str]] = {}
+    for p in pkgs:
+        if p["version"] and not p["other_index"]:
+            pins.setdefault((p["registry"], p["pkg"].lower()), set()).add(p["version"])
+    conflicting = {k for k, v in pins.items() if len(v) > 1}
+    answered: set[tuple[str, str, str | None]] = set()
+    for p in pkgs:
+        registry, pkg, spec = p["registry"], p["pkg"], p["spec"]
         t = pc._dep(registry, pkg, spec)
+        if p["other_index"]:
+            lines.append(_other_index_line(t, pc))
+            continue
         entry = cache.get(t["name"])
         r: dict | None = None
         if pc._is_cached(entry, t["id"], now) and isinstance(entry, dict) and "score" in entry:
@@ -581,11 +683,36 @@ def _check_packages(command: str, pc, cache: dict, now: float
             rec["spec"] = spec
             cache[t["name"]] = rec
         checked += 1
+        answered.add((registry, pkg.lower(), p["version"]))
         line = _package_line(t, r, pc)
         if line:
             lines.append(line)
         needs = needs or pc._dval(r) == "do_not_connect"
+    for registry, low in sorted(conflicting):
+        missing = sorted(v for v in pins[(registry, low)]
+                         if (registry, low, v) not in answered)
+        if missing:
+            needs = True
+            pkg = next(p["pkg"] for p in pkgs
+                       if p["registry"] == registry and p["pkg"].lower() == low)
+            lines.append(
+                f"❔ {registry} package '{pkg}': this command names more than one version "
+                f"({', '.join(sorted(pins[(registry, low)]))}) and "
+                f"{', '.join(missing)} could not be checked, so it is not known whether the "
+                "release that gets installed is safe.")
     return lines, needs, checked
+
+
+UNCHECKED_PIN = "not every version this command names could be checked"
+
+
+def _other_index_line(t: dict, pc) -> str:
+    """A package installed from a registry or index other than the public one."""
+    index = "registry" if t["registry"] == "npm" else "package index"
+    public = "npm registry" if t["registry"] == "npm" else "PyPI"
+    return (f"❔ {_pkg_coord(t, pc)}: not checked — this command installs it from another "
+            f"{index}, and AgentAvow grades the package on the public {public}, which may "
+            "not be the same package. The install goes ahead.")
 
 
 def _bump_stats(cache: dict, pc, checked: int, flagged: int, now: float) -> None:
@@ -894,12 +1021,13 @@ def _ask_about_allow_list(codex: bool = False) -> None:
         "permissionDecisionReason": reason}}))
 
 
-def codex_deny_reason(body: str, targets: list[dict], pkg_lines: list[str]) -> str:
+def codex_deny_reason(body: str, targets: list[dict], pkg_lines: list[str],
+                      said: str = DECISION_PHRASES["do_not_connect"]) -> str:
     """Why a Codex step was stopped and how to go ahead anyway. Codex has no "ask", so
     a Do not connect answer is a deny (owner's call, 2026-11-17); the person can still
     do it themselves outside Codex."""
     what = "add this server" if targets and not pkg_lines else "install this"
-    return (body + f"\nAgentAvow says: {DECISION_PHRASES['do_not_connect']}, so it stopped this "
+    return (body + f"\nAgentAvow says: {said}, so it stopped this "
             f"step (Codex cannot ask you first). If you reviewed the report and still want to "
             f"{what}, run the same command yourself in your own terminal outside Codex, or "
             "switch AgentAvow's hooks off in Codex (/hooks) for this session. Do not retry "
@@ -983,8 +1111,12 @@ def main() -> None:
                                         "you continue; they decide whether to proceed.",
         },
     }
+    # Do not connect, unless the only reason to stop is a release that went unchecked
+    # (a command naming several versions of one package).
+    said = (DECISION_PHRASES["do_not_connect"] if any(ln.startswith("⛔") for ln in lines)
+            else UNCHECKED_PIN)
     if needs_decision and codex:
-        reason = codex_deny_reason(body, targets, pkg_lines)
+        reason = codex_deny_reason(body, targets, pkg_lines, said)
         out["hookSpecificOutput"]["permissionDecision"] = "deny"
         out["hookSpecificOutput"]["permissionDecisionReason"] = reason
         out["hookSpecificOutput"]["additionalContext"] = (
@@ -994,7 +1126,7 @@ def main() -> None:
     elif needs_decision:
         out["hookSpecificOutput"]["permissionDecision"] = "ask"
         out["hookSpecificOutput"]["permissionDecisionReason"] = (
-            body + f"\nAgentAvow says: {DECISION_PHRASES['do_not_connect']}. Continue anyway?")
+            body + f"\nAgentAvow says: {said}. Continue anyway?")
     print(json.dumps(out))
 
 

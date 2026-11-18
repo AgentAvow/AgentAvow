@@ -153,6 +153,21 @@ def _split_npm_spec(spec: str) -> tuple[str, str]:
     return pkg, ver
 
 
+def _npm_target(spec: str) -> tuple[str, str]:
+    """The package an npm spec really installs: an alias (``name@npm:other@1.2.3`` or
+    ``npm:other@1.2.3``) installs ``other``, so (``other``, ``1.2.3``) is graded, never
+    the alias name. Otherwise the same as _split_npm_spec."""
+    for _ in range(3):  # an alias of an alias is not valid npm; stop early anyway
+        if spec[:4].lower() == "npm:":
+            spec = spec[4:]
+            continue
+        pkg, ver = _split_npm_spec(spec)
+        if ver[:4].lower() != "npm:":
+            return pkg, ver
+        spec = ver[4:]
+    return _split_npm_spec(spec)
+
+
 def _strip_pypi_version(spec: str) -> str:
     """'mcp-server-git==0.1' / 'pkg[extra]>=1' / 'pkg@1.2' -> 'mcp-server-git' / 'pkg'."""
     return _split_pypi_spec(spec)[0]
@@ -356,7 +371,7 @@ def _resolve_target(name: str, cfg: dict) -> dict | None:
     if runner in _NPM_RUNNERS:
         spec = _pkg_from_args(args, ("-p", "--package"))
         if spec:
-            pkg, ver = _split_npm_spec(spec)
+            pkg, ver = _npm_target(spec)
             return _package_target(name, "npm", pkg, _exact_version("npm", ver))
     elif runner in _PYPI_RUNNERS:
         spec = _pkg_from_args(args, ("--from", "--spec"))
@@ -865,7 +880,13 @@ def _npm_dep_map(deps: object) -> list[dict]:
         if not isinstance(name, str) or not isinstance(spec, str):
             continue
         low = spec.strip().lower()
-        if low.startswith(("file:", "link:", "git", "http", "workspace:", "npm:", ".", "/")):
+        if low.startswith("npm:"):
+            # "name": "npm:other@1.2.3" installs other: grade that, at its pin
+            target, ver = _npm_target(spec.strip())
+            if target:
+                out.append(_dep("npm", target, ver))
+            continue
+        if low.startswith(("file:", "link:", "git", "http", "workspace:", ".", "/")):
             continue
         out.append(_dep("npm", name, spec))
     return out

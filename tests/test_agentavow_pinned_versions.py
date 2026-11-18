@@ -38,6 +38,7 @@ OLD = pins._api(45, "do_not_connect",
 ANSWERS = {
     ("/package/npm/gadgethumans-mcp", None): LATEST,
     ("/package/npm/gadgethumans-mcp", "1.0.15"): OLD,
+    ("/package/npm/gadgethumans-mcp", "1.2.4"): LATEST,
     ("/package/npm/@scope/tool", None): LATEST,
     ("/package/npm/@scope/tool", "1.0.15"): OLD,
     ("/package/pypi/pytool", None): LATEST,
@@ -489,3 +490,169 @@ def test_codex_npm_install_pinned_is_denied(tmp_path, api):
         s, "npm install gadgethumans-mcp@1.0.15")))
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "npm package 'gadgethumans-mcp@1.0.15'" in out["systemMessage"]
+
+
+# --- one name, several versions: every release is checked, the worst answer counts -----
+
+@pytest.mark.parametrize("cmd,want", [
+    ("npm i foo@1.0.0 foo@1.0.15", [("foo", "1.0.0"), ("foo", "1.0.15")]),
+    ("npm i foo@1.0.0 foo@1.0.0", [("foo", "1.0.0")]),            # same pin once
+    ("npm i foo foo@1.0.15", [("foo", None), ("foo", "1.0.15")]),
+    ("pip install foo==1.0 foo==1.0.15 foo==1.0", [("foo", "1.0"), ("foo", "1.0.15")]),
+    # five pins of one name do not push a second name past the cap
+    ("npm i a@1.0.1 a@1.0.2 a@1.0.3 a@1.0.4 a@1.0.5 b",
+     [("a", f"1.0.{i}") for i in range(1, 6)] + [("b", None)]),
+])
+def test_every_pinned_release_of_a_name_is_kept(pc, pi, cmd, want):
+    assert [(p["pkg"], p["version"]) for p in pi._parse_installs(cmd, pc)] == want
+
+
+@pytest.mark.parametrize("cmd", [
+    "npm i gadgethumans-mcp@1.2.4 gadgethumans-mcp@1.0.15",
+    "npm i gadgethumans-mcp@1.0.15 gadgethumans-mcp@1.2.4",
+])
+def test_a_bad_release_among_several_versions_asks(tmp_path, api, cmd):
+    s = _Session(tmp_path / "home")
+    h = _hso(s.pre_install(_claude_bash(s, cmd)))
+    assert h["permissionDecision"] == "ask"
+    assert "⛔ npm package 'gadgethumans-mcp@1.0.15': Do not connect" in h[
+        "permissionDecisionReason"]
+    assert sorted(v for _, v in api) == ["1.0.15", "1.2.4"]
+
+
+def test_a_single_good_pin_stays_silent(tmp_path, api):
+    s = _Session(tmp_path / "home")
+    assert s.pre_install(_claude_bash(s, "npm i gadgethumans-mcp@1.2.4")) == ""
+
+
+def test_an_unchecked_release_among_several_versions_asks(tmp_path, api, pi):
+    s = _Session(tmp_path / "home")
+    h = _hso(s.pre_install(_claude_bash(
+        s, "npm i gadgethumans-mcp@1.2.4 gadgethumans-mcp@9.9.9")))  # 9.9.9: no answer
+    assert h["permissionDecision"] == "ask"
+    reason = h["permissionDecisionReason"]
+    assert "names more than one version (1.2.4, 9.9.9) and 9.9.9 could not be checked" in reason
+    assert reason.endswith(f"AgentAvow says: {pi.UNCHECKED_PIN}. Continue anyway?")
+    assert "Do not connect" not in reason
+
+
+def test_codex_unchecked_release_among_several_versions_is_denied(tmp_path, api):
+    s = _codex_session(tmp_path)
+    out = _codex_accepts("PreToolUse", s.pre_install(_codex_bash(
+        s, "npm i gadgethumans-mcp@1.2.4 gadgethumans-mcp@9.9.9")))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "could not be checked" in out["systemMessage"]
+
+
+# --- npm aliases: the target is graded, never the alias name ----------------------------
+
+@pytest.mark.parametrize("cmd,want", [
+    ("npm i foo@npm:evil@1.0.15", [("evil", "1.0.15")]),
+    ("npm i foo@npm:evil", [("evil", None)]),
+    ("npm i @a/foo@npm:@b/evil@1.0.15", [("@b/evil", "1.0.15")]),
+    ("npm i npm:evil@1.0.15", [("evil", "1.0.15")]),
+    ("pnpm add foo@npm:evil@^1.0.0", [("evil", None)]),
+    ("npm i foo@1.0.15", [("foo", "1.0.15")]),                     # control: no alias
+])
+def test_npm_install_aliases_grade_the_target(pc, pi, cmd, want):
+    assert [(p["pkg"], p["version"]) for p in pi._parse_installs(cmd, pc)] == want
+
+
+@pytest.mark.parametrize("args,want_id", [
+    (["-y", "foo@npm:gadgethumans-mcp@1.0.15"], "npm:gadgethumans-mcp==1.0.15"),
+    (["-y", "foo@npm:gadgethumans-mcp"], "npm:gadgethumans-mcp"),
+    (["-p", "foo@npm:@scope/tool@1.0.15", "tool"], "npm:@scope/tool==1.0.15"),
+    (["--package=foo@npm:@scope/tool@1.0.15", "tool"], "npm:@scope/tool==1.0.15"),
+    (["-y", "npm:gadgethumans-mcp@1.0.15"], "npm:gadgethumans-mcp==1.0.15"),
+    (["-y", "foo@1.0.15"], "npm:foo==1.0.15"),                     # control: no alias
+])
+def test_npx_aliases_grade_the_target(pc, args, want_id):
+    assert pc._resolve_target("s", {"command": "npx", "args": args})["id"] == want_id
+
+
+def test_package_json_alias_grades_the_target(pc):
+    got = [(d["pkg"], d.get("version")) for d in pc._npm_dep_map(
+        {"foo": "npm:evil@1.0.15", "bar": "npm:@s/evil@^1", "baz": "1.0.0"})]
+    assert got == [("evil", "1.0.15"), ("@s/evil", None), ("baz", "1.0.0")]
+
+
+def test_alias_install_of_a_bad_release_asks(tmp_path, api):
+    s = _Session(tmp_path / "home")
+    h = _hso(s.pre_install(_claude_bash(s, "npm i foo@npm:gadgethumans-mcp@1.0.15")))
+    assert h["permissionDecision"] == "ask"
+    assert "npm package 'gadgethumans-mcp@1.0.15': Do not connect" in h[
+        "permissionDecisionReason"]
+    assert api == [("/package/npm/gadgethumans-mcp", "1.0.15")]
+    # control: the alias of the latest release is graded at latest
+    assert s.pre_install(_claude_bash(s, "npm i foo@npm:gadgethumans-mcp")) == ""
+
+
+def test_alias_server_and_dependency_are_graded_as_the_target(tmp_path, api):
+    s = _Session(tmp_path / "home")
+    (s.home / ".claude.json").write_text(json.dumps({"mcpServers": {
+        "gadget": {"command": "npx", "args": ["-y", "harmless@npm:gadgethumans-mcp@1.0.15"]}}}))
+    (s.project / "package.json").write_text(json.dumps(
+        {"dependencies": {"harmless": "npm:@scope/tool@1.0.15"}}))
+    ctx = _hso(s.precheck(pins._claude_payload(s, "SessionStart", source="startup")))[
+        "additionalContext"]
+    assert "⛔ MCP 'gadget' (npm:gadgethumans-mcp@1.0.15): Do not connect" in ctx
+    assert "⛔ dependency '@scope/tool' (npm:@scope/tool@1.0.15): Do not connect" in ctx
+
+
+# --- a pip environment marker inside one quoted argument ------------------------------
+
+@pytest.mark.parametrize("cmd,want", [
+    ("pip install 'pytool==1.0.15; python_version>\"3\"'", [("pytool", "==1.0.15")]),
+    ("pip install \"pytool==1.0.15; sys_platform=='linux'\" rich",
+     [("pytool", "==1.0.15"), ("rich", "")]),
+    ("pip install 'pytool>=1; python_version>\"3\"'", [("pytool", ">=1")]),
+    ("pip install pytool; echo done", [("pytool", "")]),           # control: a real ';'
+    ("pip install pytool && npm i 'a|b'", [("pytool", "")]),
+])
+def test_quoted_marker_is_part_of_the_requirement(pc, pi, cmd, want):
+    assert [(pkg, spec) for _, pkg, spec in pi._package_installs(cmd, pc)] == want
+
+
+def test_quoted_marker_pin_of_a_bad_release_asks(tmp_path, api):
+    s = _Session(tmp_path / "home")
+    h = _hso(s.pre_install(_claude_bash(
+        s, "pip install 'pytool==1.0.15; python_version>\"3\"'")))
+    assert h["permissionDecision"] == "ask"
+    assert s.pre_install(_claude_bash(s, "pip install 'pytool>=1; python_version>\"3\"'")) == ""
+
+
+# --- another registry or index: named as not checked, never graded as if public -------
+
+@pytest.mark.parametrize("cmd", [
+    "npm i --registry https://npm.internal.example gadgethumans-mcp",
+    "npm i --registry=https://npm.internal.example gadgethumans-mcp",
+    "npm i --@acme:registry=https://npm.internal.example gadgethumans-mcp",
+    "npm_config_registry=https://npm.internal.example npm i gadgethumans-mcp",
+    "pnpm add --registry https://npm.internal.example gadgethumans-mcp",
+    "pip install -i https://pypi.internal.example/simple pytool",
+    "pip install --index-url https://pypi.internal.example/simple pytool",
+    "pip install --extra-index-url=https://pypi.internal.example/simple pytool",
+    "pip install -f https://wheels.internal.example pytool",
+    "PIP_INDEX_URL=https://pypi.internal.example/simple pip install pytool",
+    "uv pip install --index https://pypi.internal.example/simple pytool",
+    "uv add --default-index https://pypi.internal.example/simple pytool",
+    "poetry add --source internal pytool",
+])
+def test_another_index_is_named_not_graded(tmp_path, api, cmd):
+    s = _Session(tmp_path / "home")
+    out = json.loads(s.pre_install(_claude_bash(s, cmd)))
+    msg = out["systemMessage"]
+    assert "not checked — this command installs it from another" in msg
+    assert "permissionDecision" not in out["hookSpecificOutput"]  # a note, never a stop
+    assert "internal.example" not in msg  # the index address is never repeated
+    assert api == []
+
+
+@pytest.mark.parametrize("cmd", [
+    "npm i gadgethumans-mcp", "pip install pytool", "uv add pytool",
+    "pip install --retries 2 pytool", "npm i --loglevel warn gadgethumans-mcp",
+])
+def test_default_index_is_graded_as_before(tmp_path, api, cmd):
+    s = _Session(tmp_path / "home")
+    assert s.pre_install(_claude_bash(s, cmd)) == ""  # Safe at latest: silent
+    assert len(api) == 1
