@@ -198,10 +198,10 @@ def test_regraded_only_when_the_declared_version_changes(hook, monkeypatch, caps
         return _ok(85, "safe")
 
     _run(hook, monkeypatch, capsys, scan)
-    assert _run(hook, monkeypatch, capsys, scan) == {} and calls == ["dep:npm:chalk@5.3.0"]
+    assert _run(hook, monkeypatch, capsys, scan) == {} and calls == ["dep:npm:chalk==5.3.0"]
     pj.write_text(json.dumps({"dependencies": {"chalk": "5.4.0"}}))
     out = _run(hook, monkeypatch, capsys, scan)
-    assert calls == ["dep:npm:chalk@5.3.0", "dep:npm:chalk@5.4.0"]
+    assert calls == ["dep:npm:chalk==5.3.0", "dep:npm:chalk==5.4.0"]  # exact pins
     assert "chalk@5.4.0" in out["hookSpecificOutput"]["additionalContext"]
 
 

@@ -9,6 +9,10 @@ tests/fixtures/agentavow_claude_pins.json byte for byte.
 The fixture was written by running this file against the 0.1.43 scripts:
     python tests/test_agentavow_claude_pins.py --write
 Only rewrite it on purpose, for a change to what Claude Code users see.
+
+Rewritten on purpose for 0.1.45 (an exact version pin is graded at that version): one
+line changed, the 'rev' server launched as ``npx -y rev-pkg@1.2.0`` now reads
+``(npm:rev-pkg@1.2.0)`` where it read ``(npm:rev-pkg)``.
 """
 from __future__ import annotations
 

@@ -175,7 +175,7 @@ def test_codex_config_servers_become_targets(tmp_path):
         got = {t["name"]: (t["id"], t["scope"]) for t in pc._targets()}
     assert got == {"good": ("https://good.example.com/mcp", "user"),
                    "bad": ("https://bad.example.com/mcp", "user"),
-                   "rev": ("npm:rev-pkg", "user")}
+                   "rev": ("npm:rev-pkg==1.2.0", "user")}
 
 
 def test_the_fallback_reader_reads_server_tables_like_tomllib():
@@ -248,7 +248,7 @@ def test_session_start_in_codex_grades_config_toml_servers(tmp_path):
     assert "'bad' Do not connect" in out["systemMessage"]
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert "MCP 'good' (https://good.example.com/mcp): Safe to connect" in ctx
-    assert "MCP 'rev' (npm:rev-pkg): Review before you connect" in ctx
+    assert "MCP 'rev' (npm:rev-pkg@1.2.0): Review before you connect" in ctx
     assert "configured for other projects" not in ctx
     # nothing new next time: the once-a-day line for your own (user-scope) servers, then
     # a quiet context; both valid for Codex
