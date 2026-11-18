@@ -6,6 +6,7 @@ from tests.service_guards import (
     MAX_WORKERS,
     TEST_REDIS_DB,
     flushable_redis_db,
+    run_token,
     worker_database_url,
     worker_redis_url,
 )
@@ -25,7 +26,7 @@ def _admin(url: str):
 
 
 def _recreate_worker_db(base_url: str, worker_url: str) -> None:
-    """Drop the worker's database and copy it again from the migrated base."""
+    """Copy the migrated base to the worker's database (dropping any leftover)."""
     import asyncio
 
     import asyncpg
@@ -52,17 +53,20 @@ def _recreate_worker_db(base_url: str, worker_url: str) -> None:
 
 # Set before anything imports src.config. The session flushes this Redis db, so
 # it must be the dedicated test db (see tests/service_guards.py). Under pytest -n,
-# each worker gets its own database, copied from the base test database every
-# run and dropped at the end, and its own Redis db.
+# each worker gets its own database, copied from the base test database and
+# dropped at the end, and its own Redis db. The copy's name carries the run's
+# xdist testrunuid, so two parallel runs from one base keep to their own copies.
 os.environ.setdefault("REDIS_URL", f"redis://localhost:6379/{TEST_REDIS_DB}")
 _WORKER = os.environ.get("PYTEST_XDIST_WORKER")
 _BASE_DB_URL = os.environ.get("DATABASE_URL", _DEFAULT_DB_URL)
 if _WORKER:
-    os.environ["DATABASE_URL"] = worker_database_url(_BASE_DB_URL, _WORKER)
+    _RUN = run_token(os.environ.get("PYTEST_XDIST_TESTRUNUID") or os.urandom(4).hex())
+    os.environ["DATABASE_URL"] = worker_database_url(_BASE_DB_URL, _WORKER, _RUN)
     os.environ["REDIS_URL"] = worker_redis_url(os.environ["REDIS_URL"], _WORKER)
     _recreate_worker_db(_BASE_DB_URL, os.environ["DATABASE_URL"])
 flushable_redis_db(os.environ["REDIS_URL"], _WORKER)
 
+import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from pwdlib import PasswordHash  # noqa: E402
 from pwdlib.hashers.bcrypt import BcryptHasher  # noqa: E402
@@ -78,6 +82,10 @@ auth_service._pwd_hasher = PasswordHash((BcryptHasher(rounds=4),))
 DB_URL = os.environ.get("DATABASE_URL", _DEFAULT_DB_URL)
 
 
+# optionalhook: pytest-xdist defines this hook, and without xdist installed a plain
+# implementation makes pytest abort ("unknown hook"). Registering it from
+# pytest_configure would be too late: xdist resolves -n auto in pytest_cmdline_main.
+@pytest.hookimpl(optionalhook=True)
 def pytest_xdist_auto_num_workers(config):
     """-n auto: one worker per core, up to one Redis db each."""
     return min(MAX_WORKERS, os.cpu_count() or 1)
