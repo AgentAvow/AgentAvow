@@ -8,6 +8,8 @@
 
 AgentAvow answers "is this tool safe for my agent to connect?" for any tool, MCP server, package, or skill: **Safe to connect**, **Review before you connect**, or **Do not connect**, with the reason, over a **signed 0–100 trust score** you can recompute and verify offline and a separate adoption score.
 
+![AgentAvow catching a changed MCP tool definition](https://raw.githubusercontent.com/AgentAvow/AgentAvow/main/demos/rugpull/media/rugpull-demo.gif)
+
 ## MCP Server — Trust & Security for AI Agents
 
 Check whether a tool is safe before your agent connects to it, from Claude, ChatGPT, Cursor, VS Code or any MCP client. For a local install:
@@ -157,6 +159,24 @@ npm run dev
 
 ## Environment Variables
 
+All backend settings live in one class, `Settings` in `src/config.py`, and every one
+of them is listed in `.env.example`. Code reads `settings.<name>`, not `os.environ`
+(a test fails on new direct reads under `src/`).
+
+Settings are checked when the service starts:
+
+- A malformed value (a number that isn't one, a `DATABASE_URL` that isn't PostgreSQL,
+  a `REDIS_URL` that isn't Redis, an unknown `ENVIRONMENT`) stops the service. The
+  error names each bad variable and never prints its value.
+- `ENVIRONMENT` is `local`, `staging` or `production`. When it is unset, it is
+  `production` if `DEBUG=false` and `local` if `DEBUG=true`.
+- In production the service refuses to start with the default `JWT_SECRET`, or with
+  `DATABASE_URL` or `REDIS_URL` pointing at localhost. Staging and local development
+  may use localhost. A few other production settings (`BASE_URL`, `CORS_ORIGINS`,
+  `ATTESTATION_SIGNING_KEY_ED25519`) only log a warning.
+
+See `docs/adr/0003-settings-validated-at-startup.md` for why.
+
 ### Required (`.env`)
 
 ```bash
@@ -171,6 +191,7 @@ JWT_SECRET=change-me-to-a-random-64-char-string
 ```bash
 APP_NAME=AgentAvow
 DEBUG=false
+ENVIRONMENT=            # local | staging | production (see above)
 JWT_ALGORITHM=HS256
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES=15
 JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
@@ -195,7 +216,9 @@ VITE_API_BASE_URL=http://localhost:8000/api/v1
 
 ## API Overview
 
-The public scanning API needs **no authentication**. All app endpoints use the `/api/v1` prefix; interactive API docs are at `/api/v1/docs` (Swagger) and `/api/v1/redoc` (`/docs` is the product documentation). `GET /health` (no prefix) checks DB + Redis connectivity.
+The public scanning API needs **no authentication**. All app endpoints use the `/api/v1` prefix; interactive API docs are at `/api/v1/docs` (Swagger) and `/api/v1/redoc` (`/docs` is the product documentation). `GET /health` (no prefix) checks DB + Redis connectivity. `GET /livez` answers 200 whenever the process is up (no dependency calls), and `GET /readyz` answers 200 when DB and Redis both respond within 2 s, or 503 naming the one that failed.
+
+The OpenAPI document is committed at [`docs/api/openapi.json`](docs/api/openapi.json) and served live at `/api/v1/openapi.json`. CI fails a PR when the committed file is stale (`make openapi` regenerates it) or when it breaks a client compared with the base branch: a removed route, parameter or response field, a changed type, or a newly required field. New public routes go under `/api/v1`. The `/mcp` connector is not in the document; its tool list has its own snapshot tests. See [ADR 0006](docs/adr/0006-api-contract.md).
 
 ### Public scan API (no auth)
 
@@ -229,6 +252,50 @@ The public scanning API needs **no authentication**. All app endpoints use the `
 | **Private scan** | `POST /account/private-scan` | Scan a private repo with a transiently-supplied GitHub token (never persisted) |
 | **Watches** | `/watches` | Create/list/delete tool watches for score, answer, Certified-mark and signed-definition change alerts |
 | **Alert webhook** | `/account/alert-webhook` | Configure (and test) the HMAC-signed webhook that receives change alerts |
+
+### Errors
+
+Errors come back as [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem details,
+content type `application/problem+json`:
+
+```json
+{
+  "type": "https://agentavow.com/problems/not_found",
+  "title": "Not found",
+  "status": 404,
+  "code": "not_found",
+  "detail": "Entity not found",
+  "instance": "/api/v1/entities/1b2c.../badges",
+  "request_id": "9f0c2e4b7a1d4c3e8b5a6f7d2e1c0b9a",
+  "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+}
+```
+
+Branch on `code` (stable; the list is in `src/errors/catalog.py`) or `status`, not on
+`title` or `detail`. `request_id` matches the `X-Request-ID` response header; quote it
+when you report a problem. A 422 for an invalid request also has `errors`, one entry
+per invalid field (`location`, `field`, `message`, `type`); its `detail` is still the
+list of validation errors it always was. A 500 never carries internal detail.
+
+Three kinds of route keep the old `application/json` `{"detail", "request_id"}` error
+body: the hosted MCP endpoint `/mcp` (JSON-RPC errors), badge and image routes, and
+`/.well-known/*`. See [ADR 0005](docs/adr/0005-errors-are-problem-json.md).
+
+### Safe retries
+
+Any POST or PATCH under `/api/v1` (watches, claims, webhook updates and the
+rest) accepts an optional `Idempotency-Key` header: 1 to 255 printable ASCII
+characters, a fresh value per write, the same value on each retry of it. A retry
+with the same key and request body gets the first answer again, with
+`Idempotent-Replayed: true`, for 24 hours, and the write runs once. The same key
+with a different request answers 422 `idempotency_key_reused`. A retry while the
+first request still runs answers 409 `idempotency_key_in_use` with `Retry-After`.
+The header is never required: without it a write runs as it always has. The public
+scan, beacon, auth and received-webhook routes ignore it, and so do the routes that
+mint or rotate a secret (API keys, signing secrets): a plaintext secret is never
+stored. A replay goes out only after the credential passes the same check the
+route runs, so a logged-out token or a revoked key gets a 401. See
+[ADR 0007](docs/adr/0007-idempotency-key.md).
 
 ## Project Structure
 
@@ -321,7 +388,8 @@ are never touched. Tests hash passwords at bcrypt cost 4 by swapping the hasher 
 - CORS with configurable origins
 - Rate limiting (read, write, auth-specific limits)
 - Security headers (HSTS, X-Frame-Options, X-Content-Type-Options, etc.)
-- Request ID correlation for tracing
+- Request ID correlation for tracing: every response carries `X-Request-ID` (yours, when you send a safe one of up to 128 characters of `A-Z a-z 0-9 . _ : -`; otherwise a generated 32-character id) and a W3C `traceparent` that continues your trace when you send one
+- Structured logs: one JSON object per line in production, each carrying the request id and trace id; tokens, API keys, cookies, passwords, webhook secrets, JWTs and email addresses are redacted before a line is written (`src/observability/`)
 - Content filtering with HTML sanitization
 - HMAC-SHA256 webhook signing
 - Bcrypt password hashing

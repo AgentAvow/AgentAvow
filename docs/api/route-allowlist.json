@@ -1,0 +1,124 @@
+{
+  "_about": "Routes allowed to sit outside the versioned API contract. tests/test_openapi_contract.py fails when a route is registered outside /api/v<N> and is not in outside_version_prefix, or is under /api/v<N> but hidden from the OpenAPI document and is not in not_in_openapi. Every entry needs a reason. An entry with \"conditional\": true may be absent (it is registered only when an optional package is installed). See docs/adr/0006-api-contract.md.",
+  "outside_version_prefix": [
+    {
+      "path": "/mcp",
+      "reason": "Hosted MCP connector (Streamable HTTP, JSON-RPC), mounted as an ASGI app at the public URL agentavow.com/mcp that the published ChatGPT app and Claude connectors use. Not in the OpenAPI document; its tool list is pinned by the /mcp snapshot tests instead."
+    },
+    {
+      "path": "/.well-known/jwks.json",
+      "reason": "Public signing keys (RFC 7517) at the RFC 8615 well-known path. did:web:agentgraph.co and every offline attestation verifier fetch them here."
+    },
+    {
+      "path": "/.well-known/did.json",
+      "reason": "did:web document for the Bluesky feed generator; AT Protocol resolves it at this fixed path."
+    },
+    {
+      "path": "/.well-known/mcp-registry-auth",
+      "reason": "Domain proof the MCP registry fetches at this fixed path to verify we own the namespace."
+    },
+    {
+      "path": "/.well-known/agent-trust.json",
+      "reason": "Domain verification for the Open Agent Trust Registry (OATR), which fetches it at the well-known path."
+    },
+    {
+      "path": "/.well-known/interop-harness.json",
+      "reason": "CTEF v0.3.1 interop harness state, fetched by partner implementations at the well-known path."
+    },
+    {
+      "path": "/.well-known/webhook-test-vectors.json",
+      "reason": "Published test vectors referenced by URL from the open specs in docs/standards/."
+    },
+    {
+      "path": "/.well-known/cte-test-vectors.json",
+      "reason": "Published test vectors referenced by URL from the open specs in docs/standards/."
+    },
+    {
+      "path": "/.well-known/action-ref-near-miss-vectors.json",
+      "reason": "Published test vectors referenced by URL from the open specs in docs/standards/."
+    },
+    {
+      "path": "/.well-known/ctef-error-codes.json",
+      "reason": "Published CTEF error-code catalog referenced by URL from the open specs in docs/standards/."
+    },
+    {
+      "path": "/xrpc/app.bsky.feed.describeFeedGenerator",
+      "reason": "Bluesky feed generator endpoint; the AT Protocol fixes this path."
+    },
+    {
+      "path": "/xrpc/app.bsky.feed.getFeedSkeleton",
+      "reason": "Bluesky feed generator endpoint; the AT Protocol fixes this path."
+    },
+    {
+      "path": "/health",
+      "reason": "Health check read by scripts/deploy-prod.sh, rollback, the capacity and health-check scripts and outside monitors. Its body and path stay as they are."
+    },
+    {
+      "path": "/livez",
+      "reason": "Liveness probe (#404). Probes use the unversioned path; not in the OpenAPI document."
+    },
+    {
+      "path": "/readyz",
+      "reason": "Readiness probe (#404). Probes use the unversioned path; not in the OpenAPI document."
+    },
+    {
+      "path": "/metrics",
+      "reason": "Prometheus scrape endpoint for the host's own monitoring, not a client API. Registered only when prometheus-fastapi-instrumentator is installed.",
+      "conditional": true
+    }
+  ],
+  "not_in_openapi": [
+    {
+      "path": "/api/v1/openapi.json",
+      "reason": "The OpenAPI document itself."
+    },
+    {
+      "path": "/api/v1/docs",
+      "reason": "Swagger UI page for the API, an HTML page, not an API operation."
+    },
+    {
+      "path": "/api/v1/redoc",
+      "reason": "ReDoc page for the API, an HTML page, not an API operation."
+    },
+    {
+      "path": "/api/v1/",
+      "reason": "Trailing-slash twin of GET /api/v1 (which is in the document), kept so nginx's 301 does not loop."
+    },
+    {
+      "path": "/api/v1/ws",
+      "reason": "WebSocket endpoint; OpenAPI does not describe WebSockets."
+    },
+    {
+      "path": "/api/v1/docpages",
+      "reason": "Server-rendered HTML docs pages for crawlers, not a JSON API."
+    },
+    {
+      "path": "/api/v1/docpages/{slug}",
+      "reason": "Server-rendered HTML docs pages for crawlers, not a JSON API."
+    },
+    {
+      "path": "/api/v1/legal/privacy",
+      "reason": "Server-rendered HTML legal page, not a JSON API."
+    },
+    {
+      "path": "/api/v1/legal/terms",
+      "reason": "Server-rendered HTML legal page, not a JSON API."
+    },
+    {
+      "path": "/api/v1/badges/trust/{entity_id}.svg",
+      "reason": "HEAD twin of the GET badge route (the GET is in the document) for caches, link checkers and image proxies. Kept out of the document so client generators do not get a second operation with the same operationId."
+    },
+    {
+      "path": "/api/v1/public/scan/og.png",
+      "reason": "Social preview image for crawlers, PNG bytes, not a JSON API."
+    },
+    {
+      "path": "/api/v1/public/plugin/active",
+      "reason": "The Claude Code plugin's once-a-day active ping (204, no body). A client depends on it but it is deliberately undocumented; its shape is pinned by the plugin tests, not this diff."
+    },
+    {
+      "path": "/api/v1/public/scan-catalog/refresh",
+      "reason": "Admin-only trigger that rebuilds one worker's in-memory catalog, not for clients."
+    }
+  ]
+}

@@ -12,6 +12,7 @@ export default function VerifyEmail() {
 
   useEffect(() => {
     if (!token) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- missing-token error shown before the verify request would run
       setStatus('error')
       setMessage('No verification token provided.')
       return

@@ -327,5 +327,7 @@ async def start_worker() -> None:
 # --- CLI entry point -------------------------------------------------------
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    from src.observability import setup_logging
+
+    setup_logging()
     asyncio.run(start_worker())

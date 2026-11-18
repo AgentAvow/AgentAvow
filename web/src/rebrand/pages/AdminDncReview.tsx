@@ -92,23 +92,28 @@ export default function DncReviewPanel() {
     staleTime: 60_000,
   })
   const items = data?.items || []
+  // Default view: what is new this week, i.e. the library run's own Do not connect
+  // answers plus any read whose reason has since changed. The daily refresh re-checks
+  // every tool, so "checked in the last 7 days" alone lists every Do not connect.
+  const fresh = items.filter((c) => c.from_catalog_growth || c.status === 'changed')
   const open = items.filter((c) => c.status === 'pending' || c.status === 'changed').length
   const [showAll, setShowAll] = useState(false)
-  const shown = showAll ? items : items.slice(0, 8)
+  const shown = showAll ? items : fresh
   return (
     <Section
       title="Do not connect review"
-      scope={isLoading ? 'loading…' : `Last 7 days · ${open} to read · ${items.length} in all`}
-      note="Tools that read Do not connect now and were checked in the last 7 days. Read the finding on its result page, then Confirm (it can appear on the Trust Index card “Do not connect this week”) or Not confirmed (it stays off every highlight). A new reason after a re-check needs a new read."
+      scope={isLoading ? 'loading…' : `Last 7 days · ${fresh.length} new · ${open} to read · ${items.length} in all`}
+      note="New by default: Do not connect answers from this week's library run, plus any whose reason changed since your last read. “Show all” adds every tool that reads Do not connect and was re-checked in the last 7 days. Read the finding on its result page, then Confirm (it can appear on the Trust Index card “Do not connect this week”) or Not confirmed (it stays off every highlight)."
     >
       {isError && <p className="text-[13px] text-danger">Could not load the review list.</p>}
       {!isLoading && !isError && !items.length && <p className="text-[13px] text-text-muted">Nothing reads Do not connect from the last 7 days.</p>}
+      {!isLoading && !isError && items.length > 0 && !shown.length && <p className="text-[13px] text-text-muted">Nothing new from this week's library run.</p>}
       <div className="grid gap-3">
         {shown.map((c) => <Row key={c.page_key} c={c} onDone={() => qc.invalidateQueries({ queryKey: ['admin-dnc-reviews'] })} />)}
       </div>
-      {items.length > 8 && (
+      {items.length > fresh.length && (
         <button type="button" onClick={() => setShowAll((v) => !v)} className="mt-3 text-[12.5px] font-semibold text-primary-light hover:text-primary">
-          {showAll ? 'Show fewer' : `Show all ${items.length}`}
+          {showAll ? 'Show new only' : `Show all ${items.length}`}
         </button>
       )}
     </Section>

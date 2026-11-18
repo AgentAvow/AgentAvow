@@ -48,7 +48,7 @@ const GROUPS: { title: string; sub: string; items: Item[] }[] = [
     title: 'Where you work',
     sub: 'Install once, or add the connector and ask before you connect something.',
     items: [
-      { name: 'Claude Code and Cowork plugin', tag: 'Start here · checks by itself', tone: 'rec', text: 'In the Claude plugin directory. Checks new MCP servers and packages automatically, and warns you before your agent uses one.', actions: [{ kind: 'link', label: 'Install →', href: '/rebrand/claude-code' }] },
+      { name: 'Claude Code and Cowork plugin', tag: 'Start here · checks by itself', tone: 'rec', text: 'Two commands from our GitHub marketplace, always the current version. Checks new MCP servers and packages automatically, and warns you before your agent uses one.', actions: [{ kind: 'link', label: 'Install →', href: '/rebrand/claude-code' }] },
       { name: 'Claude and ChatGPT', tag: 'Checks when you ask', tone: 'apps', text: 'The connector in Claude and the app in ChatGPT. Ask before you connect anything, right in the chat.', actions: [{ kind: 'apps' }] },
       { name: 'Codex', tag: 'Checks when you ask', text: code(codexCmd(MCP)), actions: [{ kind: 'link', label: 'Setup →', href: '/rebrand/docs/mcp-connector' }] },
       { name: 'Cursor', tag: 'Checks when you ask', text: 'One-click install of the connector. Also listed on cursor.directory.', actions: [{ kind: 'link', label: 'Add to Cursor ↗', href: cursorInstall(MCP) }] },

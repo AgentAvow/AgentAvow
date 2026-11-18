@@ -431,6 +431,7 @@ function ToolRow({ c, highlight = false }: { c: Claim; highlight?: boolean }) {
   // user's eye lands on exactly the next step.
   useEffect(() => {
     if (highlight && c.status !== 'verified') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- react to a fresh claim: open the proof panel and pulse the highlight
       setShowVerify(true); setRing(true)
       const t = setTimeout(() => setRing(false), 2600)
       return () => clearTimeout(t)

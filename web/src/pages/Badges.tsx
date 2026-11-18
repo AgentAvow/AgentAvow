@@ -70,6 +70,7 @@ export default function Badges() {
 
   useEffect(() => {
     if (!user) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loading flag for the fetch this effect starts
     setLoadingAgents(true)
     api
       .get('/agents')

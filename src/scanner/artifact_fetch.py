@@ -561,8 +561,17 @@ class _BoundedMembers:
         self.entries = 0
 
     # -- hard guards (raise) -----------------------------------------------------
-    def walk(self, name: str, size: int, compressed: int | None = None) -> None:
-        """Account one archive entry before anything is read. Raises on a bomb."""
+    def walk(self, name: str, size: int, compressed: int | None = None) -> bool:
+        """Account one archive entry before anything is read. Raises on a bomb.
+
+        Returns False when this one member must not be read: its own compression
+        ratio is implausible and it is not source or a manifest anywhere in the tree
+        (data blobs, binaries, models). Real packages ship such data (onnx's all-zero
+        ``.pb`` test tensors), so it is skipped unread and recorded rather than
+        failing the scan. Any source or manifest member, including in test, example
+        and doc folders, still fails the scan: skipping it would let a payload
+        padded with zeros vanish into a clean result. The archive-wide guards always raise.
+        """
         self.entries += 1
         if self.entries > HARD_ENTRY_COUNT:
             raise ArtifactFetchError(
@@ -571,13 +580,20 @@ class _BoundedMembers:
         self.walked_bytes += size
         if self.walked_bytes > HARD_UNPACKED_BYTES:
             raise ArtifactFetchError("archive decompresses past the hard ceiling (zip bomb?)")
-        if (compressed is not None and size >= _RATIO_MEMBER_FLOOR
-                and size > MAX_MEMBER_RATIO * max(1, compressed)):
-            raise ArtifactFetchError(
-                f"member compression ratio is implausible (zip bomb?): {name}")
         if (self.walked_bytes >= _RATIO_ARCHIVE_FLOOR
                 and self.walked_bytes > MAX_ARCHIVE_RATIO * self.archive_size):
             raise ArtifactFetchError("archive compression ratio is implausible (zip bomb?)")
+        if (compressed is not None and size >= _RATIO_MEMBER_FLOOR
+                and size > MAX_MEMBER_RATIO * max(1, compressed)):
+            _tier, scannable = _member_class(name)
+            if scannable or _scan_helpers()[4](name):
+                # Any source file, wherever it sits: test, example and doc folders
+                # are read too (payloads, imported "testing" modules).
+                raise ArtifactFetchError(
+                    f"member compression ratio is implausible (zip bomb?): {name}")
+            self.report.add(name, size, "implausible compression ratio", False)
+            return False
+        return True
 
     # -- soft budget (skip / evict, never raise) -----------------------------------
     def admit(self, name: str, size: int) -> bool:
@@ -697,13 +713,14 @@ def _unpack_zip(raw: bytes | IO[bytes], report: SkipReport | None = None,
         for info in zf.infolist():
             name = info.filename
             is_dir = name.endswith("/")
-            box.walk(name, 0 if is_dir else info.file_size,
-                     None if is_dir else info.compress_size)
+            readable = box.walk(name, 0 if is_dir else info.file_size,
+                                None if is_dir else info.compress_size)
             if is_dir:
                 continue  # directory entry
             if _is_unsafe_member_name(name):
                 raise ArtifactFetchError(f"unsafe member path: {name!r}")
-            infos.append(info)
+            if readable:
+                infos.append(info)
         # Read in priority order so the budget goes to what the engine reads; ties keep
         # archive order (stable sort), so the result is deterministic.
         infos.sort(key=lambda i: _member_class(i.filename)[0])
