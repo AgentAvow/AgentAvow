@@ -659,7 +659,27 @@ def _codex_plugin_dirs() -> list[pathlib.Path]:
             continue
         if versions:
             out.append(max(versions, key=lambda d: d.stat().st_mtime))
+    _note_past_cap("installed Codex plugins", [d.parent.name for d in out[PLUGIN_DIRS_CAP:]],
+                   "their MCP servers were not checked")
     return out[:PLUGIN_DIRS_CAP]
+
+
+# What a session start left unread because of a cap (more plugins or sub-projects than it
+# reads). Never silent: the lines are added to the report (or, on a quiet start, to the
+# list Claude is given), naming what was not read. Reset at the start of each run.
+_NOT_READ: list[str] = []
+NOT_READ_NAMES = 8  # names listed per note; the rest are counted
+
+
+def _note_past_cap(what: str, names: list[str], why: str) -> None:
+    if not names:
+        return
+    shown = ", ".join(names[:NOT_READ_NAMES])
+    more = f" and {len(names) - NOT_READ_NAMES} more" if len(names) > NOT_READ_NAMES else ""
+    line = (f"âž– not read: {len(names)} more {what} than one session start reads "
+            f"({shown}{more}); {why}.")
+    if line not in _NOT_READ:  # a list may be read twice in one start
+        _NOT_READ.append(line)
 
 
 def _codex_targets() -> list[dict]:
@@ -769,6 +789,8 @@ def _plugin_dirs() -> list[tuple[str, pathlib.Path]]:
                     out.append(("", d))
     except Exception:
         pass
+    _note_past_cap("installed plugins", [n or d.name for n, d in out[PLUGIN_DIRS_CAP:]],
+                   "their MCP servers were not checked")
     return out[:PLUGIN_DIRS_CAP]
 
 
@@ -1052,20 +1074,28 @@ def _subproject_deps(cwd: pathlib.Path) -> list[dict]:
     try:
         if cwd.resolve() == pathlib.Path.home().resolve():
             return []
-        subdirs = sorted(d for d in cwd.iterdir()
-                         if d.is_dir() and not d.name.startswith(".")
-                         and d.name not in _SKIP_SUBDIRS)[:SUBDIRS_SCAN_CAP]
+        every = sorted(d for d in cwd.iterdir()
+                       if d.is_dir() and not d.name.startswith(".")
+                       and d.name not in _SKIP_SUBDIRS)
     except Exception:
         return []
+    subdirs = every[:SUBDIRS_SCAN_CAP]
     found: list[dict] = []
     projects = 0
+    skipped: list[str] = []
     for d in subdirs:
         deps = _manifest_deps(d)
         if deps:
+            if projects >= SUBPROJECTS_CAP:
+                skipped.append(d.name)
+                continue
             found += deps
             projects += 1
-            if projects >= SUBPROJECTS_CAP:
-                break
+    if projects:  # only a workspace root whose sub-projects are read at all
+        _note_past_cap("sub-folders with a manifest", skipped,
+                       "their dependencies were not checked")
+        _note_past_cap("sub-folders", [d.name for d in every[SUBDIRS_SCAN_CAP:]],
+                       "they were not looked at for a manifest")
     return found
 
 
@@ -1251,12 +1281,14 @@ _LEGEND = ("Legend: each line leads with one of three answers and its reason. âœ
            "file; this list is the pre-check.")
 
 
-def _quiet_context(cache: dict, targets: list[dict], deps: list[dict]) -> None:
+def _quiet_context(cache: dict, targets: list[dict], deps: list[dict],
+                   not_read: list[str] | None = None) -> None:
     """Nothing new since the last start: say nothing to the person (no systemMessage),
     but give Claude the full graded list so "show the AgentAvow pre-check" answers from
-    the same rules as the summary instead of guessing from the cache file."""
+    the same rules as the summary instead of guessing from the cache file. ``not_read``:
+    what a cap left unread this start, named at the end of that list."""
     try:
-        earlier = _previously_graded(cache, targets, deps, [])
+        earlier = _previously_graded(cache, targets, deps, []) + list(not_read or [])
     except Exception:
         return
     if not earlier:
@@ -2183,6 +2215,7 @@ def main() -> None:
 
 def _main() -> None:
     payload = None
+    _NOT_READ.clear()
     try:
         payload = json.load(sys.stdin)  # the SessionStart payload: ``cwd`` is the session folder
     except Exception:
@@ -2288,12 +2321,13 @@ def _main() -> None:
             _print_install_only(install_clause.strip())
             return
         try:
-            if not deps and _show_fine_once_a_day(cache, targets, now):
+            if not deps and not _NOT_READ and _show_fine_once_a_day(cache, targets, now):
                 return
         except Exception:
             pass
-        _quiet_context(cache, targets, deps)
+        _quiet_context(cache, targets, deps, list(_NOT_READ))
         return
+    lines += _NOT_READ  # what a cap left unread, named (never silent)
 
     try:
         elsewhere = _servers_elsewhere(targets)

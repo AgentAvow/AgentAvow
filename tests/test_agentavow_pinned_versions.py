@@ -656,3 +656,190 @@ def test_default_index_is_graded_as_before(tmp_path, api, cmd):
     s = _Session(tmp_path / "home")
     assert s.pre_install(_claude_bash(s, cmd)) == ""  # Safe at latest: silent
     assert len(api) == 1
+
+
+# --- settings and wrappers in front of the install command ---------------------------
+
+@pytest.mark.parametrize("cmd", [
+    "env npm_config_registry=https://npm.internal.example npm i gadgethumans-mcp",
+    "env -u HOME npm_config_registry=https://npm.internal.example npm i gadgethumans-mcp",
+    "env -i PATH=/usr/bin PIP_INDEX_URL=https://pypi.internal.example pip install pytool",
+    "sudo -E env PIP_INDEX_URL=https://pypi.internal.example pip install pytool",
+    "sudo -u builder UV_INDEX_URL=https://pypi.internal.example uv pip install pytool",
+    "nice -n 5 nohup env npm_config_registry=https://npm.internal.example npm i "
+    "gadgethumans-mcp",
+    "time -p env UV_DEFAULT_INDEX=https://pypi.internal.example uv add pytool",
+    "command env npm_config_registry=https://npm.internal.example npm i gadgethumans-mcp",
+])
+def test_registry_setting_after_a_wrapper_is_named_not_graded(tmp_path, api, cmd):
+    s = _Session(tmp_path / "home")
+    out = json.loads(s.pre_install(_claude_bash(s, cmd)))
+    assert "not checked — this command installs it from another" in out["systemMessage"]
+    assert "permissionDecision" not in out["hookSpecificOutput"]
+    assert api == []
+
+
+@pytest.mark.parametrize("cmd", [
+    "env FOO=1 npm i gadgethumans-mcp",
+    "sudo -u builder pip install pytool",
+    "nice -n 5 npm i gadgethumans-mcp",
+    "env -u HOME pip install pytool",
+])
+def test_a_wrapper_without_a_registry_setting_is_graded(tmp_path, api, cmd):
+    s = _Session(tmp_path / "home")
+    assert s.pre_install(_claude_bash(s, cmd)) == ""  # graded (Safe at latest): silent
+    assert len(api) == 1 and api[0][1] is None
+
+
+@pytest.mark.parametrize("cmd,settings,rest", [
+    (["env", "A=1", "npm", "i", "x"], ["A=1"], ["npm", "i", "x"]),
+    (["sudo", "-u", "bob", "-E", "env", "-u", "H", "B=2", "pip", "install", "x"], ["B=2"],
+     ["pip", "install", "x"]),
+    (["nice", "-n", "5", "nohup", "npm", "i", "x"], [], ["npm", "i", "x"]),
+    (["/usr/bin/env", "--", "C=3", "npm", "i"], ["C=3"], ["npm", "i"]),
+    (["npm", "i", "x"], [], ["npm", "i", "x"]),
+])
+def test_unwrap(pi, cmd, settings, rest):
+    assert pi._unwrap(cmd) == (settings, rest)
+
+
+def test_codex_registry_setting_after_env_is_a_note_not_a_deny(tmp_path, api):
+    s = _codex_session(tmp_path)
+    out = _codex_accepts("PreToolUse", s.pre_install(_codex_bash(
+        s, "env npm_config_registry=https://npm.internal.example npm i gadgethumans-mcp")))
+    assert "from another registry" in out["systemMessage"]
+    assert "permissionDecision" not in out["hookSpecificOutput"]
+    assert api == []
+
+
+# --- more than one step checks: never silent ------------------------------------------
+
+FIVE = "p1 p2 p3 p4 p5"
+
+
+def test_a_sixth_package_is_named_and_asked_about(tmp_path, api, pi):
+    s = _Session(tmp_path / "home")
+    h = _hso(s.pre_install(_claude_bash(s, f"npm i {FIVE} gadgethumans-mcp@1.0.15 p7")))
+    assert h["permissionDecision"] == "ask"
+    reason = h["permissionDecisionReason"]
+    assert (f"{pi.TOO_MANY}: AgentAvow checks the first 5 packages named; not checked: "
+            "gadgethumans-mcp@1.0.15, p7.") in reason
+    assert reason.endswith(f"AgentAvow says: {pi.TOO_MANY}. Continue anyway?")
+    assert [p for p, _ in api] == [f"/package/npm/p{i}" for i in range(1, 6)]  # first 5
+
+
+def test_five_packages_are_not_too_many(tmp_path, api):
+    s = _Session(tmp_path / "home")
+    out = s.pre_install(_claude_bash(s, f"npm i {FIVE}"))  # all offline: nothing to say
+    assert out == ""
+    assert len(api) == 5
+
+
+def test_a_bad_package_within_the_cap_still_reads_do_not_connect(tmp_path, api):
+    s = _Session(tmp_path / "home")
+    h = _hso(s.pre_install(_claude_bash(s, "npm i gadgethumans-mcp@1.0.15 p2 p3 p4 p5 p6")))
+    assert "not checked: p6." in h["permissionDecisionReason"]
+    assert h["permissionDecisionReason"].endswith("AgentAvow says: Do not connect. Continue anyway?")
+
+
+def test_codex_sixth_package_is_denied(tmp_path, api, pi):
+    s = _codex_session(tmp_path)
+    out = _codex_accepts("PreToolUse", s.pre_install(_codex_bash(
+        s, f"npm i {FIVE} gadgethumans-mcp@1.0.15")))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert f"AgentAvow says: {pi.TOO_MANY}, so it stopped" in out["systemMessage"]
+
+
+def _mcp_json_write(s: _Session, n: int) -> dict:
+    servers = {f"s{i}": {"command": "npx", "args": ["-y", "gadgethumans-mcp"]}
+               for i in range(1, n + 1)}
+    return pins._claude_payload(
+        s, "PreToolUse", tool_name="Write", tool_use_id="toolu_09",
+        tool_input={"file_path": str(s.project / ".mcp.json"),
+                    "content": json.dumps({"mcpServers": servers})})
+
+
+def test_a_fourth_server_in_one_write_is_named_and_asked_about(tmp_path, api, pi):
+    s = _Session(tmp_path / "home")
+    h = _hso(s.pre_install(_mcp_json_write(s, 4)))
+    assert h["permissionDecision"] == "ask"
+    assert f"{pi.TOO_MANY_SERVERS}: AgentAvow checks the first 3 servers added; not " \
+           "checked: 's4'." in h["permissionDecisionReason"]
+    assert len(api) == 3  # the first three only
+    # control: three servers are not too many
+    s2 = _Session(tmp_path / "home2")
+    assert "permissionDecision" not in _hso(s2.pre_install(_mcp_json_write(s2, 3)))
+
+
+def test_codex_fourth_server_in_one_patch_is_denied(tmp_path, api, pi):
+    s = _codex_session(tmp_path)
+    body = "".join(f'+[mcp_servers.s{i}]\n+command = "npx"\n+args = ["-y", "gadgethumans-mcp"]\n'
+                   for i in range(1, 5))
+    patch = ("*** Begin Patch\n*** Add File: " + str(s.home / ".codex" / "config.toml")
+             + "\n" + body + "*** End Patch\n")
+    payload = dict(_codex_bash(s, ""), tool_name="apply_patch",
+                   tool_input={"command": patch})
+    out = _codex_accepts("PreToolUse", s.pre_install(payload))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "not checked: 's4'" in out["systemMessage"]
+    assert f"AgentAvow says: {pi.TOO_MANY_SERVERS}" in out["systemMessage"]
+
+
+def test_out_of_time_packages_are_named_not_dropped(tmp_path, pc, pi, monkeypatch):
+    monkeypatch.setattr(pi, "PKG_BUDGET", 0.0)
+    monkeypatch.setattr(pc, "_fetch", lambda path, params: pytest.fail("no time to ask"))
+    lines, needs, checked = pi._check_packages("npm i p1 p2@1.0.0", pc, {}, time.time())
+    assert lines == ["❔ not checked: p1, p2@1.0.0 — AgentAvow ran out of time for this "
+                     "command. The install goes ahead."]
+    assert (needs, checked) == (False, 0)  # slow is not a reason to stop (fail-open)
+
+
+# --- session start: a cap names what it left unread ----------------------------------
+
+def _workspace(s: _Session, n: int) -> None:
+    for i in range(1, n + 1):
+        d = s.project / f"svc{i}"
+        d.mkdir()
+        (d / "package.json").write_text(json.dumps({"dependencies": {f"dep{i}": "^1.0.0"}}))
+
+
+def test_sub_projects_past_the_cap_are_named(tmp_path, api):
+    s = _Session(tmp_path / "home")
+    _workspace(s, 7)
+    start = pins._claude_payload(s, "SessionStart", source="startup")
+    ctx = _hso(s.precheck(start))["additionalContext"]
+    assert ("➖ not read: 2 more sub-folders with a manifest than one session start reads "
+            "(svc6, svc7); their dependencies were not checked.") in ctx
+    # a quiet start still gives Claude the note (and nothing to the person)
+    out = json.loads(s.precheck(start))
+    assert "systemMessage" not in out
+    assert "(svc6, svc7)" in out["hookSpecificOutput"]["additionalContext"]
+
+
+def test_sub_projects_within_the_cap_get_no_note(tmp_path, api):
+    s = _Session(tmp_path / "home")
+    _workspace(s, 5)
+    out = s.precheck(pins._claude_payload(s, "SessionStart", source="startup"))
+    assert "not read" not in out
+
+
+def test_plugins_past_the_cap_are_named(tmp_path, pc, monkeypatch):
+    home = tmp_path / "home"
+    root = home / ".claude" / "plugins"
+    root.mkdir(parents=True)
+    plugins = {}
+    for i in range(1, 4):
+        d = tmp_path / f"plug{i}"
+        (d / ".claude-plugin").mkdir(parents=True)
+        plugins[f"plug{i}@m"] = [{"installPath": str(d), "scope": "user"}]
+    (root / "installed_plugins.json").write_text(json.dumps({"plugins": plugins}))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(pc, "PLUGIN_DIRS_CAP", 2)
+    pc._NOT_READ.clear()
+    assert [n for n, _ in pc._plugin_dirs()] == ["plug1", "plug2"]
+    assert pc._NOT_READ == ["➖ not read: 1 more installed plugins than one session start "
+                            "reads (plug3); their MCP servers were not checked."]
+    monkeypatch.setattr(pc, "PLUGIN_DIRS_CAP", 3)
+    pc._NOT_READ.clear()
+    pc._plugin_dirs()
+    assert pc._NOT_READ == []  # control: within the cap, nothing to say

@@ -64,7 +64,8 @@ _HERE = pathlib.Path(__file__).resolve().parent
 # Stored grades first so an install is not held up; one bounded fresh scan at most;
 # anything slow, unknown or unscannable stays silent (fail-open).
 INSTALL_ENV = "AGENTAVOW_INSTALL_CHECKS"  # "off" disables package-install checks
-PKG_CAP = 5            # packages checked per command
+PKG_CAP = 5            # packages checked per command (more: the person is asked)
+SERVER_CAP = 3         # servers checked per step (more: the person is asked)
 PKG_BUDGET = 14.0      # seconds for all package lookups in one command (hook timeout 20)
 FRESH_MAX = 1          # fresh scans per command for a package with no stored grade
 STATS_KEY = "install_checks"  # counter in the cache's meta entry, read at session start
@@ -184,7 +185,7 @@ def _servers_from_codex_patch(patch: str, pc) -> list[tuple[str, dict]]:
         elif line.startswith(" "):
             new_lines.append(line[1:])
     flush()
-    return out[:3]
+    return out  # main() checks the first SERVER_CAP and names the rest
 
 
 def _server_from_mcp_add(command: str) -> tuple[str, dict] | None:
@@ -417,12 +418,52 @@ _FLAGS_BY_INSTALLER = {k: frozenset((_VALUE_FLAGS | _EXTRA_VALUE_FLAGS[k])
 _NPM_NAME = re.compile(r"^(@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*$")
 
 
+# Commands that run another command, and their flags that take a value: ``sudo -u bob
+# env -u X FOO=1 nice -n 5 npm i x`` runs ``npm i x`` with FOO=1 set.
+_WRAPPERS: dict[str, frozenset[str]] = {
+    "sudo": frozenset({"-u", "--user", "-g", "--group", "-C", "--close-from", "-D",
+                       "--chdir", "-h", "--host", "-p", "--prompt", "-r", "--role", "-t",
+                       "--type", "-U", "--other-user", "-T", "--command-timeout"}),
+    "env": frozenset({"-u", "--unset", "-C", "--chdir", "-S", "--split-string", "-P"}),
+    "time": frozenset({"-o", "--output", "-f", "--format"}),
+    "nice": frozenset({"-n", "--adjustment"}),
+    "exec": frozenset({"-a"}),
+    "command": frozenset(),
+    "nohup": frozenset(),
+}
+
+
+def _unwrap(argv: list[str]) -> tuple[list[str], list[str]]:
+    """(the ``VAR=value`` settings, the command itself) for ``argv`` with any leading
+    settings and wrapper commands (sudo, env, time, nice, nohup, command, exec) and their
+    flags taken off."""
+    settings: list[str] = []
+    i, n = 0, len(argv)
+    while i < n:
+        a = argv[i]
+        if _ENV_ASSIGN.match(a):
+            settings.append(a)
+            i += 1
+            continue
+        name = a.rsplit("/", 1)[-1]
+        if name not in _WRAPPERS:
+            break
+        takes_value = _WRAPPERS[name]
+        i += 1
+        while i < n and argv[i].startswith("-") and argv[i] != "-":
+            flag = argv[i]
+            i += 1
+            if flag == "--":
+                break
+            if flag in takes_value and "=" not in flag:
+                i += 1  # its value
+    return settings, argv[i:]
+
+
 def _installer(argv: list[str]) -> tuple[str, str, list[str]] | None:
     """(registry, installer, the args after the install verb) when ``argv`` installs
     packages. ``installer`` picks the flags that take a value (_FLAGS_BY_INSTALLER)."""
-    while argv and (_ENV_ASSIGN.match(argv[0]) or argv[0] in ("sudo", "env", "time",
-                                                               "command", "exec")):
-        argv = argv[1:]
+    argv = _unwrap(argv)[1]
     if len(argv) < 2:
         return None
     tool = argv[0].rsplit("/", 1)[-1]
@@ -494,9 +535,7 @@ _OTHER_INDEX_ENV = frozenset({
 
 def _other_index(argv: list[str], args: list[str], installer: str) -> bool:
     """Whether this install names a registry or package index other than the default."""
-    for a in argv:
-        if not _ENV_ASSIGN.match(a):
-            break
+    for a in _unwrap(argv)[0]:  # settings before the command, after sudo / env / …
         if a.split("=", 1)[0].lower() in _OTHER_INDEX_ENV:
             return True
     js = installer in _JS_VERBS
@@ -513,12 +552,14 @@ def _other_index(argv: list[str], args: list[str], installer: str) -> bool:
 def _parse_installs(command: str, pc) -> list[dict]:
     """Every package a shell command installs, in order: {registry, pkg, spec, version
     (the exact pin or None), other_index}. One entry per (registry, name, exact pin), so
-    ``npm i foo@1.0.0 foo@1.0.15`` checks both releases; the packages of the first
-    PKG_CAP names are kept. A bare ``npm install`` (lockfile), a requirements file, local
-    paths, git URLs and tarballs are not registry packages and are skipped."""
+    ``npm i foo@1.0.0 foo@1.0.15`` checks both releases. Packages past the first PKG_CAP
+    names carry ``over_cap`` (not checked, and said so). A bare ``npm install``
+    (lockfile), a requirements file, local paths, git URLs and tarballs are not registry
+    packages and are skipped."""
     out: list[dict] = []
     seen: set[tuple[str, str, str | None]] = set()
     names: list[tuple[str, str]] = []
+    over: set[tuple[str, str]] = set()
     for seg in _split_segments(_strip_redirections(command or "")):
         try:
             argv = shlex.split(seg)
@@ -550,19 +591,23 @@ def _parse_installs(command: str, pc) -> list[dict]:
             key = (*name_key, version)
             if key in seen:
                 continue
-            if name_key not in names:
+            if name_key not in names and name_key not in over:
                 if len(names) >= PKG_CAP:
-                    continue
-                names.append(name_key)
+                    over.add(name_key)
+                else:
+                    names.append(name_key)
             seen.add(key)
             out.append({"registry": registry, "pkg": parsed[0], "spec": parsed[1],
-                        "version": version, "other_index": other})
+                        "version": version, "other_index": other,
+                        "over_cap": name_key in over})
     return out
 
 
 def _package_installs(command: str, pc) -> list[tuple[str, str, str]]:
-    """Every (registry, package, version spec) a shell command installs (_parse_installs)."""
-    return [(p["registry"], p["pkg"], p["spec"]) for p in _parse_installs(command, pc)]
+    """Every (registry, package, version spec) a shell command installs, within the
+    first PKG_CAP names (_parse_installs)."""
+    return [(p["registry"], p["pkg"], p["spec"]) for p in _parse_installs(command, pc)
+            if not p["over_cap"]]
 
 
 def _is_deprecation_only(r: dict) -> bool:
@@ -636,13 +681,19 @@ def _check_packages(command: str, pc, cache: dict, now: float
     # install is put to the person, since which release lands is not known.
     pins: dict[tuple[str, str], set[str]] = {}
     for p in pkgs:
-        if p["version"] and not p["other_index"]:
+        if p["version"] and not p["other_index"] and not p["over_cap"]:
             pins.setdefault((p["registry"], p["pkg"].lower()), set()).add(p["version"])
     conflicting = {k for k, v in pins.items() if len(v) > 1}
     answered: set[tuple[str, str, str | None]] = set()
+    over_cap: list[str] = []    # past the first PKG_CAP names: put to the person
+    out_of_time: list[str] = []  # the time budget ran out first: said, never silent
     for p in pkgs:
         registry, pkg, spec = p["registry"], p["pkg"], p["spec"]
         t = pc._dep(registry, pkg, spec)
+        shown = pc._pinned_name(registry, pkg, t.get("version"))
+        if p["over_cap"]:
+            over_cap.append(shown)
+            continue
         if p["other_index"]:
             lines.append(_other_index_line(t, pc))
             continue
@@ -652,8 +703,9 @@ def _check_packages(command: str, pc, cache: dict, now: float
             r = entry
         else:
             left = PKG_BUDGET - (time.monotonic() - started)
-            if left <= 1:
-                break
+            if out_of_time or left <= 1:
+                out_of_time.append(shown)
+                continue
             pc.TIMEOUT = min(TIMEOUT, max(1.0, left))
             try:
                 r = pc._scan(t, stored=True)
@@ -700,10 +752,19 @@ def _check_packages(command: str, pc, cache: dict, now: float
                 f"({', '.join(sorted(pins[(registry, low)]))}) and "
                 f"{', '.join(missing)} could not be checked, so it is not known whether the "
                 "release that gets installed is safe.")
+    if out_of_time:
+        lines.append(f"❔ not checked: {', '.join(out_of_time)} — AgentAvow ran out of time "
+                     "for this command. The install goes ahead.")
+    if over_cap:
+        needs = True
+        lines.append(f"❔ {TOO_MANY}: AgentAvow checks the first {PKG_CAP} packages named; "
+                     f"not checked: {', '.join(over_cap)}.")
     return lines, needs, checked
 
 
 UNCHECKED_PIN = "not every version this command names could be checked"
+TOO_MANY = "too many packages in one command to check them all"
+TOO_MANY_SERVERS = "too many servers in one step to check them all"
 
 
 def _other_index_line(t: dict, pc) -> str:
@@ -1072,7 +1133,7 @@ def main() -> None:
     now = time.time()
     lines: list[str] = []
     needs_decision = False
-    for t in targets[:3]:  # an install adds one server; cap the odd bulk edit
+    for t in targets[:SERVER_CAP]:  # an install adds one server; cap the odd bulk edit
         try:
             r: dict | None = pc._scan(t)
         except pc._UnscannableError:
@@ -1085,6 +1146,11 @@ def main() -> None:
         else:
             cache[t["name"]] = pc._record(t, r, now)
         needs_decision = needs_decision or _needs_decision(r)
+    if len(targets) > SERVER_CAP:  # never silent about the servers past the cap
+        needs_decision = True
+        lines.append(f"❔ {TOO_MANY_SERVERS}: AgentAvow checks the "
+                     f"first {SERVER_CAP} servers added; not checked: "
+                     + ", ".join(f"'{t['name']}'" for t in targets[SERVER_CAP:]) + ".")
 
     pkg_lines: list[str] = []
     if command:
@@ -1111,10 +1177,11 @@ def main() -> None:
                                         "you continue; they decide whether to proceed.",
         },
     }
-    # Do not connect, unless the only reason to stop is a release that went unchecked
-    # (a command naming several versions of one package).
+    # Do not connect, unless the only reason to stop is something left unchecked: more
+    # servers or packages than one step checks, or one of several pinned releases.
+    too_many = [p for p in (TOO_MANY, TOO_MANY_SERVERS) if any(p in ln for ln in lines)]
     said = (DECISION_PHRASES["do_not_connect"] if any(ln.startswith("⛔") for ln in lines)
-            else UNCHECKED_PIN)
+            else too_many[0] if too_many else UNCHECKED_PIN)
     if needs_decision and codex:
         reason = codex_deny_reason(body, targets, pkg_lines, said)
         out["hookSpecificOutput"]["permissionDecision"] = "deny"
