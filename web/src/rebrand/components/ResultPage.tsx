@@ -12,6 +12,7 @@ import {
   certifiedPending, certifiedRows, certifiedStatus, checkedAgo, fixPrompt, fixText, sandboxSummary, topFindings,
   type CheckRow, type CheckRowState, type ResultKind, type TopFinding,
 } from '../lib/resultPage'
+import { askLinks, type AskTarget } from '../lib/askAssistant'
 
 export type { ResultKind } from '../lib/resultPage'
 
@@ -121,6 +122,9 @@ export interface ResultPageProps {
   proof?: ReactNode
   /** the incident / deprecation banner, above the title */
   banner?: ReactNode
+  /** the public tool identifier for "Ask about this in ChatGPT / Claude"; leave it out
+   * where the connector can't check the tool. Never shown on a private scan. */
+  ask?: AskTarget
 }
 
 /** Step 2's body: one line and the claim (or publish) control. */
@@ -261,6 +265,25 @@ function AnswerCard({ scan, kind, adoption, share }: { scan: ResultPageProps['sc
         </div>
       </div>
     </Reveal>
+  )
+}
+
+/** A quiet row under the answer: open ChatGPT or Claude with a prompt that runs the
+ * AgentAvow connector on this tool. Only the public identifier goes in the link. */
+export function AskAssistantRow({ target }: { target: AskTarget }) {
+  const links = askLinks(target)
+  if (!links.length) return null
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px] text-text-muted" data-testid="ask-assistant">
+      <span>Ask your assistant:</span>
+      {links.map((l) => (
+        <a key={l.assistant} href={l.href} target="_blank" rel="noopener noreferrer"
+          data-assistant={l.assistant}
+          className="font-semibold text-primary-light hover:text-primary">
+          {l.label} ↗
+        </a>
+      ))}
+    </div>
   )
 }
 
@@ -485,6 +508,7 @@ export function ResultPage(props: ResultPageProps) {
 
       {/* 1 + 2 · the answer and the two scores (the Certified badge in the trust slot) */}
       <AnswerCard scan={scan} kind={kind} adoption={adoption} share={canShare} />
+      {props.ask && !privateScan && <AskAssistantRow target={props.ask} />}
 
       {/* 3 · why it's Certified, or which check is missing; the deciding line last */}
       <CertifiedChecklist scan={scan} kind={kind} decision={d} />

@@ -1874,6 +1874,7 @@ function SkillResult({ owner, repo, skill }: { owner: string; repo: string; skil
         kind="skill"
         eyebrow={['Agent Skill', label]}
         name={skillName && !collection ? `the ${skillName} skill` : `${owner}/${repo}`}
+        ask={{ kind: 'skill', owner, repo, skill: (skill || !collection) ? (skillName || null) : null }}
         recheck={recheck}
         banner={<IncidentBanner scan={scan} />}
         chips={<>
@@ -2114,6 +2115,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
         kind="mcp"
         eyebrow={['MCP server', mcpHostLabel(endpoint)]}
         name={mcpHostLabel(endpoint)}
+        ask={{ kind: 'mcp', endpoint }}
         recheck={recheck}
         banner={<IncidentBanner scan={scan} />}
         chips={<>
@@ -2413,6 +2415,7 @@ function PackageResult({ surface, name, version }: { surface: string; name: stri
         eyebrow={[surface, name]}
         version={<VersionPicker scanned={scan.package_version} pinned={version} />}
         name={name}
+        ask={{ kind: 'package', surface, name, version: scan.package_version || version }}
         recheck={recheck}
         banner={<IncidentBanner scan={scan} />}
         chips={<>
@@ -2696,6 +2699,7 @@ function Result({ owner, repo, privateResult, showCode = false }: {
         kind="repo"
         eyebrow={[isPrivate ? 'Private GitHub repo' : 'GitHub repo', scan.repo || `${owner}/${repo}`]}
         name={`${owner}/${repo}`}
+        ask={isPrivate ? undefined : { kind: 'repo', owner, repo }}
         privateScan={oneTimePrivate ? 'one-time' : storedPrivate ? 'stored' : undefined}
         shareAnchor={storedPrivate && published}
         recheck={isPrivate ? undefined : recheck}
