@@ -1339,7 +1339,75 @@ def _pem_trivial_ec_key(lines: list[str], idx: int) -> bool:
     scalar = der[pos + 5: pos + 5 + n]
     if not 20 <= n <= 72 or len(scalar) != n:
         return False
-    return int.from_bytes(scalar, "big") < 2 ** 32
+    if int.from_bytes(scalar, "big") >= 2 ** 32:
+        return False
+    # The whole block must be exactly the key the tiny scalar defines: re-encoding it
+    # gives the same bytes, so no other field (a `publicKey` bit string, `parameters`)
+    # can carry a real secret next to the placeholder scalar.
+    try:
+        from cryptography.hazmat.primitives import serialization as _ser
+        from cryptography.hazmat.primitives.asymmetric import ec as _ec
+
+        key = _ser.load_der_private_key(der, password=None)
+        if not isinstance(key, _ec.EllipticCurvePrivateKey):
+            return False
+        if key.private_numbers().private_value != int.from_bytes(scalar, "big"):
+            return False
+        fmt = (_ser.PrivateFormat.TraditionalOpenSSL if "EC PRIVATE KEY" in head
+               else _ser.PrivateFormat.PKCS8)
+        return key.private_bytes(_ser.Encoding.DER, fmt, _ser.NoEncryption()) == der
+    except Exception:  # noqa: BLE001 - anything that does not round-trip stays critical
+        return False
+
+
+# Code that uses a key to authenticate to a live service: an HTTP / RPC client, a JWT
+# signer, an Authorization header. A trivial key used that way is a credential the
+# service accepts, so it keeps its grade.
+_KEY_USED_LIVE_RE = re.compile(
+    r"""\b(?:requests|httpx|aiohttp|urllib3|niquests)\s*\.\s*(?:get|post|put|patch|delete|"""
+    r"""request|head|Session|Client|AsyncClient|ClientSession|PoolManager)\b"""
+    r"""|\burllib\.request\b|\burlopen\s*\(|\bhttp\.client\b|\bHTTPSConnection\b"""
+    r"""|\b(?:undici|axios|got|ky|superagent|grpc|boto3|paramiko|asyncssh|smtplib|ftplib)\b"""
+    r"""|\bfetch\s*\(|\bjwt\s*\.\s*(?:encode|sign)\b|\bjose\b|\bjsonwebtoken\b"""
+    r"""|['"]Authorization['"]|\bAuthorization\s*[:=]|\bBearer\s|\bcreate_connection\s*\(""")
+# Code files only: a RECORD / docs file naming the key file uses nothing.
+_KEY_USER_EXTS = frozenset({
+    ".py", ".pyw", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx", ".rb",
+    ".go", ".rs", ".php", ".java", ".kt", ".cs", ".sh", ".bash", ".ps1", ".lua", ".pl"})
+
+
+def _pem_holder_name(lines: list[str], idx: int) -> str:
+    """The name a PEM block opening at ``lines[idx]`` is assigned to (``K = \"\"\"`` on
+    that line or the one above), else ''."""
+    for ln in (lines[idx], lines[idx - 1] if idx else ""):
+        m = re.match(r"\s*(?:(?:export\s+)?(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=",
+                     ln)
+        if m:
+            return m.group(1)
+    return ""
+
+
+def restore_trivial_keys(findings: list, texts: dict[str, str]) -> list:
+    """A trivial EC key lowered per file (``trivial_key_pre``) gets its grade back when
+    another code file in view names its holder or its file and uses a key against a
+    live service (``_KEY_USED_LIVE_RE``). Mutates and returns ``findings``."""
+    for f in findings:
+        pre = getattr(f, "trivial_key_pre", None)
+        if pre is None or f.severity != "low" or f.remediation != WHY_TRIVIAL_KEY:
+            continue
+        own = getattr(f, "file_path", "") or ""
+        refs = [r for r in (pre[3], Path(own).name if own else "") if r]
+        refs += [Path(own).stem] if own and Path(own).suffix.lower() in (
+            ".pem", ".key", ".der", ".p8", ".crt") else []
+        for p, t in texts.items():
+            if (not t or p == own or Path(p).suffix.lower() not in _KEY_USER_EXTS
+                    or not _KEY_USED_LIVE_RE.search(t)):
+                continue
+            if any(re.search(r"(?<![\w$])" + re.escape(r) + r"(?![\w$])", t) for r in refs):
+                f.severity, f.payload, f.name = pre[0], pre[1], pre[2]
+                f.remediation = ""
+                break
+    return findings
 
 
 def _generic_secret_plausible(value: str) -> bool:
@@ -3208,25 +3276,51 @@ def _real_flag_tags(tags: str) -> bool:
 _MAX_NON_RGI_FLAGS_PER_LINE = 2
 
 
-def _real_flag_spans(line: str) -> list[tuple[int, int]]:
+# The same cap over a whole file: two such flags on each of many lines spell text too.
+_MAX_NON_RGI_FLAGS_PER_FILE = 2
+_WORD_CHAR_RE = re.compile(r"[A-Za-z0-9_+/=-]")
+
+
+def non_rgi_flag_count(text: str) -> int:
+    """Plain-form ISO 3166-2 shaped (non-RGI) subdivision flags in ``text``."""
+    if "\U0001F3F4" not in text:
+        return 0
+    n = 0
+    for m in _EMOJI_TAG_SEQ_RE.finditer(text):
+        raw = m.group("plain") or ""
+        tags = "".join(chr(ord(c) - 0xE0000) for c in raw)
+        if raw and tags not in _RGI_SUBDIVISION_FLAGS and _real_flag_tags(tags):
+            n += 1
+    return n
+
+
+def _real_flag_spans(line: str, file_non_rgi: int = 0) -> list[tuple[int, int]]:
     """Spans of the well-formed subdivision flags on ``line``. The ZWJ-interleaved form is
     data only for the RGI flags (``gbeng`` / ``gbsct`` / ``gbwls``). The plain form also
-    takes the ISO 3166-2 shape, at most ``_MAX_NON_RGI_FLAGS_PER_LINE`` per line."""
+    takes the ISO 3166-2 shape, at most ``_MAX_NON_RGI_FLAGS_PER_LINE`` per line and
+    ``_MAX_NON_RGI_FLAGS_PER_FILE`` in the file (``file_non_rgi``, when the caller
+    knows it). A flag with a word character on both sides sits INSIDE a token (a key or
+    a command split by it) and is never data."""
     rgi, other = [], []
     for m in _EMOJI_TAG_SEQ_RE.finditer(line):
+        a, b = m.span()
+        if (a > 0 and b < len(line) and _WORD_CHAR_RE.match(line[a - 1])
+                and _WORD_CHAR_RE.match(line[b])):
+            continue
         raw = (m.group("plain") or m.group("zwj") or "").replace("\u200d", "")
         tags = "".join(chr(ord(c) - 0xE0000) for c in raw)
         if tags in _RGI_SUBDIVISION_FLAGS:
             rgi.append(m.span())
         elif m.group("plain") and _real_flag_tags(tags):
             other.append(m.span())
-    if len(other) > _MAX_NON_RGI_FLAGS_PER_LINE:
+    if (len(other) > _MAX_NON_RGI_FLAGS_PER_LINE
+            or file_non_rgi > _MAX_NON_RGI_FLAGS_PER_FILE):
         other = []
     return sorted(rgi + other)
 
 
-def _strip_real_flags(line: str) -> str:
-    spans = _real_flag_spans(line)
+def _strip_real_flags(line: str, file_non_rgi: int = 0) -> str:
+    spans = _real_flag_spans(line, file_non_rgi)
     for a, b in reversed(spans):
         line = line[:a] + line[b:]
     return line
@@ -4386,6 +4480,32 @@ def _yaml_rule_entry_ok(lines: list[str], idx: int) -> bool:
             and bool(keys & _YAML_RULE_DETECT_KEYS))
 
 
+# YAML a tool or an agent loads as its own config (agent dirs, CI, hooks, compose …):
+# a block there may be run by that tool, so it is never a shown rule example.
+_YAML_CONFIG_NAME_RE = re.compile(
+    r"^(?:\.pre-commit-(?:config|hooks)|docker-compose[\w.-]*|compose[\w.-]*|taskfile"
+    r"|action|\.gitlab-ci|azure-pipelines|bitbucket-pipelines|cloudbuild|serverless"
+    r"|app|lefthook|\.lefthook|mkdocs|netlify|vercel|render|fly|codemagic|appveyor"
+    r"|\.travis|\.drone|\.woodpecker|buildspec|skaffold|tiltfile|devfile|okteto"
+    r"|smithery|agents?|tasks?|crew)\.ya?ml$",
+    re.IGNORECASE)
+
+
+def _yaml_config_path(path: str) -> bool:
+    """``path`` is YAML some tool or agent loads as config: under a dot-directory
+    (``.claude/``, ``.github/``, ``.husky/`` …), an agent instruction location, or a
+    well-known config name (``.pre-commit-config.yaml``, ``docker-compose.yml``,
+    ``hooks.yaml`` …)."""
+    from src.scanner.package_context import is_agent_instruction_file
+
+    parts = Path(path.replace("\\", "/")).parts
+    if any(p.startswith(".") and p not in (".", "..") for p in parts[:-1]):
+        return True
+    if _CI_PATH_RE.search(path.replace("\\", "/")) or is_agent_instruction_file(path):
+        return True
+    return bool(_YAML_CONFIG_NAME_RE.match(parts[-1] if parts else ""))
+
+
 def _yaml_rule_example(file_path: str, content: str, lines: list[str],
                        idx: int) -> str | None:
     """The example key (``code_example``) when ``lines[idx]`` sits inside an example
@@ -4395,6 +4515,8 @@ def _yaml_rule_example(file_path: str, content: str, lines: list[str],
     if Path(file_path).suffix.lower() not in (".yaml", ".yml"):
         return None
     if not _YAML_RULES_TOP_RE.search(content):
+        return None
+    if _yaml_config_path(file_path):
         return None
     m_ind = _yaml_indent(lines[idx])
     for j in range(idx - 1, -1, -1):
@@ -4459,10 +4581,247 @@ def _rule_text_lines(path: str, text: str) -> list[str]:
     return out
 
 
+# A code file that can read data (a YAML loader, a file read, a directory listing) and
+# can run something (an exec module, an exec builtin, a shell pipe) is treated as a
+# runner of every YAML rule example in view, whatever spelling it uses for the field or
+# the file (review #380 round 3: recall over precision; the key and the file name can be
+# built at run time and the sink can be aliased).
+_PY_EXEC_MODULES = frozenset({
+    "subprocess", "pty", "commands", "popen2", "runpy", "importlib", "ctypes", "builtins",
+    "__builtin__", "sh", "plumbum", "pexpect", "invoke", "fabric", "code", "codeop",
+    "posix", "nt", "_posixsubprocess", "multiprocessing", "asyncio.subprocess"})
+_PY_EXEC_NAMES = frozenset({
+    "eval", "exec", "compile", "__import__", "execfile", "__builtins__", "breakpoint"})
+_PY_OS_EXEC_ATTR_RE = re.compile(
+    r"^(?:system|popen\d?|exec\w*|spawn\w*|posix_spawn\w*|startfile|fork\w*"
+    r"|create_subprocess_\w+|modules|__dict__)$")
+_PY_REFLECT_ROOTS = frozenset({
+    "os", "subprocess", "builtins", "__builtins__", "pty", "importlib", "sys", "asyncio",
+    "posix", "nt"})
+# Discovery or YAML loading only: a plain ``open(p)`` of a path the caller passes is not
+# enough (a CLI that runs a file you hand it does not run the package's rule file).
+_PY_READ_CALLS = frozenset({
+    "safe_load", "full_load", "unsafe_load", "load_all", "safe_load_all", "from_yaml",
+    "get_data", "files", "as_file", "resource_string", "resource_stream",
+    "resource_filename"})
+# Directory discovery (`os.walk`, `listdir`, a glob that could match YAML) finds the rule
+# file without naming it; it counts when the file also reads content (``open`` …) or
+# runs a shell / interpreter (`shell=True`, an `'sh'` / `'bash'` / `'python'` argv word),
+# so `os.walk(target)` + `subprocess.run(['slither', …])` is no runner.
+_PY_DISCOVER_CALLS = frozenset({"iterdir", "listdir", "scandir", "walk", "fwalk"})
+_PY_CONTENT_READ_CALLS = frozenset({
+    "open", "read_text", "read_bytes", "fdopen", "input", "readlines", "read",
+    "readline", "urlopen"})
+_PY_INTERPRETER_WORDS = frozenset({
+    "sh", "bash", "zsh", "dash", "ksh", "fish", "csh", "tcsh", "busybox", "env", "python",
+    "python3", "python2", "node", "deno", "bun", "perl", "ruby", "php", "pwsh",
+    "powershell", "cmd", "cmd.exe", "-c", "/c", "-e", "eval", "source", "exec", "xargs",
+    "osascript", "/bin/sh", "/bin/bash", "/usr/bin/env"})
+# A glob counts unless every pattern is a literal with a fixed non-YAML extension
+# (`rglob('*.sol')`).
+_PY_GLOB_CALLS = frozenset({"glob", "iglob", "rglob", "fnmatch", "filter"})
+_NON_YAML_GLOB_RE = re.compile(r"\.(?!ya?ml$)[A-Za-z0-9]+$", re.IGNORECASE)
+_PY_DATA_MODULES = frozenset({
+    "yaml", "ruamel", "omegaconf", "box", "hydra", "strictyaml", "oyaml", "confuse",
+    "dynaconf", "pkgutil", "pkg_resources"})
+_YAMLISH_RE = re.compile(r"ya?ml", re.IGNORECASE)
+_JS_EXT = frozenset({".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx"})
+_JS_EXEC_RE = re.compile(
+    r"""child_process|\bexeca\b|\bshelljs\b|\bcross-spawn\b|['"](?:node:)?vm['"]|\bzx\b"""
+    r"""|\beval\s*\(|\bFunction\s*\(|\bBun\s*\.\s*(?:spawn|\$)|\bDeno\s*\.\s*(?:run|Command)"""
+    r"""|\b(?:exec|execSync|spawn|spawnSync|execFile|execFileSync|fork)\s*\(""")
+_JS_READ_RE = re.compile(
+    r"""ya?ml|\breadFile\w*|\bcreateReadStream\b|fs/promises|\breaddir\w*|\bglob\w*\s*\("""
+    r"""|\bBun\s*\.\s*file\b|\bDeno\s*\.\s*read\w*|\bimport\s*\(|\brequire\s*\(\s*[^'"\s]""",
+    re.IGNORECASE)
+_SHELL_EXT = frozenset({".sh", ".bash", ".zsh", ".ksh", ".fish", ".command"})
+_SHELL_NAMES = frozenset({"makefile", "gnumakefile", "dockerfile", "justfile",
+                          "containerfile", "package.json", "taskfile.yml", "taskfile.yaml"})
+_CI_PATH_RE = re.compile(
+    r"(?:^|/)(?:\.github/(?:workflows|actions)/|\.gitlab-ci\.ya?ml$|\.circleci/"
+    r"|azure-pipelines\.ya?ml$|bitbucket-pipelines\.ya?ml$|\.drone\.ya?ml$"
+    r"|\.travis\.ya?ml$|\.buildkite/|\.woodpecker|cloudbuild\.ya?ml$|action\.ya?ml$)",
+    re.IGNORECASE)
+_SHELL_READ_RE = re.compile(
+    r"""ya?ml|\byq\b|\bjq\b|\bcat\b|\bsed\b|\bawk\b|\bhead\b|\btail\b|\bgrep\b|\bcut\b"""
+    r"""|\bperl\b|\bpython\d*\b|\bnode\b|\bruby\b|\bdeno\b|\bbun\b|\bread\b|\bxargs\b"""
+    r"""|\$\(\s*<|<\s*[\w./$"'*{]|\*""", re.IGNORECASE)
+_SHELL_EXEC_RE = re.compile(
+    _RULE_LINE_SINK_RE.pattern + r"""|\bxargs\b[^\n|;]*\b(?:ba|z|da|k)?sh\b"""
+    r"""|\b(?:ba|z|da|k)?sh\s+[<"'$]|\b(?:ba|z|da|k)?sh\s*$|\.\s+/dev/stdin|\bsource\s""",
+    re.MULTILINE)
+_OTHER_CODE_EXT = frozenset({
+    ".rb", ".go", ".rs", ".php", ".pl", ".pm", ".lua", ".java", ".kt", ".kts", ".scala",
+    ".cs", ".swift", ".ex", ".exs", ".r", ".jl", ".ps1", ".psm1", ".bat", ".cmd", ".groovy",
+    ".dart", ".c", ".cc", ".cpp", ".h", ".hpp", ".zig", ".nim", ".cr", ".tcl", ".vbs"})
+_OTHER_EXEC_RE = re.compile(
+    r"""\b(?:system|exec\w*|popen\w*|spawn\w*|shell_exec|passthru|proc_open|eval)\s*[(!]"""
+    r"""|`[^`\n]+`|%x[({\[]|Command::new|exec\.Command|os\.execute|io\.popen"""
+    r"""|ProcessBuilder|Runtime\.getRuntime|Process\.Start|Start-Process|Invoke-Expression"""
+    r"""|\biex\b|System\.cmd|Process\(\)|\bsh\s+-c\b""", re.IGNORECASE)
+_OTHER_READ_RE = re.compile(
+    r"""ya?ml|\bread\w*|\bopen\w*|\bload\w*|File\.|\bglob\b|\bDir\b|\bfopen\b|\bifstream\b"""
+    r"""|Get-Content|\bgc\b|\btype\b""", re.IGNORECASE)
+
+
+def _py_reads_and_execs(text: str) -> bool:
+    """A Python file that can read data (a YAML loader, a file read, a listing) AND can
+    run something: an exec module (``import subprocess`` covers ``run_it =
+    subprocess.run``), an exec builtin by name (``eval``, ``exec``, ``__import__``), an
+    ``os`` exec attribute, or a reflective lookup on an exec root (``getattr(os, …)``).
+    Names only: a string or comment that spells ``subprocess.run`` is no sink. A file that
+    does not parse is a runner (unread is never safe)."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError, MemoryError, RecursionError):
+        return True
+    execs = reads = discover = content = shellish = False
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            mods = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                    else [node.module or ""])
+            relative = isinstance(node, ast.ImportFrom) and node.level > 0
+            for mod in mods:
+                top = mod.split(".")[0]
+                if not relative and (mod in _PY_EXEC_MODULES or top in _PY_EXEC_MODULES):
+                    execs = True
+                if top in _PY_DATA_MODULES or _YAMLISH_RE.search(mod):
+                    reads = True
+            if isinstance(node, ast.ImportFrom):
+                for a in node.names:
+                    if (node.module or "").split(".")[0] in ("os", "posix", "nt") and (
+                            _PY_OS_EXEC_ATTR_RE.match(a.name) or a.name == "*"):
+                        execs = True
+                    if a.name in _PY_EXEC_NAMES:
+                        execs = True
+                    if a.name in _PY_READ_CALLS or _YAMLISH_RE.search(a.name):
+                        reads = True
+        elif isinstance(node, ast.Name):
+            if node.id in _PY_EXEC_NAMES:
+                execs = True
+            if _YAMLISH_RE.search(node.id):
+                reads = True
+        elif isinstance(node, ast.Attribute):
+            root = node.value
+            if (isinstance(root, ast.Name) and root.id in ("os", "posix", "nt", "asyncio")
+                    and _PY_OS_EXEC_ATTR_RE.match(node.attr)) or (
+                    isinstance(root, ast.Name) and root.id == "sys"
+                    and node.attr == "modules"):
+                execs = True
+            if node.attr in ("__dict__", "__globals__", "__builtins__", "f_globals",
+                             "f_builtins", "create_subprocess_shell",
+                             "create_subprocess_exec"):
+                execs = True
+            if node.attr in _PY_READ_CALLS or _YAMLISH_RE.search(node.attr):
+                reads = True
+        elif isinstance(node, ast.Call):
+            fn = (node.func.id if isinstance(node.func, ast.Name)
+                  else node.func.attr if isinstance(node.func, ast.Attribute) else "")
+            if fn in _PY_GLOB_CALLS:
+                pats = [a for a in node.args if not (
+                    isinstance(a, ast.Constant) and isinstance(a.value, str)
+                    and "/" not in a.value.rsplit("*", 1)[-1]
+                    and _NON_YAML_GLOB_RE.search(a.value))]
+                if pats or not node.args:
+                    discover = True
+            if fn in _PY_DISCOVER_CALLS:
+                discover = True
+            if fn in _PY_CONTENT_READ_CALLS:
+                content = True
+            if any(k.arg == "shell" for k in node.keywords):
+                shellish = True
+            if fn in ("vars", "globals", "locals"):
+                execs = True  # reaches the module's builtins
+            elif fn == "getattr" and node.args:
+                arg = node.args[0]
+                if (isinstance(arg, ast.Name) and arg.id in _PY_REFLECT_ROOTS) or isinstance(
+                        arg, (ast.Call, ast.Subscript)):
+                    execs = True
+        if execs and reads:
+            return True
+    if not execs:
+        return False
+    strs = [n.value for n in ast.walk(tree)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+    # A YAML file named in string literals, split or not (`'hooks.y' + 'aml'`).
+    if _YAMLISH_RE.search("".join(strs)):
+        return True
+    shellish = shellish or any(v.strip().lower() in _PY_INTERPRETER_WORDS for v in strs)
+    return discover and (content or shellish)
+
+
+# An agent instruction file (CLAUDE.md, AGENTS.md, SKILL.md, .cursorrules, a command
+# under .claude/ …) is run by the agent that reads it: a line that tells it to run /
+# execute a rule, a YAML file or an example runs the rule example.
+_AGENT_RUN_VERB_RE = re.compile(
+    r"\b(?:run|runs|running|execute[sd]?|executing|exec|eval|invoke[sd]?|launch|paste|"
+    r"try|test|copy)\b|\b(?:ba|z)?sh\b|\bshell\b|\bterminal\b|\bcommand\s+line\b|"
+    r"\bBash\s*\(", re.IGNORECASE)
+_AGENT_RULE_WORD_RE = re.compile(r"ya?ml|\brules?\b|\bexamples?\b|\bremediation\b",
+                                 re.IGNORECASE)
+
+
+def _agent_file_runs(path: str, text: str, key: str, rule_path: str) -> bool:
+    """An agent instruction file tells the agent to run a rule example: a run verb
+    within one line of a mention of the rules file, the example key, or (outside a
+    README) a rule / YAML / example word. Prose only: a known instruction name
+    (``AGENTS.md``, ``agents.yaml``, ``mcp.json`` …) or a prose file in an instruction
+    directory, never code that happens to live under ``commands/``."""
+    from src.scanner.package_context import AGENT_INSTRUCTION_NAMES, is_agent_instruction_file
+
+    p = Path(path)
+    if not is_agent_instruction_file(path):
+        return False
+    if p.name.lower() not in AGENT_INSTRUCTION_NAMES and p.suffix.lower() not in (
+            "", ".md", ".mdx", ".mdc", ".markdown", ".txt", ".rst", ".prompt"):
+        return False
+    readme = Path(path).name.lower().startswith("readme")
+    specific = _rule_mention_re(key, rule_path) if key else None
+    stem = Path(rule_path).stem.lower() if rule_path else ""
+    lines = text.splitlines()
+    for i, ln in enumerate(lines):
+        if specific and specific.search(ln) or (stem and stem in ln.lower()):
+            hit = True
+        else:
+            hit = not readme and bool(_AGENT_RULE_WORD_RE.search(ln))
+        if hit and any(_AGENT_RUN_VERB_RE.search(x) for x in lines[max(0, i - 1):i + 2]):
+            return True
+    return False
+
+
+def yaml_runner_file(path: str, text: str, key: str = "", rule_path: str = "") -> bool:
+    """``text`` (the file ``path``) reads data and can run something, so it may run a
+    YAML rule example whatever it calls the field (``_py_reads_and_execs`` for Python;
+    token checks for JS / TS, shell, CI YAML and other code; an agent instruction file
+    that tells the agent to run it). Other prose and data files are never runners here
+    (their mentions go through ``runs_yaml_field``)."""
+    if _agent_file_runs(path, text, key, rule_path):
+        return True
+    p = Path(path)
+    suf, name = p.suffix.lower(), p.name.lower()
+    if suf in (".py", ".pyw"):
+        return _py_reads_and_execs(text)
+    if suf in _JS_EXT:
+        return bool(_JS_EXEC_RE.search(text) and _JS_READ_RE.search(text))
+    ci = bool(_CI_PATH_RE.search(path.replace("\\", "/")))
+    if suf in _SHELL_EXT or name in _SHELL_NAMES or ci or (
+            not suf and text.startswith("#!") and re.match(r"#![^\n]*\b(?:ba|z|da|k)?sh\b",
+                                                          text)):
+        lines = _rule_text_lines(path, text) if suf in (".yaml", ".yml") else text.splitlines()
+        body = "\n".join(lines)
+        return bool(_SHELL_EXEC_RE.search(body) and _SHELL_READ_RE.search(body))
+    if suf in _OTHER_CODE_EXT:
+        return bool(_OTHER_EXEC_RE.search(text) and _OTHER_READ_RE.search(text))
+    return False
+
+
 def runs_yaml_field(text: str, key: str, rule_path: str = "", path: str = "") -> bool:
     """True when ``text`` (the file ``path``, any file in view) runs the YAML rule
-    example ``key`` of ``rule_path``: a mention of the key or the rules file near an
-    exec sink / ``| sh``, or a sink fed by a name bound from such a mention."""
+    example ``key`` of ``rule_path``: a code file that reads data and can run something
+    (``yaml_runner_file``), a mention of the key or the rules file near an exec sink /
+    ``| sh``, or a sink fed by a name bound from such a mention."""
+    if path and yaml_runner_file(path, text, key, rule_path):
+        return True
     mention = _rule_mention_re(key, rule_path)
     if not mention.search(text):
         return False
@@ -4513,10 +4872,47 @@ def runs_yaml_field(text: str, key: str, rule_path: str = "", path: str = "") ->
                if _RULE_LINE_SINK_RE.search(lines[j]))
 
 
+def _possible_runner_path(path: str) -> bool:
+    """A file that could run a rule example if it were read: code, a shell script, CI
+    config, a Makefile, or an agent instruction file (CLAUDE.md, .cursorrules …)."""
+    from src.scanner.package_context import AGENT_INSTRUCTION_NAMES
+
+    p = Path(path.replace("\\", "/"))
+    suf, name = p.suffix.lower(), p.name.lower()
+    parents = {x.lower() for x in p.parts[:-1]}
+    agent_dir = bool(parents & {".claude", ".cursor", ".windsurf", ".agents", ".codex",
+                                ".gemini", "skills", "commands", "prompts", "instructions"})
+    return (name in AGENT_INSTRUCTION_NAMES or suf == ".mdc"
+            or (agent_dir and suf in (".md", ".mdx", ".txt", ".toml", ".json", ""))
+            or name in ("claude.local.md", "copilot-instructions.md")
+            or _is_source_file(path)
+            or suf in _SHELL_EXT or suf in _JS_EXT or suf in (".py", ".pyw")
+            or suf in _OTHER_CODE_EXT or name in _SHELL_NAMES
+            or bool(_CI_PATH_RE.search(p.as_posix())))
+
+
+def restore_unread_rule_examples(findings: list, texts: dict[str, str],
+                                 paths: list[str]) -> list:
+    """Unread content is never Safe: when a file of the tree that could run a YAML rule
+    example (``_possible_runner_path``) was not read (past the file cap, oversized, a
+    name the per-file scan skips), every lowered rule example gets its grade back.
+    Mutates and returns ``findings``."""
+    if not any(getattr(f, "rule_example_pre", None) is not None for f in findings):
+        return findings
+    if not any(p not in texts and _possible_runner_path(p) for p in paths):
+        return findings
+    for f in findings:
+        pre = getattr(f, "rule_example_pre", None)
+        if pre is not None and f.severity == "low" and f.remediation == WHY_RULE_EXAMPLE:
+            f.severity, f.payload, f.remediation = pre[0], pre[1], pre[2]
+    return findings
+
+
 def restore_rule_examples(findings: list, texts: dict[str, str]) -> list:
     """A pipe-to-shell in a YAML rule example lowered per file (``rule_example_pre``)
     gets its grade back when any file in view, workflow YAML included, runs that
     example field (``runs_yaml_field``). Mutates and returns ``findings``."""
+    restore_trivial_keys(findings, texts)
     memo: dict[tuple[str, str], bool] = {}
     for f in findings:
         pre = getattr(f, "rule_example_pre", None)
@@ -4531,14 +4927,15 @@ def restore_rule_examples(findings: list, texts: dict[str, str]) -> list:
     return findings
 
 
-def _benign_unicode_only(name: str, pattern: re.Pattern, line: str) -> bool:
+def _benign_unicode_only(name: str, pattern: re.Pattern, line: str,
+                         file_non_rgi: int = 0) -> bool:
     """True when every hit of an invisible-Unicode rule on this line is a well-formed
     emoji tag sequence or a typographic joiner (precision PR 2: wcwidth's grapheme
     tables). Smuggled tag text (no flag base / uppercase tags) still fires."""
     if name.startswith("Unicode Tags"):
-        return not pattern.search(_strip_real_flags(line))
+        return not pattern.search(_strip_real_flags(line, file_non_rgi))
     if name.startswith("Zero-width"):
-        flags = _real_flag_spans(line)
+        flags = _real_flag_spans(line, file_non_rgi)
         return all(_benign_zero_width(line, m.start())
                    or any(a <= m.start() < b for a, b in flags)
                    for m in pattern.finditer(line))
@@ -4806,6 +5203,13 @@ def _scan_content(
     # `#` / `*` lines there are headings and bullets, not comments.
     markdown_like = (is_metadata or metadata_text
                      or Path(file_path).suffix.lower() in (".md", ".mdx", ".markdown"))
+    non_rgi_memo: list[int] = []
+
+    def _file_non_rgi() -> int:
+        """Non-RGI subdivision flags in the whole file (counted once, lazily)."""
+        if not non_rgi_memo:
+            non_rgi_memo.append(non_rgi_flag_count(content))
+        return non_rgi_memo[0]
 
     def _check_unicode(line: str, idx: int, stripped: str, *, in_comment: bool) -> None:
         """Invisible / smuggled Unicode on one line (one finding per line)."""
@@ -4821,7 +5225,8 @@ def _scan_content(
                         file_path=file_path, line_number=idx + 1, snippet=stripped[:120]))
                     break
                 continue
-            if pattern.search(line) and not _benign_unicode_only(name, pattern, line):
+            if pattern.search(line) and not _benign_unicode_only(
+                    name, pattern, line, _file_non_rgi()):
                 if _is_allowlisted(file_path, name, allowlist):
                     continue
                 effective_severity = severity
@@ -5029,8 +5434,9 @@ def _scan_content(
                     sev = "medium"
                 # A PEM EC key whose private scalar is trivially small (a
                 # deliberately compromised d=4 CA key) protects nothing: reported, low.
-                if name == "Private Key block" and _pem_trivial_ec_key(lines, idx):
-                    findings.append(Finding(
+                if (name == "Private Key block" and _pem_trivial_ec_key(lines, idx)
+                        and not _KEY_USED_LIVE_RE.search(content)):
+                    trivial = Finding(
                         category="secret",
                         name="Private Key block (trivial placeholder EC key)",
                         severity="low",
@@ -5038,7 +5444,13 @@ def _scan_content(
                         line_number=line_num,
                         snippet=_redact_secret(stripped[:120], match),
                         remediation=WHY_TRIVIAL_KEY,
-                    ))
+                    )
+                    # What it would have been: restored when other code in view loads
+                    # this key (its holder or its file) and calls a live service
+                    # (`restore_rule_examples`).
+                    trivial.trivial_key_pre = (  # type: ignore[attr-defined]
+                        sev, secret_payload, name, _pem_holder_name(lines, idx))
+                    findings.append(trivial)
                     break
                 # Precision pass #3: a PEM HEADER with no key body is key-HANDLING code
                 # (marker tuples, startswith(), regexes) — reported as a capability.
@@ -9464,6 +9876,10 @@ async def scan_repo(
         # A printed install hint lowered per file holds only with the whole repo in view.
         from src.scanner.package_context import recheck_printed_hints
         recheck_printed_hints(result.findings, repo_texts)
+        restore_unread_rule_examples(
+            result.findings, repo_texts,
+            [it["path"] for it in tree
+             if isinstance(it, dict) and it.get("path") and it.get("size", 1)])
 
         # Oversized source files: scan head + tail and disclose (see _scan_oversized_text).
         oversized = _oversized_scan_files(getattr(tree, "oversized", []), user_excludes)

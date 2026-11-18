@@ -623,6 +623,9 @@ def calibrate_package_findings(findings: list, fetched) -> list:
     # A shell script's shown text whose output another file runs; JSON data fields no
     # code runs (the JS / Python hint is the branch below).
     restore_shown_scripts(findings, pkg.texts)
+    from src.scanner.scan import restore_unread_rule_examples
+    restore_unread_rule_examples(findings, pkg.texts, [
+        p for p, af in pkg.files.items() if getattr(af, "text", None) != ""])
     _lower_shown_in_tree(findings, pkg.texts, hints, replaced, code_hints=False)
 
     for f in findings:

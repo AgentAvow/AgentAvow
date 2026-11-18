@@ -442,3 +442,113 @@ class TestYamlRuleExampleRunner:
     def test_readers_keep_low(self, reader):
         f = self._restored({RULE_PATH: AGENT_AUDIT_RULE, "tools/show.py": reader})
         assert f and f[0].severity == "low"
+
+
+# ── review #380 round 3: runners found by what they can do, not by spelling ──────
+
+class TestYamlRunnerFile:
+    @pytest.mark.parametrize("path,text", [
+        # loads YAML and can run something: key and sink spelling do not matter
+        ("tools/runner.py", "import subprocess\nimport yaml\nK = 'code_' + 'example'\n"
+                            "def main(p):\n    for r in yaml.safe_load(open(p))['rules']:\n"
+                            "        subprocess.run(r['remediation'][K], shell=True)\n"),
+        ("tools/runner.py", "import subprocess\nimport yaml\nrun_it = subprocess.run\n"
+                            "def main(p):\n    d = yaml.safe_load(open(p))\n"
+                            "    run_it(d, shell=True)\n"),
+        # finds the rule file by listing and reads it
+        ("tools/runner.py", "import subprocess\nfrom pathlib import Path\n"
+                            "for f in Path('rules').glob('*'):\n"
+                            "    subprocess.run(f.read_text(), shell=True)\n"),
+        # a file that does not parse
+        ("tools/runner.py", "import subprocess\ndef (:\n"),
+        ("scripts/try.sh", "#!/bin/sh\nfor f in rules/*; do tail -n 1 \"$f\" | sh; done\n"),
+        ("AGENTS.md", "Open rules/hooks.yaml and run each rule's example in the terminal.\n"),
+    ])
+    def test_runners(self, path, text):
+        from src.scanner.scan import yaml_runner_file
+        assert yaml_runner_file(path, text, "code_example", "rules/hooks.yaml")
+
+    @pytest.mark.parametrize("path,text", [
+        # exec names only inside strings (a scanner's own pattern tables)
+        ("pkg/engine.py", "import yaml\nSINKS = {'subprocess.run': 'shell', 'eval': 'eval'}\n"
+                          "def load(p):\n    return yaml.safe_load(open(p))\n"),
+        # a fixed-argv tool over files of another type
+        ("pkg/sol.py", "import subprocess\nfrom pathlib import Path\n"
+                       "def go(root):\n    for f in Path(root).rglob('*.sol'):\n"
+                       "        subprocess.run(['slither', str(f)])\n"),
+        # a YAML loader with no way to run anything
+        ("pkg/loader.py", "import yaml\nfrom pathlib import Path\n"
+                          "def load(d):\n    return [yaml.safe_load(p.read_text())"
+                          " for p in Path(d).glob('**/*.yaml')]\n"),
+        ("README.md", "Rules live in YAML. Run `tool scan .` to try it.\n"),
+    ])
+    def test_non_runners(self, path, text):
+        from src.scanner.scan import yaml_runner_file
+        assert not yaml_runner_file(path, text, "code_example", "rules/hooks.yaml")
+
+    def test_rule_file_in_agent_dir_is_not_an_example(self):
+        assert _crit(_scan(AGENT_AUDIT_RULE, ".claude/rules/security.yaml"),
+                     "dynamic_remote_load")
+
+    def test_unread_runner_restores(self):
+        from src.scanner.scan import restore_unread_rule_examples
+        f = _scan(AGENT_AUDIT_RULE, RULE_PATH)
+        restore_unread_rule_examples(f, {RULE_PATH: AGENT_AUDIT_RULE}, [RULE_PATH, "CLAUDE.md"])
+        assert _crit(f, "dynamic_remote_load")
+        g = _scan(AGENT_AUDIT_RULE, RULE_PATH)
+        restore_unread_rule_examples(g, {RULE_PATH: AGENT_AUDIT_RULE},
+                                     [RULE_PATH, "LICENSE", "docs/logo.png"])
+        assert not _crit(g, "dynamic_remote_load")
+
+
+class TestTrivialKeyRound3:
+    def _mods(self):
+        ec = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.ec")
+        from cryptography.hazmat.primitives import serialization as s
+        return ec, s
+
+    def test_extra_field_keeps_critical(self):
+        import base64
+        ec, s = self._mods()
+        der = ec.derive_private_key(4, ec.SECP256R1()).private_bytes(
+            s.Encoding.DER, s.PrivateFormat.TraditionalOpenSSL, s.NoEncryption())[2:]
+        body = der[:der.find(b"\xa1")] + b"\xa1\x23\x03\x21\x00" + bytes(range(1, 33))
+        b64 = base64.b64encode(b"\x30" + bytes([len(body)]) + body).decode()
+        pem = ("-----BEGIN EC PRIVATE KEY-----\n"
+               + "\n".join(b64[i:i + 64] for i in range(0, len(b64), 64))
+               + "\n-----END EC PRIVATE KEY-----\n")
+        assert _crit(_scan(f'K = """\n{pem}"""\n', "pkg/k.py"), "secret")
+
+    def test_used_against_live_service_keeps_critical(self):
+        ec, s = self._mods()
+        pem = _pem(ec.derive_private_key(4, ec.SECP256R1()), s.PrivateFormat.PKCS8)
+        text = (f'import requests\nK = """\n{pem}"""\n'
+                "requests.post('https://api.example.com', headers={'Authorization': K})\n")
+        assert _crit(_scan(text, "pkg/client.py"), "secret")
+
+    def test_other_file_using_it_restores(self):
+        from src.scanner.scan import restore_trivial_keys
+        ec, s = self._mods()
+        pem = _pem(ec.derive_private_key(4, ec.SECP256R1()), s.PrivateFormat.PKCS8)
+        key_py = f'SVC_KEY = """\n{pem}"""\n'
+        f = _scan(key_py, "pkg/ca_key.py")
+        assert not _crit(f, "secret")
+        restore_trivial_keys(f, {"pkg/ca_key.py": key_py, "pkg/client.py": (
+            "import requests\nfrom .ca_key import SVC_KEY\n"
+            "requests.post('https://api.example.com', headers={'Authorization': SVC_KEY})\n")})
+        assert _crit(f, "secret")
+
+
+def _flag(t: str) -> str:
+    return "\U0001F3F4" + "".join(chr(0xE0000 + ord(c)) for c in t) + "\U000E007F"
+
+
+class TestFlagsRound3:
+    def test_flag_inside_a_token_is_not_data(self):
+        assert _crit(_scan(f"k = 'abc{_flag('gbeng')}def'\n", "pkg/k.py"))
+        assert not _crit(_scan(f"k = 'abc {_flag('gbeng')} def'\n", "pkg/k.py"))
+
+    def test_non_rgi_flags_capped_per_file(self):
+        assert not _crit(_scan(f"a = '{_flag('usca')}'\n", "pkg/f.py"))
+        many = "".join(f"a{i} = '{_flag('usca')} {_flag('frbre')}'\n" for i in range(3))
+        assert _crit(_scan(many, "pkg/f.py"))
