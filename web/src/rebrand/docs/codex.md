@@ -49,5 +49,22 @@ Ask Codex (use any package name):
 Is the npm package chalk safe to connect?
 ```
 
-Automatic checks inside Codex, like the ones our Claude Code plugin runs, are being
-worked on.
+## Automatic checks (Codex CLI)
+
+The AgentAvow plugin checks your MCP servers each time a session starts, and stops a
+`codex mcp add` or package install when the answer is Do not connect. It includes the
+connector and the skill above, so you don't need those steps too. Install it with:
+
+```
+codex plugin marketplace add AgentAvow/AgentAvow
+codex plugin add agentavow-trust@agentavow
+```
+
+Codex asks you to review the plugin's hooks the next time it starts. Choose
+**Trust all and continue**, or trust them later with `/hooks`. Codex asks again after each
+plugin update, and the checks only run while the hooks are trusted.
+
+When the answer is Do not connect, the plugin stops that step and tells you why, with a
+link to the report. Codex can't ask you first, so if you've read the report and still want
+the server, run the same command yourself outside Codex. The IDE extension doesn't run
+plugins yet; the connector and skill above work there.
