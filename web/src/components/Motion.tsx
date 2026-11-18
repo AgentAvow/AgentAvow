@@ -15,6 +15,7 @@ import { useTheme } from '../hooks/useTheme'
 
 // ─── Spring configs ───
 
+// eslint-disable-next-line react-refresh/only-export-components -- shared motion presets live next to the components that use them
 export const spring = {
   gentle: { type: 'spring' as const, stiffness: 120, damping: 20 },
   snappy: { type: 'spring' as const, stiffness: 300, damping: 30 },
@@ -209,7 +210,7 @@ interface MagneticProps {
   strength?: number
 }
 
-export function Magnetic({ children, className = '', strength: _strength = 0.3 }: MagneticProps) {
+export function Magnetic({ children, className = '' }: MagneticProps) {
   return (
     <motion.div
       className={className}
@@ -435,4 +436,5 @@ export function BioluminescentGlow({
 }
 
 // Re-export motion for use in other components
+// eslint-disable-next-line react-refresh/only-export-components -- re-exports framer-motion primitives so callers import from one module
 export { motion, useInView, useScroll, useTransform }

@@ -26,6 +26,7 @@ type ImageDetail = {
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper co-located with the component it serves; HMR falls back to a full reload here
 export function imageDetail(scan: unknown): ImageDetail | null {
   const sd = (scan as { surface_detail?: { image?: ImageDetail } }).surface_detail
   return sd?.image ?? null

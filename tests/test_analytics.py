@@ -360,6 +360,7 @@ async def test_tracking_events_are_accepted(client: AsyncClient, event_type: str
 @pytest.mark.asyncio
 @pytest.mark.parametrize("destination", [
     "copy_plugin_cmd", "open_plugin_dir", "add_claude", "add_chatgpt",
+    "email_setup", "share_link",
 ])
 async def test_cta_click_accepts_each_destination(client: AsyncClient, destination: str):
     resp = await _send(client, "cta_click", str(uuid.uuid4()), intent=destination)
@@ -455,6 +456,8 @@ async def test_campaign_view_counts_a_return_visit_toward_the_first_touch(
     assert row["check_submit"] == 1
     assert row["add_claude"] == 1
     assert row["add_chatgpt"] == 0
+    assert row["email_setup"] == 0
+    assert row["share_link"] == 0
     assert row["badge_copied"] == 1
 
 

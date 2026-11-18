@@ -1,0 +1,229 @@
+{
+  "errors": {
+    "crates:403": "SourceFetchError: crates.io returned HTTP 403 for demo",
+    "crates:404": "SourceFetchError: crates.io returned HTTP 404 for demo",
+    "crates:500": "SourceFetchError: crates.io returned HTTP 500 for demo",
+    "crates:read_timeout": "SourceFetchError: crates.io fetch failed: read timed out",
+    "docker:403": "SourceFetchError: Docker Hub API returned status 403 for acme/demo",
+    "docker:404": "SourceFetchError: Docker Hub repository not found: acme/demo",
+    "docker:500": "SourceFetchError: Docker Hub API returned status 500 for acme/demo",
+    "docker:read_timeout": "SourceFetchError: Network error fetching Docker Hub repo acme/demo: read timed out",
+    "github:403": "SourceFetchError: GitHub API rate limit exceeded (remaining: 0). Set GITHUB_TOKEN for higher limits.",
+    "github:404": "SourceFetchError: GitHub repository not found: acme/demo",
+    "github:500": "SourceFetchError: GitHub API error 500 for acme/demo",
+    "github:read_timeout": "SourceFetchError: Timeout fetching GitHub repo acme/demo (>10s)",
+    "huggingface:403": "SourceFetchError: HuggingFace API returned status 403 for acme/demo",
+    "huggingface:404": "SourceFetchError: Model not found: acme/demo",
+    "huggingface:500": "SourceFetchError: HuggingFace API returned status 500 for acme/demo",
+    "huggingface:read_timeout": "SourceFetchError: Network error fetching HuggingFace model acme/demo: read timed out",
+    "npm:403": "SourceFetchError: npm registry returned status 403 for demo-pkg",
+    "npm:404": "SourceFetchError: Package not found: demo-pkg",
+    "npm:500": "SourceFetchError: npm registry returned status 500 for demo-pkg",
+    "npm:read_timeout": "SourceFetchError: Network error fetching npm package demo-pkg: read timed out",
+    "pypi:403": "SourceFetchError: PyPI returned status 403 for demo-pkg",
+    "pypi:404": "SourceFetchError: Package not found: demo-pkg",
+    "pypi:500": "SourceFetchError: PyPI returned status 500 for demo-pkg",
+    "pypi:read_timeout": "SourceFetchError: Network error fetching PyPI package demo-pkg: read timed out"
+  },
+  "results": {
+    "crates": {
+      "autonomy_level": null,
+      "avatar_url": null,
+      "bio": "A crate",
+      "capabilities": [
+        "agent"
+      ],
+      "community_signals": {
+        "crates_categories": [
+          "ai"
+        ],
+        "crates_downloads": 99,
+        "crates_recent_downloads": 9
+      },
+      "detected_framework": null,
+      "display_name": "demo",
+      "raw_metadata": {
+        "crate": {
+          "categories": [
+            "ai"
+          ],
+          "description": "A crate",
+          "downloads": 99,
+          "keywords": [
+            "agent"
+          ],
+          "name": "demo",
+          "recent_downloads": 9
+        },
+        "latest_version": {
+          "num": "0.1.0"
+        }
+      },
+      "readme_excerpt": "",
+      "source_type": "crates",
+      "source_url": "https://crates.io/crates/demo",
+      "version": "0.1.0"
+    },
+    "docker": {
+      "autonomy_level": null,
+      "avatar_url": null,
+      "bio": "Demo image",
+      "capabilities": [],
+      "community_signals": {
+        "pulls": 500,
+        "stars": 4
+      },
+      "detected_framework": null,
+      "display_name": "acme/demo",
+      "raw_metadata": {
+        "is_official": false,
+        "last_updated": "2026-10-01T00:00:00Z",
+        "name": "demo",
+        "namespace": "acme",
+        "pull_count": 500,
+        "star_count": 4
+      },
+      "readme_excerpt": "Long text",
+      "source_type": "docker",
+      "source_url": "https://hub.docker.com/r/acme/demo",
+      "version": null
+    },
+    "github": {
+      "autonomy_level": null,
+      "avatar_url": "https://a/x.png",
+      "bio": "A demo MCP server that reads files.",
+      "capabilities": [
+        "Reads files",
+        "Lists directories"
+      ],
+      "community_signals": {
+        "forks": 3,
+        "language": "Python",
+        "open_issues": 1,
+        "stars": 12,
+        "watchers": 2
+      },
+      "detected_framework": "mcp",
+      "display_name": "acme/demo",
+      "raw_metadata": {
+        "created_at": "2025-01-01T00:00:00Z",
+        "default_branch": "main",
+        "dep_files": {
+          "requirements.txt": "mcp>=1.0\n"
+        },
+        "license": "MIT",
+        "owner": "acme",
+        "repo": "demo",
+        "topics": [
+          "mcp",
+          "files"
+        ],
+        "updated_at": "2026-11-01T00:00:00Z"
+      },
+      "readme_excerpt": "# demo\n\n![badge](x)\n\nA demo MCP server that reads files.\n\n## Features\n- Reads files\n- Lists directories\n\n## Install\npip install demo\n",
+      "source_type": "github",
+      "source_url": "https://github.com/acme/demo",
+      "version": null
+    },
+    "huggingface": {
+      "autonomy_level": null,
+      "avatar_url": "https://huggingface.co/acme/avatar",
+      "bio": "A model",
+      "capabilities": [
+        "text generation",
+        "pytorch"
+      ],
+      "community_signals": {
+        "downloads": 10,
+        "likes": 2,
+        "pipeline_tag": "text-generation",
+        "tags": [
+          "pytorch"
+        ]
+      },
+      "detected_framework": null,
+      "display_name": "acme/demo",
+      "raw_metadata": {
+        "created_at": null,
+        "last_modified": null,
+        "library_name": null,
+        "pipeline_tag": "text-generation",
+        "sha": "abc123",
+        "tags": [
+          "pytorch"
+        ]
+      },
+      "readme_excerpt": "",
+      "source_type": "huggingface",
+      "source_url": "https://huggingface.co/acme/demo",
+      "version": "abc123"
+    },
+    "npm": {
+      "autonomy_level": null,
+      "avatar_url": null,
+      "bio": "A demo package",
+      "capabilities": [
+        "mcp",
+        "agent"
+      ],
+      "community_signals": {
+        "downloads_monthly": 4321,
+        "keywords": [
+          "mcp",
+          "agent"
+        ],
+        "maintainers": 1
+      },
+      "detected_framework": "mcp",
+      "display_name": "demo-pkg",
+      "raw_metadata": {
+        "homepage": "https://example.org",
+        "latest_version": "1.2.3",
+        "license": "MIT",
+        "maintainers": [
+          "alice"
+        ],
+        "repository": {
+          "type": "git",
+          "url": "git+https://github.com/acme/demo.git"
+        }
+      },
+      "readme_excerpt": "",
+      "source_type": "npm",
+      "source_url": "https://www.npmjs.com/package/demo-pkg",
+      "version": "1.2.3"
+    },
+    "pypi": {
+      "autonomy_level": null,
+      "avatar_url": "https://example.org/logo.png",
+      "bio": "A demo",
+      "capabilities": [
+        "ai",
+        "Artificial Intelligence"
+      ],
+      "community_signals": {
+        "author": "Alice",
+        "classifiers": [
+          "Topic :: Scientific/Engineering :: Artificial Intelligence"
+        ],
+        "requires_python": ">=3.10"
+      },
+      "detected_framework": "langchain",
+      "display_name": "demo-pkg",
+      "raw_metadata": {
+        "author": "Alice",
+        "author_email": null,
+        "home_page": null,
+        "license": "MIT",
+        "project_urls": {
+          "Logo": "https://example.org/logo.png"
+        },
+        "python_requires": ">=3.10"
+      },
+      "readme_excerpt": "long description",
+      "source_type": "pypi",
+      "source_url": "https://pypi.org/project/demo-pkg/",
+      "version": "0.4.0"
+    }
+  }
+}

@@ -1103,3 +1103,199 @@ def restore_externally_invoked(findings: list, texts: dict[str, str], *,
                 or any(fnmatch.fnmatchcase(n, g) for g in globs) for n in owners)):
             f.severity, f.payload, f.remediation = sev, payload, ""
             f._maintainer_restore = None
+
+
+# ---------------------------------------------------------------------------
+# Install hooks whose code is suspicious, not just present (benchmark triage cause 2)
+# ---------------------------------------------------------------------------
+
+_JS_FILE_EXTS = (".js", ".mjs", ".cjs", ".ts", ".mts", ".cts")
+_SH_FILE_EXTS = (".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd")
+_STR = r"""['"`][^'"`\n]{0,300}['"`]"""
+_LOCAL_IMPORT_RE = re.compile(
+    # path.join|resolve(__dirname, 'lib', 'x.js'), also on require('path') inline (first,
+    # so the inner `require('path')` is not taken as a plain require)
+    r"""(?:\bpath|require\s*\(\s*['"](?:node:)?path['"]\s*\))\s*\.\s*(?:join|resolve)\s*\("""
+    rf"""\s*__dirname((?:\s*,\s*{_STR}){{1,8}})\s*\)"""
+    # require('./x') / import … from './x' / require('./' + 'x') (literal pieces only)
+    rf"""|(?:require\s*\(\s*|from\s+|import\s*\(\s*|import\s+)({_STR}(?:\s*\+\s*{_STR}){{0,8}})"""
+    # require(__dirname + '/x.js') / `${{__dirname}}/x`
+    r"""|__dirname\s*\+\s*['"`]/([^'"`\s]{1,300})['"`]"""
+    r"""|\$\{\s*__dirname\s*\}/([^'"`\s$]{1,300})`""")
+_DIRNAME_TMPL_RE = re.compile(r"^\$\{\s*__dirname\s*\}/")
+_STR_PIECE_RE = re.compile(r"""['"`]([^'"`\n]{0,300})['"`]""")
+# How far the hook's own requires are followed (transitively, local files only), and
+# how much of the package the walk and the signal read may cover. Past the signal
+# budget, the files that look most suspicious are read first (a hook cannot hide its
+# payload behind dozens of dummy requires).
+_MAX_HOOK_DEPTH = 4
+_MAX_HOOK_FILES = 400
+_MAX_WALK_BYTES = 32 * 1024 * 1024
+_MAX_SIGNAL_BYTES = 16 * 1024 * 1024
+_SUSPECT_WORDS = ("hostname", "userInfo", "networkInterfaces", "eval", "Function(", "_0x",
+                  "fromCharCode", "atob", "_authToken", "systemd", "crontab", "oast",
+                  "pipedream", "webhook", "whoami", "process.env", "base64")
+
+
+def _local_refs(text: str) -> list[str]:
+    """Relative paths a JS file loads from its own package, as plain ``./x`` strings."""
+    out: list[str] = []
+    for m in _LOCAL_IMPORT_RE.finditer(text):
+        joined, lit, plus, tmpl = m.groups()
+        if lit is not None:
+            rel = _DIRNAME_TMPL_RE.sub("./", "".join(_STR_PIECE_RE.findall(lit)))
+            if not rel.startswith(("./", "../")):
+                continue
+        elif plus is not None or tmpl is not None:
+            rel = "./" + (plus if plus is not None else tmpl)
+        else:
+            parts = [p.strip("/") for p in _STR_PIECE_RE.findall(joined) if p.strip("/.")]
+            if not parts:
+                continue
+            rel = "./" + "/".join(parts)
+        out.append(rel)
+    return out
+_HOOK_NAME_RE = re.compile(r"^npm '([\w-]+)' lifecycle script \(auto-runs on install\)$")
+
+
+def _resolve(have: dict[str, str], base: str, word: str) -> str | None:
+    p = _norm(base, word[2:] if word.startswith("./") else word)
+    if p is None:
+        return None
+    return next((have[p + s] for s in _RESOLVE_SUFFIXES if p + s in have), None)
+
+
+def _hook_code(scripts: dict[str, str], hook: str, main: str,
+               texts: dict[str, str]) -> tuple[list[str], list[str]]:
+    """(shell command strings, local file paths) an install hook runs: the hook, the
+    scripts it names (``npm run x``), the local files those run, and the local files
+    those files ``require`` / ``import`` (transitively, up to ``_MAX_HOOK_DEPTH`` levels
+    and ``_MAX_HOOK_FILES`` files). Under-approximate on purpose: this only ever RAISES
+    a finding, so an unfollowable command adds nothing."""
+    have = {p[2:] if p.startswith("./") else p: p for p in texts}
+    names = list(scripts)
+    todo, seen = [hook], set()
+    cmds: list[str] = []
+    files: list[str] = []
+    while todo:
+        n = todo.pop()
+        if n in seen or n not in scripts:
+            continue
+        seen.add(n)
+        cmds.append(scripts[n])
+        todo.extend(_referenced(scripts[n], names) or ())
+        for w in _script_file_refs(scripts[n], main):
+            hit = _resolve(have, "", w) if w != RUNS_PACKAGE_CODE else None
+            if hit is not None and hit not in files:
+                files.append(hit)
+    from src.scanner.install_signals import MAX_SIGNAL_TEXT
+
+    frontier = list(files)
+    seen_files = set(files)
+    walked = 0
+    core: list[str] = list(files)  # run directly, plus their first level of requires
+    for depth in range(_MAX_HOOK_DEPTH):
+        nxt: list[str] = []
+        for path in frontier:
+            if not path.endswith(_JS_FILE_EXTS) or walked > _MAX_WALK_BYTES:
+                continue
+            text = (texts.get(path) or "")[:MAX_SIGNAL_TEXT]
+            walked += len(text)
+            base = path.rsplit("/", 1)[0] + "/" if "/" in path else ""
+            for rel in _local_refs(text):
+                hit = _resolve(have, base, rel)
+                if hit is not None and hit not in seen_files \
+                        and len(files) < _MAX_HOOK_FILES:
+                    seen_files.add(hit)
+                    files.append(hit)
+                    nxt.append(hit)
+        if depth == 0:
+            core.extend(nxt)
+        if not nxt:
+            break
+        frontier = nxt
+    return cmds, files, core
+
+
+def _signal_order(files: list[str], core: list[str], texts: dict[str, str]) -> list[str]:
+    """The files to read for signals. ``core`` (what the hook runs directly and its
+    first level of requires) is always read; the rest within ``_MAX_SIGNAL_BYTES``,
+    the ones carrying the most suspect words first. Each file is charged only for what
+    the signal read takes of it (``MAX_SIGNAL_TEXT``), so huge padding files cannot
+    use the budget up."""
+    from src.scanner.install_signals import MAX_SIGNAL_TEXT, clip
+
+    def cost(p: str) -> int:
+        return min(len(texts.get(p) or ""), MAX_SIGNAL_TEXT)
+
+    rest = [p for p in files if p not in set(core)]
+    used = sum(cost(p) for p in core)
+    if used + sum(cost(p) for p in rest) <= _MAX_SIGNAL_BYTES:
+        return [*core, *rest]
+
+    def score(p: str) -> int:
+        t = clip(texts.get(p) or "")
+        return -sum(w in t for w in _SUSPECT_WORDS)
+
+    out = list(core)
+    for p in sorted(rest, key=score):
+        if used + cost(p) > _MAX_SIGNAL_BYTES:
+            continue
+        out.append(p)
+        used += cost(p)
+    return out
+
+
+def escalate_suspicious_install_hooks(findings: list, texts: dict[str, str]) -> None:
+    """Raise a root package.json's medium ``install_hook`` finding to high when the
+    code the hook runs is suspicious, not merely present (``src.scanner.install_signals``:
+    host / user recon plus a network call, an out-of-band callback host, an obfuscated
+    payload). An ordinary build, banner or binary download keeps its medium."""
+    from src.scanner.install_signals import (
+        js_signals,
+        py_signals,
+        shell_signals,
+        suspicious_reason,
+    )
+
+    hooks = [f for f in findings if getattr(f, "category", "") == "install_hook"
+             and getattr(f, "file_path", "") == "package.json"
+             and getattr(f, "severity", "") == "medium"
+             and _HOOK_NAME_RE.match(getattr(f, "name", "") or "")]
+    if not hooks or not texts.get("package.json"):
+        return
+    try:
+        data = json.loads(texts["package.json"].lstrip("﻿"))
+    except ValueError:
+        return
+    scripts = data.get("scripts") if isinstance(data, dict) else None
+    if not isinstance(scripts, dict):
+        return
+    scripts = {k: v for k, v in scripts.items() if isinstance(k, str) and isinstance(v, str)}
+    main = data.get("main") if isinstance(data.get("main"), str) else ""
+    cache: dict[str, set[str]] = {}  # a file run by several hooks is read once
+
+    def file_signals(p: str) -> set[str]:
+        if p not in cache:
+            text = texts.get(p) or ""
+            low = p.lower()
+            if low.endswith(_SH_FILE_EXTS):
+                cache[p] = shell_signals(text)
+            elif low.endswith(".py"):
+                cache[p] = py_signals(text)
+            else:
+                cache[p] = js_signals(text)
+        return cache[p]
+
+    for f in hooks:
+        hook = _HOOK_NAME_RE.match(f.name).group(1)
+        cmds, files, core = _hook_code(scripts, hook, main, texts)
+        signals: set[str] = set()
+        for c in cmds:
+            signals |= shell_signals(c)
+        for p in _signal_order(files, core, texts):
+            signals |= file_signals(p)
+        reason = suspicious_reason(signals)
+        if reason:
+            f.severity = "high"
+            f.name = f"npm '{hook}' lifecycle script ({reason})"

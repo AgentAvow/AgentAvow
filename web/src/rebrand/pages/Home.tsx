@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { rp } from '../basePath'
 import { unsupportedRepoHost, unsupportedRepoHostMessage } from '../lib/unsupportedHost'
 import { parseErc8004 } from '../lib/erc8004'
@@ -19,6 +19,8 @@ import { DNC_LIST, useAnswerMix } from '../lib/answerMix'
 import { BuiltInTheOpen } from '../components/BuiltInTheOpen'
 import { WhereItWorks } from '../components/WhereItWorks'
 import { CtaBand, SECTION_CLASS, SectionH2 } from '../components/PageBits'
+import { ChatGptLink, EmailSetup, WalletAdExamples } from '../components/AdLanding'
+import { isWalletKeyAd } from '../lib/adLanding'
 
 const CHECK_HINTS = ['Paste a link to check', 'github.com/owner/repo', 'npmjs.com/package/…', 'https://mcp.example.com/mcp', 'pypi:requests', 'an A2A agent card URL']
 
@@ -214,6 +216,10 @@ export default function RebrandHome() {
   const [tab, setTab] = useState<Tab>('safe')
   const resultRef = useRef<HTMLElement>(null)
   const navigate = useNavigate()
+  const { search } = useLocation()
+  // The X wallet-key ads (utm_content x3 / x5) open on the check and real results.
+  // Everyone else gets the usual hero. Static HTML is always the usual hero.
+  const walletAd = isWalletKeyAd(search)
   const hint = useRotatingPlaceholder(CHECK_HINTS)
   const runCheck = (input: string) => {
     const v = withScheme(input.trim())
@@ -294,6 +300,31 @@ export default function RebrandHome() {
   const pressed = (k: Tab) => tab === k || (k === 'safe' && tab === 'deep')
   const shown = tab === 'dnc' ? null : examples?.[tab]
 
+  // The ad hero gets a short, fixed placeholder: the rotating hints are cut off on a phone.
+  const checkBox = (placeholder: string) => (
+    <>
+      <form
+        onSubmit={(e) => { e.preventDefault(); runCheck(value) }}
+        className="glass mt-8 mx-auto max-w-[600px] flex gap-2.5 rounded-2xl p-2 pl-4 shadow-lg shadow-primary/10"
+      >
+        <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 self-center text-text-muted shrink-0" aria-hidden="true">
+          <path d="M11 19a8 8 0 1 1 5.7-2.3L21 21" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+        <input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          aria-label="Link to check"
+          placeholder={value ? '' : placeholder}
+          className="flex-1 min-w-0 bg-transparent outline-none font-mono text-[15.5px] text-text placeholder:text-text-muted"
+        />
+        <button type="submit" className="font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow whitespace-nowrap">
+          Check
+        </button>
+      </form>
+      {notice && <p role="alert" className="mt-3 mx-auto max-w-[600px] text-[13px] text-warning"><NoticeText text={notice} /></p>}
+    </>
+  )
+
   return (
     <div>
       <SEOHead
@@ -302,8 +333,33 @@ export default function RebrandHome() {
         path="/"
       />
 
-      {/* 1 · HERO = the check itself */}
-      <section className="text-center pt-16 pb-10 px-6">
+      {/* 1 · HERO. From the X wallet-key ads: the check first, then real results with
+          the ad's finding among them, then the ways to carry on from a phone. The usual
+          hero (the check itself) for everyone else. */}
+      {walletAd ? (
+      <section className="text-center pt-10 sm:pt-14 pb-12 px-6">
+        <div className="max-w-[640px] mx-auto">
+          <h1 className="text-[clamp(32px,6vw,52px)] font-extrabold leading-[1.08] tracking-tight [text-wrap:balance]">
+            Is your MCP server <span className="gradient-text-bio">safe</span> to connect?
+          </h1>
+          <p className="mt-3.5 mx-auto max-w-[46ch] text-[17px] text-text-muted font-light">Paste a server or package. Get a plain answer in seconds.</p>
+          {checkBox('Server or package')}
+          <p className="mt-3 text-[13px] text-text-muted">Free · No account · We read its public code. Nothing is installed on your device.</p>
+
+          <h2 className="mt-10 mb-3 text-[19px] font-bold tracking-tight text-left">What a check looks like</h2>
+          <WalletAdExamples />
+
+          <div className="mt-8 glass rounded-2xl border border-border/60 p-5 text-left">
+            <h2 className="text-[19px] font-bold tracking-tight">Use Claude Code? Email me the setup</h2>
+            <p className="mt-1.5 mb-3 text-[14.5px] text-text-muted">The free plugin checks every MCP server before Claude Code connects to it. It installs on your computer.</p>
+            <EmailSetup search={search} />
+            <p className="mt-5 mb-2 text-[14.5px] text-text-muted">On your phone now? AgentAvow also works in ChatGPT.</p>
+            <ChatGptLink className="w-full" />
+          </div>
+        </div>
+      </section>
+      ) : (
+      <section className="text-center pt-16 pb-10 px-6" data-hero="default">
         <motion.div
           className="max-w-[1080px] mx-auto"
           initial={inSnapshot() ? false : { opacity: 0, y: 14 }}
@@ -318,25 +374,7 @@ export default function RebrandHome() {
             Paste a link to any app, connector or package. Get a clear answer, <b className="text-text font-semibold">Safe to connect</b>, <b className="text-text font-semibold">Review before you connect</b>, or <b className="text-text font-semibold">Do not connect</b>, with the reasons.
           </p>
 
-          <form
-            onSubmit={(e) => { e.preventDefault(); runCheck(value) }}
-            className="glass mt-8 mx-auto max-w-[600px] flex gap-2.5 rounded-2xl p-2 pl-4 shadow-lg shadow-primary/10"
-          >
-            <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 self-center text-text-muted shrink-0" aria-hidden="true">
-              <path d="M11 19a8 8 0 1 1 5.7-2.3L21 21" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-            </svg>
-            <input
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              aria-label="Link to check"
-              placeholder={value ? '' : hint}
-              className="flex-1 min-w-0 bg-transparent outline-none font-mono text-[15.5px] text-text placeholder:text-text-muted"
-            />
-            <button type="submit" className="font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow whitespace-nowrap">
-              Check
-            </button>
-          </form>
-          {notice && <p role="alert" className="mt-3 mx-auto max-w-[600px] text-[13px] text-warning"><NoticeText text={notice} /></p>}
+          {checkBox(hint)}
 
           <div className="mt-4 flex flex-wrap gap-2 justify-center items-center">
             <span className="text-[13px] text-text-muted">Try one:</span>
@@ -359,6 +397,8 @@ export default function RebrandHome() {
           </p>
         </motion.div>
       </section>
+
+      )}
 
       {/* 2 · THE THREE ANSWERS, on live examples, how the catalog reads, then Certified */}
       <section ref={resultRef} id="result" className={`${SECTION_CLASS} scroll-mt-20`}>
