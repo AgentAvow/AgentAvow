@@ -503,6 +503,13 @@ def _credential_path_read(code: str, path: str, profile_launch_only: bool = Fals
     return _listed_paths_read_and_sent(code, both, path)
 
 
+# A call whose first argument is a tuple / list of string literals only.
+_NAME_LIST_ARG_RE = re.compile(
+    r"""(?<![\w.])[A-Za-z_$][\w$.]*\s*\(\s*[(\[]\s*"""
+    r"""((?:["'][A-Z][A-Z0-9_]*["']\s*,\s*)*["'][A-Z][A-Z0-9_]*["']\s*,?)\s*[)\]]""")
+_SECRET_NAME_RE = re.compile(r"\b([A-Z][A-Z0-9_]*(?:_KEY|_TOKEN|_SECRET|_PASSWORD))\b")
+
+
 def _credential_findings(path: str, text: str, extern: dict[str, str] | None = None,
                          others: list[str] | None = None,
                          profile_launch_only: bool = False) -> list:
@@ -545,6 +552,10 @@ def _credential_findings(path: str, text: str, extern: dict[str, str] | None = N
         # (a whole .env sent anywhere is caught by credential_flow, auth-only rule).
         from src.scanner.credential_flow import _EXTRACT_RE
         extracted = {n for m in _EXTRACT_RE.finditer(code) for n in m.groups() if n}
+        # ...also names handed to a lookup helper as a tuple / list literal
+        # (`_resolve_keys(("OPENROUTER_API_KEY",))`, audit round 2, FreeRide).
+        extracted |= {n for m in _NAME_LIST_ARG_RE.finditer(code)
+                      for n in _SECRET_NAME_RE.findall(m.group(1))}
         # The WHOLE contents to an unresolved / local host are critical ("dump"); one
         # value pulled out of the .env there is high ("extracted").
         keys = file_keys | extracted

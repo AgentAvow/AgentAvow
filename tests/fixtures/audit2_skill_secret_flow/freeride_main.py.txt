@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""
+FreeRide - Free AI for OpenClaw
+Automatically manage and switch between free AI models on OpenRouter
+for unlimited free AI access.
+"""
+
+import argparse
+import json
+import os
+import shutil
+import sys
+import time
+from pathlib import Path
+from datetime import datetime, timedelta
+from typing import Optional
+
+try:
+    import requests
+except ImportError:
+    print("Error: requests library required. Install with: pip install requests")
+    sys.exit(1)
+
+import providers as provider_mod
+from keyguard import mask_key, redact
+
+
+# Constants
+OPENROUTER_API_URL = "https://openrouter.ai/api/v1/models"
+OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENCLAW_CONFIG_PATH = Path.home() / ".openclaw" / "openclaw.json"
+CACHE_FILE = Path.home() / ".openclaw" / ".freeride-cache.json"
+CACHE_DURATION_HOURS = 6
+# Which primary/fallbacks FreeRide set, and what was there before.
+STATE_FILE = Path.home() / ".openclaw" / ".freeride-state.json"
+# Copy of openclaw.json taken before every FreeRide write.
+BACKUP_FILE = Path.home() / ".openclaw" / "openclaw.json.freeride-bak"
+# OpenClaw's recommended place for provider keys. FreeRide only reads it.
+DOTENV_PATH = Path.home() / ".openclaw" / ".env"
+
+# OpenRouter app-attribution headers — applied to every request so all
+# FreeRide traffic shows up under one identity on OpenRouter's App Activity
+# page. https://openrouter.ai/docs/api-reference/overview#headers
+OPENROUTER_REFERER = "https://github.com/Shaivpidadi/FreeRide"
+OPENROUTER_APP_TITLE = "FreeRide Health Check"
+
+
+def _openrouter_headers(api_key: str) -> dict:
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": OPENROUTER_REFERER,
+        "X-Title": OPENROUTER_APP_TITLE,
+    }
+
+# Per-process tracking of keys that recently returned 429/401, with a soft
+# cooldown so keys come back into rotation automatically. Short-lived CLI runs
+# never reach the cooldown; the watcher daemon does.
+_KEY_COOLDOWN_SECONDS = 120
+_RATE_LIMITED_KEYS: dict = {}  # key -> timestamp when marked
+
+
+def _is_key_in_cooldown(key: str) -> bool:
+    ts = _RATE_LIMITED_KEYS.get(key)
+    if ts is None:
+        return False
+    if time.time() - ts > _KEY_COOLDOWN_SECONDS:
+        _RATE_LIMITED_KEYS.pop(key, None)
+        return False
+    return True
+
+
+def _mark_key_rate_limited(key: str):
+    _RATE_LIMITED_KEYS[key] = time.time()
+
+# Free model ranking criteria (higher is better)
+RANKING_WEIGHTS = {
+    "context_length": 0.4,      # Prefer longer context
+    "capabilities": 0.3,        # Prefer more capabilities
+    "recency": 0.2,            # Prefer newer models
+    "provider_trust": 0.1       # Prefer trusted providers
+}
+
+# Trusted providers (in order of preference)
+TRUSTED_PROVIDERS = [
+    "google", "meta-llama", "mistralai", "deepseek",
+    "nvidia", "qwen", "microsoft", "allenai", "arcee-ai"
+]
+
+
+def _parse_api_keys(raw) -> list:
+    """Parse a single key string, a JSON array literal, or a real list of keys."""
+    if isinstance(raw, list):
+        return [k.strip() for k in raw if isinstance(k, str) and k.strip()]
+    if not isinstance(raw, str):
+        return []
+    raw = raw.strip()
+    if raw.startswith("["):
+        try:
+            keys = json.loads(raw)
+            if isinstance(keys, list):
+                return [k.strip() for k in keys if isinstance(k, str) and k.strip()]
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return [raw] if raw else []
+
+
+def _read_config_quietly() -> dict:
+    """Best-effort config read for key lookup only. Never raises."""
+    try:
+        config = json.loads(OPENCLAW_CONFIG_PATH.read_text())
+    except (OSError, ValueError):
+        return {}
+    return config if isinstance(config, dict) else {}
+
+
+def _resolve_keys(env_names) -> list:
+    raw = provider_mod.resolve_secret(env_names, _read_config_quietly(), DOTENV_PATH)
+    return _parse_api_keys(raw) if raw else []
+
+
+def get_api_keys() -> list:
+    """Get all OpenRouter API keys. Accepts a single key or a JSON array.
+
+    Single key:  OPENROUTER_API_KEY=sk-or-v1-...
+    Multiple:    OPENROUTER_API_KEY=["sk-or-v1-key1","sk-or-v1-key2"]
+
+    Looked up in the environment, then ~/.openclaw/.env, then `env.vars` and
+    the legacy `env` block of openclaw.json. FreeRide never writes keys.
+    """
+    return _resolve_keys(("OPENROUTER_API_KEY",))
+
+
+def get_provider_keys(name: str) -> list:
+    """Keys for an optional provider (groq, gemini, cerebras)."""
+    return _resolve_keys(provider_mod.PROVIDERS[name].env_vars)
+
+
+def get_api_key() -> Optional[str]:
+    """Get the first available OpenRouter API key."""
+    keys = get_api_keys()
+    return keys[0] if keys else None
+
+
+def fetch_all_models() -> list:
+    """Fetch all models from OpenRouter, rotating through API keys on 429/401."""
+    keys = get_api_keys()
+    if not keys:
+        return []
+
+    last_status = None
+    for i, key in enumerate(keys, 1):
+        if _is_key_in_cooldown(key):
+            continue
+        try:
+            response = requests.get(OPENROUTER_API_URL, headers=_openrouter_headers(key), timeout=30)
+        except requests.RequestException as e:
+            print(f"  Key {i}: network error ({redact(e)})")
+            continue
+
+
+    print(f"\nConfigured {len(fallbacks)} fallback models:")
+    for i, fb in enumerate(fallbacks, 1):
+        print(f"  {i}. {fb}")
+
+    print("\nWhen rate limited, OpenClaw will automatically try these models.")
+    print("Restart OpenClaw for changes to take effect.")
+
+
+def _test_model(model_id: str):
+    """Probe a model with a tiny chat call. Rotates through API keys on 429/401.
+
+    Returns (success: bool, error: Optional[str]). Error codes:
+      "all_keys_exhausted", "model_not_found", "unavailable", "timeout",
+      "request_error", "error_<status>".
+    """
+    available = [k for k in get_api_keys() if not _is_key_in_cooldown(k)]
+    if not available:
+        return False, "all_keys_exhausted"
+
+    payload = {
+        "model": model_id,
+        "messages": [{"role": "user", "content": "Hi"}],
+        "max_tokens": 5,
+        "stream": False
+    }
+
+    for key in available:
+        try:
+            response = requests.post(OPENROUTER_CHAT_URL, headers=_openrouter_headers(key), json=payload, timeout=30)
+        except requests.Timeout:
+            return False, "timeout"
+        except requests.RequestException:
+            return False, "request_error"
+
+        if response.status_code == 200:
+            return True, None
+        if response.status_code in (401, 429):
+            _mark_key_rate_limited(key)
+            continue  # try next key — this one is dead for now
+        if response.status_code == 503:

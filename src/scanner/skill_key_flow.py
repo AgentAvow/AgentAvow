@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import shlex
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -226,6 +227,27 @@ _RHS_IS_REQUEST_RE = re.compile(
     r"|\"?\$\(\s*(?:curl|wget)\b|`\s*(?:curl|wget)\b)"
 )
 _URL_RE = re.compile(r"(?:https?|wss?)://(?:[^@/\s\"'`]*@)?(\[[0-9a-fA-F:]+\]|[A-Za-z0-9.\-]+)")
+# A host literal that the code goes on to build: `"https://api.vendor.com" + ".x.net/v1"`
+# (or Python's implicit `"…" ".x.net"`) is api.vendor.com.x.net, a different host, and
+# `f"https://api.vendor.com.{s}/v1"` is unresolved. Read the host as it is built, never
+# as the vendor prefix it starts with.
+_HOST_CONCAT_RE = re.compile(r"""(["'`])\s*\+?\s*(["'`])([A-Za-z0-9.\-]+)""")
+
+
+def _url_hosts(text: str) -> list[str]:
+    out: list[str] = []
+    for m in _URL_RE.finditer(text):
+        host = m.group(1)
+        if not host.startswith("["):
+            c = _HOST_CONCAT_RE.match(text, m.end())
+            if c:
+                host += c.group(3)
+            elif host.endswith((".", "-")):
+                host = "?"
+        out.append(host)
+    return out
+
+
 _BASE_URL_RE = re.compile(r"\b(?:base_url|baseURL|api_base|base_path)\s*[=:]\s*([^,)\n]+)")
 # Assignment targets may be dotted (``self.headers = {...}``, ``this.key = ...``).
 _ASSIGN_RE = re.compile(
@@ -587,6 +609,258 @@ def _logical_lines(text: str) -> list[str]:
     return out
 
 
+# A per-service config table (audit round 2, WildClawBench): one dict of entries, each
+# with its own URL and key. Pairing works per variable, so the whole table would join
+# every key to every URL in it. When every use of the table picks one entry by a
+# literal name, each entry is its own variable (`T__name`) and a key is paired only
+# with the URL its own entry, or the call that uses it, names. Any other use of the
+# table (passed whole, iterated, serialised) keeps it one variable, as before.
+_TABLE_OPEN_RE = re.compile(
+    r"^(\s*)((?:const|let|var)\s+)?([A-Za-z_$][\w.$]*)\s*(?::\s*[^=\"'`(]+)?=\s*\{\s*$")
+_TABLE_ENTRY_RE = re.compile(r"""^(\s*)(["']?)([A-Za-z_]\w*)\2\s*:\s*\{\s*$""")
+_TABLE_ENTRY_END_RE = re.compile(r"^\s*\}\s*,?\s*$")
+_TABLE_CLOSE_RE = re.compile(r"^\s*\}\s*;?\s*$")
+
+
+# An entry can only be trusted to keep its own URL while nothing rewrites it. The table
+# stays one variable (never split) when an entry pick is written to (`T["a"] = …`,
+# `T["a"]["url"] = …`, `T.a.url = …`, `T["a"] |= …`), mutated in place (`.update(`,
+# `.setdefault(`), merged (`{**T["a"]}`, `{...T.a}`, `T["a"] | T["b"]`, any pick inside
+# `Object.assign(` / `.update(` / a merge helper), or when the file follows a redirect
+# (a `Location` header, manual redirects): one entry's response can then send the next
+# request anywhere. Review of #388.
+_PICK_TAIL_WRITE_RE = re.compile(
+    r"(?:\s*\[[^\]\n]*\]|\s*\.[A-Za-z_$][\w$]*)*\s*(?://|\*\*|<<|>>|[-+*/%@&|^])?=(?!=)")
+_PICK_TAIL_MUTATE_RE = re.compile(
+    r"(?:\s*\[[^\]\n]*\]|\s*\.[A-Za-z_$][\w$]*)*?\s*\.(?:update|setdefault|__setitem__|__ior__)"
+    r"\s*\(")
+_PICK_TAIL_MERGE_RE = re.compile(r"\s*\|(?![|=])")
+_PICK_HEAD_MERGE_RE = re.compile(r"(?:\*\*|\.\.\.)\s*$|(?<![|])\|\s*$")
+_MERGE_CALL_RE = re.compile(
+    r"\bObject\.assign\s*\(|\.update\s*\(|\b(?:_|lodash|\$|jQuery)\.(?:merge|assign|extend"
+    r"|defaults|mergeWith|assignIn)\s*\(|\b(?:deepmerge|merge|ChainMap)\s*\(")
+_REDIRECT_RE = re.compile(
+    r"(?i)[\"']location[\"']|\.location\b|\ballow_redirects\s*=\s*False\b"
+    r"|\bfollow_redirects\s*=\s*False\b|\bredirect\s*:\s*[\"']manual[\"']|\bis_redirect\b"
+    r"|\bnext_request\b|\bmaxRedirects\s*:\s*0\b|\bget_redirect_location\b"
+    # The final URL of a response (`r.url`): requests / fetch follow redirects by
+    # default, so a URL read off a response may be any host. Entry fields named `url`
+    # are blanked out before this is searched (see _pure_reads).
+    r"|\.url\b")
+
+
+_ALIAS_BIND_RE = re.compile(r"^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=\s*")
+
+
+def _entry_rewritten(rest: str, pick: re.Pattern[str]) -> bool:
+    """True when any entry pick in ``rest`` is written to, mutated or merged (see
+    above). Redirects are checked by the caller, on the text with field reads blanked."""
+    # A name bound to a whole entry (`cfg = T["a"]`) is that entry: its writes count too.
+    aliases: set[str] = set()
+    for ln in rest.split("\n"):
+        b = _ALIAS_BIND_RE.match(ln)
+        p = b and pick.match(ln, b.end())
+        if p and re.fullmatch(r"\s*;?\s*", ln[p.end():]):
+            aliases.add(b.group(1))
+    targets = [(pick, False)]
+    if aliases:
+        targets.append((re.compile(
+            r"(?<![\w$.])(?:" + "|".join(map(re.escape, aliases)) + r")\b"), True))
+    for rx, alias in targets:
+        for m in rx.finditer(rest):
+            tail = rest[m.end():m.end() + 400]
+            head = rest[max(0, m.start() - 8):m.start()]
+            write = _PICK_TAIL_WRITE_RE.match(tail)
+            if alias and write and not re.match(r"\s*[\[.]", tail):
+                write = None  # rebinding the alias itself writes no entry
+            if (write or _PICK_TAIL_MUTATE_RE.match(tail)
+                    or _PICK_TAIL_MERGE_RE.match(tail) or _PICK_HEAD_MERGE_RE.search(head)):
+                return True
+        for c in _MERGE_CALL_RE.finditer(rest):
+            chunk = _call_text(rest, c.start())
+            if any(re.match(r"\s*[,)}\]]", chunk[p.end():]) for p in rx.finditer(chunk)):
+                return True
+    return False
+
+
+# Review round 3 of #388: listing the ways to WRITE an entry never ends (setitem, a
+# helper that writes its parameter, tuple / loop / walrus aliases, annotations,
+# Reflect.set, &&=, ...). So the table is split only when every pick is a pure READ of
+# one of its entry's own scalar fields: `T["a"]["url"]`, `T.a.url`, `T.get("a").get("k")`,
+# or the same through a name bound once to the whole entry on a line of its own
+# (`cfg = T["a"]`). A pick used any other way (a call argument, a tuple or loop target,
+# a walrus, an unknown attribute such as `.update`), a field followed by any kind of
+# assignment (`=`, `op=`, `&&=`, `||=`, `??=`, an annotation `:`) or `del`, a field that
+# holds a container, or a pick spread over lines, counts as use of the whole table.
+_FIELD_RE = re.compile(r"""^\s*(["']?)([A-Za-z_$][\w$]*)\1\s*:\s*(.*)$""")
+_CONTAINER_VALUE_RE = re.compile(
+    r"^\s*(?:[\[{(]|(?:dict|list|set|defaultdict|OrderedDict|Map|Set|Array)\s*\(|new\s)")
+_FIELD_TAIL_WRITE_RE = re.compile(
+    r"(?:\s*\[[^\]\n]*\]|\s*\.[A-Za-z_$][\w$]*)*[ \t]*"
+    r"(?://|\*\*|<<|>>>|>>|&&|\|\||\?\?|[-+*/%@&|^])?=(?!=)")
+_ALIAS_LINE_RE = re.compile(r"^(\s*)(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=\s*")
+
+
+def _entry_fields(lines: list[str], a: int, b: int) -> dict[str, bool]:
+    """{field: holds a container} for the top-level fields of the entry on lines
+    ``a``..``b``."""
+    out: dict[str, bool] = {}
+    depth = 0
+    for ln in lines[a + 1:b]:
+        if depth == 0:
+            f = _FIELD_RE.match(ln)
+            if f:
+                out[f.group(2)] = bool(_CONTAINER_VALUE_RE.match(f.group(3)))
+        depth += _depth(ln)
+    return out
+
+
+def _field_read(rest: str, at: int, fields: dict[str, bool]) -> int | None:
+    """End of a pure read of one scalar field of an entry starting at ``at`` (just
+    after the entry pick or its alias), or None."""
+    if not fields:
+        return None
+    alt = "|".join(map(re.escape, fields))
+    f = re.compile(
+        r"""[ \t]*(?:\[[ \t]*(["'])(""" + alt + r""")\1[ \t]*\]"""
+        r"""|\.get\([ \t]*(["'])(""" + alt + r""")\3[ \t]*(?:,[^()\n]*)?\)"""
+        r"""|\??\.(""" + alt + r""")\b)""").match(rest, at)
+    if not f or fields[f.group(2) or f.group(4) or f.group(5)]:
+        return None
+    if _FIELD_TAIL_WRITE_RE.match(rest, f.end()):
+        return None
+    return f.end()
+
+
+def _pure_reads(rest: str, pick: re.Pattern[str],
+                fields: dict[str, dict[str, bool]]) -> str | None:
+    """``rest`` with every pure field read (and alias binding) blanked out, or None
+    when any pick, or alias of one, is used another way (see above)."""
+    def entry(m: re.Match[str]) -> str:
+        return m.group(2) or m.group(4) or m.group(5)
+
+    spans: list[tuple[int, int]] = []
+    binds: list[tuple[int, int]] = []
+    alias_of: dict[str, str] = {}
+    off = 0
+    for ln in rest.split("\n"):
+        b = _ALIAS_LINE_RE.match(ln)
+        p = b and pick.match(ln, b.end())
+        if p and "\n" not in p.group(0) and re.fullmatch(r"\s*;?\s*", ln[p.end():]):
+            name = b.group(2)
+            if alias_of.setdefault(name, entry(p)) != entry(p):
+                return None
+            binds.append((off + b.start(2), off + p.end()))
+        off += len(ln) + 1
+
+    def ok(m: re.Match[str], ent: str) -> bool:
+        if "\n" in m.group(0):
+            return False  # a pick spread over lines
+        head = rest[rest.rfind("\n", 0, m.start()) + 1:m.start()]
+        if re.search(r"\bdel\s*$", head):
+            return False
+        end = _field_read(rest, m.end(), fields[ent])
+        if end is None:
+            return False
+        if not head.strip() and re.match(r"[ \t]*:(?!:)", rest[end:]):
+            return False  # an annotated assignment `T["a"]["k"]: str = …`
+        spans.append((m.start(), end))
+        return True
+
+    def in_bind(i: int) -> bool:
+        return any(s <= i < e for s, e in binds)
+
+    for m in pick.finditer(rest):
+        if not in_bind(m.start()) and not ok(m, entry(m)):
+            return None
+    if alias_of:
+        rx = re.compile(r"(?<![\w$.])(" + "|".join(map(re.escape, alias_of)) + r")\b")
+        for m in rx.finditer(rest):
+            if not in_bind(m.start()) and not ok(m, alias_of[m.group(1)]):
+                return None
+    out = list(rest)
+    for s, e in spans + binds:
+        out[s:e] = [c if c == "\n" else " " for c in out[s:e]]
+    return "".join(out)
+
+
+def _depth(s: str) -> int:
+    return sum(s.count(c) for c in "([{") - sum(s.count(c) for c in ")]}")
+
+
+def _table_entries(lines: list[str], i: int) -> tuple[dict[str, tuple[int, int]], int] | None:
+    """({entry: (open line, close line)}, closing line) for a table opened on line
+    ``i``, laid out one entry per block; None for any other shape."""
+    entries: dict[str, tuple[int, int]] = {}
+    j = i + 1
+    while j < min(len(lines), i + 400):
+        ln = lines[j]
+        if not ln.strip():
+            j += 1
+            continue
+        if _TABLE_CLOSE_RE.match(ln):
+            return (entries, j) if len(entries) >= 2 else None
+        m = _TABLE_ENTRY_RE.match(ln)
+        if not m or m.group(3) in entries:
+            return None
+        depth, k = 1, j + 1
+        while k < len(lines) and depth > 0:
+            depth += _depth(lines[k])
+            if depth > 0:
+                k += 1
+        if depth != 0 or not _TABLE_ENTRY_END_RE.match(lines[k]):
+            return None
+        entries[m.group(3)] = (j, k)
+        j = k + 1
+    return None
+
+
+def _split_tables(joined: str) -> str:
+    """``joined`` with each per-service config table split into one variable per
+    entry (see above). Line numbers are kept."""
+    lines = joined.split("\n")
+    for i in range(len(lines)):
+        m = _TABLE_OPEN_RE.match(lines[i])
+        if not m:
+            continue
+        found = _table_entries(lines, i)
+        if not found:
+            continue
+        entries, close = found
+        body = "\n".join(lines[i:close + 1])
+        if not (_URL_RE.search(body) and SECRET_ENV_READ_RE.search(body)):
+            continue
+        decl, name = m.group(2) or "", m.group(3)
+        alt = "|".join(re.escape(k) for k in entries)
+        use = re.compile(r"(?<![\w$.])" + re.escape(name) + r"\b")
+        pick = re.compile(
+            r"(?<![\w$.])" + re.escape(name)
+            + r"""(?:\s*\[\s*(["'])(""" + alt + r""")\1\s*\]"""
+            + r"""|\.get\(\s*(["'])(""" + alt + r""")\3\s*\)"""
+            + r"|\.(" + alt + r")\b)")
+        rest = "\n".join(lines[:i] + [""] * (close + 1 - i) + lines[close + 1:])
+        if len(use.findall(rest)) != len(pick.findall(rest)):
+            continue  # the table is used whole somewhere: keep it one variable
+        fields = {k: _entry_fields(lines, a, b) for k, (a, b) in entries.items()}
+        blank = _pure_reads(rest, pick, fields)
+        if blank is None or _REDIRECT_RE.search(blank) or _entry_rewritten(rest, pick):
+            continue  # an entry may carry another entry's URL: keep it one variable
+        lines[i] = ""
+        lines[close] = ""
+        for k, (a, b) in entries.items():
+            ind = _TABLE_ENTRY_RE.match(lines[a]).group(1)
+            lines[a] = f"{ind}{decl}{name}__{k} = {{"
+            lines[b] = f"{ind}}}"
+
+        def sub(mm: re.Match[str], name: str = name) -> str:
+            return f"{name}__{mm.group(2) or mm.group(4) or mm.group(5)}"
+
+        for n in range(len(lines)):
+            if not i <= n <= close:
+                lines[n] = pick.sub(sub, lines[n])
+    return "\n".join(lines)
+
+
 def _call_text(text: str, start: int) -> str:
     """The call starting at ``start``: through its balanced closing paren, or the
     rest of the line for a shell command (curl/wget)."""
@@ -767,7 +1041,7 @@ class _Flow:
 
 
 def _flow(text: str, path: str | None = None) -> _Flow:
-    joined = "\n".join(_logical_lines(text or ""))
+    joined = _split_tables("\n".join(_logical_lines(text or "")))
     lines = joined.splitlines()
     assigns = _assignments(lines)
     python = (path or "").lower().endswith(".py") or (
@@ -785,7 +1059,7 @@ def _flow(text: str, path: str | None = None) -> _Flow:
     url_vars: dict[str, list[str]] = {}
     url_sites: dict[str, list[tuple[list[str], _Assign]]] = {}
     for a in assigns:
-        hosts = _URL_RE.findall(a.rhs)
+        hosts = _url_hosts(a.rhs)
         if hosts and not _RHS_IS_REQUEST_RE.match(a.rhs):  # `res = fetch(...)` is a response
             url_vars.setdefault(a.target, []).extend(hosts)
             url_sites.setdefault(a.target, []).append((hosts, a))
@@ -796,7 +1070,7 @@ def _flow(text: str, path: str | None = None) -> _Flow:
         for k in range(f0, min(f1, len(lines) - 1) + 1):
             m = _RETURN_RE.search(lines[k])
             if m:
-                hs = _URL_RE.findall(lines[k][m.end():])
+                hs = _url_hosts(lines[k][m.end():])
                 if hs:
                     url_funcs.setdefault(fname, []).extend(hs)
     for a in assigns:
@@ -824,7 +1098,7 @@ def _flow(text: str, path: str | None = None) -> _Flow:
     base_spans: list[tuple[str, list[str], int]] = []
     for m in _BASE_URL_RE.finditer(joined):
         rhs = m.group(1).strip()
-        hosts = _URL_RE.findall(rhs) or list(url_vars.get(rhs, []))
+        hosts = _url_hosts(rhs) or list(url_vars.get(rhs, []))
         if hosts:
             a0 = joined.rfind("\n", 0, max(0, m.start() - 300))
             b0 = joined.find("\n", m.end() + 300)
@@ -993,10 +1267,18 @@ def _top_level_args(chunk: str) -> list[str]:
 
 
 def _hosts_in(flow: _Flow, part: str, line: int | None = None) -> list[str]:
-    hosts = list(_URL_RE.findall(part))
+    hosts = _url_hosts(part)
     for v in flow.url_vars:
-        if re.search(r"(?<![\w$.])\$?\{?" + re.escape(v) + r"\b(?!\s*[:=](?![:=]))", part):
+        # A bare word after "/" is a path segment (`.../paper/search`), not the
+        # variable `paper`; `/$URL` and `/{url}` still are.
+        m = re.search(r"(?:(?<![\w$./])|(?<=/)(?=[$\{]))\$?\{?" + re.escape(v)
+                      + r"\b(?!\s*[:=](?![:=]))", part)
+        if m:
             hosts.extend(flow.url_hosts(v, line))
+            # `"$H.x.net/v1"`, `${H}.x.net`: the host is built on, so it is not H's.
+            if m.group(0)[:1] in "${" and re.match(
+                    r"\}?\.[A-Za-z][\w-]*\.[A-Za-z]", part[m.end():]):
+                hosts.append("?")
     for f, fh in flow.url_funcs.items():
         if _func_called(part, {f}):
             hosts.extend(fh)
@@ -1181,10 +1463,13 @@ def analyze(text: str, path: str | None = None,
     building, helpers), so a value built from an OpenAI key is graded as the OpenAI
     key wherever it goes, whatever else rides along with it."""
     code = strip_comments(text or "", path)
-    names = sorted(read_secret_names(code, path))
-    computed = bool(_COMPUTED_ENV_RE.search(code))
     dump_rx = (_ENV_DUMP_RE if (path or "").lower().endswith((".py", *_SLASH_EXT))
                else re.compile(_ENV_DUMP_RE.pattern + "|" + _SH_ENV_DUMP_RE.pattern))
+    # A shell function that dumps the environment or reads the .env, used as a value.
+    code = _inline_shell_funcs(code, re.compile(
+        dump_rx.pattern + r"|(?<![\w-])(?:env|printenv)\s*(?:;|$)|" + _ENV_FILE_RE.pattern), path)
+    names = sorted(read_secret_names(code, path))
+    computed = bool(_COMPUTED_ENV_RE.search(code))
     dump = bool(dump_rx.search(code))
     ext = {f: k for f, k in (extern or {}).items() if _func_called(code, {f})}
     if not (names or computed or dump or ext):
@@ -1399,6 +1684,207 @@ _ENV_CONTENTS_RE = re.compile(
     + r"|\bdotenv_values\s*\(|\bdotenv\.parse\s*\(|\bconfig\([^)]*\)\.parsed\b")
 
 
+# One URL setting looked up by name (`PUBLIC_URL=$(awk -F= '$1 == "APP_URL" …' .env)`,
+# audit round 2, emperorclaw): where the app lives, not a secret, so a request sent
+# to it carries none of the file. Credential-bearing URLs (a database / broker DSN, a
+# webhook) and anything with a secret word stay contents.
+_URL_SETTING_RE = re.compile(r"^[A-Z][A-Z0-9_]*_(?:URL|URI|HOST|DOMAIN|ENDPOINT|ORIGIN)$")
+_CRED_URL_WORD_RE = re.compile(
+    r"(?:^|_)(?:DATABASE|DB|DSN|REDIS|MONGO\w*|POSTGRES\w*|PG|MYSQL|AMQP|BROKER|CONN\w*"
+    r"|WEBHOOK|HOOK|SECRET|KEY|TOKEN|PASSWORD|PASS|PWD|AUTH|CRED\w*|SIGNED|PRIVATE)(?:_|$)")
+
+
+# Only a whole command / expression of a known single-key shape is excused (review
+# rounds 2 and 3 of #388): a positive pattern somewhere in a longer command proves
+# nothing (`grep '^NAME=' .env; cat .env`, `awk '$1 == "NAME" || 1'`, an address range,
+# an extra `-e`, `-A/-B/-C`, regex alternation, `grep -v` and every other inverse form).
+#   shell, as `$(…)` / `` `…` `` / `"$(…)"`, ONE command, no unquoted ; & | < > ( ) or
+#   backtick, no command substitution inside quotes, exactly one .env file argument:
+#     grep [-E|-o|-s|-h|-m1] '^NAME=' FILE           (pattern `^NAME=` or `^NAME=.*`)
+#     awk [-F=] '$1 == "NAME" [{ print … ; sub(…) }]' FILE   (or `/^NAME=/`)
+#     sed -n [-E] 's/^NAME=//p' | 's/^NAME=\(.*\)/\1/p' | '/^NAME=/p' FILE
+#   Python / JS: `dotenv_values(…)["NAME"]` / `.get("NAME"[, "default"])`,
+#   `dotenv.parse(fs.readFileSync(…))["NAME"]` / `.NAME`, `config(…).parsed["NAME"]`,
+#   or one of the shell commands above through subprocess (a string, or a list of
+#   string literals).
+_Q_STR = r"""(?:"[^"\\\n]*"|'[^'\\\n]*')"""
+_SH_UNQUOTED_BAD = set(";&|<>()`\n")
+_GREP_FLAGS = {"-E", "-o", "-s", "-h", "-m1", "--max-count=1"}
+_AWK_STMT_RE = (
+    r"(?:print(?:\s+(?:\$\d+|substr\(\s*\$0\s*,\s*\d+\s*\)))?"
+    r"|g?sub\(\s*/[^/;\n]*/\s*,\s*\"[^\"\n]*\"\s*\)|exit)")
+
+
+def _shell_words(cmd: str) -> list[str] | None:
+    """The words of ONE simple shell command, or None for anything else."""
+    q = ""
+    i = 0
+    while i < len(cmd):
+        c = cmd[i]
+        if q == "'":
+            q = "" if c == "'" else q
+        elif q == '"':
+            if c == '"':
+                q = ""
+            elif c == "`" or cmd.startswith("$(", i) or c == "\\":
+                return None
+        elif c in "'\"":
+            q = c
+        elif c in _SH_UNQUOTED_BAD or c == "\\" or cmd.startswith("$(", i):
+            return None
+        i += 1
+    if q:
+        return None
+    try:
+        return shlex.split(cmd)
+    except ValueError:
+        return None
+
+
+def _env_file_arg(word: str) -> bool:
+    return (bool(_ENV_FILE_RE.search(word)) and not word.startswith("-")
+            and not re.search(r"[*?\[\]{}]", word))
+
+
+def _sh_single_key(words: list[str], name: str) -> bool:
+    if not words:
+        return False
+    prog, args = words[0].rsplit("/", 1)[-1], words[1:]
+    n = re.escape(name)
+    if prog == "grep":
+        opts = [a for a in args if a.startswith("-")]
+        rest = [a for a in args if not a.startswith("-")]
+        if args[:len(opts)] != opts or "-m" in opts:
+            return False
+        return (all(o in _GREP_FLAGS for o in opts) and len(rest) == 2
+                and bool(re.fullmatch(r"\^" + n + r"=(?:\.\*)?", rest[0]))
+                and _env_file_arg(rest[1]))
+    if prog == "awk":
+        if args[:1] == ["-F="]:
+            args = args[1:]
+        elif args[:2] == ["-F", "="]:
+            args = args[2:]
+        if len(args) != 2 or not _env_file_arg(args[1]):
+            return False
+        pat = r"(?:\$1\s*==\s*\"" + n + r"\"|/\^" + n + r"=/)"
+        body = r"\{\s*(?:" + _AWK_STMT_RE + r"\s*(?:;\s*" + _AWK_STMT_RE + r"\s*)*;?\s*)?\}"
+        return bool(re.fullmatch(r"\s*" + pat + r"\s*(?:" + body + r")?\s*", args[0]))
+    if prog == "sed":
+        opts = []
+        while args and args[0] in ("-n", "-E", "-r"):
+            opts.append(args.pop(0))
+        if "-n" not in opts or len(args) != 2 or not _env_file_arg(args[1]):
+            return False
+        return bool(re.fullmatch(
+            r"s/\^" + n + r"=//p|s/\^" + n + r"=(?:\\\(\.\*\\\)|\(\.\*\))/\\1/p|/\^" + n + r"=/p",
+            args[0]))
+    return False
+
+
+def _sh_subst(rhs: str) -> str | None:
+    """The command inside a whole-value `$(…)` / `` `…` `` / `"$(…)"`."""
+    m = re.fullmatch(r'"?\$\((.*)\)"?|"?`([^`]*)`"?', rhs, re.S)
+    if not m or (rhs.startswith('"') != rhs.endswith('"')):
+        return None
+    cmd = m.group(1) if m.group(1) is not None else m.group(2)
+    return re.sub(r"\s+2>\s*/dev/null\s*$", "", cmd)
+
+
+def _py_single_key(rhs: str, name: str) -> bool:
+    n = re.escape(name)
+    key = r"""(?:\[\s*(["'])""" + n + r"""\1\s*\]|\.get\(\s*(["'])""" + n + r"""\2\s*(?:,\s*"""
+    key += _Q_STR + r"""\s*)?\))"""
+    arg = r"\(\s*(?:" + _Q_STR + r"|[A-Za-z_][\w.]*)?\s*\)"
+    shapes = (
+        r"(?:dotenv\.)?dotenv_values\s*" + arg + r"\s*" + key,
+        r"dotenv\.parse\(\s*(?:fs\.)?readFileSync\(\s*" + _Q_STR + r"\s*(?:,\s*" + _Q_STR
+        + r"\s*)?\)\s*\)\s*(?:" + key + r"|\." + n + r"\b)",
+        r"(?:dotenv\.)?config\(\s*(?:\{\s*path\s*:\s*" + _Q_STR + r"\s*\})?\s*\)\.parsed\s*(?:"
+        + key + r"|\." + n + r"\b)",
+    )
+    if any(re.fullmatch(sh, rhs) for sh in shapes):
+        return True
+    trail = r"(?:\s*\.(?:decode|strip|rstrip)\(\s*(?:" + _Q_STR + r")?\s*\))*"
+    m = re.fullmatch(r"(?:subprocess\.)?(?:getoutput|check_output|run)\(\s*(" + _Q_STR
+                     + r")\s*(?:,\s*(?:shell\s*=\s*True|text\s*=\s*True|encoding\s*=\s*"
+                     + _Q_STR + r"))*\s*\)" + trail, rhs)
+    if m:
+        words = _shell_words(m.group(1)[1:-1])
+        return words is not None and _sh_single_key(words, name)
+    m = re.fullmatch(r"(?:subprocess\.)?(?:check_output|run)\(\s*\[\s*((?:" + _Q_STR
+                     + r"\s*,\s*)*" + _Q_STR + r")\s*,?\s*\]\s*(?:,\s*(?:text\s*=\s*True"
+                     r"|encoding\s*=\s*" + _Q_STR + r"))*\s*\)" + trail, rhs)
+    if m:
+        words = [w[1:-1] for w in re.findall(_Q_STR, m.group(1))]
+        return _sh_single_key(words, name)
+    return False
+
+
+def _url_setting_lookup(rhs: str) -> bool:
+    rhs = rhs.strip().rstrip(";").strip()
+    names = set(re.findall(r"(?<![\w$])[A-Z][A-Z0-9_]{2,}\b", rhs))
+    if len(names) != 1 or _BULK_RE.search(rhs) or _DOTALL_RE.search(rhs):
+        return False
+    (name,) = names
+    if not _URL_SETTING_RE.match(name) or _CRED_URL_WORD_RE.search(name):
+        return False
+    cmd = _sh_subst(rhs)
+    if cmd is not None:
+        words = _shell_words(cmd)
+        return words is not None and _sh_single_key(words, name)
+    return _py_single_key(rhs, name)
+
+
+_SH_FUNC_DEF_RE = re.compile(
+    r"^\s*(?:function\s+([A-Za-z_][\w-]*)\s*(?:\(\s*\))?|([A-Za-z_][\w-]*)\s*\(\s*\))\s*\{(.*)$")
+
+
+def _inline_shell_funcs(text: str, path_re: re.Pattern[str], path: str | None) -> str:
+    """A shell script with each `$(f)` / `` `f` `` of a function whose body reads a
+    file matching ``path_re`` replaced by that body, so `f() { cat .env; }` then
+    `T=$(f)` reads like `T=$(cat .env)`. A function's output is its value in shell:
+    there is no `return` to follow. Line numbers are kept."""
+    if not ((path or "").lower().endswith((".sh", ".bash", ".zsh"))
+            or re.match(r"#!.*\b(?:ba|z|da|k)?sh\b", text)):
+        return text
+    lines = text.split("\n")
+    bodies: dict[str, str] = {}
+    for i, ln in enumerate(lines):
+        m = _SH_FUNC_DEF_RE.match(ln)
+        if not m:
+            continue
+        name, rest = m.group(1) or m.group(2), m.group(3)
+        one = re.fullmatch(r"(.*?);?\s*\}\s*;?\s*", rest)
+        if one:
+            body = one.group(1)
+        else:
+            parts = [rest]
+            for nxt in lines[i + 1:i + 200]:
+                if re.fullmatch(r"\s*\}\s*;?\s*", nxt):
+                    break
+                parts.append(nxt)
+            body = "; ".join(x.strip() for x in parts if x.strip())
+        body = "; ".join(_strip_comment(x) for x in body.split("; "))
+        if path_re.search(body):
+            bodies[name] = body.strip().rstrip(";")
+    if not bodies:
+        return text
+    alt = "|".join(map(re.escape, bodies))
+    rx = re.compile(r"\$\(\s*(" + alt + r")\b[^()]*\)|`\s*(" + alt + r")\b[^`]*`")
+    # ...and a call at the head of a pipeline (`f | curl --data-binary @- …`).
+    head = re.compile(r"(^\s*|[;&]\s*)(" + alt + r")\b[^|;&\n]*(?=\|(?!\|))")
+
+    def piped(m: re.Match[str]) -> str:
+        body = bodies[m.group(2)]
+        return m.group(1) + (body if ";" not in body else "{ " + body + "; }") + " "
+
+    for _ in range(2):
+        lines = [ln if _SH_FUNC_DEF_RE.match(ln) else head.sub(piped, rx.sub(
+                 lambda m: "$(" + bodies[m.group(1) or m.group(2)] + ")", ln))
+                 for ln in lines]
+    return "\n".join(lines)
+
+
 def contents_reached(text: str, path_re: re.Pattern[str] = _ENV_CONTENTS_RE,
                      path: str | None = None, whole: bool = False,
                      others: list[str] | None = None) -> list[str]:
@@ -1407,6 +1893,7 @@ def contents_reached(text: str, path_re: re.Pattern[str] = _ENV_CONTENTS_RE,
     judged by the key-flow rule, so os.environ / load_dotenv calls are not a send.
     ``whole``: only flows of the whole contents (stop at a single-value extraction).
     ``others``: bundled files whose calls of a helper here also count."""
+    text = _inline_shell_funcs(text or "", path_re, path)
     flow = _flow(text, path)
     texts = [flow.joined, *(others or [])]
 
@@ -1415,6 +1902,8 @@ def contents_reached(text: str, path_re: re.Pattern[str] = _ENV_CONTENTS_RE,
 
     seeds: Taint = {}
     for a in flow.assigns:
+        if _url_setting_lookup(a.rhs):
+            continue
         if path_re.search(_strip_comment(a.rhs)) and not (
                 whole and single(a)):
             seeds.setdefault(a.target, set()).add(flow.scope_of(a.line, a.declared))
