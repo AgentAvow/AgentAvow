@@ -7,9 +7,13 @@ import re
 import httpx
 
 from src.source_import.errors import SourceFetchError, SourceParseError
+from src.source_import.http import fetch_client
 from src.source_import.types import SourceImportResult
 
 logger = logging.getLogger(__name__)
+
+# Budget for the whole fetch (registry metadata + download count), retries included.
+_TOTAL_DEADLINE = 25.0
 
 # Framework detection: dependency name substring → framework label
 _FRAMEWORK_PATTERNS: list[tuple[str, str]] = [
@@ -52,7 +56,7 @@ async def fetch_npm(package_name: str, url: str) -> SourceImportResult:
         SourceFetchError: If the package is not found or a network error occurs.
     """
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with fetch_client(total=_TOTAL_DEADLINE, attempt_timeout=10) as client:
             # Registry metadata
             reg_resp = await client.get(
                 f"https://registry.npmjs.org/{package_name}"

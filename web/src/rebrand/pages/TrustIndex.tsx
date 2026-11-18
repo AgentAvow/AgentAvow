@@ -22,6 +22,7 @@ function RecentFeed() {
   if (!items.length) return null
   const ago = (iso: string | null) => {
     if (!iso) return ''
+    // eslint-disable-next-line react-hooks/purity -- "Xm ago" label is meant to reflect the time of render; the list refetches every 45s
     const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000)
     if (s < 90) return 'just now'
     if (s < 3600) return `${Math.round(s / 60)}m ago`

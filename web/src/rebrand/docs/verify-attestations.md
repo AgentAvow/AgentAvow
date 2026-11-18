@@ -24,7 +24,7 @@ Fetch the JSON Web Key Set once and cache it:
 GET https://agentgraph.co/.well-known/jwks.json
 ```
 
-Resolve the `kid` from the JWS header to the matching key. Keys rotate; always match by `kid`. The set
+Resolve the `kid` from the JWS header to the matching key. Always match by `kid`. The set
 currently publishes three keys: `agentgraph-security-v1` (Ed25519 — scan attestations and behavioral
 observations), `trust-v2-2026` (Ed25519 — trust-score envelopes) and `catalog-es256-v1` (P-256/ES256 — the
 signed [`/.well-known/ai-catalog.json`](https://agentavow.com/.well-known/ai-catalog.json)). The scan key is also
@@ -42,6 +42,27 @@ GET https://agentavow.com/.well-known/did.json
 Both documents carry the Ed25519 attestation key as `#agentgraph-security-v1` and the P-256 catalog key as
 `#catalog-es256-v1` (under `assertionMethod` only), so `did:web:<either>#agentgraph-security-v1` resolves
 to the key that signed a scan.
+
+## Key changes and pinning
+
+The keys are not rotated on a schedule. A key changes only when it is retired on purpose or compromised.
+
+- **Planned change.** We announce it at least 30 days ahead and publish the new key in the JWKS and both DID
+  documents, beside the old one, for that whole period. A retired key stays in the JWKS, so attestations it
+  signed still verify.
+- **Compromise.** We remove the key at once and post a notice on this page and in the repository.
+
+The JWKS and the DID documents are served from our own domains, so a verifier that trusts only them also
+trusts whoever controls those domains. To check a key against a second source, compare its RFC 7638
+thumbprint with the list below. This page is also kept in the
+[public repository](https://github.com/AgentAvow/AgentAvow/blob/main/web/src/rebrand/docs/verify-attestations.md)
+on GitHub, a separate origin, and any change to the list shows in its history.
+
+| `kid` | Key | RFC 7638 thumbprint |
+|---|---|---|
+| `agentgraph-security-v1` | Ed25519, scan attestations and behavioral observations | `6U8Zqv4KpmzaI_MMt0-72wwKx7p72zvQdULYhS3uUWQ` |
+| `trust-v2-2026` | Ed25519, trust-score envelopes | `xr4BogLMhNgo-RysVqQcjPCyfhXmtexql0Enihmi4e4` |
+| `catalog-es256-v1` | P-256, signed AI catalog | `dzj8bdIChCQ-S1i7jI81Kcjh3p0kJuFII1tO3e9FrwA` |
 
 ### The signed catalog
 
