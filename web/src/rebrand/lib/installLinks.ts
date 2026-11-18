@@ -82,6 +82,14 @@ export function codexCmd(t: McpTarget): string {
   return `codex mcp add ${t.name} --url ${t.url}`
 }
 
+/** The AgentAvow plugin for the Codex CLI (plugin 0.1.44+): checks MCP servers at session
+ * start and stops a `codex mcp add` or package install that reads Do not connect. The
+ * Codex IDE extension doesn't run plugins; there, the connector (codexCmd) is the path. */
+export const CODEX_PLUGIN_COMMANDS = [
+  'codex plugin marketplace add AgentAvow/AgentAvow',
+  'codex plugin add agentavow-trust@agentavow',
+]
+
 /** Claude Desktop reaches a REMOTE server through the mcp-remote stdio bridge. */
 export function claudeDesktopConfig(t: McpTarget): string {
   return JSON.stringify(

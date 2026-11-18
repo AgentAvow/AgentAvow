@@ -6,7 +6,7 @@ import { rp } from '../basePath'
 import { AppsButtons } from '../components/AppsStrip'
 import { DIVIDER_CLASS } from '../components/PageBits'
 import { trackListing } from '../lib/listings'
-import { codexCmd, cursorInstall, vscodeInstall, vscodeWebInstall } from '../lib/installLinks'
+import { CODEX_PLUGIN_COMMANDS, codexCmd, cursorInstall, vscodeInstall, vscodeWebInstall } from '../lib/installLinks'
 
 /**
  * /get: every place AgentAvow is listed, in one 860px column held to the left edge of
@@ -50,7 +50,7 @@ const GROUPS: { title: string; sub: string; items: Item[] }[] = [
     items: [
       { name: 'Claude Code and Cowork plugin', tag: 'Start here · checks by itself', tone: 'rec', text: 'Two commands from our GitHub marketplace, always the current version. Checks new MCP servers and packages automatically, and warns you before your agent uses one.', actions: [{ kind: 'link', label: 'Install →', href: '/rebrand/claude-code' }] },
       { name: 'Claude and ChatGPT', tag: 'Checks when you ask', tone: 'apps', text: 'The connector in Claude and the app in ChatGPT. Ask before you connect anything, right in the chat.', actions: [{ kind: 'apps' }] },
-      { name: 'Codex', tag: 'Checks when you ask', text: code(codexCmd(MCP)), actions: [{ kind: 'link', label: 'Setup →', href: '/rebrand/docs/codex' }] },
+      { name: 'Codex', tag: 'Checks by itself (CLI)', actions: [{ kind: 'link', label: 'Setup →', href: '/rebrand/docs/codex' }], text: <>The plugin for the Codex CLI checks your MCP servers when a session starts, and stops a {code('codex mcp add')} or package install that reads Do not connect. Connector only, for the IDE extension (it doesn't run plugins): {code(codexCmd(MCP))}</>, snippet: CODEX_PLUGIN_COMMANDS.join('\n') },
       { name: 'Cursor', tag: 'Checks when you ask', text: 'One-click install of the connector. Also listed on cursor.directory.', actions: [{ kind: 'link', label: 'Add to Cursor ↗', href: cursorInstall(MCP) }] },
       { name: 'VS Code', tag: 'Checks when you ask', text: 'One-click install of the connector.', actions: [{ kind: 'vscode' }] },
       { name: 'Gemini CLI', tag: 'Checks when you ask', text: <>Extension: {code('gemini extensions install https://github.com/AgentAvow/agentavow-gemini')}</>, actions: [{ kind: 'link', label: 'Open ↗', href: 'https://github.com/AgentAvow/agentavow-gemini' }] },

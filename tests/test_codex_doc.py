@@ -37,6 +37,31 @@ def test_get_page_uses_the_same_connector() -> None:
     assert "const MCP = { name: 'agentavow', url: 'https://agentavow.com/mcp' }" in get
 
 
+def _site_codex_plugin_cmds() -> list[str]:
+    links = (WEB / "lib" / "installLinks.ts").read_text()
+    m = re.search(r"export const CODEX_PLUGIN_COMMANDS = \[([^\]]+)\]", links)
+    assert m, "CODEX_PLUGIN_COMMANDS not found in installLinks.ts"
+    return re.findall(r"'([^']+)'", m.group(1))
+
+
+def test_codex_plugin_commands_match_the_doc() -> None:
+    cmds = _site_codex_plugin_cmds()
+    assert cmds == ["codex plugin marketplace add AgentAvow/AgentAvow",
+                    "codex plugin add agentavow-trust@agentavow"]
+    assert "\n" + "\n".join(cmds) + "\n" in DOC
+
+
+def test_codex_row_leads_with_the_plugin_and_keeps_the_connector() -> None:
+    for f in ("pages/Get.tsx", "lib/agentavowPaths.ts"):
+        src = (WEB / f).read_text()
+        row = src[src.index("'Codex'"):]
+        row = row[:row.index("\n")] if f.startswith("pages") else row[:row.index("\n  },")]
+        assert "tag: 'Checks by itself (CLI)'" in row, f
+        assert "Checks when you ask" not in row, f
+        assert "CODEX_PLUGIN_COMMANDS.join('\\n')" in row, f
+        assert "Connector only" in row and "codexCmd(" in row, f
+
+
 def test_codex_doc_config_block_matches_the_connector() -> None:
     assert '[mcp_servers.agentavow]\nurl = "https://agentavow.com/mcp"\n' in DOC
 
