@@ -293,6 +293,15 @@ def scan_local(root: str | Path, *, name: str | None = None) -> ScanResult:
             result.tool_digests[it["path"]] = digest
     from src.scanner.npm_scripts import restore_externally_invoked
     restore_externally_invoked(result.findings, local_texts)
+    from src.scanner import skill_install
+    tree_paths = [it["path"] for it in tree]
+    runner_texts = dict(local_texts)
+    for p in skill_install.unread_runners(result.findings, local_texts, tree_paths)[
+            :skill_install.MAX_EXTRA_READS]:
+        text = read(p)
+        if text:
+            runner_texts[p] = text
+    skill_install.restore_runs(result.findings, runner_texts, tree_paths)
     # A test-named file that is not test code (or that running code uses) is graded as
     # shipped code (same rule as scan_repo).
     result.findings = _regrade_misnamed_tests(result.findings, local_texts, allowlist,

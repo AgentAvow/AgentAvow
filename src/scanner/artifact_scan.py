@@ -1094,6 +1094,10 @@ def scan_artifact_files(
     restore_externally_invoked(
         findings, {p: af.text for p, af in fetched.files.items() if af.text},
         registry_artifact=is_npm_tarball)
+    from src.scanner import skill_install
+    skill_install.restore_runs(
+        findings, {p: af.text for p, af in fetched.files.items() if af.text},
+        list(fetched.files))
 
     # An npm install hook whose code phones home with host / user details, contacts a
     # callback collector, or runs an obfuscated payload: medium → high.
