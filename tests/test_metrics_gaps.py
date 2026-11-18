@@ -61,7 +61,8 @@ def snap(tmp_path, monkeypatch):
     mod = _load("scripts/ops/anthropic_traffic_snapshot.py", "anthropic_traffic_snapshot_gaps")
     data = tmp_path / "data"
     for attr, name in (("SEEN_PATH", "seen.json"), ("CHECKED_PATH", "checked.json"),
-                       ("FIRST_CHECKED_PATH", "first.json"), ("CLOUD_PATH", "cloud.json")):
+                       ("FIRST_CHECKED_PATH", "first.json"), ("CLOUD_PATH", "cloud.json"),
+                       ("CODEX_CHECKED_PATH", "codex.json")):
         monkeypatch.setattr(mod, attr, str(data / name))
     monkeypatch.setattr(mod, "DATA", str(data))
     monkeypatch.setattr(mod, "_salt", lambda: "test-salt")
