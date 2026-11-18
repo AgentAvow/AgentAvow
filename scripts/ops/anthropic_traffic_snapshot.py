@@ -112,6 +112,13 @@ COLUMNS = [
     # plugin versions send no tag either until they update. checked_machines_plugin =
     # those plugin machines that also sent a check that day.
     "cc_machines_plugin", "checked_machines_plugin",
+    # Added 2026-11-17. d7_returned counts only machines back on exactly day 7, which
+    # misses developers who skip days. d7w_cohort is the same cohort as d7_cohort
+    # (first seen 7 days ago); d7w_returned = how many of them connected again on any
+    # later day through this one. returning_machines = this day's machines (owner
+    # excluded) first seen before this day; _excl_cloud also drops machines seen on a
+    # cloud entrypoint in the last 30 days. Empty on earlier days.
+    "d7w_cohort", "d7w_returned", "returning_machines", "returning_machines_excl_cloud",
 ]
 
 # Our A2A Agent Card: the A2A 1.0 path, and the pre-0.3 path some clients still try first.
@@ -270,7 +277,21 @@ def _owner_ips() -> set[str]:
 
 def _reach_fields(seen: dict[str, list[str]], checked_last: dict[str, str],
                   today: set[str], day: str, owner: set[str]) -> dict:
-    """Rolling 7-day machine counts and D1/D7 retention from salted hashes."""
+    """Rolling 7-day machine counts and D1/D7 retention from salted hashes.
+
+    d1/d7: of the machines first seen exactly 1 or 7 days before ``day``, how many are in
+    ``today`` (connected on ``day`` itself).
+
+    d7w: the same 7-day cohort, and how many connected again on ANY day from the day after
+    their first through ``day``. ``seen`` keeps only [first_seen, last_seen] per hash, not
+    every day, so the test is ``first < last <= day`` (seen after its first day, and not
+    past this day), or in ``today``. On the nightly run ``last`` is never past ``day``, so
+    this is exact. A re-run of an older day, after later days were processed, cannot see
+    a return inside the window for a machine whose last_seen has moved past ``day`` and
+    which is not in that day's log; such a re-run can undercount, never overcount.
+
+    returning_machines: machines in ``today`` (owner excluded) first seen before ``day``.
+    """
     date = datetime.strptime(day, "%Y-%m-%d")
 
     def ago(n: int) -> str:
@@ -286,6 +307,12 @@ def _reach_fields(seen: dict[str, list[str]], checked_last: dict[str, str],
         cohort = {h for h, v in seen.items() if v[0] == ago(n) and h not in owner}
         fields[f"d{n}_cohort"] = len(cohort)
         fields[f"d{n}_returned"] = len(cohort & today)
+        if n == 7:
+            fields["d7w_cohort"] = len(cohort)
+            fields["d7w_returned"] = sum(
+                1 for h in cohort if h in today or seen[h][0] < seen[h][1] <= day)
+    fields["returning_machines"] = sum(
+        1 for h in today - owner if h in seen and seen[h][0] < day)
     return fields
 
 
@@ -308,7 +335,8 @@ def _rolling(entries: dict, day: str, window_days: int) -> dict:
 def _activation_fields(seen: dict[str, list[str]], checked_last: dict[str, str],
                        first_checked: dict[str, str], cloud: set[str], today: set[str],
                        checked_today: set[str], day: str, owner: set[str]) -> dict:
-    """Cloud-excluded 7-day counts and the share of new machines that see a verdict."""
+    """Cloud-excluded 7-day counts, cloud-excluded returning machines (this day's machines
+    first seen before it) and the share of new machines that see a verdict."""
     date = datetime.strptime(day, "%Y-%m-%d")
 
     def ago(n: int) -> str:
@@ -322,6 +350,8 @@ def _activation_fields(seen: dict[str, list[str]], checked_last: dict[str, str],
             1 for h, v in seen.items() if v[1] >= start and h not in skip),
         "checked_machines_7d_excl_cloud": sum(
             1 for h, v in checked_last.items() if v >= start and h not in skip),
+        "returning_machines_excl_cloud": sum(
+            1 for h in today - skip if h in seen and seen[h][0] < day),
         "new_checked_same_day": len(
             {h for h in today if seen.get(h, [None])[0] == day and h not in owner}
             & checked_today),

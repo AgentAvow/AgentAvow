@@ -10,7 +10,7 @@ const MAX_UTM_LENGTH = 200 // analytics_first_touch columns
 const PRIVATE_SCAN_PATH = '/check/private'
 const PLUGIN_COMMAND = /\/plugin\s+(?:marketplace\s+add\s+AgentAvow\/AgentAvow|install\s+agentavow-trust@agentavow)/i
 
-export type CtaDestination = 'copy_plugin_cmd' | 'open_plugin_dir' | 'add_claude' | 'add_chatgpt'
+export type CtaDestination = 'copy_plugin_cmd' | 'open_plugin_dir' | 'add_claude' | 'add_chatgpt' | 'email_setup' | 'share_link'
 export type BadgeFormat = 'badge' | 'card' | 'widget'
 
 // Browsers can block storage outright, and analytics must never break the page because of it.
@@ -181,6 +181,15 @@ export function trackContactSubmit(): void {
 export function trackPluginCommandCopy(): void {
   try {
     if (PLUGIN_COMMAND.test(String(window.getSelection()))) trackCta('copy_plugin_cmd')
+  } catch {
+    // Silently ignore
+  }
+}
+
+/** Same as trackPluginCommandCopy, for a copy button: checks the copied text instead of the selection. */
+export function trackPluginCommandText(text: string): void {
+  try {
+    if (PLUGIN_COMMAND.test(text)) trackCta('copy_plugin_cmd')
   } catch {
     // Silently ignore
   }

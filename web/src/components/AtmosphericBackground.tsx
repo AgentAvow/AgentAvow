@@ -468,5 +468,6 @@ export function AtmosphericBackground({ children, intensity: intensityProp, conf
   )
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper co-located with the component it serves; HMR falls back to a full reload here
 export { getIntensity }
 export type { Intensity }

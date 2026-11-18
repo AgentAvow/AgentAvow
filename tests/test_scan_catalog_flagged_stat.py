@@ -241,3 +241,49 @@ def test_summary_counters_are_exclusive_and_split_scanned_from_skipped():
     # repo_scans_total keeps its meaning: every non-x402 row, graded or not
     assert summary.repo_scans_total == EXPECTED_ALL["scanned_total"] + EXPECTED_ALL["skipped"]
     assert summary.x402_endpoints_total == 1 and summary.x402_compliant == 1
+
+
+# --- answer mix: the homepage's four figures in the one cached response ------------
+
+async def _decision_total(decision: str | None = None, grade: str | None = None) -> int:
+    resp = await m.scan_catalog(
+        surface=None, q=None, severity=None, grade=grade, category=None,
+        decision=decision, sort="default", limit=1, offset=0, db=None,
+    )
+    return resp.total
+
+
+async def test_answer_mix_equals_list_totals(catalog, monkeypatch):
+    """Home / Browse used to sum four list requests; the stat must give the same figures."""
+    community = [
+        CatalogRow(surface="github", name="o/bad", full_name="o/bad", trust_score=25,
+                   critical=1, high=0),
+        CatalogRow(surface="github", name="o/ok", full_name="o/ok", trust_score=96,
+                   critical=0, high=0, grade="A+"),
+        CatalogRow(surface="npm", name="pending", full_name="pending", trust_score=None),
+    ]
+
+    async def _community(db):
+        return list(community)
+
+    monkeypatch.setattr(m, "_community_rows", _community)
+    mix = (await m.flagged_stat(db=None))["answer_mix"]
+    assert mix["safe"] == await _decision_total("safe")
+    assert mix["review"] == await _decision_total("review")
+    assert mix["do_not_connect"] == await _decision_total("do_not_connect")
+    assert mix["certified"] == await _decision_total(grade="certified")
+    assert mix["tools_checked"] == mix["safe"] + mix["review"] + mix["do_not_connect"]
+    assert mix["do_not_connect"] >= 1 and mix["safe"] >= 1
+
+
+async def test_answer_mix_keeps_x402_apart(catalog, monkeypatch):
+    mix = (await m.flagged_stat(db=None))["answer_mix"]
+    summary = m._CATALOG_CACHE["summary"]
+    # the figure Home showed before: scored endpoints, else every listed endpoint
+    assert mix["x402_scored"] == (summary.x402_scored or summary.x402_endpoints_total) == 1
+    # the x402 fixture row is never a tool checked
+    monkeypatch.setattr(
+        m, "_CATALOG_CACHE", m._build_catalog([r for r in catalog if r.surface != "x402"]))
+    monkeypatch.setattr(m, "_FLAGGED_STAT_CACHE", None)
+    again = (await m.flagged_stat(db=None))["answer_mix"]
+    assert again["tools_checked"] == mix["tools_checked"]

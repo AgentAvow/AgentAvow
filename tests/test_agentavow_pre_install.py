@@ -683,3 +683,63 @@ def test_a_checkout_under_home_var_does_not_ask(hook, monkeypatch, capsys):
     assert _run(mod, monkeypatch, capsys,
                 _bash("grep -rn verdict $HOME/projects/AgentAvow/src | head"),
                 lambda *a, **k: None) == {}
+
+
+# --- 0.1.43: fewer false asks ----------------------------------------------------------
+
+@pytest.mark.parametrize("cmd", [
+    # "allow" inside another word, in a command that touches some other cache folder
+    "cat > ~/.cache/herdr/status/x.md <<EOF\nTests skip on a shallow clone.\nEOF",
+    "echo 'swallow the error' > ~/.cache/tool/log.txt",
+    "grep -rn fallow ~/.cache/pip",
+    # a checkout path inside a bracketed list, in a command that also changes directory
+    'cd /tmp && python3 -c \'for cwd in ["/home/me/projects/AgentAvow", None]: print(cwd)\'',
+])
+def test_lookalikes_do_not_ask(hook, monkeypatch, capsys, cmd):
+    mod, _ = hook
+    assert _run(mod, monkeypatch, capsys, _bash(cmd), lambda *a, **k: None) == {}
+
+
+@pytest.mark.parametrize("cmd", [
+    "cat ~/.cache/x/allowed.json",
+    "echo x >> ~/.cache/$D/allow-list",
+    "cat ~/.cache/agentavow/allow.key",
+])
+def test_allow_files_under_the_cache_still_ask(hook, monkeypatch, capsys, cmd):
+    mod, _ = hook
+    _ask_reason(mod, monkeypatch, capsys, _bash(cmd))
+
+
+# No switch turns the own-files ask off: a repo's settings file can set Claude Code's
+# environment, so any such switch would be a repo's to flip.
+@pytest.mark.parametrize("value", ["1", "on", "true", "yes"])
+def test_no_environment_variable_turns_the_own_files_ask_off(hook, monkeypatch, capsys, value):
+    mod, _ = hook
+    monkeypatch.setenv("AGENTAVOW_MAINTAINER", value)
+    _ask_reason(mod, monkeypatch, capsys, _bash("cat ~/.cache/agentavow/allow.key"))
+
+
+# A folder can be named with a `,` or `[` in it, so the token stops must not hide a
+# link under such a folder that points at the cache folder.
+@pytest.mark.parametrize("folder", ["p,q", "a[b", "x(y"])
+def test_a_link_under_a_folder_named_with_a_token_stop_still_asks(
+        hook, monkeypatch, capsys, tmp_path, folder):
+    mod, _ = hook
+    cache = tmp_path / "home" / ".cache"
+    (cache / "agentavow").mkdir(parents=True)
+    monkeypatch.setattr(mod, "_own_dir", lambda: cache / "agentavow")
+    odd = tmp_path / folder
+    odd.mkdir()
+    (odd / "c").symlink_to(cache)
+    _ask_reason(mod, monkeypatch, capsys,
+                _bash(f"cp evil.json {odd}/c/agentavow/scanned.json"))
+    _ask_reason(mod, monkeypatch, capsys,
+                dict(_bash(f"cp evil.json {folder}/c/agentavow/scanned.json"), cwd=str(tmp_path)))
+
+
+def test_a_checkout_in_a_bracketed_list_still_does_not_ask(hook, monkeypatch, capsys, tmp_path):
+    mod, _ = hook
+    checkout = tmp_path / "projects" / "AgentAvow"
+    checkout.mkdir(parents=True)
+    cmd = f'cd /tmp && python3 -c \'for cwd in ["{checkout}", None]: print(cwd)\''
+    assert _run(mod, monkeypatch, capsys, _bash(cmd), lambda *a, **k: None) == {}

@@ -7,9 +7,13 @@ import re
 import httpx
 
 from src.source_import.errors import SourceFetchError, SourceParseError
+from src.source_import.http import fetch_client
 from src.source_import.types import SourceImportResult
 
 logger = logging.getLogger(__name__)
+
+# Budget for the whole Hugging Face fetch, retries included.
+_TOTAL_DEADLINE = 20.0
 
 _HF_URL_RE = re.compile(
     r"https?://huggingface\.co/(?P<org>[^/]+)/(?P<model>[^/?#]+)"
@@ -41,7 +45,7 @@ async def fetch_huggingface(model_id: str, url: str) -> SourceImportResult:
         SourceFetchError: If the model is not found or a network error occurs.
     """
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with fetch_client(total=_TOTAL_DEADLINE, attempt_timeout=10) as client:
             resp = await client.get(
                 f"https://huggingface.co/api/models/{model_id}"
             )

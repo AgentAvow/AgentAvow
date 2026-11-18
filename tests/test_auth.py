@@ -181,3 +181,29 @@ async def test_me_unauthenticated(client: AsyncClient):
 async def test_me_invalid_token(client: AsyncClient):
     resp = await client.get(ME_URL, headers={"Authorization": "Bearer invalid"})
     assert resp.status_code == 401
+
+
+# --- Password hashing cost ---------------------------------------------------
+# Production hashes at a fixed cost; tests/conftest.py swaps in a cost-4 hasher
+# for the suite only.
+
+
+def test_production_password_cost_is_12():
+    from src.api import auth_service
+
+    assert auth_service.PASSWORD_HASH_ROUNDS == 12
+
+
+def test_suite_hashes_at_low_cost():
+    from src.api.auth_service import hash_password
+
+    assert hash_password("Str0ngP@ss").startswith("$2b$04$")
+
+
+def test_hash_of_production_cost_still_verifies():
+    from pwdlib.hashers.bcrypt import BcryptHasher
+
+    from src.api.auth_service import verify_password
+
+    hashed = BcryptHasher(rounds=12).hash("Str0ngP@ss")
+    assert verify_password("Str0ngP@ss", hashed)

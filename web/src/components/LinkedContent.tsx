@@ -19,10 +19,10 @@ export default function LinkedContent({ text, className }: { text: string; class
   let lastIndex = 0
   let match: RegExpExecArray | null
 
-  // Reset regex state
-  URL_REGEX.lastIndex = 0
+  // Fresh copy per render: a /g regex carries lastIndex state, so don't share it
+  const urlRegex = new RegExp(URL_REGEX)
 
-  while ((match = URL_REGEX.exec(text)) !== null) {
+  while ((match = urlRegex.exec(text)) !== null) {
     // Add text before this URL
     if (match.index > lastIndex) {
       parts.push(text.slice(lastIndex, match.index))

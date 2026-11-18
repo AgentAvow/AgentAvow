@@ -72,11 +72,42 @@ jobs:
       - name: Test
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/agentgraph_test
-          REDIS_URL: redis://localhost:6379/0
+          REDIS_URL: redis://localhost:6379/15
           # .env is no longer tracked (004fc83), so CI has to opt into debug itself:
           # without it settings refuse the default JWT_SECRET and every module errors.
           DEBUG: "true"
         run: pytest tests/ -v
+
+  # The committed OpenAPI document (docs/api/openapi.json) must match the code, and a PR
+  # must not break it compared with its base branch (#408, docs/adr/0006-api-contract.md).
+  # Needs no database or Redis: the document is built from an app import with fixed
+  # settings. The /mcp tool list is not in the document; its snapshot tests guard it.
+  api-contract:
+    name: API contract (OpenAPI)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Pinned FastAPI/pydantic versions, so an upstream release does not change the text.
+      - name: Install dependencies (pinned OpenAPI toolchain)
+        run: pip install -e ".[prod,dev]" -c docs/api/openapi-toolchain.txt
+
+      - name: Committed OpenAPI document is current
+        run: python scripts/openapi/generate.py --check
+
+      - name: No breaking changes against the base branch
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags --depth=1 origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          python scripts/openapi/breaking.py --base-ref "origin/${BASE_REF}"
 
   frontend:
     name: Frontend (typecheck + build)
@@ -95,6 +126,10 @@ jobs:
       - name: Install dependencies
         working-directory: web
         run: npm ci
+
+      - name: Lint
+        working-directory: web
+        run: npm run lint
 
       - name: TypeScript check
         working-directory: web

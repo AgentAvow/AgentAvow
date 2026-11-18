@@ -17,7 +17,8 @@ EXPECTED = HERE / "expected.json"
 SETS = ("cases_npm_scripts", "cases_printed_hint", "cases_trifecta", "cases_exfil_precision",
         "cases_browser_profile", "cases_signing_key",
         "cases_encoded_instructions", "cases_bytecode", "cases_skill_prose",
-        "cases_a2a_cards", "cases_rule_exemptions")
+        "cases_a2a_cards", "cases_rule_exemptions", "cases_skill_secret_flow",
+        "cases_shown_cmd")
 
 
 def load(name: str):

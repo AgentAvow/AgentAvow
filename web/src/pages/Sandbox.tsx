@@ -183,6 +183,7 @@ export default function Sandbox() {
     }
   }, [token])
 
+  // eslint-disable-next-line react-hooks/purity -- TODO: expiry is re-derived from "now" each render so it drifts; store the issue time when the token is created (behavior change, needs a click-through)
   const expiresAt = token ? new Date(Date.now() + token.expires_in * 1000) : null
   const base = typeof window !== 'undefined' ? window.location.origin : ''
 

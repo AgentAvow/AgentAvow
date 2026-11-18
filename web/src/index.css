@@ -415,3 +415,9 @@ a:focus-visible,
     transition-duration: 0.01ms !important;
   }
 }
+
+/* X wallet-key ad visitors on the homepage: hide the prerendered usual hero until the
+   app swaps in the ad hero (set before first paint by public/ad-hero.js). */
+html[data-ad-hero="wallet"] [data-hero="default"] {
+  visibility: hidden;
+}
