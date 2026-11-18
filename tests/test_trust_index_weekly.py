@@ -378,3 +378,141 @@ async def test_most_checked_endpoint_is_public_and_cached(client, catalog, fake_
     assert r.status_code == 200
     assert len(r.json()["items"]) == 3
     assert ti.CHECKED_CACHE_KEY in fake_cache.data
+
+
+# --- the admin shortlist: at most 3 a week, most-checked first ----------------------------
+def _review(name: str, verdict: str, reason: str | None = None) -> DncReview:
+    return DncReview(page_key=f"/check/{name}", page_path=f"/check/{name}", surface="github",
+                     name=name, decision_at_review="do_not_connect",
+                     reason_at_review=reason or f"reason for {name}", verdict=verdict,
+                     reviewed_at=NOW - timedelta(days=1))
+
+
+@pytest.mark.asyncio
+async def test_shortlist_ranks_by_checks_caps_at_three_and_skips_read_ones(db, catalog,
+                                                                          fake_cache):
+    catalog.extend([
+        _row("acme/top", decision="do_not_connect"),
+        _row("acme/confirmed", decision="do_not_connect"),
+        _row("acme/kept-off", decision="do_not_connect"),
+        _row("acme/changed", decision="do_not_connect", reason="a new reason"),
+        _row("acme/second", decision="do_not_connect"),
+        _row("acme/third", decision="do_not_connect"),
+        _row("acme/fourth", decision="do_not_connect"),
+        _row("acme/unchecked", decision="do_not_connect"),
+        _row("acme/safe", decision="safe", score=90),
+    ])
+    db.add_all([_review("acme/confirmed", "confirmed"), _review("acme/kept-off", "not_confirmed"),
+                _review("acme/changed", "confirmed")])
+    await db.flush()
+    counts = {"/check/acme/safe": 99, "/check/acme/confirmed": 80, "/check/acme/kept-off": 70,
+              "/check/acme/top": 50, "/check/acme/changed": 40, "/check/acme/second": 30,
+              "/check/acme/third": 30, "/check/acme/fourth": 10}
+    items = await ti.build_shortlist(db, counts=counts)
+    assert [i["name"] for i in items] == ["acme/top", "acme/changed", "acme/second"]
+    assert [i["checks_week"] for i in items] == [50, 40, 30]
+    assert [i["status"] for i in items] == ["pending", "changed", "pending"]
+    assert items[0]["decision_reason"] == "reason for acme/top"
+    assert ti.SHORTLIST_LIMIT == 3
+
+
+@pytest.mark.asyncio
+async def test_shortlist_empty_when_no_dnc_tool_was_checked(db, catalog, fake_cache):
+    catalog.extend([_row("acme/bad", decision="do_not_connect"),
+                    _row("acme/fine", decision="safe", score=90)])
+    assert await ti.build_shortlist(db, counts={"/check/acme/fine": 12}) == []
+    assert await ti.build_shortlist(db, counts={}) == []
+
+
+@pytest.mark.asyncio
+async def test_admin_read_carries_shortlist_and_full_list(client, db, catalog, fake_cache,
+                                                         monkeypatch):
+    monkeypatch.setattr(ti, "growth_review_keys", lambda since: {})
+
+    async def counts(today=None, days=7):
+        return {"/check/acme/checked": 4}
+
+    monkeypatch.setattr(tool_checks, "week_counts", counts)
+    catalog.extend([_row("acme/checked", decision="do_not_connect"),
+                    _row("acme/quiet", decision="do_not_connect")])
+    admin = await _user(client, db, "admin", admin=True)
+    r = await client.get(ADMIN_URL, headers=_auth(admin))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["shortlist_limit"] == 3
+    assert [i["page_key"] for i in body["shortlist"]] == ["/check/acme/checked"]
+    assert body["shortlist"][0]["checks_week"] == 4
+    assert {i["page_key"] for i in body["items"]} == {"/check/acme/checked", "/check/acme/quiet"}
+
+
+# --- the card's automatic fill: structured signals only -----------------------------------
+def test_auto_reason_reads_structured_fields_only():
+    canary = {"ran": True, "canary_exfil": [{"host": "x"}]}
+    rule = {"ran": True, "findings": [{"rule": "credential_canary_exfiltrated"}]}
+    assert ti.auto_reason({}, canary) == "sandbox"
+    assert ti.auto_reason({}, rule) == "sandbox"
+    # A pending run, a run that did not run, or an advisory live probe never counts.
+    assert ti.auto_reason({}, {**canary, "pending": True}) is None
+    assert ti.auto_reason({}, {**canary, "ran": False}) is None
+    assert ti.auto_reason({}, {**canary, "plan": "live-probe"}) is None
+    assert ti.auto_reason({"incident_history": {"current_version_affected": True}}, None) \
+        == "known_malicious"
+    assert ti.auto_reason({"supply_chain": {"malicious": ["MAL-2026-1"]}}, None) \
+        == "known_malicious"
+    # History only (an older version), an empty MAL list, or reason text: not automatic.
+    assert ti.auto_reason({"incident_history": {"has_incident": True,
+                                                "current_version_affected": False}}, None) is None
+    assert ti.auto_reason({"supply_chain": {"malicious": []}}, None) is None
+    assert ti.auto_reason({"decision_reason": "a known-malicious dependency: x",
+                           "findings": {"items": [{"name": "Known-malicious package: x"}]}},
+                          None) is None
+
+
+@pytest.mark.asyncio
+async def test_card_confirmed_first_then_automatic(db, catalog, monkeypatch):
+    catalog.extend([
+        _row("acme/confirmed", decision="do_not_connect", days_ago=3),
+        _row("acme/malware", decision="do_not_connect", days_ago=1),
+        _row("acme/leak", decision="do_not_connect", days_ago=2),
+        _row("acme/plain-critical", decision="do_not_connect", days_ago=1),
+        _row("acme/kept-off", decision="do_not_connect", days_ago=1),
+        _row("acme/old-malware", decision="do_not_connect", days_ago=20),
+        _row("acme/now-safe", decision="safe", score=90, days_ago=1),
+    ])
+    db.add_all([_review("acme/confirmed", "confirmed"), _review("acme/kept-off", "not_confirmed")])
+    await db.flush()
+    mal = {"incident_history": {"current_version_affected": True}}
+    scans = {"acme/malware": mal, "acme/leak": {"leak": True}, "acme/plain-critical": {},
+             "acme/kept-off": mal, "acme/old-malware": mal, "acme/now-safe": mal}
+
+    async def scan(row):
+        return scans.get(row.full_name)
+
+    async def sandbox(data):
+        return {"ran": True, "canary_exfil": ["h"]} if data.get("leak") else None
+
+    monkeypatch.setattr(ti, "cached_scan", scan)
+    monkeypatch.setattr(ti, "cached_behavioral", sandbox)
+    data = await ti.build_dnc_week(db, now=NOW)
+    got = [(i["name"], i["listed_because"]) for i in data["items"]]
+    assert got == [("acme/confirmed", "confirmed"), ("acme/malware", "known_malicious"),
+                   ("acme/leak", "sandbox")]
+    assert data["items"][0]["confirmed_at"] and data["items"][1]["confirmed_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_card_automatic_fill_respects_the_cap(db, catalog, monkeypatch):
+    for i in range(7):
+        catalog.append(_row(f"acme/m{i}", decision="do_not_connect", days_ago=1 + i / 10))
+
+    async def scan(row):
+        return {"supply_chain": {"malicious": ["MAL-1"]}}
+
+    async def sandbox(data):
+        return None
+
+    monkeypatch.setattr(ti, "cached_scan", scan)
+    monkeypatch.setattr(ti, "cached_behavioral", sandbox)
+    data = await ti.build_dnc_week(db, now=NOW)
+    assert [i["name"] for i in data["items"]] == [f"acme/m{i}" for i in range(ti.CARD_LIMIT)]
+    assert {i["listed_because"] for i in data["items"]} == {"known_malicious"}

@@ -5,7 +5,7 @@ import { rp } from '../basePath'
 import { Reveal } from '../components/motion'
 import { DecisionLine, ScorePairMini, TrustOrCertifiedMini } from '../components/TrustMark'
 import { CtaBand, PageHeader, SECTION_CLASS, SectionH2 } from '../components/PageBits'
-import { fetchCatalog, fetchDncWeek, fetchFlaggedStat, fetchMostChecked, fetchRecent, rowIdentity, type CatalogRow, type FlaggedStat } from '../catalog'
+import { fetchCatalog, fetchDncWeek, fetchFlaggedStat, fetchMostChecked, fetchRecent, rowIdentity, type CatalogRow, type DncWeekItem, type FlaggedStat } from '../catalog'
 import { AnswerMixBar, StatCards } from '../components/AnswerMix'
 import { SandboxFindingsBlock } from '../components/SandboxStats'
 import SEOHead from '../../components/SEOHead'
@@ -76,8 +76,16 @@ function WeeklyCard({ title, note, children }: { title: string; note: string; ch
   )
 }
 
-/** "Do not connect this week": only answers a person read and confirmed (owner rule
- * 2026-11-11), re-checked by the API at read time. Hidden when there are none. */
+/** Why a tool is on "Do not connect this week". */
+const DNC_LISTED_TAG: Record<NonNullable<DncWeekItem['listed_because']>, string> = {
+  confirmed: 'confirmed by a person',
+  known_malicious: 'known malicious',
+  sandbox: 'seen in the sandbox',
+}
+
+/** "Do not connect this week": answers a person read and confirmed first (owner rule
+ * 2026-11-11), then ones that need no judgment (known malicious, a planted credential
+ * seen leaving the sandbox), re-checked by the API at read time. Hidden when empty. */
 function DncThisWeek() {
   const { data, isLoading } = useQuery({
     queryKey: ['weekly-dnc'], queryFn: fetchDncWeek, staleTime: 300_000, refetchInterval: 600_000,
@@ -86,14 +94,17 @@ function DncThisWeek() {
   const items = data || []
   if (!items.length) return null
   return (
-    <WeeklyCard title="Do not connect this week" note="Tools whose Do not connect answer a person read and confirmed in the last 7 days, newest first. A tool leaves the list when a new check changes its answer.">
+    <WeeklyCard title="Do not connect this week" note="Do not connect answers from the last 7 days: the ones a person read and confirmed first, then known-malicious packages and tools that leaked a planted credential in our sandbox. A tool leaves the list when a new check changes its answer.">
       {items.map((it) => (
         <Link key={it.page_path} to={rp(`/rebrand${it.page_path}`)} onClick={() => trackPageAction('trust_index', 'open_dnc_week')} className="block py-2 px-2 rounded-lg hover:bg-surface-hover/50 transition-colors min-w-0">
           <div className="flex items-baseline justify-between gap-3 min-w-0">
             <span className="font-mono text-[12.5px] truncate">{rowIdentity(it as unknown as CatalogRow).display}</span>
-            <span className="font-mono text-[10px] text-text-muted/70 shrink-0">confirmed {daysAgo(it.confirmed_at)}</span>
+            {it.confirmed_at && <span className="font-mono text-[10px] text-text-muted/70 shrink-0">confirmed {daysAgo(it.confirmed_at)}</span>}
           </div>
-          <div className="font-mono text-[10px] text-text-muted/70">{SURFACE_LABEL[it.surface] || it.surface}</div>
+          <div className="flex flex-wrap items-baseline gap-x-2 font-mono text-[10px] text-text-muted/70">
+            <span>{SURFACE_LABEL[it.surface] || it.surface}</span>
+            <span className="px-1.5 rounded border border-border/60">{DNC_LISTED_TAG[it.listed_because || 'confirmed']}</span>
+          </div>
           <DecisionLine row={{ trust_score: 0, decision: it.decision, decision_reason: it.decision_reason || '' }} className="mt-0.5 break-words" />
         </Link>
       ))}
