@@ -49,9 +49,10 @@ export function isWalletKeyAd(search: string): boolean {
   return /^x[35](?:-|$)/i.test(content)
 }
 
-/** /claude-code with the ad's tags, so an install made later on a computer still counts for the ad. */
-export function setupUrl(search: string): string {
+/** A setup page (/claude-code unless `page` says otherwise, e.g. '/codex') with the ad's
+ * tags, so an install made later on a computer still counts for the ad. */
+export function setupUrl(search: string, page = '/claude-code'): string {
   const origin = typeof window === 'undefined' ? 'https://agentavow.com' : window.location.origin
   const q = new URLSearchParams(adTags(search)).toString()
-  return `${origin}${rp('/rebrand/claude-code')}${q ? `?${q}` : ''}`
+  return `${origin}${rp(`/rebrand${page}`)}${q ? `?${q}` : ''}`
 }

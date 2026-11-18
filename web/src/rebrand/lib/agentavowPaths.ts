@@ -6,7 +6,7 @@
  * to /get belongs here too.
  */
 import { CHATGPT_LISTING, CLAUDE_LISTING } from './listings'
-import { codexCmd, cursorInstall, vscodeInstall } from './installLinks'
+import { CODEX_PLUGIN_COMMANDS, codexCmd, cursorInstall, vscodeInstall } from './installLinks'
 
 export const AGENTAVOW_MCP = { name: 'agentavow', url: 'https://agentavow.com/mcp' }
 
@@ -57,10 +57,10 @@ export const AGENTAVOW_PATHS: AgentAvowPath[] = [
     links: [{ label: 'Add to ChatGPT ↗', href: CHATGPT_LISTING, style: 'chatgpt' }],
   },
   {
-    key: 'codex', label: 'Codex', tag: 'Checks when you ask',
-    text: 'Add the connector to Codex.',
-    snippet: codexCmd(AGENTAVOW_MCP),
-    links: [{ label: 'Setup →', href: '/rebrand/docs/mcp-connector' }],
+    key: 'codex', label: 'Codex', tag: 'Checks by itself (CLI)',
+    links: [{ label: 'Setup →', href: '/rebrand/docs/codex' }],
+    text: `The plugin checks your MCP servers when a Codex CLI session starts, and stops a codex mcp add or package install that reads Do not connect. Connector only, for the IDE extension (it doesn't run plugins):${codexCmd(AGENTAVOW_MCP)}`,
+    snippet: CODEX_PLUGIN_COMMANDS.join('\n'),
   },
   {
     key: 'cursor', label: 'Cursor', tag: 'Checks when you ask',

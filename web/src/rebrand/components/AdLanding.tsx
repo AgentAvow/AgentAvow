@@ -23,16 +23,31 @@ async function writeClipboard(text: string): Promise<boolean> {
   }
 }
 
+/** What a shared link is for: the Claude Code setup unless a page passes its own (/codex). */
+export interface SetupTarget {
+  page: string
+  title: string
+  text: string
+  /** No "Email me the setup" beside the button, so its label drops "instead". */
+  alone?: boolean
+}
+
+const CLAUDE_CODE_SETUP: SetupTarget = {
+  page: '/claude-code',
+  title: 'AgentAvow for Claude Code',
+  text: 'Set up AgentAvow in Claude Code on my computer',
+}
+
 /** "Copy link", or "Share link" where the phone has a share sheet (Web Share API). */
-export function ShareSetupLink({ search, className = '' }: { search: string; className?: string }) {
+export function ShareSetupLink({ search, className = '', target = CLAUDE_CODE_SETUP }: { search: string; className?: string; target?: SetupTarget }) {
   // No share sheet (most computers, the prerender): copy instead.
   const [canShare] = useState(() => typeof navigator !== 'undefined' && typeof navigator.share === 'function')
   const [state, setState] = useState<'idle' | 'copied' | 'manual'>('idle')
-  const url = setupUrl(search)
+  const url = setupUrl(search, target.page)
   const onClick = async () => {
     if (canShare) {
       try {
-        await navigator.share({ title: 'AgentAvow for Claude Code', text: 'Set up AgentAvow in Claude Code on my computer', url })
+        await navigator.share({ title: target.title, text: target.text, url })
         trackCta('share_link')
         return
       } catch (e) {
@@ -51,7 +66,7 @@ export function ShareSetupLink({ search, className = '' }: { search: string; cla
   return (
     <div className={className}>
       <button type="button" onClick={onClick} className={`${BTN_GHOST_CLASS} w-full`}>
-        {state === 'copied' ? 'Link copied' : canShare ? 'Share the link instead' : 'Copy the link instead'}
+        {state === 'copied' ? 'Link copied' : `${canShare ? 'Share' : 'Copy'} the link${target.alone ? '' : ' instead'}`}
       </button>
       {state === 'manual' && (
         <p role="status" className="mt-1.5 text-[12.5px] text-text-muted [overflow-wrap:anywhere]">

@@ -2,13 +2,113 @@ from __future__ import annotations
 
 import os
 
-import pytest_asyncio
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-
-DB_URL = os.environ.get(
-    "DATABASE_URL", "postgresql+asyncpg://localhost:5432/agentgraph_test"
+from tests.service_guards import (
+    MAX_WORKERS,
+    TEST_REDIS_DB,
+    flushable_redis_db,
+    run_token,
+    worker_database_url,
+    worker_redis_url,
 )
+
+_DEFAULT_DB_URL = "postgresql+asyncpg://localhost:5432/agentgraph_test"
+
+
+def _admin(url: str):
+    """Open an asyncpg connection to the maintenance db of ``url``'s server."""
+    import asyncpg
+    from sqlalchemy.engine import make_url
+
+    u = make_url(url)
+    return asyncpg.connect(user=u.username, password=u.password,
+                           host=u.host or "localhost", port=u.port or 5432,
+                           database="postgres")
+
+
+def _recreate_worker_db(base_url: str, worker_url: str) -> None:
+    """Copy the migrated base to the worker's database (dropping any leftover)."""
+    import asyncio
+
+    import asyncpg
+    from sqlalchemy.engine import make_url
+
+    base, worker = make_url(base_url).database, make_url(worker_url).database
+
+    async def run() -> None:
+        conn = await _admin(base_url)
+        try:
+            await conn.execute(f'DROP DATABASE IF EXISTS "{worker}" WITH (FORCE)')
+            for attempt in range(20):
+                try:
+                    await conn.execute(f'CREATE DATABASE "{worker}" TEMPLATE "{base}"')
+                    return
+                except asyncpg.ObjectInUseError:  # another worker is copying it
+                    await asyncio.sleep(0.1 * (attempt + 1))
+            raise RuntimeError(f"could not create {worker} from {base}")
+        finally:
+            await conn.close()
+
+    asyncio.run(run())
+
+
+# Set before anything imports src.config. The session flushes this Redis db, so
+# it must be the dedicated test db (see tests/service_guards.py). Under pytest -n,
+# each worker gets its own database, copied from the base test database and
+# dropped at the end, and its own Redis db. The copy's name carries the run's
+# xdist testrunuid, so two parallel runs from one base keep to their own copies.
+os.environ.setdefault("REDIS_URL", f"redis://localhost:6379/{TEST_REDIS_DB}")
+_WORKER = os.environ.get("PYTEST_XDIST_WORKER")
+_BASE_DB_URL = os.environ.get("DATABASE_URL", _DEFAULT_DB_URL)
+if _WORKER:
+    _RUN = run_token(os.environ.get("PYTEST_XDIST_TESTRUNUID") or os.urandom(4).hex())
+    os.environ["DATABASE_URL"] = worker_database_url(_BASE_DB_URL, _WORKER, _RUN)
+    os.environ["REDIS_URL"] = worker_redis_url(os.environ["REDIS_URL"], _WORKER)
+    _recreate_worker_db(_BASE_DB_URL, os.environ["DATABASE_URL"])
+flushable_redis_db(os.environ["REDIS_URL"], _WORKER)
+
+import pytest  # noqa: E402
+import pytest_asyncio  # noqa: E402
+from pwdlib import PasswordHash  # noqa: E402
+from pwdlib.hashers.bcrypt import BcryptHasher  # noqa: E402
+from sqlalchemy import text  # noqa: E402
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: E402
+
+from src.api import auth_service  # noqa: E402
+
+# bcrypt cost 4 for the suite only: register and login dominate its runtime, and a
+# hash of any cost still verifies. Production code keeps its fixed cost.
+auth_service._pwd_hasher = PasswordHash((BcryptHasher(rounds=4),))
+
+DB_URL = os.environ.get("DATABASE_URL", _DEFAULT_DB_URL)
+
+
+# optionalhook: pytest-xdist defines this hook, and without xdist installed a plain
+# implementation makes pytest abort ("unknown hook"). Registering it from
+# pytest_configure would be too late: xdist resolves -n auto in pytest_cmdline_main.
+@pytest.hookimpl(optionalhook=True)
+def pytest_xdist_auto_num_workers(config):
+    """-n auto: one worker per core, up to one Redis db each."""
+    return min(MAX_WORKERS, os.cpu_count() or 1)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """A worker drops its own database copy when its session ends."""
+    if not _WORKER:
+        return
+    import asyncio
+
+    from sqlalchemy.engine import make_url
+
+    name = make_url(DB_URL).database
+
+    async def run() -> None:
+        conn = await _admin(DB_URL)
+        try:
+            await conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        finally:
+            await conn.close()
+
+    asyncio.run(run())
 
 # Tables to truncate before the test session (order respects FK constraints).
 _TABLES = [
@@ -779,6 +879,22 @@ async def _clean_db_once():
             text("TRUNCATE " + ", ".join(_TABLES) + " CASCADE")
         )
     await engine.dispose()
+
+    # Redis state outlives a run (rate-limit and password-reset counters, cached
+    # leaderboards). A client of its own, so the app's shared pool doesn't bind
+    # to this session's event loop.
+    import redis.asyncio as aioredis
+
+    from src.config import settings
+
+    flushable_redis_db(settings.redis_url, _WORKER)
+    r = aioredis.from_url(settings.redis_url)
+    try:
+        await r.flushdb()
+    except (aioredis.ConnectionError, OSError):
+        pass  # no Redis: the app's cache and limiter fall back without it
+    finally:
+        await r.aclose()
 
 
 @pytest_asyncio.fixture(autouse=True)

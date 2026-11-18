@@ -72,11 +72,12 @@ jobs:
       - name: Test
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/agentgraph_test
-          REDIS_URL: redis://localhost:6379/0
+          REDIS_URL: redis://localhost:6379/15
           # .env is no longer tracked (004fc83), so CI has to opt into debug itself:
           # without it settings refuse the default JWT_SECRET and every module errors.
           DEBUG: "true"
-        run: pytest tests/ -v
+        # One database and one Redis db per worker (tests/service_guards.py).
+        run: pytest tests/ -n auto -q -rfE --durations=25
 
   # The committed OpenAPI document (docs/api/openapi.json) must match the code, and a PR
   # must not break it compared with its base branch (#408, docs/adr/0006-api-contract.md).

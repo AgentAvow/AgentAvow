@@ -362,7 +362,7 @@ async def test_viewer_403_on_studio_replies_campaign_users(client, db, path):
     ("PUT", "/api/v1/admin/ad-spend",
      {"day": "2026-11-01", "utm_campaign": "c", "spend_usd": "1.00"}),
     ("POST", "/api/v1/admin/ad-spend/import", {"csv": "a,b\n1,2"}),
-    ("DELETE", f"/api/v1/admin/ad-spend/{uuid.uuid4()}", None),
+    ("DELETE", "/api/v1/admin/ad-spend/00000000-0000-4000-8000-000000000001", None),
     ("POST", "/api/v1/admin/marketing/trigger", {}),
     ("POST", "/api/v1/admin/marketing/campaigns/generate", {}),
 ])

@@ -47,6 +47,11 @@ ID, the plugin version and the app type (desktop, cli, sdk, cloud or other). Not
 about your tools, servers, files or code. It lets AgentAvow count machines the plugin
 protects. AGENTAVOW_ANON_ID=off turns it off along with the install ID.
 
+In Codex (which runs this same plugin's hooks), the servers come from Codex's own config:
+``[mcp_servers.<name>]`` in ~/.codex/config.toml ($CODEX_HOME), each ``.codex/config.toml``
+of a project you trusted, and the servers your enabled Codex plugins bring. Codex is
+recognised from the hook payload (see detect_host); everything else is Claude Code.
+
 Design guarantees (deliberate):
   • OPT-IN — nothing runs unless YOU install this hook. AgentAvow's MCP server never
     forces a scan; that would be an injection vector and is not how this works.
@@ -71,7 +76,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.43"
+__version__ = "0.1.45"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -134,26 +139,145 @@ RETRY_QUEUED = 10 * 60  # seconds before a queued dependency is asked about agai
 
 def _strip_npm_version(spec: str) -> str:
     """'@scope/name@1.2' -> '@scope/name'; 'name@1.2' -> 'name'."""
+    return _split_npm_spec(spec)[0]
+
+
+def _split_npm_spec(spec: str) -> tuple[str, str]:
+    """'@scope/name@1.2.3' -> ('@scope/name', '1.2.3'); 'name' -> ('name', '')."""
     if spec.startswith("@"):
         parts = spec.split("@")  # ['', 'scope/name', '1.2']
-        return "@" + parts[1] if len(parts) >= 2 else spec
-    return spec.split("@", 1)[0]
+        if len(parts) < 2:
+            return spec, ""
+        return "@" + parts[1], "@".join(parts[2:])
+    pkg, _, ver = spec.partition("@")
+    return pkg, ver
+
+
+def _npm_target(spec: str) -> tuple[str, str]:
+    """The package an npm spec really installs: an alias (``name@npm:other@1.2.3`` or
+    ``npm:other@1.2.3``) installs ``other``, so (``other``, ``1.2.3``) is graded, never
+    the alias name. Otherwise the same as _split_npm_spec."""
+    for _ in range(3):  # an alias of an alias is not valid npm; stop early anyway
+        if spec[:4].lower() == "npm:":
+            spec = spec[4:]
+            continue
+        pkg, ver = _split_npm_spec(spec)
+        if ver[:4].lower() != "npm:":
+            return pkg, ver
+        spec = ver[4:]
+    return _split_npm_spec(spec)
 
 
 def _strip_pypi_version(spec: str) -> str:
-    """'mcp-server-git==0.1' / 'pkg[extra]>=1' -> 'mcp-server-git' / 'pkg'."""
-    return re.split(r"[=<>!~\[]", spec, 1)[0].strip()
+    """'mcp-server-git==0.1' / 'pkg[extra]>=1' / 'pkg@1.2' -> 'mcp-server-git' / 'pkg'."""
+    return _split_pypi_spec(spec)[0]
+
+
+def _split_pypi_spec(spec: str) -> tuple[str, str]:
+    """'pkg[extra]==1.2.3' -> ('pkg', '==1.2.3'); 'pkg@1.2.3' (uvx) -> ('pkg', '@1.2.3')."""
+    spec = spec.strip()
+    pkg = re.split(r"[=<>!~\[@;\s]", spec, 1)[0].strip()
+    rest = spec[len(pkg):].strip()
+    if rest.startswith("["):  # extras: pkg[cli]==1.0
+        rest = rest.split("]", 1)[1].strip() if "]" in rest else ""
+    return pkg, rest.split(";", 1)[0].strip()  # drop environment markers
+
+
+# An exact release, as opposed to a range or a tag. A pinned server or package is graded
+# at that release (the API's ``?version=``); a range ("^1.2", ">=1", "1.x"), a tag
+# ("latest", "next") or no spec is graded at the latest release, as before.
+_NPM_EXACT = re.compile(r"^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
+_PYPI_EXACT = re.compile(
+    r"^(?:\d+!)?\d+(?:\.\d+)*(?:[-_.]?(?:a|b|rc|c|alpha|beta|pre|preview)[-_.]?\d*)?"
+    r"(?:[-_.]?(?:post|rev|r)[-_.]?\d*)?(?:[-_.]?dev[-_.]?\d*)?"
+    r"(?:\+[a-z0-9]+(?:[-_.][a-z0-9]+)*)?$", re.IGNORECASE)
+
+
+def _exact_version(registry: str, spec: str) -> str | None:
+    """The exact release a version spec pins, or None for a range, a tag or no spec.
+    npm: '1.2.3', '=1.2.3', 'v1.2.3'. PyPI: '==1.2.3', '===1.2.3', and uv's '@1.2.3'."""
+    s = (spec or "").strip()
+    if registry == "npm":
+        s = s[1:].strip() if s.startswith("=") else s
+        if not _NPM_EXACT.match(s):
+            return None
+        return s[1:] if s[:1] in ("v", "V") else s
+    if registry == "pypi":
+        for op in ("===", "==", "@"):
+            if s.startswith(op):
+                v = s[len(op):].strip()
+                return v if _PYPI_EXACT.match(v) else None
+    return None
+
+
+def _pinned_name(registry: str, pkg: str, version: str | None) -> str:
+    """How a package is named to the person: 'name@1.2.3' (npm), 'name==1.2.3' (PyPI),
+    or the bare name when no exact release is pinned."""
+    if not version:
+        return pkg
+    return f"{pkg}=={version}" if registry == "pypi" else f"{pkg}@{version}"
+
+
+def _target_coord(t: dict) -> str:
+    """A server target as shown in a line: its URL, or 'registry:name' with the pinned
+    release when there is one ('npm:name@1.2.3')."""
+    if t["kind"] == "mcp":
+        return t["url"]
+    return f"{t['registry']}:{_pinned_name(t['registry'], t['pkg'], t.get('version'))}"
+
+
+def _package_target(name: str, registry: str, pkg: str, version: str | None) -> dict:
+    """A package server target. A pinned one carries ``version`` and an id of its own
+    ('npm:name==1.2.3'), so a grade for one release never answers for another and the
+    latest release's grade never answers for a pin (or the other way round)."""
+    t = {"name": name, "kind": "package", "registry": registry, "pkg": pkg,
+         "id": f"{registry}:{pkg}" + (f"=={version}" if version else "")}
+    if version:
+        t["version"] = version
+    return t
+
+
+# Runner flags whose NEXT token is a value, never the package (npx / bunx / pnpm dlx;
+# uvx / pipx run), so ``uvx --python 3.12 pkg`` is not read as a package named '3.12'.
+# ``--flag=value`` is one token and needs no entry.
+_RUNNER_VALUE_FLAGS = frozenset({
+    # npx / bunx / pnpm dlx
+    "--registry", "--cache", "--userconfig", "--prefix", "-w", "--workspace", "-C", "--dir",
+    "-c", "--call", "--loglevel", "--node-options", "--shell", "--script-shell",
+    # uvx / uv tool run
+    "--python", "--with", "--with-editable", "--with-requirements", "--index",
+    "--default-index", "-i", "--index-url", "--extra-index-url", "-f", "--find-links",
+    "--constraints", "--overrides", "--build-constraints", "--exclude-newer",
+    "--exclude-newer-package", "--prerelease", "--resolution", "--index-strategy",
+    "--keyring-provider", "-P", "--upgrade-package", "--reinstall-package",
+    "--refresh-package", "--no-build-package", "--no-binary-package", "--config-setting",
+    "--config-settings-package", "--link-mode", "--cache-dir", "--directory", "--project",
+    "--config-file", "--color", "--python-preference", "--allow-insecure-host",
+    "--env-file", "--torch-backend", "--fork-strategy",
+    # pipx run
+    "--pip-args", "--backend", "--suffix",
+})
 
 
 def _pkg_from_args(args: list[str], flag_takes_pkg: tuple[str, ...]) -> str | None:
     """First real package token in a runner's args, honoring a 'flag then package'
-    form (npx -p PKG, uvx --from PKG)."""
-    want_next = False
+    form (npx -p PKG, uvx --from PKG, --package=PKG) and skipping the value of a flag
+    that takes one (uvx --python 3.12 PKG)."""
+    want_next = skip_next = False
     for a in args:
         if want_next:
             return a
+        if skip_next:
+            skip_next = False
+            continue
         if a in flag_takes_pkg:
             want_next = True
+            continue
+        flag, eq, value = a.partition("=")
+        if eq and value and flag in flag_takes_pkg:
+            return value
+        if a in _RUNNER_VALUE_FLAGS:
+            skip_next = True
             continue
         if a.startswith("-") or a in ("run", "--"):
             continue
@@ -247,15 +371,13 @@ def _resolve_target(name: str, cfg: dict) -> dict | None:
     if runner in _NPM_RUNNERS:
         spec = _pkg_from_args(args, ("-p", "--package"))
         if spec:
-            pkg = _strip_npm_version(spec)
-            return {"name": name, "kind": "package", "registry": "npm",
-                    "pkg": pkg, "id": f"npm:{pkg}"}
+            pkg, ver = _npm_target(spec)
+            return _package_target(name, "npm", pkg, _exact_version("npm", ver))
     elif runner in _PYPI_RUNNERS:
-        spec = _pkg_from_args(args, ("--from",))
+        spec = _pkg_from_args(args, ("--from", "--spec"))
         if spec:
-            pkg = _strip_pypi_version(spec)
-            return {"name": name, "kind": "package", "registry": "pypi",
-                    "pkg": pkg, "id": f"pypi:{pkg}"}
+            pkg, ver = _split_pypi_spec(spec)
+            return _package_target(name, "pypi", pkg, _exact_version("pypi", ver))
     return None
 
 
@@ -320,6 +442,268 @@ def _set_session_cwd(payload: object) -> None:
                 _SESSION_CWD = None
 
 
+# --------------------------------------------------------------------------- #
+# Which app is running the hook: Claude Code, or Codex (OpenAI) running this same plugin
+# --------------------------------------------------------------------------- #
+# Codex runs Claude Code plugin hooks (same hooks.json, same JSON in and out), but its
+# MCP servers live in ~/.codex/config.toml, it has its own `codex mcp add`, and a
+# PreToolUse hook there cannot "ask" (only deny). Every Codex-only path below is taken
+# only when the hook is sure it runs in Codex; anything else is Claude Code, unchanged.
+HOST_ENV = "AGENTAVOW_HOST"  # OPTIONAL override: "codex" or "claude"
+_HOST: str | None = None  # "codex" or "claude", set by main() from the payload
+
+
+def _codex_home() -> pathlib.Path:
+    """$CODEX_HOME, else ~/.codex (where Codex keeps config.toml, sessions and plugins)."""
+    raw = os.environ.get("CODEX_HOME", "").strip()
+    return pathlib.Path(raw).expanduser() if raw else pathlib.Path.home() / ".codex"
+
+
+def _inside(path: object, root: pathlib.Path) -> bool:
+    if not isinstance(path, str) or not path.strip():
+        return False
+    try:
+        p, r = os.path.realpath(os.path.expanduser(path)), os.path.realpath(root)
+        return p == r or p.startswith(r.rstrip(os.sep) + os.sep)
+    except Exception:
+        return False
+
+
+def detect_host(payload: object) -> str:
+    """"codex" when the hook payload or environment can only come from Codex: a
+    ``turn_id`` (Codex adds it to every tool hook; Claude Code never sends one), a
+    transcript under the Codex home, or a plugin root (PLUGIN_ROOT, which Codex sets
+    beside CLAUDE_PLUGIN_ROOT) under the Codex home. "claude" otherwise."""
+    forced = os.environ.get(HOST_ENV, "").strip().lower()
+    if forced in ("codex", "claude"):
+        return forced
+    home = _codex_home()
+    if isinstance(payload, dict):
+        if isinstance(payload.get("turn_id"), str) and payload["turn_id"]:
+            return "codex"
+        if _inside(payload.get("transcript_path"), home):
+            return "codex"
+    if _inside(os.environ.get("PLUGIN_ROOT"), home):
+        return "codex"
+    return "claude"
+
+
+def _set_host(payload: object) -> None:
+    global _HOST
+    try:
+        _HOST = detect_host(payload)
+    except Exception:
+        _HOST = "claude"
+
+
+def _in_codex() -> bool:
+    return _HOST == "codex"
+
+
+def _toml_load(text: str) -> dict:
+    """config.toml as a dict: tomllib (Python 3.11+), else a small reader that only
+    understands what MCP server tables need (``[a.b."c"]`` headers, strings, booleans,
+    numbers and one-line string arrays). {} on anything it cannot read."""
+    try:
+        import tomllib  # type: ignore[import-not-found]
+    except ImportError:
+        tomllib = None
+    if tomllib is not None:
+        try:
+            data = tomllib.loads(text)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+    return _mini_toml(text)
+
+
+_TOML_KEY = r'(?:"(?:[^"\\]|\\.)*"|\'[^\']*\'|[A-Za-z0-9_-]+)'
+_TOML_HEADER = re.compile(r"^\[(?!\[)\s*(" + _TOML_KEY + r"(?:\s*\.\s*" + _TOML_KEY
+                          + r")*)\s*\]\s*(?:#.*)?$")
+_TOML_PAIR = re.compile(r"^(" + _TOML_KEY + r")\s*=\s*(.+?)\s*$")
+
+
+def _toml_key_parts(dotted: str) -> list[str]:
+    parts = re.findall(_TOML_KEY, dotted)
+    return [p[1:-1] if p[:1] in "\"'" else p for p in parts]
+
+
+def _toml_value(raw: str) -> object:
+    raw = raw.strip()
+    if raw.startswith('"') or raw.startswith("'"):
+        m = re.match(r'^"((?:[^"\\]|\\.)*)"|^\'([^\']*)\'', raw)
+        if not m:
+            raise ValueError(raw)
+        return (json.loads('"' + m.group(1) + '"') if m.group(1) is not None
+                else m.group(2))
+    if raw.startswith("["):
+        end = raw.rfind("]")
+        if end < 0:
+            raise ValueError(raw)
+        items = re.findall(r'"(?:[^"\\]|\\.)*"|\'[^\']*\'', raw[1:end])
+        return [_toml_value(i) for i in items]
+    word = raw.split("#", 1)[0].strip()
+    if word in ("true", "false"):
+        return word == "true"
+    return word
+
+
+def _mini_toml(text: str) -> dict:
+    root: dict = {}
+    table = root
+    for line in text.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        m = _TOML_HEADER.match(s)
+        if m:
+            table = root
+            for part in _toml_key_parts(m.group(1)):
+                nxt = table.get(part)
+                table[part] = nxt = nxt if isinstance(nxt, dict) else {}
+                table = nxt
+            continue
+        if s.startswith("[["):
+            table = {}  # arrays of tables are not needed here
+            continue
+        m = _TOML_PAIR.match(s)
+        if not m:
+            continue
+        try:
+            parts = _toml_key_parts(m.group(1))
+            table[parts[-1]] = _toml_value(m.group(2))
+        except Exception:
+            continue
+    return root
+
+
+def _read_toml(path: pathlib.Path) -> dict:
+    try:
+        return _toml_load(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _codex_project_dirs(user_cfg: dict) -> list[pathlib.Path]:
+    """The folders whose ``.codex/config.toml`` Codex loads for this session, nearest
+    last: the session folder and each parent up to the project root (the nearest folder
+    holding .git), and only when the person trusted the project
+    (``[projects."<path>"] trust_level = "trusted"`` for the session folder or the
+    project root). An untrusted project's config is loaded but switched off by Codex,
+    so its servers never run and are not graded here."""
+    cwd = _cwd()
+    try:
+        cwd = cwd.resolve()
+    except Exception:
+        pass
+    chain = [cwd, *cwd.parents]
+    root = next((d for d in chain if (d / ".git").exists()), None)
+    upto = chain[:chain.index(root) + 1] if root is not None else [cwd]
+    projects = user_cfg.get("projects") if isinstance(user_cfg.get("projects"), dict) else {}
+
+    def trust(d: pathlib.Path) -> str | None:
+        for key in (str(d), os.path.realpath(d)):
+            entry = projects.get(key)
+            if isinstance(entry, dict) and isinstance(entry.get("trust_level"), str):
+                return entry["trust_level"]
+        return None
+
+    decided = trust(cwd) or (trust(root) if root is not None else None)
+    if decided != "trusted":
+        return []
+    return list(reversed(upto))
+
+
+def _codex_server_map(cfg: dict) -> dict[str, dict]:
+    servers = cfg.get("mcp_servers")
+    return {k: v for k, v in servers.items() if isinstance(k, str) and isinstance(v, dict)} \
+        if isinstance(servers, dict) else {}
+
+
+def codex_servers() -> dict[str, tuple[dict, str]]:
+    """{name: (server table, scope)} for the MCP servers a Codex session here can use:
+    ``[mcp_servers.<name>]`` in $CODEX_HOME/config.toml ("user") and, in a trusted
+    project, each ``.codex/config.toml`` from the project root down to the session
+    folder ("project"; nearer wins). A server switched off (``enabled = false``) is left
+    out. Never raises."""
+    out: dict[str, tuple[dict, str]] = {}
+    try:
+        user_cfg = _read_toml(_codex_home() / "config.toml")
+        layers = [(user_cfg, "user")]
+        for d in _codex_project_dirs(user_cfg):
+            layers.append((_read_toml(d / ".codex" / "config.toml"), "project"))
+        for cfg, scope in layers:
+            for name, server in _codex_server_map(cfg).items():
+                out[name] = (server, scope)
+    except Exception:
+        return out
+    return {k: v for k, v in out.items() if v[0].get("enabled") is not False}
+
+
+def _codex_plugin_dirs() -> list[pathlib.Path]:
+    """Install folders of the plugins enabled in Codex (``[plugins."<name>@<market>"]
+    enabled = true``), newest installed version of each, from $CODEX_HOME/plugins/cache."""
+    cfg = _read_toml(_codex_home() / "config.toml")
+    plugins = cfg.get("plugins") if isinstance(cfg.get("plugins"), dict) else {}
+    out: list[pathlib.Path] = []
+    for key, entry in plugins.items():
+        if not isinstance(key, str) or "@" not in key or not isinstance(entry, dict):
+            continue
+        if entry.get("enabled") is False:
+            continue
+        name, market = key.split("@", 1)
+        base = _codex_home() / "plugins" / "cache" / market / name
+        try:
+            versions = [d for d in base.iterdir() if d.is_dir()]
+        except Exception:
+            continue
+        if versions:
+            out.append(max(versions, key=lambda d: d.stat().st_mtime))
+    _note_past_cap("installed Codex plugins", [d.parent.name for d in out[PLUGIN_DIRS_CAP:]],
+                   "their MCP servers were not checked")
+    return out[:PLUGIN_DIRS_CAP]
+
+
+# What a session start left unread because of a cap (more plugins or sub-projects than it
+# reads). Never silent: the lines are added to the report (or, on a quiet start, to the
+# list Claude is given), naming what was not read. Reset at the start of each run.
+_NOT_READ: list[str] = []
+NOT_READ_NAMES = 8  # names listed per note; the rest are counted
+
+
+def _note_past_cap(what: str, names: list[str], why: str) -> None:
+    if not names:
+        return
+    shown = ", ".join(names[:NOT_READ_NAMES])
+    more = f" and {len(names) - NOT_READ_NAMES} more" if len(names) > NOT_READ_NAMES else ""
+    line = (f"➖ not read: {len(names)} more {what} than one session start reads "
+            f"({shown}{more}); {why}.")
+    if line not in _NOT_READ:  # a list may be read twice in one start
+        _NOT_READ.append(line)
+
+
+def _codex_targets() -> list[dict]:
+    """The Codex counterpart of _targets(): the servers in Codex's config.toml files,
+    then the servers Codex plugins bring (AgentAvow's own connector left out)."""
+    seen: dict[str, dict] = {}
+    for name, (server, scope) in codex_servers().items():
+        if name == META_KEY:
+            continue
+        t = _resolve_target(name, server)
+        if t:
+            t["scope"] = scope
+            seen[name] = t
+    try:
+        for pdir in _codex_plugin_dirs():
+            pname, servers = _plugin_server_map(pdir)
+            if (pname or pdir.parent.name) == OWN_PLUGIN:
+                continue
+            _add_plugin_servers(pname or pdir.parent.name, servers, seen)
+    except Exception:
+        pass  # fail-open: a plugin's config can never break the rest of the list
+    return list(seen.values())
+
+
 def _cwd_keys() -> set[str]:
     cwd = _cwd()
     keys = {str(cwd)}
@@ -336,7 +720,9 @@ def _targets() -> list[dict]:
     scope (``~/.claude.json`` → ``projects[cwd].mcpServers``), and project scope
     (``./.mcp.json``, ``./.claude/settings*.json``). Servers configured for other
     projects are graded when those projects are opened (see _servers_elsewhere), so
-    the summary matches the list the person can see."""
+    the summary matches the list the person can see. In Codex: _codex_targets()."""
+    if _in_codex():
+        return _codex_targets()
     seen: dict[str, dict] = {}
     data = _read_json(pathlib.Path.home() / ".claude.json")
     if isinstance(data, dict):
@@ -403,6 +789,8 @@ def _plugin_dirs() -> list[tuple[str, pathlib.Path]]:
                     out.append(("", d))
     except Exception:
         pass
+    _note_past_cap("installed plugins", [n or d.name for n, d in out[PLUGIN_DIRS_CAP:]],
+                   "their MCP servers were not checked")
     return out[:PLUGIN_DIRS_CAP]
 
 
@@ -451,18 +839,23 @@ def _plugin_servers(seen: dict[str, dict]) -> None:
         name = name or key_name
         if name == OWN_PLUGIN:
             continue
-        for sname, cfg in servers.items():
-            t = _resolve_target(sname, cfg)
-            if not t or _own_connector(t):
-                continue
-            if sname in seen and seen[sname]["id"] == t["id"]:
-                continue  # the same server, already listed from your own config
-            key = sname if sname not in seen and sname != META_KEY else f"plugin_{name}_{sname}"
-            if key in seen:
-                continue
-            t["name"] = key
-            t["scope"] = "plugin"
-            seen[key] = t
+        _add_plugin_servers(name, servers, seen)
+
+
+def _add_plugin_servers(name: str, servers: dict, seen: dict[str, dict]) -> None:
+    """Add one plugin's servers to ``seen`` (see _plugin_servers for the keys)."""
+    for sname, cfg in servers.items():
+        t = _resolve_target(sname, cfg)
+        if not t or _own_connector(t):
+            continue
+        if sname in seen and seen[sname]["id"] == t["id"]:
+            continue  # the same server, already listed from your own config
+        key = sname if sname not in seen and sname != META_KEY else f"plugin_{name}_{sname}"
+        if key in seen:
+            continue
+        t["name"] = key
+        t["scope"] = "plugin"
+        seen[key] = t
 
 
 # --------------------------------------------------------------------------- #
@@ -476,9 +869,18 @@ def _deps_enabled() -> bool:
 
 
 def _dep(registry: str, pkg: str, spec: str) -> dict:
+    """A dependency or an installed package. One pinned to an exact release is graded at
+    that release; its id ('dep:npm:name==1.2.3') differs from every range/unpinned id
+    ('dep:npm:name@^1.2', and those written before pins were graded), so the two kinds
+    of grade never answer for each other."""
     spec = (spec or "").strip()
-    return {"name": f"{DEP_PREFIX}{registry}:{pkg}", "kind": "package", "registry": registry,
-            "pkg": pkg, "spec": spec, "id": f"{DEP_PREFIX}{registry}:{pkg}@{spec}"}
+    t = {"name": f"{DEP_PREFIX}{registry}:{pkg}", "kind": "package", "registry": registry,
+         "pkg": pkg, "spec": spec, "id": f"{DEP_PREFIX}{registry}:{pkg}@{spec}"}
+    version = _exact_version(registry, spec)
+    if version:
+        t["version"] = version
+        t["id"] = f"{DEP_PREFIX}{registry}:{pkg}=={version}"
+    return t
 
 
 def _npm_deps(data: object) -> list[dict]:
@@ -500,7 +902,13 @@ def _npm_dep_map(deps: object) -> list[dict]:
         if not isinstance(name, str) or not isinstance(spec, str):
             continue
         low = spec.strip().lower()
-        if low.startswith(("file:", "link:", "git", "http", "workspace:", "npm:", ".", "/")):
+        if low.startswith("npm:"):
+            # "name": "npm:other@1.2.3" installs other: grade that, at its pin
+            target, ver = _npm_target(spec.strip())
+            if target:
+                out.append(_dep("npm", target, ver))
+            continue
+        if low.startswith(("file:", "link:", "git", "http", "workspace:", ".", "/")):
             continue
         out.append(_dep("npm", name, spec))
     return out
@@ -666,20 +1074,28 @@ def _subproject_deps(cwd: pathlib.Path) -> list[dict]:
     try:
         if cwd.resolve() == pathlib.Path.home().resolve():
             return []
-        subdirs = sorted(d for d in cwd.iterdir()
-                         if d.is_dir() and not d.name.startswith(".")
-                         and d.name not in _SKIP_SUBDIRS)[:SUBDIRS_SCAN_CAP]
+        every = sorted(d for d in cwd.iterdir()
+                       if d.is_dir() and not d.name.startswith(".")
+                       and d.name not in _SKIP_SUBDIRS)
     except Exception:
         return []
+    subdirs = every[:SUBDIRS_SCAN_CAP]
     found: list[dict] = []
     projects = 0
+    skipped: list[str] = []
     for d in subdirs:
         deps = _manifest_deps(d)
         if deps:
+            if projects >= SUBPROJECTS_CAP:
+                skipped.append(d.name)
+                continue
             found += deps
             projects += 1
-            if projects >= SUBPROJECTS_CAP:
-                break
+    if projects:  # only a workspace root whose sub-projects are read at all
+        _note_past_cap("sub-folders with a manifest", skipped,
+                       "their dependencies were not checked")
+        _note_past_cap("sub-folders", [d.name for d in every[SUBDIRS_SCAN_CAP:]],
+                       "they were not looked at for a manifest")
     return found
 
 
@@ -865,12 +1281,14 @@ _LEGEND = ("Legend: each line leads with one of three answers and its reason. �
            "file; this list is the pre-check.")
 
 
-def _quiet_context(cache: dict, targets: list[dict], deps: list[dict]) -> None:
+def _quiet_context(cache: dict, targets: list[dict], deps: list[dict],
+                   not_read: list[str] | None = None) -> None:
     """Nothing new since the last start: say nothing to the person (no systemMessage),
     but give Claude the full graded list so "show the AgentAvow pre-check" answers from
-    the same rules as the summary instead of guessing from the cache file."""
+    the same rules as the summary instead of guessing from the cache file. ``not_read``:
+    what a cap left unread this start, named at the end of that list."""
     try:
-        earlier = _previously_graded(cache, targets, deps, [])
+        earlier = _previously_graded(cache, targets, deps, []) + list(not_read or [])
     except Exception:
         return
     if not earlier:
@@ -887,7 +1305,10 @@ def _quiet_context(cache: dict, targets: list[dict], deps: list[dict]) -> None:
 def _servers_elsewhere(here: list[dict]) -> int:
     """How many scannable servers are configured for OTHER projects on this machine
     (not in this session's list). Reported as a count only; they are graded when
-    those projects are opened. 0 on any error."""
+    those projects are opened. 0 on any error, and 0 in Codex (its config.toml has no
+    per-project server lists of other folders)."""
+    if _in_codex():
+        return 0
     try:
         data = _read_json(pathlib.Path.home() / ".claude.json")
         if not isinstance(data, dict) or not isinstance(data.get("projects"), dict):
@@ -1263,10 +1684,20 @@ def _record(target: dict, result: dict, now: float) -> dict:
     else:
         rec["registry"] = target["registry"]
         rec["pkg"] = target["pkg"]
-        rec["report_url"] = f"{WEB}/check/pkg/{target['registry']}/{target['pkg']}"
+        rec["report_url"] = _package_report_url(target)
+        if target.get("version"):
+            rec["version"] = target["version"]
         result = dict(result, tool_digests={}, tool_manifest_digest=None)  # not live-served
     rec.update(result)
     return rec
+
+
+def _package_report_url(target: dict) -> str:
+    """The package's report page; a pinned release's page when one is pinned."""
+    url = f"{WEB}/check/pkg/{target['registry']}/{target['pkg']}"
+    if target.get("version"):
+        url += "?version=" + urllib.parse.quote(str(target["version"]), safe="")
+    return url
 
 
 def _drifted(entry: dict) -> bool:
@@ -1298,7 +1729,9 @@ UA_PRODUCT = "agentavow-precheck"
 
 
 def _user_agent() -> str:
-    return f"{UA_PRODUCT}/{__version__} ({_install_source()})"
+    # In Codex: "(plugin; codex)", so AgentAvow can count Codex installs apart.
+    host = "; codex" if _in_codex() else ""
+    return f"{UA_PRODUCT}/{__version__} ({_install_source()}{host})"
 
 
 # A random install ID, made once per machine, so AgentAvow can count how many installs
@@ -1484,6 +1917,8 @@ def _scan(target: dict, force: bool = False, stored: bool = False) -> dict:
             params["force"] = "true"  # the definitions changed; a cached grade is stale
         return _verdict(_fetch("/mcp", params))
     params = {"stored": "true"} if stored else {}
+    if target.get("version"):
+        params["version"] = str(target["version"])  # the pinned release, not the latest
     return _verdict(_fetch(f"/package/{target['registry']}/{target['pkg']}", params))
 
 
@@ -1509,6 +1944,14 @@ def _save_cache(cache: dict) -> bool:
 
 
 def _intro_message() -> str:
+    if _in_codex():
+        return ("AgentAvow: nothing to grade here yet — no MCP servers it can grade and no "
+                "package.json, requirements.txt, pyproject.toml or Cargo.toml in this folder. "
+                "Add a server (for example `codex mcp add <name> --url <https url>` or "
+                "`codex mcp add <name> -- npx <package>`) and it is checked before it is added "
+                "and again at your next session start; open a project and its direct "
+                "dependencies are checked too. To check any tool right now, ask Codex "
+                '"is <tool> safe?" or open https://agentavow.com/check.')
     how = (
         "run /agentavow-trust:scan <MCP URL | npm or pypi package | owner/repo>"
         if _install_source() == "plugin"
@@ -1737,7 +2180,7 @@ def _pending(cache: dict, t: dict, entry: object, now: float, asked: bool,
     RETRY_UNSCANNABLE, like an unscannable server: "timed_out"."""
     if isinstance(entry, dict) and entry.get("id") == t["id"] and "approved_at" in entry:
         return ""
-    coord = t["url"] if t["kind"] == "mcp" else f"{t['registry']}:{t['pkg']}"
+    coord = _target_coord(t)
     prior = entry if (isinstance(entry, dict) and entry.get("id") == t["id"]
                       and "pending_since" in entry) else {}
     try:
@@ -1772,6 +2215,7 @@ def main() -> None:
 
 def _main() -> None:
     payload = None
+    _NOT_READ.clear()
     try:
         payload = json.load(sys.stdin)  # the SessionStart payload: ``cwd`` is the session folder
     except Exception:
@@ -1780,6 +2224,7 @@ def _main() -> None:
         _set_session_cwd(payload)
     except Exception:
         pass
+    _set_host(payload)
 
     try:
         targets = _targets()
@@ -1817,7 +2262,7 @@ def _main() -> None:
             lines.append(f"➖ MCP '{t['name']}' ({t['host']}): not scanned — its URL looks "
                          "like it contains a secret, so it was not sent to AgentAvow.")
             continue
-        coord = t["url"] if t["kind"] == "mcp" else f"{t['registry']}:{t['pkg']}"
+        coord = _target_coord(t)
         if t["id"] not in results:  # the same coordinate under two names scans once
             if time.monotonic() - started > BUDGET:
                 # Out of time: not asked this session. Said, not silently skipped.
@@ -1876,12 +2321,13 @@ def _main() -> None:
             _print_install_only(install_clause.strip())
             return
         try:
-            if not deps and _show_fine_once_a_day(cache, targets, now):
+            if not deps and not _NOT_READ and _show_fine_once_a_day(cache, targets, now):
                 return
         except Exception:
             pass
-        _quiet_context(cache, targets, deps)
+        _quiet_context(cache, targets, deps, list(_NOT_READ))
         return
+    lines += _NOT_READ  # what a cap left unread, named (never silent)
 
     try:
         elsewhere = _servers_elsewhere(targets)

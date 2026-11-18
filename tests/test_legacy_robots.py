@@ -40,7 +40,7 @@ LEGACY = [
 
 REBRAND = [
     "/", "/check", "/check/owner/repo", "/check/mcp", "/check/a2a?card=x", "/browse",
-    "/index", "/claude-code", "/get", "/teams", "/faq", "/how-it-works", "/docs",
+    "/index", "/claude-code", "/codex", "/get", "/teams", "/faq", "/how-it-works", "/docs",
     "/docs/check-guide", "/legal/terms", "/login", "/badge", "/for-developers",
     "/state-of-agent-security-q3-2026", "/state-of-agent-security-2026", "/feedback",
     "/admin-dashboard", "/research", "/certified", "/claim",

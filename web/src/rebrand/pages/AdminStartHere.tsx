@@ -17,6 +17,8 @@ interface Row {
   cc_new_machines_30d?: number | null
   d1_cohort?: number | null; d1_returned?: number | null
   d7_cohort?: number | null; d7_returned?: number | null
+  d7w_cohort?: number | null; d7w_returned?: number | null
+  codex_checked_machines_7d?: number | null
   calls_claude_code?: number | null; calls_claude?: number | null; calls_chatgpt?: number | null
   checks_total?: number | null; checks_claude_code?: number | null; checks_claude?: number | null
   checks_chatgpt?: number | null; checks_cursor?: number | null; checks_vscode?: number | null
@@ -80,9 +82,14 @@ export default function StartHerePanel() {
   const protectedMachines = cloudExcluded ? latest?.checked_machines_7d_excl_cloud : latest?.checked_machines_7d
   const connected = cloudExcluded ? latest?.cc_machines_7d_excl_cloud : latest?.cc_machines_7d
   const share = protectedMachines != null && connected ? ` of ${connected.toLocaleString()} (${pctOf(protectedMachines, connected)})` : ''
+  // Plugin 0.1.44+ in the Codex CLI, counted apart (snapshots from 2026-11-18 on).
+  const codexChecked = latest?.codex_checked_machines_7d
   const sevenDayPartial = latest && latest.day < SEVEN_DAY_COMPLETE_FROM
   const d7 = pct(sum(rows, (r) => r.d7_returned), sum(rows, (r) => r.d7_cohort))
   const d1 = pct(sum(rows, (r) => r.d1_returned), sum(rows, (r) => r.d1_cohort))
+  // Any day within the week: only rows that carry it (snapshots from 2026-11-17 on).
+  const d7wRows = rows.filter((r) => r.d7w_cohort != null)
+  const d7w = d7wRows.length ? pct(sum(d7wRows, (r) => r.d7w_returned), sum(d7wRows, (r) => r.d7w_cohort)) : 'Not ready'
   // Hand-run checks: only the days the checks counter covers, so this matches the MCP
   // panel's "Hand-run checks". Earlier days' raw tool calls are shown apart, not added.
   const checkDays = rows.filter((r) => r.checks_total != null)
@@ -118,8 +125,8 @@ export default function StartHerePanel() {
           label={`Claude Code machines protected · unique, 7 days to ${dayLabel(latest?.day)}`}
           k="protected"
           value={protectedMachines != null ? `${protectedMachines.toLocaleString()}${share}` : 'Not ready'}
-          meaning={<>Machines where the Claude Code plugin's session-start or install-time check ran at least once in those 7 days, out of machines connecting.{sevenDayPartial ? ` Partial: this count is complete from ${dayLabel(SEVEN_DAY_COMPLETE_FROM)} (it needs 7 days of data).` : ''}</>}
-          tip={`Each machine counts once in the 7 days. Owner machines (data/owner-ips.txt on the host) are excluded. Not counted: hand-run checks in claude.ai, ChatGPT, Cursor, VS Code or Codex; the npm and Python gates; CI. ${cloudExcluded ? 'Machines seen on an Anthropic cloud (remote) entrypoint in the last 30 days are excluded too.' : 'Anthropic cloud addresses (remote Claude Code sessions) are NOT excluded on this row: the snapshot did not split by entrypoint yet, so they inflate both the count and the share.'}`}
+          meaning={<>Machines where the Claude Code plugin's session-start or install-time check ran at least once in those 7 days, out of machines connecting. Codex machines checked (same 7 days): <span className="font-semibold tabular-nums">{codexChecked != null ? codexChecked.toLocaleString() : 'Not ready'}</span>.{sevenDayPartial ? ` Partial: this count is complete from ${dayLabel(SEVEN_DAY_COMPLETE_FROM)} (it needs 7 days of data).` : ''}</>}
+          tip={`Each machine counts once in the 7 days. Owner machines (data/owner-ips.txt on the host) are excluded. Not counted: hand-run checks in claude.ai, ChatGPT, Cursor, VS Code or Codex; the plugin's own checks in Codex (shown on their own as Codex machines checked); the npm and Python gates; CI. ${cloudExcluded ? 'Machines seen on an Anthropic cloud (remote) entrypoint in the last 30 days are excluded too.' : 'Anthropic cloud addresses (remote Claude Code sessions) are NOT excluded on this row: the snapshot did not split by entrypoint yet, so they inflate both the count and the share.'}`}
         />
         <Card
           label={`Machines protected (active installs${activeFrom ? `, from ${dayLabel(activeFrom)}` : ''}) · unique, 7 days to ${dayLabel(yesterday)}`}
@@ -140,7 +147,7 @@ export default function StartHerePanel() {
         <Card
           label="Came back a week later"
           value={`${d7} · next day ${d1}`}
-          meaning="For each day in the window: of the machines first seen exactly 7 days earlier, how many connected again that day. 'Next day' is the same for machines first seen the day before."
+          meaning={<>For each day in the window: of the machines first seen exactly 7 days earlier, how many connected again that day. 'Next day' is the same for machines first seen the day before. Came back any day within 7 days: <span className="font-semibold tabular-nums">{d7w}</span>.</>}
           tip="Connecting, not being protected. Exact-day return is noisy for a tool used a few times a week, and IP changes lower it. Owner machines excluded."
         />
         <Card

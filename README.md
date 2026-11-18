@@ -362,9 +362,20 @@ make test
 # Single test file
 .venv/bin/python3 -m pytest tests/test_auth.py -v
 
+# In parallel (up to 8 workers; needs pytest-xdist from the dev extras): each worker
+# copies the test database to <name>_<run>_gwN, drops it at the end, and uses
+# Redis db 15 - N. A killed run can leave copies behind: psql -l | grep _gw
+.venv/bin/python3 -m pytest tests/ -n auto
+
 # With coverage
 .venv/bin/python3 -m pytest tests/ --cov=src
 ```
+
+Tests need Postgres and Redis. Point `DATABASE_URL` at a test-only database: the
+session truncates its tables. The session also flushes Redis db 15, the only db it
+accepts in `REDIS_URL` (the default under pytest), so dev (db 0) and staging (db 1)
+are never touched. Tests hash passwords at bcrypt cost 4 by swapping the hasher in
+`tests/conftest.py`; the app always uses cost 12.
 
 ### Code Standards
 

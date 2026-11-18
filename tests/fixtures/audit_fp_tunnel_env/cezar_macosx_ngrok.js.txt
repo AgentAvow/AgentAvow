@@ -1,0 +1,10 @@
+        }
+        // 3) reserved domain (optional → ephemeral URL)
+        const domainInput = await ctx.ui.text({
+            message: 'Reserved ngrok domain (leave blank for an ephemeral URL that changes on restart)',
+            placeholder: 'cezar.ngrok.app',
+            // Bare hostname only — `https://…` here used to yield `--domain https://…`
+            // in the plist and a `https://https://…` publicUrl.
+            validate: (v) => (!v.trim() || HOSTNAME_RE.test(v.trim()) ? undefined : 'enter a bare hostname (no scheme), e.g. cezar.ngrok.app'),
+        });
+        if (domainInput === CANCEL)
