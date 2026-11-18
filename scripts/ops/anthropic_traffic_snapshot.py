@@ -42,6 +42,8 @@ CHECKED_PATH = os.path.join(DATA, "anthropic-traffic-checked.json")
 FIRST_CHECKED_PATH = os.path.join(DATA, "anthropic-traffic-first-checked.json")
 # {hash: last day it connected from Anthropic's cloud (a remote* entrypoint)}, 30 days.
 CLOUD_PATH = os.path.join(DATA, "anthropic-traffic-cloud.json")
+# {hash: last day the plugin checked something on it from Codex}, 7 days (from 2026-11-18).
+CODEX_CHECKED_PATH = os.path.join(DATA, "anthropic-traffic-codex-checked.json")
 FIRST_CHECKED_WINDOW_DAYS = 45
 SALT_PATH = os.path.join(DATA, ".anthropic-traffic-salt")
 OWNER_PATH = os.path.join(DATA, "owner-ips.txt")
@@ -119,12 +121,35 @@ COLUMNS = [
     # excluded) first seen before this day; _excl_cloud also drops machines seen on a
     # cloud entrypoint in the last 30 days. Empty on earlier days.
     "d7w_cohort", "d7w_returned", "returning_machines", "returning_machines_excl_cloud",
+    # Added 2026-11-18. Plugin 0.1.44 runs in the Codex CLI too, and its session-start and
+    # install-time hooks then send "agentavow-precheck/<v> (plugin; codex)" and
+    # "agentavow-preinstall/<v> (plugin; codex)". Those requests are counted here, owner
+    # excluded: codex_plugin_machines = distinct machines that day, codex_plugin_reqs =
+    # requests, codex_checked_machines_7d = distinct machines over the last 7 days. From
+    # the same day they are left OUT of the Claude Code hook/checked columns above
+    # (hook_*, preinstall_*, checked_machines*), which before 0.1.44 had no Codex traffic.
+    "codex_plugin_machines", "codex_plugin_reqs", "codex_checked_machines_7d",
 ]
+
+# The hooks that tag a Codex request with "; codex" in their User-Agent comment.
+PLUGIN_CHECK_UA_PREFIXES = (
+    "agentavow-precheck/", "agentavow-pre_install/", "agentavow-preinstall/")
 
 # Our A2A Agent Card: the A2A 1.0 path, and the pre-0.3 path some clients still try first.
 A2A_CARD_PATHS = ("/.well-known/agent-card.json", "/.well-known/agent.json")
 
 ENTRYPOINT_GROUPS = ("desktop", "cli", "sdk", "cloud", "other")
+
+
+def is_codex_plugin_request(ua: str) -> bool:
+    """True for the plugin's session-start or install-time hook running in Codex:
+    ``agentavow-precheck/0.1.44 (plugin; codex)`` (or ``(manual; codex)``)."""
+    if not ua.startswith(PLUGIN_CHECK_UA_PREFIXES):
+        return False
+    open_at, close_at = ua.find("("), ua.find(")")
+    if open_at < 0 or close_at < open_at:
+        return False
+    return "codex" in (t.strip() for t in ua[open_at + 1:close_at].split(";"))
 
 
 def is_plugin_connector_request(request: str) -> bool:
@@ -389,6 +414,7 @@ def snapshot(day: str, since_hours: int) -> dict:
     card_ips: set[str] = set()
     pre_ips: set[str] = set()
     plugin_ips: set[str] = set()
+    codex_ips: set[str] = set()
     hook_versions: dict[str, int] = defaultdict(int)
     n = defaultdict(int)
     hours_seen: set[int] = set()
@@ -422,7 +448,12 @@ def snapshot(day: str, since_hours: int) -> dict:
         if "Claude-User" in ua:
             n["claudeai_reqs"] += 1
             cai_ips.add(ip)
-        if ua.startswith("agentavow-precheck/"):
+        # Codex, not Claude Code: counted on its own, kept out of hook_*/preinstall_*.
+        codex = is_codex_plugin_request(ua)
+        if codex and not is_owner:
+            codex_ips.add(ip)
+            n["codex_plugin_reqs"] += 1
+        if not codex and ua.startswith("agentavow-precheck/"):
             hook_ips.add(ip)
             n["hook_reqs"] += 1
             hook_versions[ua.split()[0].split("/", 1)[1]] += 1
@@ -436,7 +467,7 @@ def snapshot(day: str, since_hours: int) -> dict:
         if st in (200, 304) and is_card_request(req):
             card_ips.add(ip)
             n["a2a_card_fetches"] += 1
-        if ua.startswith(("agentavow-pre_install/", "agentavow-preinstall/")):
+        if not codex and ua.startswith(("agentavow-pre_install/", "agentavow-preinstall/")):
             pre_ips.add(ip)
             n["preinstall_reqs"] += 1
         if "/api/v1/public/scan" in req and st == 200 and " /api/v1/public/scan/" in req:
@@ -475,6 +506,13 @@ def snapshot(day: str, since_hours: int) -> dict:
         h = machine(ip)
         checked_last[h] = max(checked_last.get(h, day), day)
     owner_h = {machine(ip) for ip in owner}
+    codex_last = {h: d for h, d in _load_json(CODEX_CHECKED_PATH).items()
+                  if isinstance(d, str) and d >= week_ago}
+    for ip in codex_ips:
+        h = machine(ip)
+        codex_last[h] = max(codex_last.get(h, day), day)
+    codex_start = (datetime.strptime(day, "%Y-%m-%d") - timedelta(days=6)).strftime(
+        "%Y-%m-%d")
     today_h = {machine(ip) for ip in cc_ips}
     checked_today_h = {machine(ip) for ip in hook_ips | pre_ips}
     reach = _reach_fields(seen, checked_last, today_h, day, owner_h)
@@ -500,6 +538,8 @@ def snapshot(day: str, since_hours: int) -> dict:
         json.dump(cloud, fh)
     with open(FIRST_CHECKED_PATH, "w") as fh:
         json.dump(first_checked, fh)
+    with open(CODEX_CHECKED_PATH, "w") as fh:
+        json.dump(codex_last, fh)
 
     row = {
         "day": day,
@@ -519,6 +559,10 @@ def snapshot(day: str, since_hours: int) -> dict:
         "checked_machines": len(hook_ips | pre_ips),
         "checked_machines_excl_owner": len((hook_ips | pre_ips) - owner),
         "preinstall_reqs": n["preinstall_reqs"],
+        "codex_plugin_machines": len(codex_ips),
+        "codex_plugin_reqs": n["codex_plugin_reqs"],
+        "codex_checked_machines_7d": sum(
+            1 for h, d in codex_last.items() if d >= codex_start and h not in owner_h),
         "log_complete": int(bool(hours_seen) and min(hours_seen) == 0 and max(hours_seen) == 23),
         **reach,
         **activation,

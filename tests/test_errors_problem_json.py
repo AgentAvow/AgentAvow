@@ -225,7 +225,8 @@ async def test_excluded_paths_keep_legacy_json(client, prefix, path, method, kwa
 
 @pytest.mark.parametrize("path", [
     "/api/v1/public/scan/acme/tool/badge",
-    f"/api/v1/badges/trust/{uuid.uuid4()}.svg",
+    # A fixed id: pytest -n workers must all collect the same test ids.
+    "/api/v1/badges/trust/00000000-0000-4000-8000-000000000418.svg",
 ])
 async def test_badge_errors_keep_legacy_json(client, path):
     resp = await client.get(path)
