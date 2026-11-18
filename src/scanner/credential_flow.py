@@ -300,6 +300,24 @@ def _blank_child_calls(code: str, python: bool) -> str:
     return "".join(out)
 
 
+def _blank_key_lookups(code: str, names: list[str], python: bool) -> str:
+    """``code`` with every lookup of ONE named key on a copied environment blanked:
+    ``merged.get('BU_CDP_URL')`` / ``merged['X']`` (and JS ``merged.X`` /
+    ``merged?.X``). That reads one variable, never the whole environment
+    (browser-use ``harness_cloud.py``: ``{**os.environ, **env}`` only read by key,
+    2026-11-14). The key must be a string literal (or a JS property name): a computed
+    key (``merged[k]``) and the bare name keep the dump."""
+    if not names:
+        return code
+    alt = "|".join(re.escape(n) for n in names)
+    lit = r"""(?:'[^'\n]*'|"[^"\n]*""" + ("" if python else r"|`[^`$\n]*`") + ")"
+    js_prop = "" if python else r"|\??\.\s*(?!get\b)[A-Za-z_$][\w$]*(?![\w$])(?!\s*\()"
+    default = r"(?:,\s*(?:" + lit + r"|None|null|undefined|-?\d+)\s*)?"
+    rx = re.compile(r"(?<![\w$.])(?:" + alt + r")(?:\s*\??\.?\s*\[\s*" + lit + r"\s*\]"
+                    r"|\s*\??\.\s*get\s*\(\s*" + lit + r"\s*" + default + r"\)" + js_prop + ")")
+    return rx.sub(lambda m: " " * len(m.group(0)), code)
+
+
 def _dump_in(code: str, python: bool) -> bool:
     """The whole environment serialized / copied in ``code`` (outside a child-process
     call's arguments, and not narrowed by a ``.filter``)."""
@@ -982,10 +1000,14 @@ class _Analyzer:
             path_kind = lit_kind or next(
                 (k for nm, k in vis_p.items() if _ref_re(nm).search(code)), None)
             has_read = bool(self.read_re.search(code))
-            src_kind = self._source_kind_in(code, st.scope)
             # A value handed to a child process (`spawn(cmd, {env: {...process.env}})`,
-            # `subprocess.run(cmd, env=env)`) is not carried by what the call returns.
+            # `subprocess.run(cmd, env=env)`, `Popen(cmd, env=job_env(opts))`) is not
+            # carried by what the call returns (openshorts worker.py, 2026-11-14).
             ref_code = _blank_child_calls(code, self.python) if self.dump else code
+            src_kind = self._source_kind_in(ref_code, st.scope)
+            if self.dump:
+                ref_code = _blank_key_lookups(
+                    ref_code, [nm for nm, k in vis_t.items() if k == _ENV_DUMP], self.python)
             ref_kind = _pick([k for nm, k in vis_t.items() if _ref_re(nm).search(ref_code)])
             value_kind = ((path_kind if (path_kind and has_read) else None) or src_kind
                           or self.dump_kinds[idx])
@@ -1097,6 +1119,10 @@ class _Analyzer:
                     param_hits: list[tuple[list[str], bool]], sink: str | None = None,
                     code: str | None = None) -> None:
         code = st.code if code is None else code
+        if self.dump:
+            # Same length, so offsets into the statement hold.
+            code = _blank_key_lookups(
+                code, [nm for nm, k in vis_t.items() if k == _ENV_DUMP], self.python)
         span = code[a:b]
         kind: str | None = None
         # Every tainted reference in the call, by kind: the strictest kind decides, and

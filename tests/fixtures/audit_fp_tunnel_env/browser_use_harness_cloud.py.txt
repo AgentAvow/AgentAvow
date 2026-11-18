@@ -1,0 +1,66 @@
+import ast
+import ipaddress
+import os
+import socket
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+CDP_REFUSED_GRACE_S = 3.0  # a Chrome started just before this call opens its port within that
+
+
+def require_cdp_url_listening(name: str, env: dict[str, str] | None = None) -> None:
+	"""BU_CDP_URL (and no BU_CDP_WS, which wins) whose host refuses connections: nothing listens on that port, yet
+	browser-harness retried it for 30 s on every call and then failed. Raise at once with both ways out, unless daemon
+	name is still healthy (browser-harness then reuses it and never reads BU_CDP_URL). A port that is no number never
+	works: raise at once too. A timeout, DNS, an HTTP error, or a proxy urllib uses for a host off this machine stays
+	browser-harness's to retry and report."""
+	merged = {**os.environ, **(env or {})}
+	url = merged.get('BU_CDP_URL')
+	if not url or merged.get('BU_CDP_WS'):
+		return
+	dedicated = '--user-data-dir=<a dir of its own>'
+	try:
+		u = urllib.parse.urlsplit(url)
+		shown = f'{u.scheme}://{u.netloc.rpartition("@")[2]}'  # never the user:password@, path or query (a token)
+		port = u.port
+	except ValueError:
+		scheme, sep, rest = url.partition('://')
+		shown = scheme + sep + rest.split('/')[0].split('?')[0].rpartition('@')[2]
+		raise RuntimeError(
+			f'BU_CDP_URL={shown} is not a valid http://HOST:PORT URL. Set it to http://127.0.0.1:PORT where PORT is the number a Chrome '
+			f'started with --remote-debugging-port=PORT {dedicated} listens on{_WAYS_OUT}'
+		) from None
+	host = u.hostname
+	if not host:
+		return
+	if port is None:  # urllib dials the scheme's port; a remote https endpoint can serve DevTools there
+		port = 443 if u.scheme in ('https', 'wss') else 80
+		fix = (
+			f'It names no port, so {port} was tried. Set it to http://127.0.0.1:PORT of a Chrome started with '
+			f'--remote-debugging-port=PORT {dedicated}'
+		)
+	else:
+		fix = f'Start Chrome with --remote-debugging-port={port} {dedicated}'
+	if urllib.request.getproxies().get(u.scheme) and not _loopback(host) and not urllib.request.proxy_bypass(host):
+		return  # browser-harness's urllib reaches it through that proxy, not directly
+	deadline, checked = time.monotonic() + CDP_REFUSED_GRACE_S, False
+	while True:
+		try:
+			socket.create_connection((host, port), timeout=5).close()  # Windows takes ~2 s to report a refusal
+			return
+		except ConnectionRefusedError:
+			if not checked and admin.daemon_alive(name) and daemon_healthy(name):
+				return
+			checked = True
+			if time.monotonic() >= deadline:
+				break
+			time.sleep(0.25)
+		except OSError:
+			return
+	raise RuntimeError(f'BU_CDP_URL={shown} refused the connection: no browser listens on {host}:{port}. {fix}{_WAYS_OUT}')
+
+
