@@ -65,6 +65,18 @@ class FakeRedis:
     async def delete(self, key):
         return 1 if self.kv.pop(key, None) is not None else 0
 
+    async def incr(self, key):
+        self.kv[key] = str(int(self.kv.get(key) or 0) + 1)
+        return int(self.kv[key])
+
+    async def eval(self, script, numkeys, key, token):
+        # The lock-release script: delete only while the key still holds our token.
+        assert "redis.call('get', KEYS[1]) == ARGV[1]" in script and numkeys == 1
+        if self.kv.get(key) == token:
+            del self.kv[key]
+            return 1
+        return 0
+
     async def zincrby(self, key, amount, member):
         d = self.z.setdefault(key, {})
         d[member] = d.get(member, 0) + amount
@@ -677,3 +689,58 @@ async def test_card_rebuild_lock_serves_the_last_card(client, catalog, fake_cach
     r = await client.get(DNC_URL)
     assert r.json()["items"] == []
     assert ti.DNC_CACHE_KEY in fake_cache.data and ti.DNC_LOCK_KEY not in fake_redis.kv
+
+
+@pytest.mark.asyncio
+async def test_a_review_during_a_rebuild_keeps_that_card_out_of_the_cache(
+        client, catalog, fake_cache, fake_redis, monkeypatch):
+    built = {"window_days": 7, "items": [{"name": "stale"}]}
+
+    async def build(db, now=None):
+        await ti._bump_card_generation()  # a Not-confirmed POST lands mid-build
+        return built
+
+    monkeypatch.setattr(ti, "build_dnc_week", build)
+    r = await client.get(DNC_URL)
+    assert r.json() == built
+    assert ti.DNC_CACHE_KEY not in fake_cache.data and ti.DNC_LAST_KEY not in fake_cache.data
+    assert ti.DNC_LOCK_KEY not in fake_redis.kv
+
+
+@pytest.mark.asyncio
+async def test_record_review_bumps_the_card_generation(client, db, catalog, fake_cache,
+                                                       fake_redis):
+    catalog.append(_row("acme/bad", decision="do_not_connect"))
+    before = await ti._card_generation()
+    admin = await _user(client, db, "admin", admin=True)
+    r = await client.post(ADMIN_URL, json={"page_path": "/check/acme/bad",
+                                           "verdict": "not_confirmed"}, headers=_auth(admin))
+    assert r.status_code == 200
+    assert await ti._card_generation() != before
+
+
+@pytest.mark.asyncio
+async def test_lock_release_only_frees_our_own_lock(fake_redis):
+    proceed, token = await ti._take_rebuild_lock()
+    assert proceed and token and fake_redis.kv[ti.DNC_LOCK_KEY] == token
+    assert await ti._take_rebuild_lock() == (False, None)
+    # Ours expired and another worker took the lock: releasing ours leaves theirs.
+    fake_redis.kv[ti.DNC_LOCK_KEY] = "someone-else"
+    await ti._release_rebuild_lock(token)
+    assert fake_redis.kv[ti.DNC_LOCK_KEY] == "someone-else"
+    fake_redis.kv[ti.DNC_LOCK_KEY] = token
+    await ti._release_rebuild_lock(token)
+    assert ti.DNC_LOCK_KEY not in fake_redis.kv
+
+
+@pytest.mark.asyncio
+async def test_shortlist_brings_back_a_not_confirmed_tool_whose_reason_changed(
+        db, catalog, monkeypatch):
+    # It qualifies for the card by itself, but a person kept it off for another reason:
+    # the card leaves it off, so the shortlist must show it again.
+    catalog.append(_row("acme/reread", decision="do_not_connect", reason=MALWARE))
+    db.add(_review("acme/reread", "not_confirmed", reason="an older reason"))
+    await db.flush()
+    _patch_lookups(monkeypatch, {"acme/reread": _scan(MAL_DATA)})
+    items = await ti.build_shortlist(db, counts={"/check/acme/reread": 5})
+    assert [(i["name"], i["status"]) for i in items] == [("acme/reread", "changed")]

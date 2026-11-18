@@ -42,6 +42,7 @@ import functools
 import hashlib
 import json
 import logging
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
@@ -70,6 +71,7 @@ CACHE_TTL = 600
 DNC_CACHE_KEY = "trust_index:dnc_week:v2"
 DNC_LAST_KEY = "trust_index:dnc_week:last:v2"
 DNC_LOCK_KEY = "trust_index:dnc_week:lock"
+DNC_GEN_KEY = "trust_index:dnc_week:gen"
 CHECKED_CACHE_KEY = "trust_index:most_checked:v1"
 CANDIDATES_MAX = 200
 JSONL_TAIL = 5000
@@ -77,7 +79,7 @@ SHORTLIST_LIMIT = 3    # the owner reads at most this many a week
 AUTO_LOOKUPS_MAX = 300  # cached scans read per card build for the automatic fill
 AUTO_CONCURRENCY = 16   # cached-scan / sandbox reads in flight at once
 REBUILD_LOCK_TTL = 10   # seconds one worker holds the card-rebuild lock
-LAST_GOOD_TTL = 24 * 3600  # the last built card, served while another worker rebuilds
+LAST_GOOD_TTL = 3600   # the last built card, served while another worker rebuilds
 
 
 def _now() -> datetime:
@@ -437,8 +439,8 @@ async def dnc_week(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     hit = await cache.get(DNC_CACHE_KEY)
     if isinstance(hit, dict):
         return hit
-    locked = await _take_rebuild_lock()
-    if not locked:
+    proceed, token = await _take_rebuild_lock()
+    if not proceed:
         # Another worker is rebuilding: serve the last card, or wait briefly for theirs.
         last = await cache.get(DNC_LAST_KEY)
         if isinstance(last, dict):
@@ -448,32 +450,73 @@ async def dnc_week(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
             hit = await cache.get(DNC_CACHE_KEY)
             if isinstance(hit, dict):
                 return hit
+    gen = await _card_generation()
     try:
         data = await build_dnc_week(db)
-        await cache.set(DNC_CACHE_KEY, data, ttl=CACHE_TTL)
-        await cache.set(DNC_LAST_KEY, data, ttl=LAST_GOOD_TTL)
+        # A review landed while this card was being built: it may list a tool the
+        # review just took off, so it is served once but never stored.
+        if gen == await _card_generation():
+            await cache.set(DNC_CACHE_KEY, data, ttl=CACHE_TTL)
+            await cache.set(DNC_LAST_KEY, data, ttl=LAST_GOOD_TTL)
     finally:
-        if locked:
-            await _release_rebuild_lock()
+        if token:
+            await _release_rebuild_lock(token)
     return data
 
 
-async def _take_rebuild_lock() -> bool:
-    """One worker rebuilds the card at a time (Redis SET NX, a few seconds). True when
-    this caller holds the lock, or when Redis cannot be asked (then everyone builds)."""
+# Bumped by every review write. Kept in Redis so a write on one worker stops a rebuild
+# on another; the process counter covers a Redis that cannot be asked.
+_CARD_GEN = 0
+
+
+async def _card_generation() -> tuple[int, str | None]:
     try:
         from src.redis_client import get_redis
 
-        return bool(await get_redis().set(DNC_LOCK_KEY, "1", nx=True, ex=REBUILD_LOCK_TTL))
+        raw = await get_redis().get(DNC_GEN_KEY)
+        shared = raw.decode() if isinstance(raw, bytes) else (str(raw) if raw else "0")
     except Exception:
-        return True
+        shared = None
+    return _CARD_GEN, shared
 
 
-async def _release_rebuild_lock() -> None:
+async def _bump_card_generation() -> None:
+    global _CARD_GEN
+    _CARD_GEN += 1
     try:
         from src.redis_client import get_redis
 
-        await get_redis().delete(DNC_LOCK_KEY)
+        await get_redis().incr(DNC_GEN_KEY)
+    except Exception:
+        logger.debug("card generation not bumped in redis", exc_info=False)
+
+
+async def _take_rebuild_lock() -> tuple[bool, str | None]:
+    """One worker rebuilds the card at a time (Redis SET NX, a few seconds). Returns
+    (proceed, token): the token when this caller holds the lock; (True, None) when
+    Redis cannot be asked (then everyone builds); (False, None) when another holds it."""
+    try:
+        from src.redis_client import get_redis
+
+        token = secrets.token_hex(16)
+        got = await get_redis().set(DNC_LOCK_KEY, token, nx=True, ex=REBUILD_LOCK_TTL)
+        return (True, token) if got else (False, None)
+    except Exception:
+        return True, None
+
+
+_RELEASE_IF_MINE = (
+    "if redis.call('get', KEYS[1]) == ARGV[1] then "
+    "return redis.call('del', KEYS[1]) else return 0 end")
+
+
+async def _release_rebuild_lock(token: str) -> None:
+    """Free the lock only if it is still this caller's (it may have expired and been
+    taken by another worker meanwhile)."""
+    try:
+        from src.redis_client import get_redis
+
+        await get_redis().eval(_RELEASE_IF_MINE, 1, DNC_LOCK_KEY, token)
     except Exception:
         logger.debug("card rebuild lock not released", exc_info=False)
 
@@ -589,9 +632,9 @@ async def build_shortlist(db: AsyncSession, counts: dict[str, int] | None = None
     """This week's shortlist for a person's read: at most SHORTLIST_LIMIT tools that read
     Do not connect now and that people or agents checked this week, most checks first.
     A tool a person already read (confirmed / not confirmed) is skipped unless its
-    reason changed since, and so is one that goes on the public card by itself
-    (``auto_kind``: known malicious, a malicious dependency, or a planted credential
-    seen leaving the sandbox), since it needs no read."""
+    reason changed since, and so is one with no review that goes on the public card by
+    itself (``auto_kind``: known malicious, a malicious dependency, or a planted
+    credential seen leaving the sandbox), since it needs no read."""
     from src import tool_checks
 
     if counts is None:
@@ -614,7 +657,11 @@ async def build_shortlist(db: AsyncSession, counts: dict[str, int] | None = None
     out: list[dict] = []
     for k in ranked:
         r, rv = dnc[k], reviews.get(k)
-        if _status(rv, r) in ("confirmed", "not_confirmed") or await auto_kind(r):
+        if _status(rv, r) in ("confirmed", "not_confirmed"):
+            continue
+        # The card lists it by itself (no read needed), unless a person already read it:
+        # a Not-confirmed tool whose reason changed comes back here, never to the card.
+        if rv is None and await auto_kind(r):
             continue
         out.append(_candidate(k, r, rv, growth=False, checks=counts[k],
                               top=await top_critical(r)))
@@ -724,6 +771,7 @@ async def record_review(
                      details={"page_key": key, "verdict": body.verdict,
                               "decision": row.decision})
     await db.commit()
+    await _bump_card_generation()
     await cache.invalidate(DNC_CACHE_KEY)
     await cache.invalidate(DNC_LAST_KEY)
     await cache.invalidate(CHECKED_CACHE_KEY)
