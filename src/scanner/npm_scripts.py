@@ -909,6 +909,105 @@ def _membership_only(text: str, path: str, arrays: set[str]) -> bool:
     return True
 
 
+TUNNEL_DATA_WHY = (
+    "A tunnel host listed as data in JS / TS code (a prompt placeholder or example, a "
+    "bundled Public Suffix List, a host-allowlist suffix) whose holder never reaches a "
+    "network call, is never read whole, returned, exported or passed to this package's "
+    "own code, in a file whose text nothing in the package reads.")
+
+
+def mark_tunnel_data(finding: object, severity: str) -> None:
+    """A tunnel-host match that is data in its own file (scan.py
+    ``_tunnel_host_example`` / ``_bundled_domain_list_entry`` /
+    ``_suffix_allowlist_default``), reported low until the rest of the tree is checked
+    (``restore_tunnel_data``)."""
+    finding._tunnel_data_restore = severity  # type: ignore[attr-defined]
+    finding.remediation = TUNNEL_DATA_WHY  # type: ignore[attr-defined]
+
+
+# A file read as text. `open(` only outside JS, where `window.open(url)` is navigation.
+_TEXT_READ_JS_RE = re.compile(
+    r"""\b(?:readFile(?:Sync)?|createReadStream|readTextFile(?:Sync)?|openSync"""
+    r"""|Bun\s*\.\s*file|readFileStr)\s*\(\s*(?P<arg>[^\n]*)""")
+_TEXT_READ_OTHER_RE = re.compile(
+    r"""\b(?:open|read_text|read_bytes|readFile\w*|File\.read|fs::read_to_string"""
+    r"""|ReadFile|readAllBytes|readString)\s*\(\s*(?P<arg>[^\n]*)""")
+# A read of a script's own source over the network or a raw import.
+_SOURCE_FETCH_RE = re.compile(
+    r"""\bfetch\s*\(\s*(?:import\.meta\.url|document\.currentScript|new\s+URL\s*\("""
+    r"""|['"`]\.{0,2}/[^'"`\n]*\.[cm]?[jt]sx?\b)|document\.currentScript\.src"""
+    r"""|\?raw\b|\btype\s*:\s*['"]text['"]""")
+_DATA_FILE_EXT = (".json", ".md", ".txt", ".yaml", ".yml", ".toml", ".html", ".css",
+                  ".csv", ".svg", ".xml", ".lock", ".env", ".ini", ".cfg", ".pem", ".key")
+
+
+def _reads_text_of(text: str, path: str, stem: str) -> bool:
+    """Code file ``text`` may read the text of the file named ``stem``: a file read
+    whose path names it or is built at runtime (a variable, a concatenation, a join
+    whose only literal is not a data file), a fetch of a script URL or a raw import,
+    or a shell command naming it."""
+    stem_re = re.compile(r"(?<![\w$-])" + re.escape(stem) + r"(?![\w$-])")
+    js = path.lower().endswith((".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx"))
+    for rx in (_TEXT_READ_JS_RE,) if js else (_TEXT_READ_JS_RE, _TEXT_READ_OTHER_RE):
+        for m in rx.finditer(text):
+            arg = m.group("arg")[:300]
+            if stem_re.search(arg):
+                return True
+            lits = re.findall(r"""(['"])([^'"\n]*)\1""", arg)
+            first = re.match(r"""\s*(['"])[^'"\n]*\1\s*[,)]""", arg)
+            if first:
+                continue                          # one plain literal, not this file
+            if ("+" in arg.split(")")[0] or "${" in arg or not lits
+                    or not any(v.lower().endswith(_DATA_FILE_EXT) for _, v in lits)):
+                return True
+    for ln in text.splitlines():
+        if _SOURCE_FETCH_RE.search(ln) and (stem_re.search(ln) or "import.meta" in ln
+                                            or "currentScript" in ln or "new URL" in ln):
+            return True
+        if re.search(r"\b(?:exec\w*|spawn\w*|system|popen|run)\s*\(", ln) and stem_re.search(ln):
+            return True
+    return False
+
+
+def _script_globals(text: str) -> set[str]:
+    """Names file ``text`` makes global: an assignment to an undeclared name
+    (`cfg = {…}`), and in a classic script (no import / export / require) every
+    top-level `var` / `let` / `const` / `function` / `class` (shared by every script
+    on the page)."""
+    declared = set(re.findall(
+        r"\b(?:var|let|const|function\s*\*?|class)\s+([A-Za-z_$][\w$]*)", text))
+    out = {n for n in re.findall(r"(?m)^\s*([A-Za-z_$][\w$]*)\s*=(?![=>])", text)
+           if n not in declared}
+    if not re.search(r"(?m)^\s*(?:import|export)\b|\brequire\s*\(|\bmodule\.exports\b"
+                     r"|\bexports\.", text):
+        out |= set(re.findall(
+            r"(?m)^(?:var|let|const|async\s+function\s*\*?|function\s*\*?|class)\s+"
+            r"([A-Za-z_$][\w$]*)", text))
+    return out - {"module", "exports", "window", "globalThis", "self", "this", "undefined"}
+
+
+def restore_tunnel_data(findings: list, texts: dict[str, str]) -> None:
+    """A tunnel host relaxed as data is only data while no code reads its file's text
+    (`readFileSync(require.resolve('./opts'))`, a runtime path, a raw import) and no
+    other file reads a global it sets (:func:`_script_globals`): any code file of the
+    tree (this one included) that may restores the finding's severity. A file not in
+    ``texts`` restores too."""
+    marked = [f for f in findings if getattr(f, "_tunnel_data_restore", None)
+              and f.severity == "low" and f.remediation == TUNNEL_DATA_WHY]
+    for f in marked:
+        stem = f.file_path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+        own = texts.get(f.file_path) or ""
+        globs = _script_globals(own)
+        glob_rx = (re.compile(r"(?<![\w$.])(?:" + "|".join(map(re.escape, sorted(globs)))
+                              + r")(?![\w$])") if globs else None)
+        if f.file_path not in texts or any(
+                t and _is_code_file(p) and (_reads_text_of(t, p, stem) or (
+                    glob_rx is not None and p != f.file_path and glob_rx.search(t)))
+                for p, t in texts.items()):
+            f.severity, f.remediation = f._tunnel_data_restore, ""
+            f._tunnel_data_restore = None
+
+
 def restore_signature_hosts(findings: list, texts: dict[str, str]) -> None:
     """Another code file of the tree that names the array, or loads this file into its
     own process (``source`` / ``.`` / import / require / from naming it), may send the
@@ -1041,6 +1140,7 @@ def restore_externally_invoked(findings: list, texts: dict[str, str], *,
     Every caller of ``_scan_content`` that can see a package.json must call this."""
     _restore_allowlist_hosts(findings, texts)
     restore_signature_hosts(findings, texts)
+    restore_tunnel_data(findings, texts)
     restore_signing_relaxed(findings, texts)
     _restore_datasets(findings, texts)
     _restore_helper_scripts(findings, texts)

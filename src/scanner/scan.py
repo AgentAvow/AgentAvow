@@ -3506,16 +3506,152 @@ _READS_OWN_SOURCE_RE = re.compile(
     r"""|process\.argv\[1\]|sys\.argv\[0\]|require\.main)"""
     r"""|\binspect\.getsource|\bgetsourcelines\b""")
 # An enclosing literal whose holder escapes this file or is unnamed: returned from a
-# function, exported, or set on `this`. Its reads cannot be tracked by name.
+# function, exported, or set on `this` or a global. Its reads cannot be tracked by name.
 _ESCAPING_OPENER_RE = re.compile(
     r"""\breturn\s*[\[{(]|\bmodule\.exports\b|\bexports\.[\w$]+\s*=|^\s*export\b"""
-    r"""|\bthis\.[\w$]+\s*=|=>\s*(?:\(\s*[\[{]|\[)\s*$""")
+    r"""|\b(?:this|globalThis|window|global|self|document|process)\s*(?:\??\.\s*[\w$]+"""
+    r"""|\[[^\]\n]*\])\s*=(?![=>])|=>\s*(?:\(\s*[\[{]|\[)\s*$""")
 _EXPORTS_NAME_RE = re.compile(r"""\bmodule\.exports\b|\bexports\.[\w$]+\s*=|^\s*export\b""")
+_GLOBAL_ROOTS = frozenset({
+    "window", "globalThis", "global", "self", "this", "module", "exports", "process",
+    "document", "localStorage", "sessionStorage"})
+
+# A literal handed straight to a call (`show({ placeholder: … })`, `new W([…])`) has no
+# name of its own: the callee may read it whole (`Object.values(o)`). A call into code
+# this package defines (a function, method, arrow or key of that name, a local file it
+# imports, `this`) or into an unnamed expression (`(0, f)(…)`, `g()(…)`) counts as
+# reaching the network; a call into an imported library (`ctx.ui.text({…})`) does not.
+_STR_ESC_RE = re.compile(r""""(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`""")
+_GROUPING_WORDS = frozenset({
+    "if", "while", "for", "switch", "return", "typeof", "await", "yield", "catch", "with",
+    "in", "of", "void", "delete", "case", "do", "else", "throw", "instanceof"})
+_PKG_IMPORT = r"""(?:await\s+)?(?:require|import)\s*\(\s*['"][^'"./]"""
+# esbuild's CommonJS wrapper, the only local callee a bundled data module is wrapped in.
+_ESBUILD_CJS_RE = re.compile(
+    r"""(?:var|let|const)\s+(__commonJS\w*)\s*=\s*\(cb,\s*mod\)\s*=>\s*function\s+__require"""
+    r"""\s*\(\)\s*\{\s*return\s+mod\s*\|\|\s*\(0,\s*cb\[__getOwnPropNames\(cb\)\[0\]\]\)"""
+    r"""\(\(mod\s*=\s*\{\s*exports:\s*\{\s*\}\s*\}\)\.exports,\s*mod\),\s*mod\.exports;?\s*\};?""")
+
+
+def _name_defined_here(text: str, name: str) -> bool:
+    """``name`` is defined by this file's own code (not only imported from a package)."""
+    e = re.escape(name)
+    if name.startswith("__commonJS"):
+        canon = {m.group(1) for m in _ESBUILD_CJS_RE.finditer(text)}
+        own = re.search(r"\b__getOwnPropNames\s*=(?!\s*Object\.getOwnPropertyNames\s*[;,\n])",
+                        text)
+        defs = len(re.findall(r"(?<![\w$.])" + e + r"\s*=(?![=>])", text))
+        if name in canon and defs == 1 and not own:
+            return False
+    pats = (
+        r"\bfunction\s*\*?\s*" + e + r"\s*\(", r"\bclass\s+" + e + r"\b",
+        r"\b(?:const|let|var)\s+" + e + r"\s*=(?![=>])(?!\s*" + _PKG_IMPORT + ")",
+        r"""\bimport\b[^;\n]*(?<![\w$])""" + e + r"""(?![\w$])[^;\n]*\bfrom\s*['"]\.""",
+        r"\b(?:const|let|var)\s*\{[^}]*(?<![\w$])" + e + r"(?![\w$])[^}]*\}\s*=(?!\s*"
+        + _PKG_IMPORT + ")",
+        r"(?<![\w$.?])" + e + r"""['"]?\s*:\s*"""
+        r"""(?:async\b|function\b|\(|[A-Za-z_$][\w$]*\s*(?:=>|[,}\n]))""",
+        r"(?m)^\s*(?:static\s+)?(?:async\s+)?\*?\s*" + e + r"\s*\([^)\n]*\)\s*\{",
+        r"[.\]]\s*" + e + r"\s*=(?![=>])", r"""\[\s*['"]""" + e + r"""['"]\s*\]\s*=(?!=)""",
+        r"(?m)^\s*" + e + r"\s*=(?![=>])")
+    return any(re.search(p, text) for p in pats)
+
+
+def _passed_to_own_code(text: str, prefix: str) -> bool:
+    """The literal that starts right after ``prefix`` (the file's text up to it) sits in
+    the arguments of a call into this package's own code or an unnamed expression."""
+    t = _STR_ESC_RE.sub(lambda m: m.group(0)[0] + " " * (len(m.group(0)) - 2)
+                        + m.group(0)[-1], prefix)
+    t = re.sub(r"//[^\n]*", lambda m: " " * len(m.group(0)), t)
+    depth = 0
+    for p in range(len(t) - 1, -1, -1):
+        ch = t[p]
+        if ch in ")]}":
+            depth += 1
+            continue
+        if ch not in "([{":
+            continue
+        if depth:
+            depth -= 1
+            continue
+        if ch != "(":
+            continue
+        before = t[:p].rstrip()
+        m = re.search(r"((?:new\s+)?[A-Za-z_$][\w$]*(?:\s*\??\.\s*[A-Za-z_$][\w$]*)*)"
+                      r"\s*(?:\?\.)?$", before)
+        if not m:
+            if before.endswith((")", "]", "`")):
+                return True   # `(0, f)({…})`, `g()({…})`
+            continue          # a grouping paren: `x = ({…})`
+        chain = re.findall(r"[A-Za-z_$][\w$]*", m.group(1))
+        if chain[0] == "new":
+            chain = chain[1:]
+        if len(chain) == 1 and chain[0] in _GROUPING_WORDS:
+            continue
+        pre = before[:m.start()].rstrip()
+        if pre.endswith((".", ")", "]")) or re.search(r"\bfunction\s*\*?$", pre):
+            return True       # `require('./x').show({…})`, a default parameter value
+        if chain[0] in ("this", "self", "globalThis", "window", "super"):
+            return True
+        called = {chain[0], chain[-1]}
+        if chain[-1] in ("call", "apply", "bind") and len(chain) > 1:
+            called.add(chain[-2])
+        if any(_name_defined_here(text, nm) for nm in called if nm not in ("module", "exports")):
+            return True
+        # `Object.assign(globalThis, {…})`: a library call that stores it globally.
+        if re.match(r"\s*(?:globalThis|window|global|self|this|module|exports|document)"
+                    r"\s*(?:\.\s*[\w$]+\s*)*,", t[p + 1:]):
+            return True
+    return False
+
+
+def _enclosing_code_read_as_text(text: str, prefix: str) -> bool:
+    """A function or class that encloses the literal is used other than by a call:
+    `cfg.toString()`, `String(cfg)`, `` `${cfg}` ``, passed as a value. Its source text,
+    literal included, can then be read without naming the literal's holder."""
+    t = _STR_ESC_RE.sub(lambda m: m.group(0)[0] + " " * (len(m.group(0)) - 2)
+                        + m.group(0)[-1], prefix)
+    t = re.sub(r"//[^\n]*", lambda m: " " * len(m.group(0)), t)
+    fns: set[str] = set()
+    depth = 0
+    for p in range(len(t) - 1, -1, -1):
+        ch = t[p]
+        if ch in ")]}":
+            depth += 1
+        elif ch in "([{":
+            if depth:
+                depth -= 1
+            elif ch == "{":
+                head = t[max(0, p - 300):p]
+                m = (re.search(r"\b(?:function\s*\*?|class)\s+([A-Za-z_$][\w$]*)[^{;]*$", head)
+                     or re.search(r"([A-Za-z_$][\w$]*)\s*[:=]\s*(?:async\s+)?(?:function\b[^{;]*"
+                                  r"|(?:\([^()]*\)|[A-Za-z_$][\w$]*)\s*=>\s*|class\b[^{;]*)$", head)
+                     or re.search(r"(?:^|[\s;{}])(?:static\s+|async\s+|get\s+|set\s+)*\*?"
+                                  r"([A-Za-z_$][\w$]*)\s*\([^()]*\)\s*$", head))
+                if m and m.group(1) not in _GROUPING_WORDS:
+                    fns.add(m.group(1))
+    for fn in fns - _JS_NOT_A_NAME:
+        e = re.escape(fn)
+        for om in re.finditer(r"(?<![\w$.])" + e + r"(?![\w$])", text):
+            before = text[max(0, om.start() - 40):om.start()]
+            after = text[om.end():om.end() + 3]
+            if re.match(r"\s*\(", after) or re.search(
+                    r"(?:\bfunction\s*\*?|\bclass|\bnew|\bconst|\blet|\bvar|\bstatic|\basync"
+                    r"|\bget|\bset)\s*$", before):
+                continue
+            if re.match(r"\s*[:=](?![=])", after) or re.match(r"\s*\.\s*prototype\b",
+                                                               text[om.end():om.end() + 20]):
+                continue      # its definition (`cfg: function`, `cfg = () =>`)
+            if re.search(r"^\s*(?:static\s+|async\s+|get\s+|set\s+)*\*?$",
+                         before.rsplit("\n", 1)[-1]) and re.match(r"\s*\(", after):
+                continue
+            return True
+    return False
 
 
 def _data_holder_safe(lines: list[str], idx: int, names: set[str],
                       span: tuple[int, int], start: int | None = None,
-                      wrapped: bool = False) -> bool:
+                      wrapped: bool = False, col: int | None = None) -> bool:
     """A tunnel host listed as data on line ``idx`` (held under ``names``, defined on
     lines ``span``) can never be dialled: the file does not read its own source, no
     enclosing literal is returned / exported / set on ``this`` (its reads are
@@ -3523,10 +3659,21 @@ def _data_holder_safe(lines: list[str], idx: int, names: set[str],
     call, a computed key), and :func:`_value_reaches_network` finds no read of the
     holder itself. ``start`` is the line to search enclosing brackets from (the list's
     opener for a long list); ``wrapped`` says that opener is a bundler's CommonJS
-    wrapper's `module.exports = [`, which the caller tracks by the wrapper's name."""
-    if _READS_OWN_SOURCE_RE.search("\n".join(lines)):
+    wrapper's `module.exports = [`, which the caller tracks by the wrapper's name.
+    ``col`` is where the literal starts on line ``first`` (default: the line's start,
+    or for ``start`` the whole opener line); a literal in the arguments of a call into
+    this package's own code is unsafe (:func:`_passed_to_own_code`)."""
+    text = "\n".join(lines)
+    if _READS_OWN_SOURCE_RE.search(text):
         return False
     first = idx if start is None else start
+    if col is None:
+        col = 0 if start is None else len(lines[first])
+    prefix = "\n".join(lines[max(0, first - 2000):first] + [lines[first][:col]])
+    if _passed_to_own_code(text, prefix) or _enclosing_code_read_as_text(text, prefix):
+        return False
+    if col and _ESCAPING_OPENER_RE.search(lines[first][:col].rstrip() + " ") and not wrapped:
+        return False
     openers = ([] if start is None else [start]) + _enclosing_openers(lines, first)
     outer: set[str] = set()
     for n, j in enumerate(openers):
@@ -3544,15 +3691,18 @@ def _data_holder_safe(lines: list[str], idx: int, names: set[str],
             for nm in names | outer for ln in lines
             if nm and nm not in _JS_NOT_A_NAME and not _is_line_comment(ln)):
         return False
-    if _outer_object_read_whole(lines, outer, span):
+    if _outer_object_read_whole(lines, outer, span, names):
         return False
     return not _value_reaches_network(lines, names, span)
 
 
-def _outer_object_read_whole(lines: list[str], names: set[str], span: tuple[int, int]) -> bool:
-    """An object enclosing the value is read in any way other than a member access
-    (`cfg.other`) or a comparison: `Object.values(cfg)`, `...cfg`, `for (k in cfg)`,
-    `JSON.stringify(cfg)`, `send(cfg)`, `cfg[k]`, `return cfg`, an alias."""
+def _outer_object_read_whole(lines: list[str], names: set[str], span: tuple[int, int],
+                             path: set[str] | frozenset[str] = frozenset()) -> bool:
+    """An object enclosing the value is read in any way other than a member access to
+    a key off the value's ``path`` (`cfg.other`) or a comparison: `Object.values(cfg)`,
+    `...cfg`, `for (k in cfg)`, `JSON.stringify(cfg)`, `send(cfg)`, `cfg[k]`,
+    `return cfg`, an alias, `all.ui` (a key on the path), `steps.forEach(…)`."""
+    path = set(path) | set(names)
     lo, hi = span
     for name in {n for n in names if n and n not in _JS_NOT_A_NAME}:
         name_re = re.compile(r"(?<![\w$.])" + re.escape(name) + r"(?![\w$])")
@@ -3567,8 +3717,12 @@ def _outer_object_read_whole(lines: list[str], names: set[str], span: tuple[int,
                     continue  # its definition
                 if re.search(r"\b(?:const|let|var|function|class)\s+$", before):
                     continue
-                if re.match(r"\s*\??\.\s*[A-Za-z_$]", after) or (
-                        _BENIGN_AFTER_RE.match(after) or _BENIGN_BEFORE_RE.search(before)):
+                if _BENIGN_AFTER_RE.match(after) or _BENIGN_BEFORE_RE.search(before):
+                    continue
+                # `cfg.other` reads another key; `all.ui` (a key on the way to the
+                # value) or a method call (`steps.forEach(…)`) reads the value too.
+                mm = re.match(r"\s*\??\.\s*([A-Za-z_$][\w$]*)\s*(\(?)", after)
+                if mm and mm.group(1) not in path and not mm.group(2):
                     continue
                 return True
     return False
@@ -3615,6 +3769,12 @@ def _value_reaches_network(lines: list[str], names: set[str], span: tuple[int, i
                 if am and om.start() >= am.end():
                     # `const h = name.split(' ')[1]`: follow the alias.
                     lhs = am.group("lhs")
+                    root = re.match(r"[A-Za-z_$][\w$]*", lhs)
+                    # An alias that is exported, set on a global / `this`, or one of
+                    # several assignments on the line cannot be followed by name.
+                    if (_EXPORTS_NAME_RE.search(ln) or (root and root.group(0) in _GLOBAL_ROOTS)
+                            or len(re.findall(r"(?<![=!<>])=(?![=>])", ln)) > 1):
+                        return True
                     if lhs[0] in "{[":
                         todo += re.findall(r"[A-Za-z_$][\w$]*", lhs)
                     else:
@@ -3645,13 +3805,21 @@ def _tunnel_host_example(lines: list[str], idx: int, m: re.Match[str]) -> bool:
             shown = bool(_EXAMPLE_LEAD_RE.search(line[lm.start() + 1:m.start()]))
         if not shown:
             return False
+        # Nothing but closing brackets after it, and no other statement before it:
+        # `{ placeholder: '…' }, h = o.placeholder;` reads it on its own line.
+        pre = _STR_ESC_RE.sub("''", line[:lm.start()])
+        if ";" in pre or not _CLEAN_TAIL_RE.match(line[lm.end():]):
+            return False
         names = _holder_names(line[:lm.start()])
         openers = _enclosing_openers(lines, idx)
         # `const o = { placeholder: '…' }`: the object itself may be read whole.
         if openers and re.search(r"=\s*[\[{]\s*$", lines[openers[0]]):
             names |= _holder_names(lines[openers[0]])
-        return _data_holder_safe(lines, idx, names, (idx, idx))
+        return _data_holder_safe(lines, idx, names, (idx, idx), col=lm.start())
     return False
+
+
+_CLEAN_TAIL_RE = re.compile(r"""^\s*(?:[\])}]\s*)*[,;]?\s*(?:[\])}]\s*)*[,;]?\s*(?://.*)?$""")
 
 
 # `allowedHosts: options.allowedHosts ?? userConfig.server?.allowedHosts ?? [` (a
@@ -3692,6 +3860,14 @@ def _suffix_allowlist_default(lines: list[str], idx: int, pattern: re.Pattern[st
     return False
 
 
+_CLEAN_LIST_OPEN_RE = re.compile(
+    r"""^\s*(?:(?:export\s+)?(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=|(?:module\.)?exports\s*="""
+    r"""|[A-Za-z_$][\w$]*\s*:|(["'])[^"'\n]*\1\s*:)\s*\[\s*$""")
+_CLEAN_CLOSE_RE = re.compile(r"""^\s*[\])}]+\s*[,;]?\s*(?://.*)?$""")
+# esbuild's wrapper around a bundled JSON / CommonJS module.
+_CJS_WRAPPER_OPEN_RE = re.compile(
+    r"""^\s*var\s+[A-Za-z_$][\w$]*\s*=\s*__commonJS\w*\(\s*\{\s*"[^"\n]*"\s*"""
+    r"""\(\s*exports\s*,\s*module\s*\)\s*\{\s*$""")
 _ONE_TOKEN_ELEM_RE = re.compile(r"""^\s*(['"])[^\s'"\\]+\1\s*,?\s*$""")
 
 
@@ -3727,16 +3903,23 @@ def _bundled_domain_list_entry(lines: list[str], idx: int, pattern: re.Pattern[s
         return False
     if not _psl_markers(lines, a, b):
         return False
+    # The opener holds one plain holder and the closer nothing but closing brackets:
+    # code on either line (`]; return PSL;`, `], Q = PSL;`) would be read by no check.
+    if not (_CLEAN_LIST_OPEN_RE.match(lines[a - 1]) and _CLEAN_CLOSE_RE.match(lines[b + 1])):
+        return False
     # The list's holder: `const L = [` / `rules: [`, or for a CommonJS data module
-    # (`module.exports = [`) the bundler's wrapper (`var require_rules = __commonJS(`).
+    # (`module.exports = [`) the bundler's wrapper (`var require_rules = __commonJS(`)
+    # on the line right above, closed right below.
     names = _holder_names(lines[a - 1])
     span_lo = a - 1
     wrapped = False
     if not names and re.search(r"\b(?:module\.)?exports\s*=\s*\[\s*$", lines[a - 1]):
-        for j in _enclosing_openers(lines, a - 1)[:1]:
+        j = a - 2
+        if (j >= 0 and _CJS_WRAPPER_OPEN_RE.match(lines[j]) and b + 2 < len(lines)
+                and re.match(r"\s*\}\s*\}\s*\)\s*;?\s*$", lines[b + 2])):
             names = set(_HOLDER_DECL_RE.findall(lines[j])) - _JS_NOT_A_NAME
             span_lo = j
-            wrapped = bool(names) and "__commonJS" in lines[j]
+            wrapped = bool(names)
     return _data_holder_safe(lines, idx, names, (span_lo, b + 1), start=a - 1, wrapped=wrapped)
 
 
@@ -4637,23 +4820,36 @@ def _scan_content(
                     # A suffix test (`host.endswith(".ngrok.io")`) or a placeholder
                     # tunnel subdomain (`wss://<sub>.ngrok-free.app`) names no
                     # destination. Low, kept visible.
-                    if _exfil_host_not_destination(line, pattern, lines, idx):
+                    if _exfil_host_not_destination(line, pattern):
                         findings.append(Finding(
                             category="exfiltration", name=name, severity="low",
                             file_path=file_path, line_number=line_num,
                             snippet=stripped[:120]))
                         continue
                     # A bare host in a domain-list data file (the Public Suffix List)
-                    # or a long domain-list array bundled with code, or a leading-dot
-                    # suffix in a host allowlist's (default) list, is data. Low, kept
-                    # visible; see _domain_list_entry and the two helpers.
-                    if (_domain_list_entry(lines, idx)
-                            or _bundled_domain_list_entry(lines, idx, pattern)
-                            or _suffix_allowlist_default(lines, idx, pattern)):
+                    # is data. Low, kept visible; see _domain_list_entry.
+                    if _domain_list_entry(lines, idx):
                         findings.append(Finding(
                             category="exfiltration", name=name, severity="low",
                             file_path=file_path, line_number=line_num,
                             snippet=stripped[:120]))
+                        continue
+                    # In JS / TS code only (a JSON / YAML / Python value is read by
+                    # code the checks below cannot see): a tunnel host shown as a
+                    # placeholder / example, a long domain-list array bundled with
+                    # code, or a leading-dot suffix in a host allowlist's (default)
+                    # list is data. Low until the tree check finds another file that
+                    # reads this file's text (npm_scripts.restore_tunnel_data).
+                    if file_lang in ("javascript", "typescript") and (
+                            _exfil_host_not_destination(line, pattern, lines, idx)
+                            or _bundled_domain_list_entry(lines, idx, pattern)
+                            or _suffix_allowlist_default(lines, idx, pattern)):
+                        f_low = Finding(
+                            category="exfiltration", name=name, severity="low",
+                            file_path=file_path, line_number=line_num,
+                            snippet=stripped[:120])
+                        npm_scripts.mark_tunnel_data(f_low, severity)
+                        findings.append(f_low)
                         continue
                     # A host inside a regex / pattern string ARRAY that never reaches
                     # a sink is a signature (a guard's list of what to look for,

