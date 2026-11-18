@@ -747,3 +747,58 @@ def test_a_checkout_in_a_bracketed_list_still_does_not_ask(hook, monkeypatch, ca
     checkout.mkdir(parents=True)
     cmd = f'cd /tmp && python3 -c \'for cwd in ["{checkout}", None]: print(cwd)\''
     assert _run(mod, monkeypatch, capsys, _bash(cmd), lambda *a, **k: None) == {}
+
+
+# --- 0.1.46: a heredoc that only writes text is judged by the file it writes ------------
+
+_STATUS_BODY = """---
+agent: blexpo25
+state: waiting-on-owner
+updated: $(date '+%Y-%m-%d %H:%M')
+---
+## Summary
+The owner approved the plan (no change to minimumReleaseAgeExclude or allowBuilds
+without raising it). The allowed-servers list and the agentavow folder are untouched.
+"""
+
+
+@pytest.mark.parametrize("cmd", [
+    # a herdr status report: text written under another tool's cache folder, then read back
+    "cat > /home/me/.cache/herdr/status/blexpo25.md <<EOF\n" + _STATUS_BODY
+    + "EOF\ncat /home/me/.cache/herdr/status/blexpo25.md | sed -n 9p",
+    "cat > ~/.cache/herdr/status/x.md <<'EOF'\n" + _STATUS_BODY + "EOF",
+    "cat >> ~/.cache/herdr/status/x.md <<-EOF\n" + _STATUS_BODY + "\tEOF",
+    "cat <<EOF > ~/.cache/herdr/status/x.md\n" + _STATUS_BODY + "EOF\necho done",
+])
+def test_a_heredoc_that_only_writes_text_does_not_ask(hook, monkeypatch, capsys, cmd):
+    mod, _ = hook
+    assert _run(mod, monkeypatch, capsys, _bash(cmd), lambda *a, **k: None) == {}
+
+
+@pytest.mark.parametrize("cmd", [
+    # the file written is AgentAvow's own
+    "cat > ~/.cache/agentavow/allowed-servers.txt <<EOF\nx\nEOF",
+    "cat <<EOF >> $HOME/.cache/agentavow/scanned.json\n{}\nEOF",
+    # an unquoted body runs its substitutions
+    "cat > ~/.cache/herdr/x.md <<EOF\nkey: $(cat ~/.cache/agentavow/allow.key)\nEOF",
+    "cat > ~/.cache/herdr/x.md <<EOF\nkey: `cat ~/.cache/agentavow/allow.key`\nEOF",
+    # the written file is run afterwards
+    "cat > /tmp/x.sh <<EOF\ncat ~/.cache/agentavow/allow.key\nEOF\nsh /tmp/x.sh",
+    "cat > /tmp/x.sh <<'EOF'\ncat ~/.cache/agentavow/allow.key\nEOF\nbash /tmp/x.sh",
+    "cat > /tmp/x.sh <<'EOF'\ncat ~/.cache/agentavow/allow.key\nEOF\nsource /tmp/x.sh",
+    "cat > /tmp/x.sh <<'EOF'\ncat ~/.cache/agentavow/allow.key\nEOF\n. /tmp/x.sh",
+    "cat > /tmp/x.sh <<'EOF'\ncat ~/.cache/agentavow/allow.key\nEOF\nchmod +x /tmp/x.sh && /tmp/x.sh",
+    "cat > /tmp/x.py <<'EOF'\nprint(open('/home/me/.cache/agentavow/allow.key').read())\nEOF\n"
+    "python3 /tmp/x.py",
+    "cat > /tmp/x.txt <<'EOF'\ncat ~/.cache/agentavow/allow.key\nEOF\nsed -n 1e /tmp/x.txt",
+    "cat > /tmp/x.txt <<'EOF'\ncat ~/.cache/agentavow/allow.key\nEOF\nxargs -a /tmp/x.txt -I{} sh -c {}",
+    # not a plain write: the header pipes the body to a shell or interpreter
+    "cat <<EOF | sh\ncat ~/.cache/agentavow/allow.key\nEOF",
+    "python3 - <<'EOF'\nprint(open('/home/me/.cache/agentavow/allow.key').read())\nEOF",
+    "bash <<'EOF'\ncat ~/.cache/agentavow/allow.key\nEOF",
+    # a write plus another command on the header line
+    "cat > /tmp/x <<'EOF' && sh /tmp/x\ncat ~/.cache/agentavow/allow.key\nEOF",
+])
+def test_a_heredoc_that_names_or_runs_our_files_still_asks(hook, monkeypatch, capsys, cmd):
+    mod, _ = hook
+    _ask_reason(mod, monkeypatch, capsys, _bash(cmd))

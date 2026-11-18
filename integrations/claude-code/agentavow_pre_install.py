@@ -53,7 +53,7 @@ import sys
 import time
 import urllib.error
 
-__version__ = "0.1.45"
+__version__ = "0.1.46"
 
 TIMEOUT = 12  # seconds per scan: an install is rare, so a slower fresh scan is fine
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -1034,6 +1034,106 @@ def _cd_cannot_reach_own_dir(s: str, cwd: object) -> bool:
         return False
 
 
+# A heredoc that only writes text to a file (`cat > f <<EOF`, `cat <<'EOF' >> f`): its body
+# is data, judged by the file it writes, not by its words. The target is a plain path
+# (`~`, `$HOME` and `${HOME}` allowed; no substitution, glob or second command).
+_HEREDOC_TARGET = r"[\w~./${}:@+,=-]+"
+_HEREDOC_HEADER = re.compile(
+    rf"^\s*cat\s+(?:>>?\s*(?P<t1>{_HEREDOC_TARGET})\s+<<(?P<d1>-?)\s*(?P<q1>['\"]?)"
+    rf"(?P<w1>\w+)(?P=q1)|<<(?P<d2>-?)\s*(?P<q2>['\"]?)(?P<w2>\w+)(?P=q2)\s+>>?\s*"
+    rf"(?P<t2>{_HEREDOC_TARGET}))\s*$")
+_HEREDOC_OP = re.compile(r"<<-?\s*['\"]?\w+['\"]?")
+# Commands that only read or print. Anything else around a blanked body (an interpreter,
+# `source`, `.`, `chmod`, `xargs`, running a file by name) keeps every body in view, since
+# it could run what was written.
+_READ_ONLY_CMDS = frozenset({"cat", "head", "tail", "grep", "wc", "ls", "echo", "printf",
+                             "date", "mkdir", "true", "sed"})
+_SED_PRINT = re.compile(r"^(?:\d+|\$)(?:,(?:\d+|\$))?[pd]$")
+_SEGMENT_SPLIT = re.compile(r"\|\||&&|[;|&\n]")
+
+
+def _substitutions(line: str) -> list[str] | None:
+    """The `$(...)` and backtick substitutions an unquoted heredoc line runs, or None
+    when one is not closed on the line (a substitution spanning lines keeps the body)."""
+    out, i = [], 0
+    while i < len(line):
+        if line.startswith("$(", i):
+            depth, j = 1, i + 2
+            while j < len(line) and depth:
+                depth += {"(": 1, ")": -1}.get(line[j], 0)
+                j += 1
+            if depth:
+                return None
+            out.append(line[i + 2:j - 1])
+            i = j
+        elif line[i] == "`":
+            j = line.find("`", i + 1)
+            if j < 0:
+                return None
+            out.append(line[i + 1:j])
+            i = j + 1
+        else:
+            i += 1
+    return out
+
+
+def _only_reads(text: str) -> bool:
+    """Every command in ``text`` is a plain reader or printer, with no substitution."""
+    if any(x in text for x in ("$(", "`", "<(", ">(")):
+        return False
+    for seg in _SEGMENT_SPLIT.split(text):
+        words = seg.split()
+        if not words:
+            continue
+        if words[0] not in _READ_ONLY_CMDS:
+            return False
+        if words[0] == "sed":
+            flags = [w for w in words[1:] if w.startswith("-")]
+            script = next((w.strip("'\"") for w in words[1:] if not w.startswith("-")), "")
+            if any(f not in ("-n", "-E", "-r") for f in flags) or not _SED_PRINT.match(script):
+                return False
+    return True
+
+
+def _blank_data_heredocs(command: str) -> str:
+    """``command`` with the body of each heredoc that only writes text to a file blanked
+    (an unquoted body keeps the substitutions it runs). Unchanged when a heredoc can't be
+    read, or when anything around the bodies or a kept substitution does more than read
+    or print: that could run what was written."""
+    if "<<" not in command:
+        return command
+    lines = command.split("\n")
+    outside: list[str] = []
+    subs: list[str] = []
+    i = 0
+    while i < len(lines):
+        m = _HEREDOC_HEADER.match(lines[i])
+        if not m:
+            outside.append(lines[i])
+            i += 1
+            continue
+        word = m.group("w1") or m.group("w2")
+        strip_tabs = (m.group("d1") or m.group("d2")) == "-"
+        end = next((j for j in range(i + 1, len(lines))
+                    if (lines[j].lstrip("\t") if strip_tabs else lines[j]) == word), None)
+        if end is None:
+            return command
+        if not (m.group("q1") or m.group("q2")):
+            for body_line in lines[i + 1:end]:
+                found = _substitutions(body_line)
+                if found is None:
+                    return command
+                subs.extend(found)
+        outside.append(lines[i])
+        i = end + 1
+    if len(outside) == len(lines):
+        return command
+    text = "\n".join(outside)
+    if not _only_reads(_HEREDOC_OP.sub("", text)) or not all(_only_reads(s) for s in subs):
+        return command
+    return "\n".join([text, *subs])
+
+
 def _shell_names_own_files(command: str, cwd: object = None) -> bool:
     """Whether a shell command names AgentAvow's cache folder or one of its files, in
     any of the spellings a person or a script would use: ~ / $HOME / ${HOME} /
@@ -1043,7 +1143,7 @@ def _shell_names_own_files(command: str, cwd: object = None) -> bool:
     neither does a folder named AgentAvow anywhere but the cache folder: the test is
     where a folder sits (its parent, or the working directory for a relative `cd`),
     never what a checkout or worktree is called."""
-    raw = re.sub(r"[\"'`\\]", "", command)
+    raw = re.sub(r"[\"'`\\]", "", _blank_data_heredocs(command))
     s = raw.lower()
     if _NAMED_FILE.search(s):
         return True
