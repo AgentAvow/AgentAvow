@@ -1,7 +1,9 @@
 """The "Ask about this in ChatGPT / Claude" row on a report page
 (web/src/rebrand/lib/askAssistant.ts), run under node: the prompt names the public tool
-identifier and our connector, the links prefill ChatGPT and Claude, and nothing but the
-public identifier ends up in the link."""
+identifier and our connector; ChatGPT gets it prefilled through ?q=, while Claude gets a
+blank new chat plus the same prompt on the clipboard (claude.ai warns on a prefilled
+prompt, which reads like a prompt-injection alert); nothing but the public identifier
+ends up in a link."""
 from __future__ import annotations
 
 import json
@@ -51,10 +53,13 @@ def test_package_prompt_and_both_links():
     chatgpt, claude = r["links"]
     assert chatgpt["label"] == "Ask about this in ChatGPT"
     assert chatgpt["href"].startswith("https://chatgpt.com/?q=")
-    assert claude["label"] == "Ask about this in Claude"
-    assert claude["href"].startswith("https://claude.ai/new?q=")
     assert _q(chatgpt["href"]) == prompt
-    assert _q(claude["href"]) == prompt
+    assert "copy" not in chatgpt
+    # Claude: no prefill in the URL; the same prompt goes by clipboard instead.
+    assert claude["label"] == "Ask about this in Claude"
+    assert claude["href"] == "https://claude.ai/new"
+    assert "q=" not in claude["href"] and "?" not in claude["href"]
+    assert claude["copy"] == prompt
 
 
 def test_each_surface_names_the_tool_the_way_the_page_does():
@@ -79,8 +84,9 @@ def test_mcp_link_drops_query_fragment_and_userinfo():
     [r] = _run([{"kind": "mcp",
                  "endpoint": "https://user:pw@mcp.example.com/sse?api_key=sk-secret#x"}])
     assert r["text"] == "MCP server https://mcp.example.com/sse"
-    for link in r["links"]:
-        assert "secret" not in link["href"] and "pw" not in _q(link["href"])
+    chatgpt, claude = r["links"]
+    assert "secret" not in chatgpt["href"] and "pw" not in _q(chatgpt["href"])
+    assert "secret" not in claude["copy"] and "pw" not in claude["copy"]
 
 
 def test_nothing_to_name_gives_no_links():
@@ -94,6 +100,8 @@ def test_row_opens_a_new_tab_and_private_scans_get_none():
     src = COMPONENT.read_text()
     assert 'target="_blank" rel="noopener noreferrer"' in src
     assert "props.ask && !privateScan && <AskAssistantRow" in src
+    assert "Question copied — paste it into Claude" in src
+    assert "navigator.clipboard.writeText(l.copy)" in src
     check = CHECK.read_text()
     assert "ask={isPrivate ? undefined : { kind: 'repo', owner, repo }}" in check
     # Never send people to the Claude plugin directory from this row.

@@ -7,7 +7,10 @@
  * cut to scheme, host and path, so a key someone pasted into a query string or the
  * userinfo never reaches the assistant.
  *
- * Both sites prefill the message box from `q` and wait for the person to press send.
+ * ChatGPT prefills its message box from `q` and waits for the person to press send.
+ * Claude gets no `q`: claude.ai shows a warning on a prefilled prompt, which reads like
+ * a prompt-injection alert on a security product's page. So the Claude link copies the
+ * same prompt to the clipboard and opens a blank chat for the person to paste into.
  */
 
 export type AskTarget =
@@ -64,14 +67,22 @@ export function askPrompt(targetText: string): string {
   return `Use AgentAvow to check ${targetText} and tell me if it's safe to connect.`
 }
 
-export interface AskLink { assistant: 'ChatGPT' | 'Claude'; label: string; href: string }
+export const CLAUDE_NEW_CHAT = 'https://claude.ai/new'
+
+export interface AskLink {
+  assistant: 'ChatGPT' | 'Claude'
+  label: string
+  href: string
+  /** set when the prompt goes by clipboard instead of the URL: copy this, then open href */
+  copy?: string
+}
 
 export function askLinks(t: AskTarget): AskLink[] {
   const text = askTargetText(t)
   if (!text) return []
-  const q = encodeURIComponent(askPrompt(text))
+  const prompt = askPrompt(text)
   return [
-    { assistant: 'ChatGPT', label: 'Ask about this in ChatGPT', href: `https://chatgpt.com/?q=${q}` },
-    { assistant: 'Claude', label: 'Ask about this in Claude', href: `https://claude.ai/new?q=${q}` },
+    { assistant: 'ChatGPT', label: 'Ask about this in ChatGPT', href: `https://chatgpt.com/?q=${encodeURIComponent(prompt)}` },
+    { assistant: 'Claude', label: 'Ask about this in Claude', href: CLAUDE_NEW_CHAT, copy: prompt },
   ]
 }

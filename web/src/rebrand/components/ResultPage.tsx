@@ -12,7 +12,8 @@ import {
   certifiedPending, certifiedRows, certifiedStatus, checkedAgo, fixPrompt, fixText, sandboxSummary, topFindings,
   type CheckRow, type CheckRowState, type ResultKind, type TopFinding,
 } from '../lib/resultPage'
-import { askLinks, type AskTarget } from '../lib/askAssistant'
+import { askLinks, type AskLink, type AskTarget } from '../lib/askAssistant'
+import { currentPath, trackEvent } from '../../lib/analytics'
 
 export type { ResultKind } from '../lib/resultPage'
 
@@ -268,21 +269,36 @@ function AnswerCard({ scan, kind, adoption, share }: { scan: ResultPageProps['sc
   )
 }
 
-/** A quiet row under the answer: open ChatGPT or Claude with a prompt that runs the
- * AgentAvow connector on this tool. Only the public identifier goes in the link. */
+/** A quiet row under the answer: ask ChatGPT or Claude to run the AgentAvow connector
+ * on this tool. ChatGPT opens with the question filled in; Claude opens a blank chat
+ * and the question goes to the clipboard (see lib/askAssistant). Only the public
+ * identifier is ever sent. */
 export function AskAssistantRow({ target }: { target: AskTarget }) {
+  const [copy, setCopy] = useState<'idle' | 'copied' | 'failed'>('idle')
   const links = askLinks(target)
   if (!links.length) return null
+  const onClick = (l: AskLink) => () => {
+    trackEvent('guest_cta_click', currentPath(), `ask:${l.assistant.toLowerCase()}`)
+    if (!l.copy) return
+    // The link still opens Claude in a new tab; the copy rides on the same click.
+    const done = (st: 'copied' | 'failed') => { setCopy(st); if (st === 'copied') setTimeout(() => setCopy('idle'), 4000) }
+    if (!navigator.clipboard) { done('failed'); return }
+    navigator.clipboard.writeText(l.copy).then(() => done('copied'), () => done('failed'))
+  }
   return (
     <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px] text-text-muted" data-testid="ask-assistant">
       <span>Ask your assistant:</span>
       {links.map((l) => (
         <a key={l.assistant} href={l.href} target="_blank" rel="noopener noreferrer"
-          data-assistant={l.assistant}
+          data-assistant={l.assistant} onClick={onClick(l)}
           className="font-semibold text-primary-light hover:text-primary">
           {l.label} ↗
         </a>
       ))}
+      <span role="status" aria-live="polite" className={copy === 'failed' ? 'basis-full' : 'text-success'}>
+        {copy === 'copied' && 'Question copied — paste it into Claude'}
+        {copy === 'failed' && <>Couldn&apos;t copy. Paste this into Claude: <span className="font-mono text-text select-all">{links.find((l) => l.copy)?.copy}</span></>}
+      </span>
     </div>
   )
 }
