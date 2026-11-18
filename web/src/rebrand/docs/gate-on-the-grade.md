@@ -256,7 +256,7 @@ https servers are graded by the URL in your `mcp_servers` config. A refused call
 
 | Integration | Status |
 |---|---|
-| Claude Code plugin (session-start check, install check, per-call gate) | Shipped; listed in the Claude plugin directory |
+| Claude Code plugin (session-start check, install check, per-call gate) | Shipped; installs from our GitHub marketplace (`/plugin marketplace add AgentAvow/AgentAvow`) |
 | MCP connector (`https://agentavow.com/mcp`) | Shipped; works in any MCP client |
 | ChatGPT app | Shipped; in the ChatGPT plugin directory |
 | npm `agentavow-trust`: core gate, Vercel AI SDK, Flue, Claude Agent SDK, OpenAI Agents SDK | Shipped (0.4.2) |

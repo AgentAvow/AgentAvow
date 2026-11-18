@@ -47,9 +47,8 @@ interface FGNode extends GraphNode {
   vz?: number
 }
 
-interface FGLink extends GraphEdge {
-  // react-force-graph resolves source/target to node objects at runtime
-}
+// react-force-graph resolves source/target to node objects at runtime
+type FGLink = GraphEdge
 
 interface ForceGraphData {
   nodes: FGNode[]

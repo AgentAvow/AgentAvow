@@ -5,6 +5,7 @@ import api from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
 import type { Post, Profile as ProfileType } from '../types'
 import { formatDate, timeAgo, formatPrice } from '../lib/formatters'
+import { getApiErrorMessage } from '../lib/errors'
 import EvolutionTimeline from '../components/EvolutionTimeline'
 import Endorsements from '../components/Endorsements'
 import { BadgesSection, AuditHistorySection } from '../components/VerificationBadges'
@@ -279,7 +280,7 @@ export default function Profile() {
       if (followRefetchTimer.current) clearTimeout(followRefetchTimer.current)
       await queryClient.cancelQueries({ queryKey: ['profile', entityId] })
       const prev = queryClient.getQueryData(['profile', entityId])
-      queryClient.setQueryData(['profile', entityId], (old: any) => old ? { ...old, is_following: true, follower_count: (old.follower_count ?? 0) + 1 } : old)
+      queryClient.setQueryData(['profile', entityId], (old: ProfileType | undefined) => old ? { ...old, is_following: true, follower_count: (old.follower_count ?? 0) + 1 } : old)
       return { prev }
     },
     onError: (_err, _vars, ctx) => {
@@ -307,6 +308,7 @@ export default function Profile() {
 
   useEffect(() => {
     if (blockedData) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- seed local, user-toggleable block state from the server list
       setIsBlocked(blockedData.blocked.some((b) => b.entity_id === entityId))
     }
   }, [blockedData, entityId])
@@ -322,7 +324,7 @@ export default function Profile() {
       }
       await queryClient.cancelQueries({ queryKey: ['profile', entityId] })
       const prev = queryClient.getQueryData(['profile', entityId])
-      queryClient.setQueryData(['profile', entityId], (old: any) => old ? { ...old, is_following: false, follower_count: Math.max((old.follower_count ?? 1) - 1, 0) } : old)
+      queryClient.setQueryData(['profile', entityId], (old: ProfileType | undefined) => old ? { ...old, is_following: false, follower_count: Math.max((old.follower_count ?? 1) - 1, 0) } : old)
       return { prev }
     },
     onError: (_err, _vars, ctx) => {
@@ -380,8 +382,8 @@ export default function Profile() {
       setClaimReason('')
       addToast('Profile claimed successfully! You are now the operator.', 'success')
     },
-    onError: (err: any) => {
-      addToast(err?.response?.data?.detail || 'Failed to claim profile', 'error')
+    onError: (err: unknown) => {
+      addToast(getApiErrorMessage(err, 'Failed to claim profile'), 'error')
     },
   })
 
@@ -394,8 +396,8 @@ export default function Profile() {
       setRemovalReason('')
       addToast('Removal request submitted. We\'ll review it within 48 hours.', 'success')
     },
-    onError: (err: any) => {
-      addToast(err?.response?.data?.detail || 'Failed to submit removal request', 'error')
+    onError: (err: unknown) => {
+      addToast(getApiErrorMessage(err, 'Failed to submit removal request'), 'error')
     },
   })
 
@@ -588,7 +590,7 @@ export default function Profile() {
     },
   })
 
-  const allActivities = activityData?.pages.flatMap((p) => p.activities) || []
+  const allActivities = useMemo(() => activityData?.pages.flatMap((p) => p.activities) || [], [activityData])
   const filteredActivities = useMemo(() =>
     activityFilter === 'all' ? allActivities : allActivities.filter((a) => a.type === activityFilter),
     [allActivities, activityFilter]

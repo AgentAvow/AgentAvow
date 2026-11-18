@@ -17,6 +17,8 @@ interface CampaignRow {
   open_plugin_dir: number
   add_claude: number
   add_chatgpt: number
+  email_setup: number
+  share_link: number
   badge_copied: number
   contact_submit: number
 }
@@ -30,6 +32,8 @@ const CAMPAIGN_STEPS: [keyof CampaignRow, string][] = [
   ['open_plugin_dir', 'Plugin Dir'],
   ['add_claude', 'Add Claude'],
   ['add_chatgpt', 'Add ChatGPT'],
+  ['email_setup', 'Emailed setup'],
+  ['share_link', 'Shared link'],
   ['badge_copied', 'Badge'],
   ['contact_submit', 'Contact'],
 ]

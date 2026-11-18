@@ -217,20 +217,24 @@ export function PrestigeIcon({ size = 20, className }: IconProps) {
 const ATTESTATION_ICONS = [ShieldDashed, ShieldOutline, ShieldCheck, ShieldFilled, ShieldStar, ShieldWreath] as const
 const COMMUNITY_ICONS = [NodeSingle, NodePair, NodeTriangle, NodeCluster, NodeHex, NodeDense] as const
 
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper co-located with the component it serves; HMR falls back to a full reload here
 export function getAttestationIcon(tier: number): React.FC<IconProps> {
   return ATTESTATION_ICONS[Math.max(0, Math.min(5, tier))]
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper co-located with the component it serves; HMR falls back to a full reload here
 export function getCommunityIcon(tier: number): React.FC<IconProps> {
   return COMMUNITY_ICONS[Math.max(0, Math.min(5, tier))]
 }
 
 /** Get aria-label text for a tier icon */
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper co-located with the component it serves; HMR falls back to a full reload here
 export function getAttestationLabel(tier: number): string {
   const labels = ['Unverified', 'Basic', 'Confirmed', 'Validated', 'Verified', 'Certified']
   return labels[Math.max(0, Math.min(5, tier))]
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper co-located with the component it serves; HMR falls back to a full reload here
 export function getCommunityLabel(tier: number): string {
   const labels = ['Unknown', 'Emerging', 'Connected', 'Established', 'Trusted', 'Pillar']
   return labels[Math.max(0, Math.min(5, tier))]

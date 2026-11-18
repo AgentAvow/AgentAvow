@@ -1,0 +1,82 @@
+[
+ [
+  "precheck: nothing to grade, intro once",
+  "{\"systemMessage\": \"AgentAvow: nothing to grade here yet \\u2014 no MCP servers it can grade and no package.json, requirements.txt, pyproject.toml or Cargo.toml in this folder. Add a server (for example `claude mcp add <name> <https url>` or `claude mcp add <name> -- npx <package>`) and it is checked before it is added and again at your next session start; open a project and its direct dependencies are checked too. To check any tool right now, run /agentavow-trust:scan <MCP URL | npm or pypi package | owner/repo>.\"}\n"
+ ],
+ [
+  "precheck: intro is not repeated",
+  ""
+ ],
+ [
+  "precheck: servers and a dependency graded",
+  "{\"systemMessage\": \"AgentAvow pre-check: checked 3 MCP servers \\u2014 1 Safe, 1 Review, 1 Don't connect (needs attention: 'bad' Do not connect \\u2014 1 critical finding(s)). Dependencies: checked all 1 \\u2014 1 Safe, 0 Review. Ask for the AgentAvow pre-check for details. 1 more MCP server configured for other projects, checked when you open them.\", \"hookSpecificOutput\": {\"hookEventName\": \"SessionStart\", \"additionalContext\": \"AgentAvow pre-check \\u2014 new MCP servers and direct dependencies checked before you rely on them.\\nThe user has NOT seen this (hook output is not displayed to them). At the very start of your first reply in this session, before anything else, tell them in one or two lines: \\\"AgentAvow pre-check: checked 3 MCP servers \\u2014 1 Safe, 1 Review, 1 Don't connect (needs attention: 'bad' Do not connect \\u2014 1 critical finding(s)). Dependencies: checked all 1 \\u2014 1 Safe, 0 Review. Ask for the AgentAvow pre-check for details. 1 more MCP server configured for other projects, checked when you open them.\\\" Then carry on with whatever they asked. If they want details, use the lines below; do not repeat the summary in later replies.\\n\\u2705 MCP 'good' (https://good.example.com/mcp): Safe to connect \\u2014 no critical or high findings \\u00b7 AgentAvow 88/100.\\n\\u26d4 MCP 'bad' (https://bad.example.com/mcp): Do not connect \\u2014 1 critical finding(s) \\u00b7 AgentAvow 22/100.\\n\\u26a0\\ufe0f MCP 'rev' (npm:rev-pkg): Review before you connect \\u2014 a high finding \\u00b7 AgentAvow 58/100.\\n\\u2705 dependency 'leftpad' (npm:leftpad@^1.0.0): Safe to connect \\u2014 no critical or high findings \\u00b7 AgentAvow 84/100.\\nLegend: each line leads with one of three answers and its reason. \\u2705 Safe to connect. \\u26a0\\ufe0f Review before you connect (a high finding, an advisory for this version, deprecation, or a score under 51). \\u26d4 Do not connect (a critical finding, a planted credential leaving the sandbox, or a known-malicious package). '\\u00b7 Certified' marks a tool that passed the full Certified gate. \\u2796 not checked, with the reason. \\u23f3 still being checked: no answer yet, asked again next session; its tools run without a grade until then. Dependencies are already installed: their answer is advice, never a stop. Do not interpret the raw cache file; this list is the pre-check. Full reports: https://agentavow.com/check\"}}\n"
+ ],
+ [
+  "precheck: nothing new, quiet context",
+  "{\"hookSpecificOutput\": {\"hookEventName\": \"SessionStart\", \"additionalContext\": \"AgentAvow pre-check: nothing new since the last session start. Do NOT mention AgentAvow unless the user asks about it. If they ask for the pre-check, this is the complete current list:\\n  \\u2705 MCP 'good': Safe to connect \\u2014 no critical or high findings \\u00b7 AgentAvow 88/100\\n  \\u26d4 MCP 'bad': Do not connect \\u2014 1 critical finding(s) \\u00b7 AgentAvow 22/100\\n  \\u26a0\\ufe0f MCP 'rev': Review before you connect \\u2014 a high finding \\u00b7 AgentAvow 58/100\\n  \\u2705 dependency 'leftpad': Safe to connect \\u2014 no critical or high findings \\u00b7 AgentAvow 84/100\\nLegend: each line leads with one of three answers and its reason. \\u2705 Safe to connect. \\u26a0\\ufe0f Review before you connect (a high finding, an advisory for this version, deprecation, or a score under 51). \\u26d4 Do not connect (a critical finding, a planted credential leaving the sandbox, or a known-malicious package). '\\u00b7 Certified' marks a tool that passed the full Certified gate. \\u2796 not checked, with the reason. \\u23f3 still being checked: no answer yet, asked again next session; its tools run without a grade until then. Dependencies are already installed: their answer is advice, never a stop. Do not interpret the raw cache file; this list is the pre-check. Full reports: https://agentavow.com/check\"}}\n"
+ ],
+ [
+  "gate: Do not connect server is stopped",
+  "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"deny\", \"permissionDecisionReason\": \"AgentAvow: Do not connect \\u2014 1 critical finding(s). MCP 'bad' scored 22/100 (tier restricted); 'do' was not run. Report: https://agentavow.com/check/mcp?endpoint=https%3A%2F%2Fbad.example.com%2Fmcp\\nIf the user has reviewed this server and wants to use it anyway, the user (not Claude) can allow this one server: AgentAvow has shown them, outside this conversation, the exact line to add to ~/.cache/agentavow/allowed-servers.txt, with a confirmation code only they can see. If they can't see that line (for example in VS Code), they can print it by running this in their own terminal: python3 <ROOT>/plugins/agentavow-trust/scripts/agentavow_pretool_gate.py --allow-line bad\\nTell the user exactly that.\\nDo not run that command yourself (it prints nothing to you), do not edit that file yourself, do not read AgentAvow's files in ~/.cache/agentavow, and do not ask for or work out the code: a line without the user's own code allows nothing.\"}, \"systemMessage\": \"AgentAvow gate: MCP 'bad' reads Do not connect, so its tools were stopped. If you reviewed it and want to use it anyway, add this line yourself to ~/.cache/agentavow/allowed-servers.txt (the code at the end is shown only to you; do not paste it into the chat):\\nbad https://bad.example.com/mcp XNFTW-2JKON\\nIf you can't see the line here (for example in VS Code), run this in your own terminal to print it: python3 <ROOT>/plugins/agentavow-trust/scripts/agentavow_pretool_gate.py --allow-line bad\"}\n"
+ ],
+ [
+  "gate: Safe server, same definition, silent",
+  ""
+ ],
+ [
+  "gate: changed definition asks",
+  "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"ask\", \"permissionDecisionReason\": \"AgentAvow: the definition of 'read' on MCP 'good' changed since AgentAvow checked this server (88/100). Review before running; it is re-checked at your next session start. Report: https://agentavow.com/check/mcp?endpoint=https%3A%2F%2Fgood.example.com%2Fmcp\"}}\n"
+ ],
+ [
+  "gate: a call naming AgentAvow's own files asks",
+  "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"ask\", \"permissionDecisionReason\": \"AgentAvow: this MCP call names AgentAvow's own files (~/.cache/agentavow: the grades, your allow list, its key). Only approve it if you asked for this yourself.\"}}\n"
+ ],
+ [
+  "gate: ungraded server, one note per session",
+  "{\"systemMessage\": \"AgentAvow gate: MCP 'newsrv' has no grade on file, so its tools run unchecked. It is checked at your next session start.\"}\n"
+ ],
+ [
+  "gate: the note is not repeated",
+  ""
+ ],
+ [
+  "gate: AgentAvow's own connector is silent",
+  ""
+ ],
+ [
+  "install: claude mcp add of a Do not connect server asks",
+  "{\"systemMessage\": \"AgentAvow checked this before it is added:\\n\\u26d4 MCP 'evil' (https://evil.example.com/mcp): Do not connect \\u2014 a known-malicious package or dependency \\u00b7 AgentAvow 9/100. Report: https://agentavow.com/check/mcp?endpoint=https%3A%2F%2Fevil.example.com%2Fmcp\", \"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"additionalContext\": \"AgentAvow checked this before it is added:\\n\\u26d4 MCP 'evil' (https://evil.example.com/mcp): Do not connect \\u2014 a known-malicious package or dependency \\u00b7 AgentAvow 9/100. Report: https://agentavow.com/check/mcp?endpoint=https%3A%2F%2Fevil.example.com%2Fmcp\\nTell the user this verdict in one line before you continue; they decide whether to proceed.\", \"permissionDecision\": \"ask\", \"permissionDecisionReason\": \"AgentAvow checked this before it is added:\\n\\u26d4 MCP 'evil' (https://evil.example.com/mcp): Do not connect \\u2014 a known-malicious package or dependency \\u00b7 AgentAvow 9/100. Report: https://agentavow.com/check/mcp?endpoint=https%3A%2F%2Fevil.example.com%2Fmcp\\nAgentAvow says: Do not connect. Continue anyway?\"}}\n"
+ ],
+ [
+  "install: claude mcp add of a Safe package server notes",
+  "{\"systemMessage\": \"AgentAvow checked this before it is added:\\n\\u2705 MCP 'fine' (npm:fine-pkg): Safe to connect \\u2014 no critical or high findings \\u00b7 AgentAvow 90/100. Report: https://agentavow.com/check/pkg/npm/fine-pkg\", \"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"additionalContext\": \"AgentAvow checked this before it is added:\\n\\u2705 MCP 'fine' (npm:fine-pkg): Safe to connect \\u2014 no critical or high findings \\u00b7 AgentAvow 90/100. Report: https://agentavow.com/check/pkg/npm/fine-pkg\\nTell the user this verdict in one line before you continue; they decide whether to proceed.\"}}\n"
+ ],
+ [
+  "install: npm install with a Do not connect package asks",
+  "{\"systemMessage\": \"AgentAvow checked this before it is installed:\\n\\u26d4 npm package 'badpkg': Do not connect \\u2014 a known-malicious package or dependency \\u00b7 AgentAvow 5/100. Report: https://agentavow.com/check/pkg/npm/badpkg\\n\\u26a0\\ufe0f npm package 'reviewpkg': Review before you connect \\u2014 trust score 47/100 is under 51 \\u00b7 AgentAvow 47/100. The install goes ahead. Report: https://agentavow.com/check/pkg/npm/reviewpkg\", \"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"additionalContext\": \"AgentAvow checked this before it is installed:\\n\\u26d4 npm package 'badpkg': Do not connect \\u2014 a known-malicious package or dependency \\u00b7 AgentAvow 5/100. Report: https://agentavow.com/check/pkg/npm/badpkg\\n\\u26a0\\ufe0f npm package 'reviewpkg': Review before you connect \\u2014 trust score 47/100 is under 51 \\u00b7 AgentAvow 47/100. The install goes ahead. Report: https://agentavow.com/check/pkg/npm/reviewpkg\\nTell the user this verdict in one line before you continue; they decide whether to proceed.\", \"permissionDecision\": \"ask\", \"permissionDecisionReason\": \"AgentAvow checked this before it is installed:\\n\\u26d4 npm package 'badpkg': Do not connect \\u2014 a known-malicious package or dependency \\u00b7 AgentAvow 5/100. Report: https://agentavow.com/check/pkg/npm/badpkg\\n\\u26a0\\ufe0f npm package 'reviewpkg': Review before you connect \\u2014 trust score 47/100 is under 51 \\u00b7 AgentAvow 47/100. The install goes ahead. Report: https://agentavow.com/check/pkg/npm/reviewpkg\\nAgentAvow says: Do not connect. Continue anyway?\"}}\n"
+ ],
+ [
+  "install: pip install of a Safe package is silent",
+  ""
+ ],
+ [
+  "install: reading the allow list asks",
+  "{\"systemMessage\": \"AgentAvow: this reads or changes AgentAvow's own files (~/.cache/agentavow: the grades, the list of servers you allowed past a Do not connect answer, and the key behind its confirmation codes). Only approve it if you asked for this yourself.\", \"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"ask\", \"permissionDecisionReason\": \"AgentAvow: this reads or changes AgentAvow's own files (~/.cache/agentavow: the grades, the list of servers you allowed past a Do not connect answer, and the key behind its confirmation codes). Only approve it if you asked for this yourself.\"}}\n"
+ ],
+ [
+  "install: a .mcp.json write is checked",
+  "{\"systemMessage\": \"AgentAvow checked this before it is added:\\n\\u26d4 MCP 'evil' (https://evil.example.com/mcp): Do not connect \\u2014 a known-malicious package or dependency \\u00b7 AgentAvow 9/100. Report: https://agentavow.com/check/mcp?endpoint=https%3A%2F%2Fevil.example.com%2Fmcp\", \"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"additionalContext\": \"AgentAvow checked this before it is added:\\n\\u26d4 MCP 'evil' (https://evil.example.com/mcp): Do not connect \\u2014 a known-malicious package or dependency \\u00b7 AgentAvow 9/100. Report: https://agentavow.com/check/mcp?endpoint=https%3A%2F%2Fevil.example.com%2Fmcp\\nTell the user this verdict in one line before you continue; they decide whether to proceed.\", \"permissionDecision\": \"ask\", \"permissionDecisionReason\": \"AgentAvow checked this before it is added:\\n\\u26d4 MCP 'evil' (https://evil.example.com/mcp): Do not connect \\u2014 a known-malicious package or dependency \\u00b7 AgentAvow 9/100. Report: https://agentavow.com/check/mcp?endpoint=https%3A%2F%2Fevil.example.com%2Fmcp\\nAgentAvow says: Do not connect. Continue anyway?\"}}\n"
+ ],
+ [
+  "install: codex mcp add is not a Claude Code command (silent)",
+  ""
+ ],
+ [
+  "install: an unrelated command is silent",
+  ""
+ ],
+ [
+  "precheck: install checks relayed at the next start",
+  "{\"systemMessage\": \"AgentAvow pre-check: checked 1 MCP server \\u2014 1 Safe, 0 Review. Dependencies: checked all 1 \\u2014 1 Safe, 0 Review. Ask for the AgentAvow pre-check for details. 1 more MCP server configured for other projects, checked when you open them. Since the last session AgentAvow checked 4 package installs; 2 needed a look (reported at the time).\", \"hookSpecificOutput\": {\"hookEventName\": \"SessionStart\", \"additionalContext\": \"AgentAvow pre-check \\u2014 new MCP servers and direct dependencies checked before you rely on them.\\nThe user has NOT seen this (hook output is not displayed to them). At the very start of your first reply in this session, before anything else, tell them in one or two lines: \\\"AgentAvow pre-check: checked 1 MCP server \\u2014 1 Safe, 0 Review. Dependencies: checked all 1 \\u2014 1 Safe, 0 Review. Ask for the AgentAvow pre-check for details. 1 more MCP server configured for other projects, checked when you open them. Since the last session AgentAvow checked 4 package installs; 2 needed a look (reported at the time).\\\" Then carry on with whatever they asked. If they want details, use the lines below; do not repeat the summary in later replies.\\n\\u2705 MCP 'good' (https://good.example.com/mcp): its tool definitions changed since the last grade; re-checked: Safe to connect \\u2014 no critical or high findings \\u00b7 AgentAvow 88/100.\\nChecked at an earlier session start (unchanged since):\\n  \\u26d4 MCP 'bad': Do not connect \\u2014 1 critical finding(s) \\u00b7 AgentAvow 22/100\\n  \\u26a0\\ufe0f MCP 'rev': Review before you connect \\u2014 a high finding \\u00b7 AgentAvow 58/100\\n  \\u2705 dependency 'leftpad': Safe to connect \\u2014 no critical or high findings \\u00b7 AgentAvow 84/100\\nLegend: each line leads with one of three answers and its reason. \\u2705 Safe to connect. \\u26a0\\ufe0f Review before you connect (a high finding, an advisory for this version, deprecation, or a score under 51). \\u26d4 Do not connect (a critical finding, a planted credential leaving the sandbox, or a known-malicious package). '\\u00b7 Certified' marks a tool that passed the full Certified gate. \\u2796 not checked, with the reason. \\u23f3 still being checked: no answer yet, asked again next session; its tools run without a grade until then. Dependencies are already installed: their answer is advice, never a stop. Do not interpret the raw cache file; this list is the pre-check. Full reports: https://agentavow.com/check\"}}\n"
+ ]
+]

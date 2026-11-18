@@ -35,6 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (token) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- session bootstrap: fetchMe syncs user/loading state from the API whenever the token changes
       fetchMe()
     } else {
       setIsLoading(false)
@@ -100,6 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- context hook co-located with its provider; HMR falls back to a full reload here
 export function useAuth() {
   const context = useContext(AuthContext)
   if (!context) throw new Error('useAuth must be used within AuthProvider')

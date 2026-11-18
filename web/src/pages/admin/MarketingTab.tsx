@@ -51,6 +51,16 @@ function renderPlaybookValue(val: unknown) {
 // format can't drift back into "paste this body" (which gets insta-flagged).
 const HN_FIELD_KEYS = ['title', 'url', 'body', 'first_comment']
 
+function Copy({ text }: { text: string }) {
+  return text ? (
+    <button
+      type="button"
+      onClick={() => navigator.clipboard?.writeText(text)}
+      className="text-[10px] text-blue-400 hover:text-blue-300 ml-2"
+    >copy</button>
+  ) : null
+}
+
 function HNContract({ playbook }: { playbook: Record<string, unknown> }) {
   const title = playbook.title != null ? String(playbook.title) : ''
   const url = playbook.url != null ? String(playbook.url) : ''
@@ -58,15 +68,6 @@ function HNContract({ playbook }: { playbook: Record<string, unknown> }) {
   const firstComment = playbook.first_comment != null ? String(playbook.first_comment) : ''
   const titleOver = title.length > 80
   const refEntries = Object.entries(playbook).filter(([k]) => !HN_FIELD_KEYS.includes(k))
-
-  const Copy = ({ text }: { text: string }) =>
-    text ? (
-      <button
-        type="button"
-        onClick={() => navigator.clipboard?.writeText(text)}
-        className="text-[10px] text-blue-400 hover:text-blue-300 ml-2"
-      >copy</button>
-    ) : null
 
   return (
     <div className="mb-3 bg-orange-500/5 border border-orange-500/25 rounded-lg px-3 py-2.5 space-y-2.5">

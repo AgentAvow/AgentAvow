@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components -- a build script's entry, never hot-reloaded */
 /**
  * Server entry for the build-time prerender (web/scripts/prerender.mjs). It renders
  * the real page components, so the snapshot can't drift from the live page. Pages

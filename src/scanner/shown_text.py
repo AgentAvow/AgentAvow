@@ -19,7 +19,12 @@ keeps the critical.
   in this file (or the file sources another one); when ``echo`` / ``printf`` is
   redefined or the script's stdout is redirected (``exec > >(sh)``); and when the
   function that holds the line has its output piped, captured or ``eval``-ed anywhere
-  in the file (followed through every caller).
+  in the file (followed through every caller, up to ``_MAX_CALLERS`` functions). One
+  capture is allowed (audit class 1): ``fail "… like this: $(command_line "$@")"``,
+  where ``$(f …)`` sits inside the double-quoted argument of another print command and
+  nothing in it pipes or chains ``f``'s output. A mention inside text an earlier line
+  opened (a ``python3 -c "…"`` body) or in a one-line ``case`` arm's pattern is not a
+  call.
 * :func:`html_shown` (``.html`` pages): the line is page text or a plain attribute
   (``<span>``, ``data-copy``, ``title``), outside any ``<script>`` element a browser
   runs and with no ``on…=`` handler / ``javascript:`` URL / ``srcdoc`` on the line.
@@ -79,6 +84,9 @@ _ECHO_REDEFINED_RE = re.compile(
     r"^\s*(?:function\s+)?(?:echo|printf)\s*\(\s*\)|^\s*function\s+(?:echo|printf)\b|"
     r"\balias\s+(?:echo|printf)\s*=|\benable\s+-n\s+(?:echo|printf)\b", re.M)
 _STDOUT_REDIRECTED_RE = re.compile(r"\bexec\s+(?:\d*>|&>|>)")
+# Functions followed up the call chain before giving up (a menu-driven installer's
+# `main` reaches 40+ menu functions).
+_MAX_CALLERS = 200
 
 
 class _Tok:
@@ -195,13 +203,23 @@ def _line_runs(toks: list[_Tok]) -> bool:
     return False
 
 
-def _code_view(lines: list[str]) -> tuple[list[str], list[bool]] | None:
+def _printf_assigns(cmd: list[_Tok]) -> bool:
+    """``printf -v NAME …`` stores its output in a variable instead of printing it."""
+    h = _head(cmd)
+    return h is not None and h.text == "printf" and any(
+        t.kind == "word" and t is not h and t.text.startswith("-v") for t in cmd)
+
+
+def _code_view(lines: list[str]) -> tuple[list[str], list[bool], list[int]] | None:
     """Each line with quoted text, ``${…}`` expansions, comments and heredoc bodies
     blanked, and whether the line STARTS as code (not inside a string or heredoc that
-    an earlier line opened). Quotes are followed across lines. None when a quote or
-    heredoc never closes."""
+    an earlier line opened), and the column where code resumes on that line (0 for a
+    line that starts as code; the line's length when the whole line is string or
+    heredoc text). Quotes are followed across lines. None when a quote or heredoc
+    never closes."""
     out: list[str] = []
     starts: list[bool] = []
+    resume: list[int] = []
     quote: str | None = None
     heredoc: str | None = None
     pending_doc: str | None = None
@@ -209,14 +227,18 @@ def _code_view(lines: list[str]) -> tuple[list[str], list[bool]] | None:
         if heredoc is not None:
             out.append("")
             starts.append(False)
+            resume.append(len(raw))
             if raw.strip() == heredoc:
                 heredoc = None
             continue
         starts.append(quote is None)
+        resume.append(0 if quote is None else len(raw))
         buf: list[str] = []
         i, n = 0, len(raw)
         while i < n:
             c = raw[i]
+            if quote is not None and resume[-1] == n and c == quote:
+                resume[-1] = i + 1  # the string an earlier line opened closes here
             if quote == "'":
                 if c == "'":
                     quote = None
@@ -261,7 +283,7 @@ def _code_view(lines: list[str]) -> tuple[list[str], list[bool]] | None:
             heredoc, pending_doc = pending_doc, None
     if quote is not None or heredoc is not None:
         return None
-    return out, starts
+    return out, starts, resume
 
 
 class _ShellFile:
@@ -271,7 +293,7 @@ class _ShellFile:
         self.lines = lines
         self.text = "\n".join(lines)
         view = _code_view(lines)
-        self.code, self.starts = view if view is not None else ([], [])
+        self.code, self.starts, self.resume = view if view is not None else ([], [], [])
         self.funcs: list[tuple[str, int, int]] | None = (
             self._functions() if view is not None else None)
         self._print_only: dict[str, bool] = {}
@@ -368,6 +390,8 @@ class _ShellFile:
                     continue
                 if h.quotes or "$" in h.text:
                     return False  # runs a parameter: "$@", $1, ${cmd}
+                if _printf_assigns(cmd):
+                    return False
                 if h.text in _PRINT_BODY_OK:
                     if h.text in ("[", "[[", "test", "local", "declare", "typeset",
                                   "readonly") and any(
@@ -391,19 +415,198 @@ class _ShellFile:
             if name in seen:
                 continue
             seen.add(name)
-            if len(seen) > 40:
+            if len(seen) > _MAX_CALLERS:
                 return False
             rx = re.compile(r"(?<![\w.:-])" + re.escape(name) + r"(?![\w.:-])")
             own = [(s, e) for n, s, e in self.funcs if n == name]
             for idx, line in enumerate(self.lines):
                 if not rx.search(line) or any(s <= idx <= e for s, e in own):
                     continue
+                if not self.starts[idx]:
+                    # The line opens inside a string / heredoc an earlier line opened.
+                    # Text before the string closes is shown; code after it is read
+                    # like any other line (`msg="hello` / `"; name | sh`).
+                    cut = self.resume[idx]
+                    if not rx.search(line[cut:]) and (
+                            "$(" not in line[:cut] and "`" not in line[:cut]):
+                        continue
+                    if rx.search(line[cut:]) and not rx.search(line[:cut]):
+                        line = " " * cut + line[cut:]
+                arm = _CASE_ARM_RE.match(line)
+                if arm and not rx.search(line[:arm.end()]):
+                    line = " " * arm.end() + line[arm.end():]  # `a|A) name ;;`
                 toks = _lex(line)
-                if toks is None or _line_runs(toks) or any(
+                if toks is None and "$(" in line:
+                    # `fail "… like this: $(command_line "$@")"`: the output is captured
+                    # straight into the quoted message of another print command.
+                    if not self._captured_into_print(line, name):
+                        return False
+                elif toks is None or _line_runs(toks) or any(
                         t.kind == "op" and t.text in ("|", "|&") for t in toks):
                     return False
                 work.extend(self.enclosing(idx))
         return True
+
+    def _captured_into_print(self, line: str, name: str) -> bool:
+        """Every mention of ``name`` on ``line`` opens a ``$(name …)`` substitution
+        that sits inside a double-quoted argument of ``echo`` / ``printf`` / a
+        print-only function of this file, with nothing in the substitution that pipes,
+        redirects or chains ``name``'s output; and the line, with each ``$(…)`` inside
+        double quotes read as plain text, runs nothing and pipes nothing."""
+        subs = _dq_substitutions(line)
+        if subs is None:
+            return False
+        rx = re.compile(r"(?<![\w.:-])" + re.escape(name) + r"(?![\w.:-])")
+        mine: list[tuple[int, int]] = []
+        for m in rx.finditer(line):
+            hit = next(((a, b, body) for a, b, body in subs if a <= m.start() < b), None)
+            if hit is None:
+                return False  # a mention outside any quoted substitution
+            a, b, body = hit
+            head = re.match(r"\s*([A-Za-z_][\w.:-]*)", body)
+            if head is None:
+                return False
+            rest = body[head.end():]
+            if _top_level_ops(rest):
+                return False
+            if head.group(1) == name and m.start() == a + 2 + head.start(1):
+                mine.append((a, b))
+                continue
+            # `$(command_line uninstall)`: the name is only a word handed to another
+            # print-only function, not a call.
+            if "$(" not in rest and (head.group(1) in _PRINTERS or (
+                    head.group(1) not in _RUNNERS and self.print_only(head.group(1)))):
+                continue
+            return False
+        flat = list(line)
+        for a, b, _body in subs:
+            for i in range(a, b):
+                flat[i] = "x"
+        flat_line = "".join(flat)
+        toks = _lex(flat_line)
+        if toks is None or _line_runs(toks) or any(
+                t.kind == "op" and t.text in ("|", "|&") for t in toks):
+            return False
+        cmds = _commands(toks)
+        for a, b in mine:
+            cmd = next((c for c in cmds for t in c if t.kind == "word" and any(
+                qs < a and b - 1 < qe for qs, qe in t.quotes)), None)
+            if cmd is None:
+                return False
+            word = next(t for t in cmd if t.kind == "word" and any(
+                qs < a and b - 1 < qe for qs, qe in t.quotes))
+            h = _head(cmd)
+            if h is None or h is word or h.quotes:
+                return False
+            if cmd[-1].kind == "op" and cmd[-1].text in ("|", "|&", "&"):
+                return False
+            if _printf_assigns(cmd):
+                return False  # `printf -v CMD "%s" "$(name)"` assigns, it does not print
+            if h.text not in _PRINTERS and (_SOURCES_RE.search(self.text)
+                                            or not self.print_only(h.text)):
+                return False
+        return True
+
+
+# A `case` arm's pattern list at the start of a line (`a|A)`, `-*)`, `*)`).
+# Only a one-line arm (`… ;;`) or a pattern alone on its line: `a|sh)` cannot end a
+# subshell then.
+_CASE_ARM_RE = re.compile(
+    r"^\s*[^\s()|;&<>$`'\"]+(?:\s*\|\s*[^\s()|;&<>$`'\"]+)*\s*\)(?=(?:[^\n]*;;&?|;&)\s*$|\s*$)")
+
+
+def _dq_substitutions(line: str) -> list[tuple[int, int, str]] | None:
+    """Outermost ``$( … )`` spans inside double quotes on ``line``: (start of ``$``,
+    end after ``)``, body). None when the line has a backtick, a substitution outside
+    double quotes, or quotes / parentheses that do not balance."""
+    if "`" in line:
+        return None
+    out: list[tuple[int, int, str]] = []
+    i, n = 0, len(line)
+    quote: str | None = None
+    while i < n:
+        c = line[i]
+        if quote == "'":
+            if c == "'":
+                quote = None
+            i += 1
+            continue
+        if c == "\\":
+            i += 2
+            continue
+        if line.startswith("$(", i):
+            if quote != '"':
+                return None
+            j = _subst_end(line, i + 2)
+            if j is None:
+                return None
+            out.append((i, j, line[i + 2:j - 1]))
+            i = j
+            continue
+        if c == '"':
+            quote = None if quote == '"' else '"'
+        elif c == "'" and quote is None:
+            quote = "'"
+        i += 1
+    return out if quote is None else None
+
+
+def _subst_end(line: str, i: int) -> int | None:
+    """Index after the ``)`` closing a substitution whose body starts at ``i``. A
+    nested ``$(`` starts a fresh quoting context (``"$(a "$(b)")"``)."""
+    saved: list[str | None] = []  # quote state outside each open substitution
+    quote: str | None = None
+    n = len(line)
+    while i < n:
+        c = line[i]
+        if quote == "'":
+            if c == "'":
+                quote = None
+        elif c == "\\":
+            i += 1
+        elif line.startswith("$(", i):
+            saved.append(quote)
+            quote = None
+            i += 1
+        elif c == '"':
+            quote = None if quote == '"' else '"'
+        elif c == "'" and quote is None:
+            quote = "'"
+        elif c == ")" and quote is None:
+            if not saved:
+                return i + 1
+            quote = saved.pop()
+        i += 1
+    return None
+
+
+def _top_level_ops(s: str) -> bool:
+    """Does ``s`` (a substitution's arguments) hold a pipe, chain, redirect or
+    background operator outside quotes and nested substitutions?"""
+    saved: list[str | None] = []
+    quote: str | None = None
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if quote == "'":
+            if c == "'":
+                quote = None
+        elif c == "\\":
+            i += 1
+        elif s.startswith("$(", i):
+            saved.append(quote)
+            quote = None
+            i += 1
+        elif c == '"':
+            quote = None if quote == '"' else '"'
+        elif c == "'" and quote is None:
+            quote = "'"
+        elif c == ")" and quote is None and saved:
+            quote = saved.pop()
+        elif not saved and quote is None and c in "|;&<>()":
+            return True
+        i += 1
+    return bool(saved) or quote is not None
 
 
 def shell_shown(lines: list[str], idx: int, matches: list[tuple[int, int]],
@@ -434,6 +637,8 @@ def shell_shown(lines: list[str], idx: int, matches: list[tuple[int, int]],
         if h is None or h is word or h.quotes:
             return False  # the string is the command or an assignment, not an argument
         if cmd[-1].kind == "op" and cmd[-1].text in ("|", "|&", "&"):
+            return False
+        if _printf_assigns(cmd):
             return False
         if h.text not in _PRINTERS:
             if _SOURCES_RE.search(sf.text) or not sf.print_only(h.text):
@@ -719,6 +924,32 @@ _PROSE_SUFFIXES = (".md", ".markdown", ".mdx", ".txt", ".rst", ".html", ".htm", 
 _EVAL_BEFORE_RE = re.compile(r"\b(?:eval|source|Invoke-Expression|iex)\b|(?:^|[;&|]\s*)\.\s")
 
 
+_QUOTED_HEREDOC_RE = re.compile(r"<<-?\s*(?:(['\"])([A-Za-z_]\w*)\1|\\([A-Za-z_]\w*))")
+
+
+def _quoted_heredoc_lines(text: str) -> set[int]:
+    """0-based lines inside the body of a heredoc whose delimiter is quoted
+    (``<<'EOF'``, ``<<"EOF"``, ``<<\\EOF``): the shell never expands them, so a
+    backtick or ``$(`` there is text (an installer writing a Markdown guide)."""
+    out: set[int] = set()
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines):
+        m = _QUOTED_HEREDOC_RE.search(lines[i])
+        if m and "#" not in lines[i][:m.start()]:
+            delim = m.group(2) or m.group(3)
+            j = i + 1
+            while j < len(lines) and lines[j].strip() != delim:
+                out.add(j)
+                j += 1
+            if j >= len(lines):
+                return set()  # never closed: read every line as code
+            i = j + 1
+            continue
+        i += 1
+    return out
+
+
 def script_output_run(path: str, texts: dict[str, str]) -> tuple[str, int] | None:
     """Where some file of ``texts`` (another script, package.json, a Makefile, a
     Dockerfile …) runs the OUTPUT of the shell script ``path``: its name followed by a
@@ -731,8 +962,9 @@ def script_output_run(path: str, texts: dict[str, str]) -> tuple[str, int] | Non
     for fp, text in texts.items():
         if not text or base not in text or fp.lower().endswith(_PROSE_SUFFIXES):
             continue
+        literal = _quoted_heredoc_lines(text)
         for i, line in enumerate(text.split("\n")):
-            if base not in line:
+            if base not in line or i in literal:
                 continue
             for m in rx.finditer(line):
                 before, after = line[:m.start()], line[m.end():]
@@ -752,3 +984,317 @@ def script_output_run(path: str, texts: dict[str, str]) -> tuple[str, int] | Non
                 if _EVAL_BEFORE_RE.search(before):
                     return fp, i + 1
     return None
+
+
+# Program output handed to a shell: a pipe into one, or a command substitution that is
+# eval'd, sourced, given to `sh -c` / `sh <(…)` or run as the command word.
+_PIPE_INTO_SHELL_RE = re.compile(
+    r"(?<!\|)\|(?!\|)\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:\S+=\S*\s+)*)?"
+    r"(?:xargs\s+(?:-\S+\s+)*)?(?:\S*/)?(?:(?:ba|z|da|k|fi)?sh|eval|source|iex|"
+    r"Invoke-Expression)\b")
+_SUBST_RUN_SRC = (
+    r"(?:\b(?:eval|source|iex|Invoke-Expression)\s+|"
+    r"(?:^\s*|[;&|({]\s*|\b(?:then|do|else|if|while|until)\s+|!\s*)\.\s+|"
+    r"\b(?:ba|z|da|k)?sh\s+(?:-\w+\s+)*{bare})"
+    r"(?:\\?[\"'])?(?:{subst}|`|<\()")
+_BARE_CMD = r"|(?:^\s*|[;&|{]\s*|\b(?:then|do|else|if|while|until)\s+|!\s*)"
+_SUBST_RUN_RE = re.compile(
+    _SUBST_RUN_SRC.replace("{bare}", _BARE_CMD).replace("{subst}", r"\$\("))
+# In a Makefile `$(X)` is a make variable; the shell's substitution is `$$(`.
+_SUBST_RUN_MAKE_RE = re.compile(
+    _SUBST_RUN_SRC.replace("{bare}", _BARE_CMD).replace("{subst}", r"\$\$\("))
+# In program source a `$(` / backtick at the start of a statement is code (jQuery, a
+# template literal), not a shell command word.
+_SUBST_RUN_CODE_RE = re.compile(
+    _SUBST_RUN_SRC.replace("{bare}", "").replace("{subst}", r"\$\("))
+# The stage right before the pipe is a download: the "curl/wget piped to shell" rule's
+# own shape (`curl … | sh`, `iwr … | iex`), reported by that rule on this line.
+_REMOTE_STAGE_RE = re.compile(
+    r"(?:curl|wget)\s+[^|]*$|\b(?:iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^|]*$")
+# A substitution whose command is a download.
+_REMOTE_SUBST_RE = re.compile(
+    r"^\s*(?:sudo\s+)?(?:curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b")
+_SEGMENT_SEP_RE = re.compile(r"&&|\|\||;")
+_SINGLE_PIPE_RE = re.compile(r"(?<!\|)\|(?!\|)")
+
+
+def program_output_run(texts: dict[str, str]) -> tuple[str, int] | None:
+    """Where some file of ``texts`` runs a LOCAL program's output in a shell: a pipe
+    into ``sh`` / ``eval`` / ``source`` (``go run ./cli | sh`` in a Makefile,
+    ``cargo run | sh`` in a build script, a ``//go:generate`` line) or a command
+    substitution that is eval'd, sourced or run (``eval "$(cargo run)"``). Producers
+    that fetch from the network (``curl … | sh``) are left out: that is the install
+    one-liner itself, which has its own finding. Used to keep the finding on a Go /
+    Rust / JS / Python string that only reaches stdout or stderr, since this
+    program's output may be the one that is run. Prose is skipped (README, docs),
+    except files an agent is given as instructions other than a README.
+    ``(file, 1-based line)`` or None."""
+    from src.scanner.package_context import is_agent_instruction_file
+    for fp, text in texts.items():
+        if not text or ("|" not in text and "$(" not in text and "`" not in text
+                        and "<(" not in text):
+            continue
+        low = fp.lower()
+        if low.endswith(_PROSE_SUFFIXES) and (
+                Path(low).name.startswith("readme") or not is_agent_instruction_file(fp)):
+            continue
+        name = Path(low).name
+        subst_re = _SUBST_RUN_CODE_RE if Path(low).suffix in _CODE_LANG_SUFFIXES \
+            else _SUBST_RUN_MAKE_RE if name in ("makefile", "gnumakefile") \
+            or name.endswith(".mk") else _SUBST_RUN_RE
+        for i, line in enumerate(text.split("\n")):
+            s = line.lstrip()
+            if (s.startswith("#") and not s.startswith("#!")) or (
+                    s.startswith("//") and not s.startswith("//go:generate")):
+                continue
+            for m in _PIPE_INTO_SHELL_RE.finditer(line):
+                stage = _SINGLE_PIPE_RE.split(_SEGMENT_SEP_RE.split(line[:m.start()])[-1])[-1]
+                if stage.strip(" \t\"'`(") and not _REMOTE_STAGE_RE.search(stage):
+                    return fp, i + 1
+            for m in subst_re.finditer(line):
+                rest = line[m.end():]
+                if m.group(0).endswith("`"):
+                    inner = rest.split("`", 1)[0]
+                else:
+                    depth, j = 1, 0
+                    while j < len(rest) and depth:
+                        depth += {"(": 1, ")": -1}.get(rest[j], 0)
+                        j += 1
+                    inner = rest[:j - 1] if not depth else rest
+                if inner.strip(" \t\"'") and not _REMOTE_SUBST_RE.search(inner):
+                    return fp, i + 1
+    return None
+
+
+# ---------------------------------------------------------------------------------
+# A field of an object literal in code (audit class 1, 2026-11-14)
+# ---------------------------------------------------------------------------------
+
+# Languages where a shell word (`source`, `| sh`, `$(`) outside a string is not a
+# command: only their calls and process modules count as sinks.
+_CODE_LANG_SUFFIXES = frozenset({".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts",
+                                 ".cts", ".py", ".go", ".rs", ".java", ".kt", ".cs",
+                                 ".swift", ".vue", ".svelte"})
+_CODE_SINK_RE = re.compile(
+    r"\b(?:exec\w*|spawn\w*|fork|system|popen|Popen|call|check_call|check_output|"
+    r"getoutput|getstatusoutput|run\w*|shell_exec|passthru|proc_open|eval|Function|"
+    r"ShellExecute|execa\w*|shell|Command|command)\s*(?:\.\s*[A-Za-z_]\w*\s*)?[(!]|"
+    r"(?<![\w}$])\$\s*`|\b[\w$]*[Ss]pawn\w*\s*\.\s*\w+\s*\(|"
+    r"\b(?:subprocess|child_process|shelljs|os/exec|std::process)\b")
+# Helpers only tests import (`x.test-support.ts`, `test-utils/…`, `testing/helpers.ts`).
+_TEST_SUPPORT_RE = re.compile(
+    r"(?i)(?:^|/)(?:__mocks__|__fixtures__|test-?utils?|test-?helpers?|testing)/|"
+    r"\.test-(?:support|helpers?|utils?|fixtures?|harness)\.[cm]?[jt]sx?$|"
+    r"(?:^|/)test-?(?:support|helpers?|utils?|harness)\.[cm]?[jt]sx?$")
+_QUOTED_RE = re.compile(r"'(?:[^'\\\n]|\\.)*'|\"(?:[^\"\\\n]|\\.)*\"")
+
+
+def _blank_quoted(m: re.Match) -> str:
+    q = m.group(0)
+    return q[0] + " " * (len(q) - 2) + q[-1]
+
+
+# Names a line declares: `const x`, `let { a, b }`, `for (const n of …)`.
+_DECLARED_RE = re.compile(
+    r"\b(?:const|let|var)\s+(?:\{([^}]*)\}|\[([^\]]*)\]|([A-Za-z_$][\w$]*))")
+_JS_IDENT_RE = re.compile(r"[A-Za-z_$][\w$]*")
+_LINE_COMMENT_PREFIXES = ("#", "//", "*", "/*")
+
+
+# A call on a quote-blanked line: its callee (`helper`, `console.log`, `notes.map`).
+_CALLEE_RE = re.compile(r"([A-Za-z_$][\w$]*(?:\s*\??\.\s*[A-Za-z_$][\w$]*)*)\s*\(")
+_NOT_CALL_WORDS = frozenset({"if", "for", "while", "switch", "catch", "return",
+                             "typeof", "function", "await", "yield", "in", "of"})
+# Callees that only show text or build it.
+_SHOW_CALLEE_RE = re.compile(
+    r"console\.\w+|process\.std(?:out|err)\.write|String|Number|Boolean|JSON\.stringify|"
+    r"chalk(?:\.\w+)*")
+# Methods that call nothing given a value (they may take an inline arrow, whose body is
+# on the line and checked too). Handed a function NAME (`notes.forEach(run)`), the
+# callback ones pass the elements on.
+_PURE_METHODS = frozenset({
+    "join", "trim", "trimStart", "trimEnd", "includes", "startsWith", "endsWith",
+    "split", "replace", "replaceAll", "slice", "toString", "padStart", "padEnd",
+    "toUpperCase", "toLowerCase", "indexOf", "concat", "at", "repeat",
+    "forEach", "map", "flatMap", "filter", "some", "every", "find"})
+_CALLBACK_METHODS = frozenset({"forEach", "map", "flatMap", "filter", "some", "every",
+                               "find"})
+_ARROW_PARAMS_RE = re.compile(r"\(\s*([\w$,\s{}]*)\)\s*=>|([A-Za-z_$][\w$]*)\s*=>")
+
+
+def _passes_on(line: str) -> bool:
+    """Does the quote-blanked ``line`` call anything that is not a print / formatting
+    call or a pure method (a helper the value could be handed to)?"""
+    for m in _CALLEE_RE.finditer(line):
+        callee = re.sub(r"\s+", "", m.group(1)).replace("?.", ".")
+        last = callee.rsplit(".", 1)[-1]
+        if callee in _NOT_CALL_WORDS or _SHOW_CALLEE_RE.fullmatch(callee):
+            continue
+        if "." in callee and last in _PURE_METHODS:
+            if last in _CALLBACK_METHODS and re.match(
+                    r"\s*[A-Za-z_$][\w$.]*\s*[,)]", line[m.end():]):
+                return True  # `notes.forEach(run)`: elements handed to a named function
+            continue
+        return True
+    return False
+
+
+def code_key_exec_site(key: str, path: str,
+                       texts: dict[str, str]) -> tuple[str, int] | None:
+    """Where some code file of ``texts`` could hand the field ``key`` of an object
+    literal in ``path`` to an exec sink: (file, 1-based line), else None.
+
+    Deliberately generous (a false match only keeps the critical):
+
+    * everything :func:`json_key_exec_site` checks (``.key`` / ``["key"]`` reads next
+      to a sink or into a variable a sink line uses, and computed reads into a sink in
+      the files that load ``path``);
+    * the bare word ``key`` (a destructuring ``{ key }``, a shorthand, a parameter)
+      within reach of a sink: on the same line within 240 characters, or on an
+      adjacent line;
+    * a line that mentions ``key`` and declares names (``const``/``let``/``var``, a
+      destructuring, ``for (const n of …)``, an arrow's parameters): any of those
+      names, or ``key`` itself, on a sink line of that file;
+    * in code, a line that mentions ``key`` or one of those names and calls anything
+      but a print / formatting call or a pure method (:func:`_passes_on`): the value
+      may be handed to a helper that runs it (``helper(cfg.notes)``)."""
+    from src.scanner.test_files import is_test_code, judged
+    # A test module runs only in the maintainer's test runner.
+    texts = {fp: t for fp, t in texts.items()
+             if fp == path or not (t and ((judged(fp) and is_test_code(fp, t))
+                                          or _TEST_SUPPORT_RE.search(fp)))}
+    site = _code_computed_exec_site(texts) or _code_variable_exec_site(texts)
+    if site is not None:
+        return site
+    word = re.compile(r"(?<![\w$])" + re.escape(key) + r"(?![\w$])")
+    for fp, text in texts.items():
+        if not text or key not in text or fp.lower().endswith(_NOT_CODE_SUFFIXES):
+            continue
+        low = fp.lower()
+        lines = text.split("\n")
+        code = Path(low).suffix in _CODE_LANG_SUFFIXES
+        if code:
+            # The words inside a quoted string are not a sink (the hint's own
+            # `… | bash`). Backtick templates stay as written: `${…}` holds code.
+            lines = [_QUOTED_RE.sub(_blank_quoted, ln) for ln in lines]
+        tick = low.endswith(_BACKTICK_LANG_SUFFIXES) or "." not in Path(low).name
+        sink_re = _CODE_SINK_RE if code else _ANY_SINK_RE
+
+        def sink(x: str) -> bool:
+            return bool(sink_re.search(x)) or (tick and "`" in x)
+
+        sink_lines: list[str] | None = None
+        for i, ln in enumerate(lines):
+            if ln.lstrip().startswith(_LINE_COMMENT_PREFIXES):
+                continue
+            hits = list(word.finditer(ln))
+            if not hits:
+                continue
+            around = [lines[i - 1][-_NEAR_CHARS:] if i else "",
+                      lines[i + 1][:_NEAR_CHARS] if i + 1 < len(lines) else ""]
+            around += [ln[max(0, m.start() - _NEAR_CHARS): m.end() + _NEAR_CHARS]
+                       for m in hits]
+            if any(sink(x) for x in around):
+                return fp, i + 1
+            names = {key}
+            for m in _DECLARED_RE.finditer(ln):
+                body = m.group(1) or m.group(2) or m.group(3) or ""
+                names.update(n for n in _JS_IDENT_RE.findall(body)
+                             if n not in ("const", "let", "var"))
+            am = _ASSIGN_LHS_RE.match(ln)
+            if am:
+                names.add(am.group(1))
+            if code:
+                for pm in _ARROW_PARAMS_RE.finditer(ln):
+                    names.update(_JS_IDENT_RE.findall(pm.group(1) or pm.group(2) or ""))
+                if _passes_on(ln):
+                    return fp, i + 1
+                for n in names - {key}:
+                    rx = re.compile(r"(?<![\w$])" + re.escape(n) + r"(?![\w$])")
+                    for j, other in enumerate(lines):
+                        if j != i and rx.search(other) and _passes_on(other) and not \
+                                other.lstrip().startswith(_LINE_COMMENT_PREFIXES):
+                            return fp, j + 1
+            if sink_lines is None:
+                sink_lines = [x for x in lines if sink(x)
+                              and not x.lstrip().startswith(_LINE_COMMENT_PREFIXES)]
+            for n in names:
+                rx = re.compile(r"(?<![\w$])\$?\{?" + re.escape(n) + r"(?![\w$])")
+                if any(rx.search(x) for x in sink_lines):
+                    return fp, i + 1
+    return None
+
+
+_PLAIN_TEMPLATE_RE = re.compile(r"`[^`$\\]*`")
+_PROCESS_RECEIVER_RE = re.compile(r"(?i)exec|shell|proc|spawn|child|cmd|^cp$|^zx$|^sh$|^\$$")
+# Words in a sink's argument list that are not a value read from somewhere.
+_LITERAL_WORDS = frozenset({"true", "false", "null", "undefined", "new", "Array", "Object",
+                            "process", "env", "cwd", "__dirname"})
+
+
+def _code_variable_exec_site(texts: dict[str, str]) -> tuple[str, int] | None:
+    """A sink call in code whose arguments read a variable (``execSync(b)``,
+    ``spawn('sh', ['-c', v[0]])``): the field's value can reach it through any alias
+    chain, computed key or ``Object.entries`` loop, so it counts for every key. Object
+    keys (``{ stdio: 'inherit' }``), ``process.cwd()`` and literals do not count, nor
+    does a definition (``function runAll(a) {``) or a ``run`` / ``call`` method of an
+    object that is not a process helper (``stmt.run(x)``)."""
+    for fp, text in texts.items():
+        if not text or Path(fp.lower()).suffix not in _CODE_LANG_SUFFIXES:
+            continue
+        flat = _PLAIN_TEMPLATE_RE.sub(lambda m: "``", _QUOTED_RE.sub(_blank_quoted, text))
+        for m in _CODE_SINK_RE.finditer(flat):
+            if not m.group(0).endswith("("):
+                continue
+            depth, j = 1, m.end()
+            while j < len(flat) and depth and j - m.end() < 2000:
+                if flat[j] == "(":
+                    depth += 1
+                elif flat[j] == ")":
+                    depth -= 1
+                j += 1
+            args = flat[m.end():j - 1]
+            rm = re.search(r"([\w$]*)\s*\.\s*$", flat[max(0, m.start() - 60):m.start()])
+            if rm and re.match(r"(?:run\w*|call|check_call|[Cc]ommand)\b", m.group(0)) \
+                    and not _PROCESS_RECEIVER_RE.search(rm.group(1)):
+                continue  # `stmt.run(x)`, `fn.call(x)`: a method of something else
+            if re.match(r"\s*(?::[^=;{]*)?(?:\{|=>)", flat[j:j + 80]) or re.search(
+                    r"\bfunction\s*\*?\s*$|\b(?:async|get|set|static)\s+$",
+                    flat[max(0, m.start() - 20):m.start()]):
+                continue  # a definition, not a call
+            for w in re.finditer(r"(?<![\w$.])[A-Za-z_$][\w$]*(?![\w$])(?!\s*:(?!:))", args):
+                if w.group(0) not in _LITERAL_WORDS:
+                    return fp, text.count("\n", 0, m.start()) + 1
+    return None
+
+
+def _code_computed_exec_site(texts: dict[str, str]) -> tuple[str, int] | None:
+    """A read by computed key handed to a sink in code (``exec(cfg[k])``,
+    ``Object.values(o).forEach(run)``, ``spawn(cmd, [...Object.values(o)])``): it may
+    read any field, so it counts for every key. String contents are blanked first."""
+    for fp, text in texts.items():
+        if not text or fp.lower().endswith(_NOT_CODE_SUFFIXES):
+            continue
+        code = Path(fp.lower()).suffix in _CODE_LANG_SUFFIXES
+        sink_re = _CODE_SINK_RE if code else _ANY_SINK_RE
+        call_re = _CODE_SINK_RE if code else _SINK_CALL_RE
+        for i, ln in enumerate(text.split("\n")):
+            if ln.lstrip().startswith(_LINE_COMMENT_PREFIXES):
+                continue
+            if code:
+                ln = _QUOTED_RE.sub(_blank_quoted, ln)
+            if _PASS_RUNNER_RE.search(ln):
+                return fp, i + 1
+            for m in call_re.finditer(ln):
+                if _COMPUTED_INDEX_RE.search(ln[m.end(): m.end() + 200]):
+                    return fp, i + 1
+            for m in _ITER_VALUES_RE.finditer(ln):
+                if sink_re.search(ln[max(0, m.start() - _NEAR_CHARS): m.end() + _NEAR_CHARS]):
+                    return fp, i + 1
+    return None
+
+
+def shown_field_key(key: str) -> bool:
+    """A plain field name that is not command-shaped (``notes``, ``fixHint``,
+    ``message``; not ``command``, ``install_cmd``, ``run``, ``steps``)."""
+    return bool(re.fullmatch(r"[A-Za-z_$][\w$]{0,63}", key)) and not _EXEC_KEY_RE.match(key)

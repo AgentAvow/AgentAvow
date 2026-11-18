@@ -616,10 +616,24 @@ MANIFEST_EXEC_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
 ]
 
 # Dangerous content inside an npm lifecycle install hook (#5).
+# A redirect to a device (`> /dev/tcp/host/port`, `>& /dev/sda`) counts; silencing
+# output (`> /dev/null 2>&1`, `2>/dev/null`, `>/dev/stderr`) does not. A package
+# manager's preinstall `node ./preinstall.js > /dev/null 2>&1` and `npm rebuild x 2>/dev/null ||
+# true` hooks read as "runs remote/shell/eval content" (verdict accuracy audit,
+# 2026-11-14). A `/dev/tcp/` or `/dev/udp/` path is a network socket in ANY redirect
+# direction (`< /dev/tcp/…`, `3<>/dev/tcp/…`, `&>/dev/udp/…`), so it is dangerous on its
+# own, even next to a quiet `> /dev/null`. A raw socket client (`nc`, `ncat`, `socat`,
+# `telnet`) or a read of a home credential path (`~/.ssh/…`, `$HOME/.aws/credentials`,
+# `~/.npmrc`) is dangerous on its own too: `cat ~/.ssh/id_rsa > /dev/stdout | nc …` must
+# not lean on a device redirect to stay critical.
 INSTALL_SCRIPT_DANGER_RE = re.compile(
     r"""(?:curl|wget)\b|\|\s*(?:ba)?sh\b|\bnode\s+(?:-e|--eval|-p|--print|-pe|-ep)\b|"""
     r"""\bpython3?\s+-c\b|base64\s+(?:-d|--decode|-D)\b|\beval\b|"""
-    r"""https?://|\bchmod\s+\+x\b|>\s*/dev/""",
+    r"""https?://|\bchmod\s+\+x\b|/dev/(?:tcp|udp)/|"""
+    r"""\b(?:nc|ncat|socat|telnet)\b|"""
+    r"""(?:~|\$\{?(?:HOME|USERPROFILE)\}?|/root|/home/[^/\s]+|/Users/[^/\s]+)/"""
+    r"""\.(?:ssh|aws|npmrc)\b|"""
+    r""">&?\s*/dev/(?!(?:null|stdout|stderr)(?![\w/.-]))""",
     re.IGNORECASE,
 )
 # npm lifecycle hooks that auto-run on `npm install` (the supply-chain entry point).

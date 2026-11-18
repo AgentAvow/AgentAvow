@@ -915,6 +915,126 @@ def mark_signature(finding: object, severity: str, arrays: set[str]) -> None:
     finding.remediation = SIGNATURE_WHY  # type: ignore[attr-defined]
 
 
+def _membership_only(text: str, path: str, arrays: set[str]) -> bool:
+    """In JS / TS module ``text``, every array is declared once (``const NAME = new
+    Set([``, not exported), every other use is a membership test (``NAME.has(x)`` /
+    ``NAME.includes(x)``), and the module has no CommonJS export: nothing that imports
+    the module can read the array (@agent-native/core's FORBIDDEN_HOST_SUFFIXES)."""
+    if not text or not path.lower().endswith(
+            (".js", ".mjs", ".ts", ".mts", ".jsx", ".tsx")):
+        return False
+    if re.search(r"\bmodule\.exports\b|(?<![\w$.])exports\s*[.\[]|\bexport\s+default\b", text):
+        return False
+    for name in arrays:
+        n = re.escape(name)
+        decls = re.findall(r"(?m)^[ \t]*(?:const|let|var)\s+" + n + r"\s*=", text)
+        uses = len(re.findall(r"(?<![\w$])" + n + r"(?![\w$])", text))
+        tests = len(re.findall(r"(?<![\w$.])" + n + r"\s*\.\s*(?:has|includes)\s*\(", text))
+        if len(decls) != 1 or uses != 1 + tests or re.search(
+                r"\bexport\b(?:\s*\{[^}]*|[^\n;]*)(?<![\w$])" + n + r"(?![\w$])", text):
+            return False
+    return True
+
+
+TUNNEL_DATA_WHY = (
+    "A tunnel host listed as data in JS / TS code (a prompt placeholder or example, a "
+    "bundled Public Suffix List, a host-allowlist suffix) whose holder never reaches a "
+    "network call, is never read whole, returned, exported or passed to this package's "
+    "own code, in a file whose text nothing in the package reads.")
+
+
+def mark_tunnel_data(finding: object, severity: str) -> None:
+    """A tunnel-host match that is data in its own file (scan.py
+    ``_tunnel_host_example`` / ``_bundled_domain_list_entry`` /
+    ``_suffix_allowlist_default``), reported low until the rest of the tree is checked
+    (``restore_tunnel_data``)."""
+    finding._tunnel_data_restore = severity  # type: ignore[attr-defined]
+    finding.remediation = TUNNEL_DATA_WHY  # type: ignore[attr-defined]
+
+
+# A file read as text. `open(` only outside JS, where `window.open(url)` is navigation.
+_TEXT_READ_JS_RE = re.compile(
+    r"""\b(?:readFile(?:Sync)?|createReadStream|readTextFile(?:Sync)?|openSync"""
+    r"""|Bun\s*\.\s*file|readFileStr)\s*\(\s*(?P<arg>[^\n]*)""")
+_TEXT_READ_OTHER_RE = re.compile(
+    r"""\b(?:open|read_text|read_bytes|readFile\w*|File\.read|fs::read_to_string"""
+    r"""|ReadFile|readAllBytes|readString)\s*\(\s*(?P<arg>[^\n]*)""")
+# A read of a script's own source over the network or a raw import.
+_SOURCE_FETCH_RE = re.compile(
+    r"""\bfetch\s*\(\s*(?:import\.meta\.url|document\.currentScript|new\s+URL\s*\("""
+    r"""|['"`]\.{0,2}/[^'"`\n]*\.[cm]?[jt]sx?\b)|document\.currentScript\.src"""
+    r"""|\?raw\b|\btype\s*:\s*['"]text['"]""")
+_DATA_FILE_EXT = (".json", ".md", ".txt", ".yaml", ".yml", ".toml", ".html", ".css",
+                  ".csv", ".svg", ".xml", ".lock", ".env", ".ini", ".cfg", ".pem", ".key")
+
+
+def _reads_text_of(text: str, path: str, stem: str) -> bool:
+    """Code file ``text`` may read the text of the file named ``stem``: a file read
+    whose path names it or is built at runtime (a variable, a concatenation, a join
+    whose only literal is not a data file), a fetch of a script URL or a raw import,
+    or a shell command naming it."""
+    stem_re = re.compile(r"(?<![\w$-])" + re.escape(stem) + r"(?![\w$-])")
+    js = path.lower().endswith((".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx"))
+    for rx in (_TEXT_READ_JS_RE,) if js else (_TEXT_READ_JS_RE, _TEXT_READ_OTHER_RE):
+        for m in rx.finditer(text):
+            arg = m.group("arg")[:300]
+            if stem_re.search(arg):
+                return True
+            lits = re.findall(r"""(['"])([^'"\n]*)\1""", arg)
+            first = re.match(r"""\s*(['"])[^'"\n]*\1\s*[,)]""", arg)
+            if first:
+                continue                          # one plain literal, not this file
+            if ("+" in arg.split(")")[0] or "${" in arg or not lits
+                    or not any(v.lower().endswith(_DATA_FILE_EXT) for _, v in lits)):
+                return True
+    for ln in text.splitlines():
+        if _SOURCE_FETCH_RE.search(ln) and (stem_re.search(ln) or "import.meta" in ln
+                                            or "currentScript" in ln or "new URL" in ln):
+            return True
+        if re.search(r"\b(?:exec\w*|spawn\w*|system|popen|run)\s*\(", ln) and stem_re.search(ln):
+            return True
+    return False
+
+
+def _script_globals(text: str) -> set[str]:
+    """Names file ``text`` makes global: an assignment to an undeclared name
+    (`cfg = {…}`), and in a classic script (no import / export / require) every
+    top-level `var` / `let` / `const` / `function` / `class` (shared by every script
+    on the page)."""
+    declared = set(re.findall(
+        r"\b(?:var|let|const|function\s*\*?|class)\s+([A-Za-z_$][\w$]*)", text))
+    out = {n for n in re.findall(r"(?m)^\s*([A-Za-z_$][\w$]*)\s*=(?![=>])", text)
+           if n not in declared}
+    if not re.search(r"(?m)^\s*(?:import|export)\b|\brequire\s*\(|\bmodule\.exports\b"
+                     r"|\bexports\.", text):
+        out |= set(re.findall(
+            r"(?m)^(?:var|let|const|async\s+function\s*\*?|function\s*\*?|class)\s+"
+            r"([A-Za-z_$][\w$]*)", text))
+    return out - {"module", "exports", "window", "globalThis", "self", "this", "undefined"}
+
+
+def restore_tunnel_data(findings: list, texts: dict[str, str]) -> None:
+    """A tunnel host relaxed as data is only data while no code reads its file's text
+    (`readFileSync(require.resolve('./opts'))`, a runtime path, a raw import) and no
+    other file reads a global it sets (:func:`_script_globals`): any code file of the
+    tree (this one included) that may restores the finding's severity. A file not in
+    ``texts`` restores too."""
+    marked = [f for f in findings if getattr(f, "_tunnel_data_restore", None)
+              and f.severity == "low" and f.remediation == TUNNEL_DATA_WHY]
+    for f in marked:
+        stem = f.file_path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+        own = texts.get(f.file_path) or ""
+        globs = _script_globals(own)
+        glob_rx = (re.compile(r"(?<![\w$.])(?:" + "|".join(map(re.escape, sorted(globs)))
+                              + r")(?![\w$])") if globs else None)
+        if f.file_path not in texts or any(
+                t and _is_code_file(p) and (_reads_text_of(t, p, stem) or (
+                    glob_rx is not None and p != f.file_path and glob_rx.search(t)))
+                for p, t in texts.items()):
+            f.severity, f.remediation = f._tunnel_data_restore, ""
+            f._tunnel_data_restore = None
+
+
 def restore_signature_hosts(findings: list, texts: dict[str, str]) -> None:
     """Another code file of the tree that names the array, or loads this file into its
     own process (``source`` / ``.`` / import / require / from naming it), may send the
@@ -926,11 +1046,14 @@ def restore_signature_hosts(findings: list, texts: dict[str, str]) -> None:
         sev, arrays = f._signature_restore
         stem = re.escape(f.file_path.rsplit("/", 1)[-1].rsplit(".", 1)[0])
         alt = "|".join(re.escape(a) for a in sorted(arrays))
-        rx = re.compile(
-            r"(?<![\w$])(?:" + alt + r")(?![\w$])|"
-            r"(?:^|[;&|]\s*|\bthen\s+|\bdo\s+)(?:source|\.)\s+[^\n;]*" + stem + r"|"
+        named = r"(?<![\w$])(?:" + alt + r")(?![\w$])"
+        loads = (
+            r"|(?:^|[;&|]\s*|\bthen\s+|\bdo\s+)(?:source|\.)\s+[^\n;]*" + stem + r"|"
             r"(?:\bimport\b|\brequire\s*\(|\bfrom\b|\bimportlib\b|\brunpy\b)[^\n]*"
-            r"(?<![\w$])" + stem + r"(?![\w$])", re.M)
+            r"(?<![\w$])" + stem + r"(?![\w$])")
+        if _membership_only(texts.get(f.file_path) or "", f.file_path, arrays):
+            loads = ""      # importing the module cannot reach a private membership Set
+        rx = re.compile(named + loads, re.M)
         if f.file_path not in texts or any(
                 p != f.file_path and t and _is_code_file(p) and rx.search(t)
                 for p, t in texts.items()):
@@ -1044,6 +1167,7 @@ def restore_externally_invoked(findings: list, texts: dict[str, str], *,
     Every caller of ``_scan_content`` that can see a package.json must call this."""
     _restore_allowlist_hosts(findings, texts)
     restore_signature_hosts(findings, texts)
+    restore_tunnel_data(findings, texts)
     restore_signing_relaxed(findings, texts)
     _restore_datasets(findings, texts)
     _restore_helper_scripts(findings, texts)
@@ -1107,3 +1231,199 @@ def restore_externally_invoked(findings: list, texts: dict[str, str], *,
                 or any(fnmatch.fnmatchcase(n, g) for g in globs) for n in owners)):
             f.severity, f.payload, f.remediation = sev, payload, ""
             f._maintainer_restore = None
+
+
+# ---------------------------------------------------------------------------
+# Install hooks whose code is suspicious, not just present (benchmark triage cause 2)
+# ---------------------------------------------------------------------------
+
+_JS_FILE_EXTS = (".js", ".mjs", ".cjs", ".ts", ".mts", ".cts")
+_SH_FILE_EXTS = (".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd")
+_STR = r"""['"`][^'"`\n]{0,300}['"`]"""
+_LOCAL_IMPORT_RE = re.compile(
+    # path.join|resolve(__dirname, 'lib', 'x.js'), also on require('path') inline (first,
+    # so the inner `require('path')` is not taken as a plain require)
+    r"""(?:\bpath|require\s*\(\s*['"](?:node:)?path['"]\s*\))\s*\.\s*(?:join|resolve)\s*\("""
+    rf"""\s*__dirname((?:\s*,\s*{_STR}){{1,8}})\s*\)"""
+    # require('./x') / import … from './x' / require('./' + 'x') (literal pieces only)
+    rf"""|(?:require\s*\(\s*|from\s+|import\s*\(\s*|import\s+)({_STR}(?:\s*\+\s*{_STR}){{0,8}})"""
+    # require(__dirname + '/x.js') / `${{__dirname}}/x`
+    r"""|__dirname\s*\+\s*['"`]/([^'"`\s]{1,300})['"`]"""
+    r"""|\$\{\s*__dirname\s*\}/([^'"`\s$]{1,300})`""")
+_DIRNAME_TMPL_RE = re.compile(r"^\$\{\s*__dirname\s*\}/")
+_STR_PIECE_RE = re.compile(r"""['"`]([^'"`\n]{0,300})['"`]""")
+# How far the hook's own requires are followed (transitively, local files only), and
+# how much of the package the walk and the signal read may cover. Past the signal
+# budget, the files that look most suspicious are read first (a hook cannot hide its
+# payload behind dozens of dummy requires).
+_MAX_HOOK_DEPTH = 4
+_MAX_HOOK_FILES = 400
+_MAX_WALK_BYTES = 32 * 1024 * 1024
+_MAX_SIGNAL_BYTES = 16 * 1024 * 1024
+_SUSPECT_WORDS = ("hostname", "userInfo", "networkInterfaces", "eval", "Function(", "_0x",
+                  "fromCharCode", "atob", "_authToken", "systemd", "crontab", "oast",
+                  "pipedream", "webhook", "whoami", "process.env", "base64")
+
+
+def _local_refs(text: str) -> list[str]:
+    """Relative paths a JS file loads from its own package, as plain ``./x`` strings."""
+    out: list[str] = []
+    for m in _LOCAL_IMPORT_RE.finditer(text):
+        joined, lit, plus, tmpl = m.groups()
+        if lit is not None:
+            rel = _DIRNAME_TMPL_RE.sub("./", "".join(_STR_PIECE_RE.findall(lit)))
+            if not rel.startswith(("./", "../")):
+                continue
+        elif plus is not None or tmpl is not None:
+            rel = "./" + (plus if plus is not None else tmpl)
+        else:
+            parts = [p.strip("/") for p in _STR_PIECE_RE.findall(joined) if p.strip("/.")]
+            if not parts:
+                continue
+            rel = "./" + "/".join(parts)
+        out.append(rel)
+    return out
+_HOOK_NAME_RE = re.compile(r"^npm '([\w-]+)' lifecycle script \(auto-runs on install\)$")
+
+
+def _resolve(have: dict[str, str], base: str, word: str) -> str | None:
+    p = _norm(base, word[2:] if word.startswith("./") else word)
+    if p is None:
+        return None
+    return next((have[p + s] for s in _RESOLVE_SUFFIXES if p + s in have), None)
+
+
+def _hook_code(scripts: dict[str, str], hook: str, main: str,
+               texts: dict[str, str]) -> tuple[list[str], list[str]]:
+    """(shell command strings, local file paths) an install hook runs: the hook, the
+    scripts it names (``npm run x``), the local files those run, and the local files
+    those files ``require`` / ``import`` (transitively, up to ``_MAX_HOOK_DEPTH`` levels
+    and ``_MAX_HOOK_FILES`` files). Under-approximate on purpose: this only ever RAISES
+    a finding, so an unfollowable command adds nothing."""
+    have = {p[2:] if p.startswith("./") else p: p for p in texts}
+    names = list(scripts)
+    todo, seen = [hook], set()
+    cmds: list[str] = []
+    files: list[str] = []
+    while todo:
+        n = todo.pop()
+        if n in seen or n not in scripts:
+            continue
+        seen.add(n)
+        cmds.append(scripts[n])
+        todo.extend(_referenced(scripts[n], names) or ())
+        for w in _script_file_refs(scripts[n], main):
+            hit = _resolve(have, "", w) if w != RUNS_PACKAGE_CODE else None
+            if hit is not None and hit not in files:
+                files.append(hit)
+    from src.scanner.install_signals import MAX_SIGNAL_TEXT
+
+    frontier = list(files)
+    seen_files = set(files)
+    walked = 0
+    core: list[str] = list(files)  # run directly, plus their first level of requires
+    for depth in range(_MAX_HOOK_DEPTH):
+        nxt: list[str] = []
+        for path in frontier:
+            if not path.endswith(_JS_FILE_EXTS) or walked > _MAX_WALK_BYTES:
+                continue
+            text = (texts.get(path) or "")[:MAX_SIGNAL_TEXT]
+            walked += len(text)
+            base = path.rsplit("/", 1)[0] + "/" if "/" in path else ""
+            for rel in _local_refs(text):
+                hit = _resolve(have, base, rel)
+                if hit is not None and hit not in seen_files \
+                        and len(files) < _MAX_HOOK_FILES:
+                    seen_files.add(hit)
+                    files.append(hit)
+                    nxt.append(hit)
+        if depth == 0:
+            core.extend(nxt)
+        if not nxt:
+            break
+        frontier = nxt
+    return cmds, files, core
+
+
+def _signal_order(files: list[str], core: list[str], texts: dict[str, str]) -> list[str]:
+    """The files to read for signals. ``core`` (what the hook runs directly and its
+    first level of requires) is always read; the rest within ``_MAX_SIGNAL_BYTES``,
+    the ones carrying the most suspect words first. Each file is charged only for what
+    the signal read takes of it (``MAX_SIGNAL_TEXT``), so huge padding files cannot
+    use the budget up."""
+    from src.scanner.install_signals import MAX_SIGNAL_TEXT, clip
+
+    def cost(p: str) -> int:
+        return min(len(texts.get(p) or ""), MAX_SIGNAL_TEXT)
+
+    rest = [p for p in files if p not in set(core)]
+    used = sum(cost(p) for p in core)
+    if used + sum(cost(p) for p in rest) <= _MAX_SIGNAL_BYTES:
+        return [*core, *rest]
+
+    def score(p: str) -> int:
+        t = clip(texts.get(p) or "")
+        return -sum(w in t for w in _SUSPECT_WORDS)
+
+    out = list(core)
+    for p in sorted(rest, key=score):
+        if used + cost(p) > _MAX_SIGNAL_BYTES:
+            continue
+        out.append(p)
+        used += cost(p)
+    return out
+
+
+def escalate_suspicious_install_hooks(findings: list, texts: dict[str, str]) -> None:
+    """Raise a root package.json's medium ``install_hook`` finding to high when the
+    code the hook runs is suspicious, not merely present (``src.scanner.install_signals``:
+    host / user recon plus a network call, an out-of-band callback host, an obfuscated
+    payload). An ordinary build, banner or binary download keeps its medium."""
+    from src.scanner.install_signals import (
+        js_signals,
+        py_signals,
+        shell_signals,
+        suspicious_reason,
+    )
+
+    hooks = [f for f in findings if getattr(f, "category", "") == "install_hook"
+             and getattr(f, "file_path", "") == "package.json"
+             and getattr(f, "severity", "") == "medium"
+             and _HOOK_NAME_RE.match(getattr(f, "name", "") or "")]
+    if not hooks or not texts.get("package.json"):
+        return
+    try:
+        data = json.loads(texts["package.json"].lstrip("﻿"))
+    except ValueError:
+        return
+    scripts = data.get("scripts") if isinstance(data, dict) else None
+    if not isinstance(scripts, dict):
+        return
+    scripts = {k: v for k, v in scripts.items() if isinstance(k, str) and isinstance(v, str)}
+    main = data.get("main") if isinstance(data.get("main"), str) else ""
+    cache: dict[str, set[str]] = {}  # a file run by several hooks is read once
+
+    def file_signals(p: str) -> set[str]:
+        if p not in cache:
+            text = texts.get(p) or ""
+            low = p.lower()
+            if low.endswith(_SH_FILE_EXTS):
+                cache[p] = shell_signals(text)
+            elif low.endswith(".py"):
+                cache[p] = py_signals(text)
+            else:
+                cache[p] = js_signals(text)
+        return cache[p]
+
+    for f in hooks:
+        hook = _HOOK_NAME_RE.match(f.name).group(1)
+        cmds, files, core = _hook_code(scripts, hook, main, texts)
+        signals: set[str] = set()
+        for c in cmds:
+            signals |= shell_signals(c)
+        for p in _signal_order(files, core, texts):
+            signals |= file_signals(p)
+        reason = suspicious_reason(signals)
+        if reason:
+            f.severity = "high"
+            f.name = f"npm '{hook}' lifecycle script ({reason})"

@@ -47,6 +47,7 @@ The scanner has built-in **context-aware checks** that automatically skip safe p
 | `open("config.json", "r").read()` | Hardcoded file path string |
 | `with open(path) as f:` | Context manager ensures proper resource handling |
 | `Path("out.txt").write_text(data)` | Pathlib method call on a known path |
+| `placeholder: 'acme.tunnel.example'`, `"e.g. acme.tunnel.example"`, a host-allowlist suffix, a bundled public-suffix list | In JS / TS code only, a tunnel host listed as data is reported low, not critical, but only while it can never be dialled: its holder is never passed on, interpolated or returned; the object around it is never read whole (`Object.values`, spread, `JSON.stringify`, iterated, passed to a call); it is not returned from a function, exported, or set on `this` or a global; it is not handed to a function the package defines itself; no other code shares its line; and nothing in the package reads the file's (or the enclosing function's) source text. Anything else keeps the critical. A value in a JSON, YAML or Python file keeps it too. |
 
 ## Finding Names Reference
 

@@ -1,0 +1,8 @@
+# Versions that shape the generated docs/api/openapi.json (pip constraints format).
+# `make openapi` and the api-contract CI job generate with exactly these, so the
+# committed document does not change when an upstream release lands. To bump: edit
+# the pins, run `make openapi-venv` and `make openapi`, and commit both files.
+fastapi==0.163.1
+pydantic==2.14.3
+pydantic-core==2.50.4
+starlette==1.10.0

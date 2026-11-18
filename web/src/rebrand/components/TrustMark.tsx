@@ -26,13 +26,16 @@ const ARC = (cx: number, cy: number, r: number, a0: number, a1: number) => {
 }
 
 /** Adoption count → arc fill 0–100 (log-scaled to ~1e9 so it never pins/starves). */
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper co-located with the component it serves; HMR falls back to a full reload here
 export function adoptionPct(count?: number | null): number {
   const c = count || 0
   return c > 0 ? Math.min(100, Math.round((Math.log10(c + 1) / 9) * 100)) : 0
 }
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper co-located with the component it serves; HMR falls back to a full reload here
 export function adoptionTierWord(pct: number): string {
   return pct >= 88 ? 'Load-bearing' : pct >= 65 ? 'Widely relied' : pct >= 40 ? 'Established' : pct >= 15 ? 'Rising' : 'New'
 }
+// eslint-disable-next-line react-refresh/only-export-components -- pure helper co-located with the component it serves; HMR falls back to a full reload here
 export function compactNum(n: number): string {
   return n >= 1e9 ? (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B'
     : n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M'

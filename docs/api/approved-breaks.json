@@ -1,0 +1,4 @@
+{
+  "_about": "Breaking changes to docs/api/openapi.json that the owner has approved. scripts/openapi/breaking.py prints each break as one line; copy that line into \"break\" (a * matches any run of characters) and say why in \"reason\". Reviewed in the PR like any other change. Entries that no longer match anything are reported as safe to delete. See docs/adr/0006-api-contract.md.",
+  "approved": []
+}

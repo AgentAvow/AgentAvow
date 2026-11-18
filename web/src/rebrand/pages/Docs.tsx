@@ -1,11 +1,11 @@
-import { isValidElement, useEffect, type ReactNode } from 'react'
+import { isValidElement, useEffect, useState, type ReactNode } from 'react'
 import { Eyebrow } from '../components/PageBits'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { rp } from '../basePath'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import SEOHead from '../../components/SEOHead'
-import { listingCta, trackCta, trackPluginCommandCopy } from '../../lib/analytics'
+import { listingCta, trackCta, trackPluginCommandCopy, trackPluginCommandText } from '../../lib/analytics'
 import { slugify } from '../lib/slugify'
 import howGradingWorks from '../docs/how-grading-works.md?raw'
 import gateOnTheGrade from '../docs/gate-on-the-grade.md?raw'
@@ -14,6 +14,7 @@ import runLocally from '../docs/run-locally.md?raw'
 import trustBadges from '../docs/trust-badges.md?raw'
 import verifyAttestations from '../docs/verify-attestations.md?raw'
 import autoScanClaudeCode from '../docs/auto-scan-claude-code.md?raw'
+import codexDoc from '../docs/codex.md?raw'
 import mcpConnector from '../docs/mcp-connector.md?raw'
 import behavioralSandbox from '../docs/behavioral-sandbox.md?raw'
 import x402Doc from '../docs/x402.md?raw'
@@ -46,11 +47,37 @@ const DOCS = [
     blurb: 'Connect the AgentAvow MCP server to Claude, ChatGPT, Cursor, or VS Code and check any tool’s trust score before your agent connects to it.' },
   { slug: 'auto-scan-claude-code', title: 'Auto-scan in Claude Code', body: autoScanClaudeCode,
     blurb: 'Have Claude Code check every new tool’s trust score automatically — via the plugin, a CLAUDE.md rule, or a SessionStart hook.' },
+  { slug: 'codex', title: 'Use AgentAvow in Codex', body: codexDoc,
+    blurb: 'Add the AgentAvow connector and the scan-before-connect skill to Codex, then ask whether an MCP server, package or repo is safe to connect.' },
   { slug: 'x402', title: 'How we check x402', body: x402Doc,
     blurb: 'How x402 paid endpoints are scored from their public listing: what we read, the checks, what a result means, the user agent, opt-out and limits.' },
   { slug: 'erc8004-agents', title: 'ERC-8004 agents', body: erc8004Agents,
     blurb: 'Check an ERC-8004 agent on Ethereum, Base or BNB Chain: what we read from its registration, how its answer is set, the API, and the limits.' },
 ]
+
+/** A fenced code block with a copy button for the whole block (commands, config). */
+function CodeBlock({ children }: { children: ReactNode }) {
+  const [done, setDone] = useState(false)
+  const text = textOf(children).replace(/\n$/, '')
+  const copy = () => {
+    void navigator.clipboard?.writeText(text)
+    trackPluginCommandText(text)
+    setDone(true)
+    setTimeout(() => setDone(false), 1400)
+  }
+  return (
+    <div className="relative group">
+      {/* Top padding gives the button its own band, so it never covers a long line that scrolls. */}
+      <pre className="!pt-10">{children}</pre>
+      <button
+        type="button"
+        onClick={copy}
+        aria-label="Copy to clipboard"
+        className="absolute top-2 right-2 font-mono text-[10.5px] px-2 py-0.5 rounded bg-surface-hover border border-border text-text-muted hover:text-primary-light"
+      >{done ? 'copied ✓' : 'copy'}</button>
+    </div>
+  )
+}
 
 /** Plain text of a react-markdown heading's children, for its id. */
 function textOf(node: ReactNode): string {
@@ -170,6 +197,7 @@ export default function RebrandDocs() {
         <Markdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]} components={{
           // Wide tables scroll inside their own box instead of widening the page.
           table: ({ children }) => <div className="my-4 overflow-x-auto"><table>{children}</table></div>,
+          pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
           // GitHub-style ids on h2/h3 so #anchor links resolve (same ids as the SSR render).
           h2: ({ children }) => <h2 id={slugify(textOf(children))} className="scroll-mt-24">{children}</h2>,
           h3: ({ children }) => <h3 id={slugify(textOf(children))} className="scroll-mt-24">{children}</h3>,
