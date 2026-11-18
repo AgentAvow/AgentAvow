@@ -37,9 +37,15 @@ Scanning is free and needs no account.
 | Scan command | Ask in plain words ("scan npm chalk", "is this MCP server safe?"), or use the command: `/agentavow-trust:scan npm chalk`, `/agentavow-trust:scan owner/repo`, `/agentavow-trust:scan https://mcp.example.com/mcp`. Claude Code puts the plugin's name in front of plugin commands, so a plain `/scan` is not found. | Chat, Cowork, Claude Code |
 | `scan-before-connect` skill | When you ask Claude to add an MCP server or install a package you name, Claude scans it first and tells you the answer before it goes ahead. | Chat, Cowork, Claude Code |
 | Install-time hook | When a server is about to be added (`claude mcp add …`, or a write to `.mcp.json`), grades it first. "Do not connect": Claude Code asks you, with the answer as the reason. Anything else (Safe to connect; Review before you connect; not scannable): a one-line answer and the add proceeds. Never denies. | Claude Code, Cowork |
-| Package installs | When Claude runs `npm`/`pnpm`/`yarn`/`bun` add or install, `pip`/`python -m pip` install, `uv add`, `uv pip install`, `pipx install` or `poetry add` with named packages (up to 5 per command), each is checked against its stored grade. Safe to connect: silent, unless part of the package could not be read (a file past the read cap or past the unpack budget), which gets one quiet note. Deprecated by its maintainer: a one-line note that it is deprecated (not a security finding). Review before you connect: a one-line note and the install proceeds. Do not connect: Claude Code asks you first. Lockfile installs (`npm install`, `npm ci`, `uv sync`), requirements files, local paths and repository or URL installs are left alone; a package AgentAvow could not grade (not found, not scannable, or the service is busy) gets a one-line "not checked" note; an offline or slow check stays silent. The next session start mentions once how many installs were checked. Turn it off with `AGENTAVOW_INSTALL_CHECKS=off`. | Claude Code, Cowork |
+| Package installs | When Claude runs `npm`/`pnpm`/`yarn`/`bun` add or install, `pip`/`python -m pip` install, `uv add`, `uv pip install`, `pipx install` or `poetry add` with named packages (up to 5 per command; with more, it asks first and names the ones it did not check), each is checked against its stored grade. Safe to connect: silent, unless part of the package could not be read (a file past the read cap or past the unpack budget), which gets one quiet note. Deprecated by its maintainer: a one-line note that it is deprecated (not a security finding). Review before you connect: a one-line note and the install proceeds. Do not connect: Claude Code asks you first. Lockfile installs (`npm install`, `npm ci`, `uv sync`), requirements files, local paths and repository or URL installs are left alone; a package AgentAvow could not grade (not found, not scannable, or the service is busy) gets a one-line "not checked" note; an offline or slow check stays silent. The next session start mentions once how many installs were checked. Turn it off with `AGENTAVOW_INSTALL_CHECKS=off`. | Claude Code, Cowork |
 | SessionStart hook | At the start of a session, grades each MCP server this session can use (user scope, this project, and the servers your installed plugins bring) that it has not seen before, and the project's direct dependencies: package.json `dependencies` (or `devDependencies` when there are none), requirements.txt, pyproject `[project].dependencies`, and Cargo.toml `[dependencies]` (Rust crates). In a workspace root with no manifest of its own, it reads the manifests one folder down (up to 5 sub-projects; never in your home folder). Up to 8 dependencies per start, re-graded only when the declared version changes; `AGENTAVOW_PRECHECK_DEPS=off` turns the dependency pass off. A server whose check has no answer within the start's time limit (a first scan can take a minute or more) is named as still being checked and asked about again at the next start until its answer shows (at most 5 starts or 24 hours; then it is reported once as "not checked: check timed out" and checked again in a week). Servers for other projects are counted and graded when you open them. Claude opens its first reply with a one-line summary (how many Safe / Review / Don't connect, the one needing attention), and keeps one line per server and dependency for when you ask. Dependencies are already installed: their answer is advice, never a stop. | Claude Code, Cowork |
 | PreToolUse gate | Before each MCP tool call, checks the answer on file for that server. Stops a call to a server whose answer is "Do not connect" (and, as before, one in the blocked tier), unless you allowed that one server; asks before a tool whose definition changed since it was scanned. "Review before you connect" never prompts. | Claude Code, Cowork |
+
+When a server, package or dependency is pinned to an exact version (`npx -y name@1.2.3`,
+`npm install name@1.2.3`, `pip install name==1.2.3`, `uvx name@1.2.3`, `uvx --from
+name==1.2.3 …`, or an exact version in package.json or requirements.txt), the hooks grade
+that version, not the latest one. A range or a tag (`^1.2`, `>=1`, `latest`, `next`) is
+graded at the latest version.
 
 The session-start hook and the skill warn; a low score adds context and you decide.
 The gate is the one part that can stop a call, and by default only for a server whose
@@ -144,6 +150,28 @@ Then add an MCP server and start a new session. The hook reports a line such as:
 ⚠️ MCP 'example' (https://mcp.example.com/mcp): Review before you connect — one high finding: shell command built from user input · AgentAvow 66/100.
 ```
 
+## Works in Codex too
+
+The same plugin runs in OpenAI's Codex (CLI and desktop app):
+
+```
+codex plugin marketplace add AgentAvow/AgentAvow
+codex plugin add agentavow-trust@agentavow
+```
+
+Codex asks you to review the plugin's hooks before they run: at the next start it
+shows "Hooks need review"; pick "Trust all and continue" (or use `/hooks`). It asks
+again after each plugin update. Until you trust them, only the connector and the
+skill work, and `codex exec` skips untrusted hooks without a word.
+
+In Codex the session-start check reads the servers in `~/.codex/config.toml` (and a
+trusted project's `.codex/config.toml`), and the install check watches
+`codex mcp add <name> --url <url>`, `codex mcp add <name> -- <command>` and the package
+installs listed above. Codex hooks cannot ask, so where Claude Code asks, Codex stops
+the step and says why, with the report and how to go ahead anyway (run it yourself in
+your own terminal outside Codex, or switch AgentAvow's hooks off in `/hooks`). Review
+before you connect is still a one-line note.
+
 ## The sandbox result in the line
 
 AgentAvow runs every npm and PyPI package it grades in an isolated gVisor sandbox on its own
@@ -210,7 +238,7 @@ AgentAvow, so it never sends it.
 **Once a day** (the first session start of each UTC day, even when there is nothing new
 to check) the session-start hook sends one more small request, a POST to
 `https://agentavow.com/api/v1/public/plugin/active` with the same install ID header and
-a body of `{"version": "0.1.43", "app": "desktop"}`: the plugin version and the app
+a body of `{"version": "0.1.45", "app": "desktop"}`: the plugin version and the app
 type, one of `desktop`, `cli`, `sdk`, `cloud` or `other`, read from Claude Code's
 `CLAUDE_CODE_ENTRYPOINT`. No tool, server, path or repo name goes in it. It lets
 AgentAvow count the machines the plugin protects, including the many days the hook
