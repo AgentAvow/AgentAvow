@@ -50,7 +50,7 @@ const GROUPS: { title: string; sub: string; items: Item[] }[] = [
     items: [
       { name: 'Claude Code and Cowork plugin', tag: 'Start here · checks by itself', tone: 'rec', text: 'Two commands from our GitHub marketplace, always the current version. Checks new MCP servers and packages automatically, and warns you before your agent uses one.', actions: [{ kind: 'link', label: 'Install →', href: '/rebrand/claude-code' }] },
       { name: 'Claude and ChatGPT', tag: 'Checks when you ask', tone: 'apps', text: 'The connector in Claude and the app in ChatGPT. Ask before you connect anything, right in the chat.', actions: [{ kind: 'apps' }] },
-      { name: 'Codex', tag: 'Checks when you ask', text: code(codexCmd(MCP)), actions: [{ kind: 'link', label: 'Setup →', href: '/rebrand/docs/mcp-connector' }] },
+      { name: 'Codex', tag: 'Checks when you ask', text: code(codexCmd(MCP)), actions: [{ kind: 'link', label: 'Setup →', href: '/rebrand/docs/codex' }] },
       { name: 'Cursor', tag: 'Checks when you ask', text: 'One-click install of the connector. Also listed on cursor.directory.', actions: [{ kind: 'link', label: 'Add to Cursor ↗', href: cursorInstall(MCP) }] },
       { name: 'VS Code', tag: 'Checks when you ask', text: 'One-click install of the connector.', actions: [{ kind: 'vscode' }] },
       { name: 'Gemini CLI', tag: 'Checks when you ask', text: <>Extension: {code('gemini extensions install https://github.com/AgentAvow/agentavow-gemini')}</>, actions: [{ kind: 'link', label: 'Open ↗', href: 'https://github.com/AgentAvow/agentavow-gemini' }] },
