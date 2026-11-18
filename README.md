@@ -362,6 +362,11 @@ make test
 # Single test file
 .venv/bin/python3 -m pytest tests/test_auth.py -v
 
+# In parallel (up to 8 workers; needs pytest-xdist from the dev extras): each worker
+# copies the test database to <name>_<run>_gwN, drops it at the end, and uses
+# Redis db 15 - N. A killed run can leave copies behind: psql -l | grep _gw
+.venv/bin/python3 -m pytest tests/ -n auto
+
 # With coverage
 .venv/bin/python3 -m pytest tests/ --cov=src
 ```
