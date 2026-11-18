@@ -34,6 +34,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   const stableChannels = useMemo(() => channels, [channelKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep onMessage ref current without triggering reconnects
+  // eslint-disable-next-line react-hooks/refs -- latest-callback ref: keeps the handler current without reconnecting; moving it to an effect would change delivery timing
   onMessageRef.current = onMessage
 
   // Only connect when tab is visible — disconnects when hidden, reconnects when visible

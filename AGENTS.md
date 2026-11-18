@@ -18,6 +18,7 @@ them in passing.
 - `integrations/` the claude-code hook scripts, plus litellm, opa (policy tested in CI) and openai-plugin.
 - `sdk/` SDKs and packages: `js/` (npm gate, tested in CI), `python/`, `mcp-server/`, `bridges/`, and others. See `sdk/PUBLISHING.md`.
 - `docs/standards/` open specs and conformance vectors (Apache-2.0 / CC BY 4.0; see `CONTRIBUTING.md`). Each vector folder has `generate.mjs` and `verify.mjs`.
+- `docs/adr/` architecture decision records: decisions already made. Read the index before proposing to change a core layer.
 - `docs/` user and operator docs (quickstart, onboarding, moderation playbook, `security-scan-false-positives.md`).
 - `github-action/` the PR trust-scan Action (`trust-scan.yml` runs it on PRs). `local-scan-action/` is the local-scan Action (`agentavow-selfscan.yml`).
 - `gitlab/`, `bitbucket/`, `azure-devops/` CI templates around the slim scanner image (`docker/scanner.Dockerfile`).
@@ -53,8 +54,13 @@ pytest tests/ -v              # env: DATABASE_URL, REDIS_URL, DEBUG=true
   refuse the default `JWT_SECRET`, so every module errors.
 - The full CI run takes about 25 to 35 minutes, judging by recent runs. Run the tests
   you touched locally first, e.g. `pytest tests/test_x.py -q`.
+- **`make check`** runs the fast gates in one go: ruff, AST verify, the doc-parity test
+  (`tests/test_doc_parity.py`, which checks that the commands and paths on this page
+  exist) and the web typecheck. It needs no database. Run it before every push. The
+  full suite is still `make test`.
 - The Makefile wraps these with a `.venv` (`make setup`, `make lint`, `make test`,
-  `make migrate`). Its `db-start` target uses Homebrew services, so it is macOS-only.
+  `make migrate`); pass `VENV=.venv312` (or any other venv) to use a different one.
+  Its `db-start` target uses Homebrew services, so it is macOS-only.
   On Linux, `docker compose up db redis` from `docker-compose.yml` gives you Postgres
   and Redis.
 - New migration: `alembic revision --autogenerate -m "..."` (`make migration`).
@@ -90,6 +96,7 @@ publishes `ghcr.io/agentavow/scanner`.
   `git worktree add ../AgentAvow-wt-<topic> -b <type>/<topic> origin/main`.
   One writer per worktree.
 - One PR per change. Branch names follow `feat/`, `fix/`, `chore/`, `docs/`.
+  `.github/pull_request_template.md` lists the checks every PR ticks.
 - Never merge past failing CI or missing reviews, and never bypass branch protection.
 - `ci.yml` runs on every PR, including PRs stacked on another PR's branch, and on
   pushes to main. `gh workflow run ci.yml --ref <branch>` triggers a manual run.
@@ -104,6 +111,11 @@ publishes `ghcr.io/agentavow/scanner`.
 
 - **Tests wipe their database.** See the warning under "Backend": a dedicated test
   database per agent, never dev, staging or prod.
+- **Logging goes through `src/observability/`.** Log with `logging.getLogger(__name__)`;
+  don't call `logging.basicConfig` or import a tracing library elsewhere (CLI entry
+  points call `src.observability.setup_logging()`). The formatter adds request and
+  trace ids and redacts secrets and emails (`tests/test_observability_imports.py`,
+  ADR 0004). Still don't log tokens, headers or request bodies on purpose.
 - **Python tables have TypeScript twins.** Change both sides in one PR:
   `src/scanner/verdict.py` ↔ `web/src/components/trust/gradeSystem.ts`, and
   `src/scanner/categories.py` ↔ `web/src/components/trust/scanCategories.ts`.
@@ -119,6 +131,18 @@ publishes `ghcr.io/agentavow/scanner`.
   `src/jobs/mcp_health.py` and the digest in `tests/test_mcp_card_trust_adoption_c.py`.
   Any change to it also needs a manual Rescan of the published ChatGPT app by the
   owner. Schema changes are additive only; flag them in the PR description.
+- **The REST API document is committed.** After a route or model change, run
+  `make openapi` (after `make openapi-venv` once: it pins FastAPI and pydantic from
+  `docs/api/openapi-toolchain.txt`) and commit `docs/api/openapi.json`. CI fails when it is stale or when
+  it breaks a client against the base branch (`make openapi-check`). New routes go
+  under `/api/v1`; exceptions go in `docs/api/route-allowlist.json` with a reason, and
+  owner-approved breaks in `docs/api/approved-breaks.json`. This diff does not cover
+  `/mcp`; the snapshot guards above still do (`docs/adr/0006-api-contract.md`).
+- **`Idempotency-Key` stays optional.** `src/idempotency.py` replays a keyed POST or
+  PATCH from Redis (ADR 0007). Never require the header on a route anonymous
+  clients call, and give every new entry in `EXCLUDED_PREFIXES` a reason there and in
+  `docs/adr/0007-idempotency-key.md`. A new route that answers a plaintext secret
+  (API key, signing secret, token) goes in `SECRET_ROUTES`; the tests fail otherwise.
 - **Merge only on an explicit green.** A watcher that errored or a pending job is not a
   pass.
 - **No AI-attribution trailers** (`Co-Authored-By: Claude`, `Claude-Session:`,
@@ -161,6 +185,13 @@ change, add `agent:needs-product`, explain why in one comment, and stop.
 - **Deploy gate:** `scripts/deploy-prod.sh` runs `nginx -t` on the new config in a
   throwaway container before it rebuilds or restarts anything, and stops if that
   fails. `tests/test_deploy_prod_script.py` pins this. Keep the gate.
+- **Settings:** add a field to `Settings` in `src/config.py` and a line to
+  `.env.example` (`tests/test_settings.py` checks every field is listed), then read
+  `settings.<field>`. Don't read `os.environ` / `os.getenv` under `src/`:
+  `tests/test_no_direct_env_reads.py` fails on new reads. In production
+  (`ENVIRONMENT=production`, or `DEBUG=false` with it unset) the app refuses to start
+  with the default `JWT_SECRET` or a localhost database or Redis. See
+  `docs/adr/0003-settings-validated-at-startup.md`.
 - **Scanner false positives** for users: `docs/security-scan-false-positives.md`
   covers inline `# ag-scan:ignore` and allowlist entries. Scanner precision fixes
   usually come with corpus or fixture tests.

@@ -13,7 +13,7 @@ your setup in a directory review. You opt in; you stay in control.
 The **AgentAvow Trust** plugin bundles the connector, a scan command (`/agentavow-trust:scan`), a skill
 that scans a server or package before Claude adds it (the same idea as Option 1),
 the SessionStart hook described under Option 2, and the per-call gate described
-below it. Find it in the Anthropic plugin directory, or install it from the repo:
+below it. Install it from our GitHub marketplace, which always has the current version:
 
 ```
 /plugin marketplace add AgentAvow/AgentAvow

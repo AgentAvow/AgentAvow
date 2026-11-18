@@ -2,9 +2,24 @@ from __future__ import annotations
 
 import os
 
-import pytest_asyncio
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from tests.service_guards import TEST_REDIS_DB, flushable_redis_db
+
+# Set before anything imports src.config. The session flushes this Redis db, so
+# it must be the dedicated test db (see tests/service_guards.py).
+os.environ.setdefault("REDIS_URL", f"redis://localhost:6379/{TEST_REDIS_DB}")
+flushable_redis_db(os.environ["REDIS_URL"])
+
+import pytest_asyncio  # noqa: E402
+from pwdlib import PasswordHash  # noqa: E402
+from pwdlib.hashers.bcrypt import BcryptHasher  # noqa: E402
+from sqlalchemy import text  # noqa: E402
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: E402
+
+from src.api import auth_service  # noqa: E402
+
+# bcrypt cost 4 for the suite only: register and login dominate its runtime, and a
+# hash of any cost still verifies. Production code keeps its fixed cost.
+auth_service._pwd_hasher = PasswordHash((BcryptHasher(rounds=4),))
 
 DB_URL = os.environ.get(
     "DATABASE_URL", "postgresql+asyncpg://localhost:5432/agentgraph_test"
@@ -779,6 +794,22 @@ async def _clean_db_once():
             text("TRUNCATE " + ", ".join(_TABLES) + " CASCADE")
         )
     await engine.dispose()
+
+    # Redis state outlives a run (rate-limit and password-reset counters, cached
+    # leaderboards). A client of its own, so the app's shared pool doesn't bind
+    # to this session's event loop.
+    import redis.asyncio as aioredis
+
+    from src.config import settings
+
+    flushable_redis_db(settings.redis_url)
+    r = aioredis.from_url(settings.redis_url)
+    try:
+        await r.flushdb()
+    except (aioredis.ConnectionError, OSError):
+        pass  # no Redis: the app's cache and limiter fall back without it
+    finally:
+        await r.aclose()
 
 
 @pytest_asyncio.fixture(autouse=True)

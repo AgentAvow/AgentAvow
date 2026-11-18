@@ -1,9 +1,10 @@
 """Event-driven sandbox runs: re-run a tool when it CHANGES, not on a calendar.
 
 The public scan path (``public_scan_router._behavioral_block``) runs the sandbox the
-first time a viewer asks for a coordinate and caches the block for 24 h. That is a
+first time a viewer asks for a coordinate and caches the block (one day past the
+backfill revisit window, see ``_behavioral_cache_ttl``). That is a
 viewer-driven schedule: a package that ships a new version five minutes after a run
-keeps serving the old observation until the cache expires AND someone looks again.
+would keep serving the old observation until the cache expires.
 
 This module adds two other ways a run can start, both reusing the router's own
 target / plan / lock / slot helpers so there is exactly one definition of "what the
@@ -14,8 +15,8 @@ sandbox runs for this scan":
   previous cached scan, the cached sandbox block(s) for it are dropped and a run is
   enqueued (reason ``version_change``). A watched coordinate whose block is simply
   missing is enqueued too (reason ``watch``) so watchers always have a fresh-enough
-  observation to diff. Nothing changed → nothing happens; the 24 h cache expires on
-  its own and the next viewer re-triggers.
+  observation to diff. Nothing changed → nothing happens; the cache expires on its
+  own, after the backfill has had its chance to re-run it.
 
 * ``enqueue_behavioral`` — the one entry point for starting a background run. A
   ``normal`` run (watch triggers) takes a slot exactly like the viewer path; a ``low``

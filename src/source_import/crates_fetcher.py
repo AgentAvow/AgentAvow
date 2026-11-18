@@ -21,6 +21,7 @@ import re
 import httpx
 
 from src.source_import.errors import SourceFetchError, SourceParseError
+from src.source_import.http import fetch_client
 from src.source_import.types import SourceImportResult
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,8 @@ _CRATES_URL_RE = re.compile(
 )
 
 _REQUEST_TIMEOUT = 15.0
+# Budget for the whole fetch, retries included.
+_TOTAL_DEADLINE = 25.0
 
 
 def parse_crates_url(url: str) -> str:
@@ -61,7 +64,9 @@ async def fetch_crates(crate_name: str, url: str) -> SourceImportResult:
     """
     api_url = f"https://crates.io/api/v1/crates/{crate_name}"
     try:
-        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+        async with fetch_client(
+            total=_TOTAL_DEADLINE, attempt_timeout=_REQUEST_TIMEOUT,
+        ) as client:
             resp = await client.get(
                 api_url,
                 headers={

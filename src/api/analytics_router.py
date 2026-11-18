@@ -68,7 +68,12 @@ PAGE_ACTION_PATHS = {
 }
 
 # A cta_click carries its destination in `intent`.
-CTA_DESTINATIONS = {"copy_plugin_cmd", "open_plugin_dir", "add_claude", "add_chatgpt"}
+# email_setup: "Email me the setup" sent; share_link: the page link shared or copied
+# (both on the phone path of /claude-code and the X-ad homepage).
+CTA_DESTINATIONS = {
+    "copy_plugin_cmd", "open_plugin_dir", "add_claude", "add_chatgpt",
+    "email_setup", "share_link",
+}
 
 UTM_FIELDS = ("utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term")
 UTM_MAX_LENGTH = 200
@@ -173,6 +178,8 @@ class CampaignRow(BaseModel):
     open_plugin_dir: int = 0
     add_claude: int = 0
     add_chatgpt: int = 0
+    email_setup: int = 0
+    share_link: int = 0
     badge_copied: int = 0
     contact_submit: int = 0
 

@@ -12,6 +12,7 @@ import { useAuth } from '../../hooks/useAuth'
 import api from '../../lib/api'
 import { rp } from '../basePath'
 
+// eslint-disable-next-line react-refresh/only-export-components -- admin-access hook kept beside the admin guard components; HMR falls back to a full reload here
 export function useAdminAccess() {
   const { user, isLoading } = useAuth()
   const isAdmin = !!user?.is_admin

@@ -121,6 +121,7 @@ export default function Layout() {
   const [scrolled, setScrolled] = useState(false)
 
   // Close mobile menu on route change
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- close the mobile menu after navigation; route change is an external event
   useEffect(() => { setMobileOpen(false) }, [location.pathname])
 
   // Glassmorphism on scroll — debounced to avoid re-rendering 60x/sec
