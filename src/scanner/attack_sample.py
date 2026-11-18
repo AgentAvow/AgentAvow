@@ -16,14 +16,20 @@ A match is a sample (low) only when ALL of these hold:
 3. the match sits inside one string value of a ``"key": "…"`` pair in an object whose
    other keys include test-case vocabulary (``expect`` / ``expected`` / ``category`` /
    ``label`` / ``attack_type`` …);
-4. every host the string fetches is a reserved name (``evil.example``, ``*.invalid``,
-   ``example.com``) and no curl / wget flag routes the fetch elsewhere
-   (``pipe_shell.reserved_hosts_only``), so it fetches nobody's script even if
-   something runs it, for JSON and Python alike. A sample naming a real host keeps the
-   dataset policy (``npm_scripts.DATASET_WHY``: high in a dataset dir, critical
-   elsewhere), because an agent reading it still sees it;
-5. Python: no line of the file hands that key (``case["text"]``, ``.get("text")``) to
-   an exec sink.
+4. every argument the string hands curl / wget is a reserved name (``evil.example``,
+   ``*.invalid``, ``example.com``), with or without a scheme, every flag is a plain
+   one, and nothing on the line or in the file routes the fetch or wraps curl / wget
+   (``pipe_shell.reserved_hosts_only``, ``pipe_shell.routes_elsewhere``). A sample
+   naming a real host keeps the dataset policy (``npm_scripts.DATASET_WHY``: high in a
+   dataset dir, critical elsewhere), because an agent reading it still sees it;
+5. Python: nothing in the file can run a command or import by a computed name;
+6. tree check (``npm_scripts._restore_attack_samples``): the finding gets its severity
+   back when code that can run something names the file, its stem or its directory,
+   or lists / reads files by a computed path; when a package script, install hook or
+   agent-instruction file names it; when any shipped file routes fetches (a proxy
+   setting, a .curlrc, a curl wrapper); or when the file is unseen. Code that runs a
+   reserved-host sample can rewrite the host first, so "it fetches nobody's script"
+   holds only while nothing can reach the file (#387 review, round 3).
 """
 from __future__ import annotations
 
@@ -87,33 +93,11 @@ def _object_keys(lines: list[str], idx: int) -> set[str]:
     return keys
 
 
+_PY_DYNAMIC_RE = re.compile(r"__import__|\bimportlib\b|\bgetattr\s*\(|\bcompile\s*\(")
 _PY_SINK_RE = re.compile(
     r"\bsubprocess\b|\bos\s*\.\s*(?:system|popen|exec\w*|spawn\w*)\s*\(|"
     r"\b(?:exec|eval|Popen|check_output|check_call|getoutput|getstatusoutput)\s*\(|"
     r"\bshell\s*=\s*True\b|\bpty\s*\.\s*spawn\b|\bcommands\s*\.\s*getoutput\b")
-
-
-def _py_key_executed(key: str, content: str) -> bool:
-    """A line of the Python file reads ``key`` on an exec sink line, or binds it
-    whole (``cmd = case["text"]``, ``.get("text")``) to a name a sink line uses."""
-    k = re.escape(key)
-    ref = (r"(?:\[\s*['\"]" + k + r"['\"]\s*\]|\.get\s*\(\s*['\"]" + k + r"['\"]"
-           r"|\bgetattr\s*\([^,()]+,\s*['\"]" + k + r"['\"])")
-    ref_re = re.compile(ref)
-    bind_re = re.compile(r"^\s*([A-Za-z_]\w*)\s*=\s*[\w.\]\[]*" + ref + r"[^()]*\)?\s*$")
-    lines = content.split("\n")
-    sinks = [ln for ln in lines if _PY_SINK_RE.search(ln)]
-    for ln in lines:
-        if not ref_re.search(ln):
-            continue
-        if _PY_SINK_RE.search(ln):
-            return True
-        bm = bind_re.match(ln)
-        if bm:
-            var = re.compile(r"(?<![\w.])" + re.escape(bm.group(1)) + r"\b")
-            if any(var.search(x) for x in sinks):
-                return True
-    return False
 
 
 def _sample_path(file_path: str) -> bool:
@@ -157,7 +141,13 @@ def sample_key(file_path: str, content: str, lines: list[str], idx: int,
         return None
     if not {k.lower() for k in _object_keys(lines, idx) - {key}} & _CASE_KEYS:
         return None
-    if p.suffix.lower() == ".py" and _py_key_executed(key, content):
+    if p.suffix.lower() == ".py" and (_PY_SINK_RE.search(content)
+                                      or _PY_DYNAMIC_RE.search(content)):
+        # Python: a file that can run a command or import by a computed name keeps
+        # the finding, whatever key the sample sits in (aliases, `next(iter(...))`
+        # and rewrites defeat key tracking; #387 review, round 3).
+        return None
+    if pipe_shell.routes_elsewhere(content):
         return None
     return key if pipe_shell.reserved_hosts_only(line, pattern, file_path) else None
 

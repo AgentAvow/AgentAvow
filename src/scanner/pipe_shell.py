@@ -15,6 +15,11 @@ says what it is:
   rustup, Docker, Claude Code …), no other argument, and no curl / wget flag that reads
   a config, adds a URL or proxy, or writes a file. Reported **high** (Review). Never in
   an install-lifecycle file (package.json scripts, setup.py): those stay critical.
+* ``NO_URL``: the only argument is a URL whose host is literally elided
+  (``https://.../install.sh``), every flag is a plain one, and nothing on the line
+  routes the fetch or wraps curl. Reported **low**; never in agent instructions or an
+  install hook. ``scan`` keeps it critical when the file can route, run or rewrite
+  text, and a tree pass (``npm_scripts._restore_no_url``) when anything can reach it.
 * ``CRITICAL``: everything else, as before: ``http://``, ``--insecure``, raw IP hosts,
   paste hosts, shorteners, a target built from variables, base64 on the line, any
   other host (including the project's own: an author-declared homepage proves nothing
@@ -301,6 +306,130 @@ def _no_url_allowed(file_path: str) -> bool:
     return name not in _INSTALL_HOOK_NAMES and not is_agent_instruction_file(file_path)
 
 
+# Flags that change only how a fetch is reported or retried, never where it goes. The
+# reserved-host and no-URL checks accept a target only when every flag is one of
+# these: an unknown flag may take a host as its value (`--dns-servers`, `--proxy1.0`,
+# `--unix-socket` …), so it is never assumed harmless (#387 review, round 3).
+_PLAIN_SHORT = frozenset("sSfLqv#")
+_PLAIN_LONG = frozenset({
+    "--silent", "--show-error", "--fail", "--fail-early", "--fail-with-body",
+    "--location", "--compressed", "--quiet", "--no-verbose", "--progress-bar",
+    "--tlsv1.2", "--tlsv1.3", "--http1.1", "--http2",
+})
+_PLAIN_LONG_VALUE = {
+    "--proto": re.compile(r"^=?[a-z+=,-]+$"),
+    "--retry": re.compile(r"^\d+$"),
+    "--max-time": re.compile(r"^\d+(?:\.\d+)?$"),
+    "--connect-timeout": re.compile(r"^\d+(?:\.\d+)?$"),
+    "--output": re.compile(r"^-$"),
+    "--output-document": re.compile(r"^-$"),
+}
+
+
+def _plain_args(target: str) -> list[str] | None:
+    """The non-flag arguments of a curl / wget target whose every flag is a plain one
+    (``_PLAIN_SHORT`` / ``_PLAIN_LONG``, ``-o -`` / ``-O-`` to stdout), else None."""
+    toks = [t.strip("'\"`") for t in target.split()]
+    out: list[str] = []
+    i = 0
+    while i < len(toks):
+        t = toks[i]
+        i += 1
+        if not t or _REDIRECT_OK_RE.match(t):
+            continue
+        if t.startswith("--"):
+            name, eq, val = t.partition("=")
+            if name in _PLAIN_LONG and not eq:
+                continue
+            rx = _PLAIN_LONG_VALUE.get(name)
+            if rx is None:
+                return None
+            if not eq:
+                val = toks[i] if i < len(toks) else ""
+                i += 1
+            if not rx.match(val):
+                return None
+            continue
+        if t.startswith("-") and len(t) > 1:
+            cluster = t[1:]
+            for j, ch in enumerate(cluster):
+                if ch in "oO":
+                    val = cluster[j + 1:]
+                    if not val:
+                        val = toks[i] if i < len(toks) else ""
+                        i += 1
+                    if val != "-":
+                        return None
+                    break
+                if ch not in _PLAIN_SHORT:
+                    return None
+            continue
+        out.append(t)
+    return out
+
+
+# Text that makes curl / wget fetch from somewhere the URL does not name, or run as
+# something else: a proxy / config / resolver environment setting (`export
+# http_proxy=…`, `HOME=. curl` with a shipped .curlrc, `LOCALDOMAIN=` search domains),
+# as an assignment or a JSON / dict key; a config file curl / wget read; or an alias /
+# shell function that wraps curl / wget. Checked over the whole line (a setting before
+# an earlier `;` still applies) and, for the no-URL class, the whole file.
+_ROUTING_TEXT_RE = re.compile(
+    r"(?i:(?<![\w-])(?:\w*proxy|curl_home|wgetrc|system_wgetrc|curl_ca_bundle|home|"
+    r"xdg_config_home|localdomain|res_options|hostaliases)['\"]?\]?\s*[:=]"
+    r"|\.curlrc\b|\.wgetrc\b|/etc/hosts\b|\bresolv\.conf\b"
+    r"|\balias\s+(?:curl|wget|(?:ba|z|da|k)?sh)\s*="
+    r"|\bfunction\s+(?:curl|wget|(?:ba|z|da|k)?sh)\b"
+    r"|(?<![\w-])(?:curl|wget|(?:ba|z|da|k)?sh)\s*\(\s*\)\s*\{)"
+    # a PATH that can put another `curl` / `sh` first
+    r"|(?<![\w-])PATH['\"]?\]?\s*[:=]")
+
+
+def routes_elsewhere(text: str) -> bool:
+    """``text`` (a line or a whole file) can change where curl / wget fetch from or
+    what runs as curl / wget (``_ROUTING_TEXT_RE``)."""
+    return bool(_ROUTING_TEXT_RE.search(text))
+
+
+def _host_token(tok: str) -> str | None:
+    """The host a curl / wget argument fetches from: a URL's host, or the host of a
+    scheme-less ``host[:port][/path]`` argument; None when it names no host."""
+    if _URL_RE.fullmatch(tok):
+        hm = _HOST_IN_URL_RE.match(tok)
+        return hm.group(1) if hm else None
+    host = tok.split("/", 1)[0].rsplit("@", 1)[-1].split(":", 1)[0]
+    return host if _HOSTISH_RE.fullmatch(host) else None
+
+
+# Anything in a file that can run or rewrite text: a process spawn, eval, a computed
+# import, or a shell tool that rewrites a string before it runs (`eval "$(echo … | sed
+# …)"`). A host-elided URL in such a file can be turned into a real one by the code
+# beside it, so it keeps its critical.
+_NO_URL_SINK_RE = re.compile(
+    r"\bsubprocess\b|\bos\.(?:system|popen|exec\w*|spawn\w*)\b|\bPopen\b|\bpty\.spawn\b|"
+    r"\bexec\s*\(|\beval\b|\bcompile\s*\(|__import__|\bimportlib\b|\bgetattr\s*\(|"
+    r"\bchild_process\b|\bexec(?:Sync|File\w*)?\s*\(|\bspawn(?:Sync)?\s*\(|\bfork\s*\(|"
+    r"\bFunction\s*\(|\bvm\.\w+|\brequire\s*\(\s*[^'\"]|\bimport\s*\(|\$\s*`|\bzx\b|"
+    r"\bexeca\b|\bshelljs\b|Bun\.(?:spawn|\$)|Deno\.(?:run|Command)|\bsystem\s*\(|"
+    r"\b(?:ba|z|da|k)?sh\s+-c\b|\bsource\b|\$\(|\bsed\b|\bawk\b|\bperl\b|\bxargs\b|"
+    r"\benvsubst\b|\.replace(?:All)?\s*\(|\bre\.sub\b")
+
+
+def no_url_file_ok(content: str) -> bool:
+    """The no-URL class is kept for a file only when nothing in it routes a fetch,
+    wraps curl / wget, or can run or rewrite text (``_NO_URL_SINK_RE``)."""
+    return not routes_elsewhere(content) and not _NO_URL_SINK_RE.search(content)
+
+
+def _no_url_target(line: str, target: str) -> bool:
+    """The elided URL is the only argument, every flag is plain, and nothing on the
+    line routes the fetch or wraps curl: there is nothing to fetch however the line
+    or its file is run (#387 review, round 3)."""
+    args = _plain_args(target)
+    return (args is not None and len(args) == 1 and _elided_url(args[0])
+            and not routes_elsewhere(line) and not line.rstrip().endswith("\\"))
+
+
 def classify_match(line: str, start: int, end: int, file_path: str) -> str:
     """Classify one pipe-to-shell match: DROP, NO_URL, OFFICIAL, PINNED or CRITICAL."""
     start = _last_command_start(line, start, end)
@@ -319,7 +448,7 @@ def classify_match(line: str, start: int, end: int, file_path: str) -> str:
         real = [a for a in args if a and not a.startswith("-")]
         if not real or all(_PLACEHOLDER_ARG_RE.match(a) for a in real):
             return DROP
-    elif (not has_var and all(_elided_url(u) for u in urls)
+    elif (not has_var and _no_url_target(line, target)
           and _no_url_allowed(file_path)):
         return NO_URL
     name = Path(file_path).name.lower()
@@ -354,49 +483,29 @@ def _is_reserved_host(host: str) -> bool:
             or any(h == d or h.endswith("." + d) for d in _RESERVED_DOMAINS))
 
 
-# An environment assignment before curl / wget that routes the fetch or loads a config.
-_ROUTING_ENV_RE = re.compile(r"(?i)(?:^|[\s\"'`])(?:\w*proxy|curl_home|wgetrc|curl_ca_bundle)=")
-
-
-def _routes_elsewhere(target: str) -> bool:
-    """A curl / wget flag in ``target`` that can make the fetch reach another host than
-    the URL names (``--connect-to``, ``--resolve``, ``-x`` / ``--proxy``, a SOCKS
-    proxy) or read a config that can (``-K`` / ``--config``, wget ``-e``): the URL's
-    host is no longer what is fetched (#387 review)."""
-    for raw in target.split():
-        t = raw.strip("'\"`")
-        if t.startswith("--"):
-            if t.partition("=")[0] in _LONG_DANGEROUS:
-                return True
-        elif t.startswith("-") and len(t) > 1:
-            for ch in t[1:]:
-                if ch in _SHORT_DANGEROUS:
-                    return True
-                if ch in _SHORT_WITH_VALUE:
-                    break
-    return False
-
-
 def reserved_hosts_only(line: str, pattern: re.Pattern[str], file_path: str) -> bool:
-    """Every pipe-to-shell match on ``line`` fetches from a reserved host (and from
-    nothing else): no variable, no extra URL, no flag or environment setting that
-    routes the fetch elsewhere, at least one host per match."""
+    """Every pipe-to-shell match on ``line`` fetches from a reserved host and from
+    nothing else: no variable, only plain flags (``_plain_args``: a flag that may take
+    a host, a proxy, a resolver or a config is refused, known or not), every argument
+    a reserved host, with or without a scheme, and nothing anywhere on the line that
+    routes the fetch or wraps curl / wget (``routes_elsewhere``, ``export`` and
+    settings before an earlier ``;`` included; #387 review, round 3)."""
+    if routes_elsewhere(line):
+        return False
     any_match = False
     for m in pattern.finditer(line):
         any_match = True
         start = _last_command_start(line, m.start(), m.end())
         target = _target(line, start, m.end())
-        if not target or _VAR_RE.search(target) or _routes_elsewhere(target):
+        if not target or _VAR_RE.search(target):
             return False
-        seps = list(_CMD_SEP_RE.finditer(line, 0, start))
-        if _ROUTING_ENV_RE.search(line[seps[-1].end() if seps else 0:start]):
+        args = _plain_args(target.replace("\\.", "."))
+        if not args:
             return False
-        hosts = [hm.group(1) for u in _URL_RE.findall(target)
-                 if (hm := _HOST_IN_URL_RE.match(u))]
-        if not _URL_RE.search(target):
-            hosts = [h.replace("\\.", ".") for h in _HOSTISH_RE.findall(target)]
-        if not hosts or not all(_is_reserved_host(h) for h in hosts):
-            return False
+        for a in args:
+            host = _host_token(a)
+            if host is None or not _is_reserved_host(host):
+                return False
     return any_match
 
 
