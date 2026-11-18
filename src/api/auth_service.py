@@ -19,7 +19,10 @@ from src.models import (
     TokenBlacklist,
 )
 
-_pwd_hasher = PasswordHash((BcryptHasher(rounds=12),))
+# bcrypt cost for every stored password. tests/conftest.py swaps in a cheaper
+# hasher for the suite; nothing in the app lowers it.
+PASSWORD_HASH_ROUNDS = 12
+_pwd_hasher = PasswordHash((BcryptHasher(rounds=PASSWORD_HASH_ROUNDS),))
 
 
 def hash_password(password: str) -> str:

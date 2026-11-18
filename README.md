@@ -366,6 +366,12 @@ make test
 .venv/bin/python3 -m pytest tests/ --cov=src
 ```
 
+Tests need Postgres and Redis. Point `DATABASE_URL` at a test-only database: the
+session truncates its tables. The session also flushes Redis db 15, the only db it
+accepts in `REDIS_URL` (the default under pytest), so dev (db 0) and staging (db 1)
+are never touched. Tests hash passwords at bcrypt cost 4 by swapping the hasher in
+`tests/conftest.py`; the app always uses cost 12.
+
 ### Code Standards
 
 - **Python 3.11+** (3.12 in production) — use `from __future__ import annotations` for union types
