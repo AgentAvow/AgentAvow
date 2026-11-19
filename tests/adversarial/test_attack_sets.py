@@ -26,6 +26,9 @@ production package path (npm_result_from_tarball -> apply_artifact_scan -> trust
   .env (#388; skill path)
 * ``cases_shown_cmd`` - an install hint only shown (shell, Go, Rust, JS) whose text
   can still reach a process (#378; scanned as a source repo with ``scan_local``)
+* ``cases_subpackage_scripts`` - a maintainer-only script in a nested package.json the
+  root never ships, against install hooks, runners and shipped code that reach it
+  (scanned as a source repo with ``scan_local``)
 
 Every case's label is pinned in ``expected.json``. A scanner change that moves one fails
 here; regenerate with ``python -I tests/adversarial/expected_labels.py --write`` in the
@@ -47,7 +50,8 @@ EXPECTED = json.loads((HERE / "expected.json").read_text())
 SETS = ("cases_npm_scripts", "cases_printed_hint", "cases_trifecta", "cases_exfil_precision",
         "cases_browser_profile", "cases_signing_key",
         "cases_encoded_instructions", "cases_bytecode", "cases_skill_prose",
-        "cases_a2a_cards", "cases_skill_secret_flow", "cases_shown_cmd")
+        "cases_a2a_cards", "cases_skill_secret_flow", "cases_shown_cmd",
+        "cases_subpackage_scripts")
 
 # Attacks that still read safe today, with the label they should read.
 KNOWN_GAPS: dict[tuple[str, str], str] = {
