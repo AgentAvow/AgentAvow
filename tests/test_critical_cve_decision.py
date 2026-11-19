@@ -53,6 +53,46 @@ def test_cvss_prefers_v4_then_v3_then_legacy():
         assert gh_advisory_cvss(bad) is None
 
 
+def test_cvss_takes_the_higher_of_v3_and_v4():
+    both = {"cvss_severities": {"cvss_v4": {"score": 8.7}, "cvss_v3": {"score": 9.1}}}
+    assert gh_advisory_cvss(both) == 9.1
+    both = {"cvss_severities": {"cvss_v4": {"score": 9.3}, "cvss_v3": {"score": 8.1}}}
+    assert gh_advisory_cvss(both) == 9.3
+
+
+# One flaw, two OSV records: the GHSA carries GitHub's label, the PYSEC record none.
+_GHSA_REC = {"id": "GHSA-aaaa-bbbb-cccc", "aliases": ["CVE-2026-5", "PYSEC-2026-5"],
+             "summary": "flaw", "database_specific": {"severity": "CRITICAL"},
+             "affected": [{"package": {"ecosystem": "PyPI", "name": "pkg"},
+                           "ranges": [{"type": "ECOSYSTEM",
+                                       "events": [{"introduced": "0"}, {"fixed": "2.0"}]}]}]}
+_PYSEC_REC = {"id": "PYSEC-2026-5", "aliases": ["CVE-2026-5"], "summary": "flaw",
+              "severity": [{"type": "CVSS_V3", "score": "9.8"}],
+              "affected": [{"package": {"ecosystem": "PyPI", "name": "pkg"},
+                            "ranges": [{"type": "ECOSYSTEM",
+                                        "events": [{"introduced": "0"}, {"fixed": "2.0"}]}]}]}
+
+
+def test_duplicate_osv_records_merge_the_same_in_either_order():
+    a = ih.summarize_advisories([_PYSEC_REC, _GHSA_REC], "PyPI", "1.0", "pkg")
+    b = ih.summarize_advisories([_GHSA_REC, _PYSEC_REC], "PyPI", "1.0", "pkg")
+    assert a == b and len(a) == 1
+    (m,) = a
+    assert m["id"] == "GHSA-aaaa-bbbb-cccc" and m["severity"] == "critical"
+    assert m["cvss"] == 9.8 and m["affects_scanned_version"] is True
+    assert m["fixed_in"] == "2.0" and "CVE-2026-5" in m["aliases"]
+    data = _data(a)
+    assert decide(data).decision == "do_not_connect"
+
+
+def test_osv_vector_strings_are_not_scored():
+    rec = {**_PYSEC_REC, "severity": [{"type": "CVSS_V3",
+                                       "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}]}
+    assert ih.osv_numeric_cvss(rec) is None
+    (m,) = ih.summarize_advisories([rec], "PyPI", "1.0", "pkg")
+    assert m["cvss"] is None and m["severity"] == "medium"
+
+
 def test_repo_advisory_carries_cvss():
     (a,) = summarize_repo_advisories([TODOIST_ADVISORY], "npm", TODOIST, "10.3.2")
     assert a["cvss"] == 9.3 and a["aliases"] == ["CVE-2026-76807"]

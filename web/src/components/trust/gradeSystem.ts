@@ -290,15 +290,20 @@ function advisoryCvss(a: Obj): number | null {
   return v
 }
 
+// The advisory's own severity label, lowercased; anything but a string is missing.
+function advisoryLabel(a: Obj): string {
+  return typeof a.severity === 'string' ? a.severity.toLowerCase() : ''
+}
+
 export function advisoryIsCritical(a: Obj): boolean {
   const c = advisoryCvss(a)
   if (c !== null) return c >= CRITICAL_CVSS
-  return String(a.severity ?? '').toLowerCase() === 'critical'
+  return advisoryLabel(a) === 'critical'
 }
 
 function advisoryRank(a: Obj): [number, number, number] {
   const c = advisoryCvss(a)
-  return [advisoryIsCritical(a) ? 1 : 0, ADVISORY_SEV_RANK[String(a.severity ?? '').toLowerCase()] ?? 0, c ?? -1]
+  return [advisoryIsCritical(a) ? 1 : 0, ADVISORY_SEV_RANK[advisoryLabel(a)] ?? 0, c ?? -1]
 }
 
 function rankGreater(x: [number, number, number], y: [number, number, number]): boolean {

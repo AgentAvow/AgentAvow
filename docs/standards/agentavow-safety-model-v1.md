@@ -271,8 +271,13 @@ mark). Reference implementation: `src/scanner/verdict.py` (`certified_mark`).
 The phrase layer is unsigned, so this change carries no model version; the score is
 unchanged. A published advisory (GHSA, CVE or another OSV record) for the package itself
 that affects the scanned version reads `do_not_connect` when its CVSS base score is 9.0 or
-more. GitHub's score is used where the advisory lists one (CVSS v4, else v3); without a
-score, the advisory's own `critical` severity label stands in. Any other affecting
+more. The score is the numeric CVSS the publisher gives: for a GitHub repository advisory,
+the higher of its CVSS v4 and v3 scores; for an OSV record, a severity score stated as a
+number. A CVSS vector without a stated number is not scored. When no numeric score is
+given, the advisory's own severity label decides: `critical` reads `do_not_connect`, any
+other label (or none) reads `review`. Records that describe the same flaw (sharing an id
+or alias) are merged first, keeping the highest label and the highest score, so the
+result does not depend on record order. Any other affecting
 advisory reads `review` as before, and an advisory that affects only other versions is
 not an input. Every `decision_reason` names an affecting advisory by its CVE id (else its
 own id), with the fixed release when one is listed: it leads the reason when the advisory

@@ -125,18 +125,24 @@ def _advisory_cvss(a: dict) -> float | None:
     return float(v)
 
 
+def _advisory_label(a: dict) -> str:
+    """The advisory's own severity label, lowercased; anything but a string is missing."""
+    v = a.get("severity")
+    return v.lower() if isinstance(v, str) else ""
+
+
 def advisory_is_critical(a: dict) -> bool:
     """CVSS 9.0 or more; without a score, the advisory's own "critical" label."""
     c = _advisory_cvss(a)
     if c is not None:
         return c >= CRITICAL_CVSS
-    return str(a.get("severity") or "").lower() == "critical"
+    return _advisory_label(a) == "critical"
 
 
 def _advisory_rank(a: dict) -> tuple:
     c = _advisory_cvss(a)
     return (advisory_is_critical(a),
-            _ADVISORY_SEV_RANK.get(str(a.get("severity") or "").lower(), 0),
+            _ADVISORY_SEV_RANK.get(_advisory_label(a), 0),
             c if c is not None else -1.0)
 
 
