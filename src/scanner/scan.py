@@ -7791,6 +7791,7 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
         await _apply_repo_advisories(result, eco, name, fetched.packaged_manifest)
     except Exception:  # noqa: BLE001 — fail-open, but never read as clean
         _repo_advisory_lookup_failed(result, f"{eco}:{name}")
+    _flag_unreadable_critical_advisories(result)
     # An ecosystem OSV covers whose lookup did not complete: "no advisories" was not
     # checked, so say so beside the answer (disclosure only, never scored).
     try:
@@ -8049,6 +8050,21 @@ async def _apply_repo_advisories(result, eco: str, name: str, manifest: dict | N
     if n:
         result.coverage_gaps = {**(result.coverage_gaps or {}),
                                 "repo_advisory_range_unparsed": n}
+
+
+def _flag_unreadable_critical_advisories(result) -> None:
+    """A critical advisory from the vulnerability database (OSV) naming this package,
+    whose range we could not read against the scanned version (a commit range, a
+    version we cannot parse): disclosed as ``advisory_range_unparsed``, which withholds
+    the Certified mark. Never a finding and never the answer: it was not read as
+    affecting. Runs after the repository advisories, which can supply a CVSS score."""
+    from src.scanner.incident_history import unreadable_critical_advisories
+
+    n = unreadable_critical_advisories(
+        (result.incident_history or {}).get("advisories") or [])
+    if n:
+        result.coverage_gaps = {**(result.coverage_gaps or {}),
+                                "advisory_range_unparsed": n}
 
 
 def _repo_advisory_lookup_failed(result, what: str) -> None:

@@ -619,6 +619,8 @@ def test_ts_coverage_gap_notes_twin():
         {"repo_advisory_range_unparsed": "1234", "advisory_lookup": "failed"},
         {"repo_advisory_unmatched": 1}, {"repo_advisory_unmatched": "2",
                                          "repo_advisory_range_unparsed": 1},
+        {"advisory_range_unparsed": 1}, {"advisory_range_unparsed": "3",
+                                         "repo_advisory_range_unparsed": 1},
     )] + [{"coverage_gaps": ["x"]}, {}]
     script = (
         "const m = await import(process.argv[1]);"

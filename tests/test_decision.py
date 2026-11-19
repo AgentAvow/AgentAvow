@@ -289,6 +289,11 @@ CASES = [
         "repo_advisory_unmatched": 1}), "safe", True,
      "nothing found in 340 files; 1 repository security advisory could not be matched "
      "to this image's version"),
+    # A critical advisory whose range could not be read is disclosed, never decides.
+    ("unreadable_critical_advisory_stays_safe", _scan(92, 340, coverage_gaps={
+        "advisory_range_unparsed": 1}), "safe", True,
+     "nothing found in 340 files; 1 critical security advisory had a version range "
+     "that could not be read"),
     ("advisory_aliases_not_a_list", _scan(66, 200, incident_history={"advisories": [
         {"id": "GHSA-x", "aliases": "CVE-2026-9", "affects_scanned_version": True}]}),
      "review", True, "known vulnerability GHSA-x affects this version"),
@@ -923,6 +928,15 @@ MARK_CASES = [
     ("gap_repo_advisory_range_unparsed", _scan(
         92, 340, certified=CERTIFIED, coverage_gaps={"repo_advisory_range_unparsed": 1}),
      False, "coverage_gaps"),
+    ("gap_advisory_range_unparsed", _scan(
+        92, 340, certified=CERTIFIED, coverage_gaps={"advisory_range_unparsed": 1}),
+     False, "coverage_gaps"),
+    ("gap_advisory_range_unparsed_string", _scan(
+        92, 340, certified=CERTIFIED, coverage_gaps={"advisory_range_unparsed": "2"}),
+     False, "coverage_gaps"),
+    ("gap_advisory_range_unparsed_zero_keeps_mark", _scan(
+        92, 340, certified=CERTIFIED, coverage_gaps={"advisory_range_unparsed": 0}),
+     True, ""),
     ("gap_repo_advisory_unmatched", _scan(
         92, 340, certified=CERTIFIED, coverage_gaps={"repo_advisory_unmatched": 1}),
      False, "coverage_gaps"),

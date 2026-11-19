@@ -1,0 +1,138 @@
+[
+  {
+    "ghsa_id": "GHSA-rvjm-7hvp-f868",
+    "cve_id": null,
+    "html_url": "https://github.com/datalayer/jupyter-mcp-server/security/advisories/GHSA-rvjm-7hvp-f868",
+    "summary": "ManagementRouteSecurityMiddleware Bypass via connect_to_jupyter MCP Tool (SSRF & Sandbox Hijack) and Default Wildcard CORS on /mcp",
+    "severity": "critical",
+    "state": "published",
+    "published_at": "2026-11-17T09:40:17Z",
+    "withdrawn_at": null,
+    "cvss": {
+      "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:H/A:H",
+      "score": 9.6
+    },
+    "cvss_severities": {
+      "cvss_v3": {
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:H/A:H",
+        "score": 9.6
+      },
+      "cvss_v4": {
+        "vector_string": null,
+        "score": null
+      }
+    },
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "pip",
+          "name": "jupyter-mcp-server"
+        },
+        "vulnerable_version_range": "<= commit fe0a1d4f0592",
+        "patched_versions": null
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-f8rf-rcrx-h6r9",
+    "cve_id": null,
+    "html_url": "https://github.com/datalayer/jupyter-mcp-server/security/advisories/GHSA-f8rf-rcrx-h6r9",
+    "summary": "Host-header spoof bypasses the CVE-2026-77359/GHSA-9x8x-crjq-g64h fix - ManagementRouteSecurityMiddleware checks the client-supplied Host header, not the real TCP peer",
+    "severity": "critical",
+    "state": "published",
+    "published_at": "2026-09-01T04:34:32Z",
+    "withdrawn_at": null,
+    "cvss": {
+      "vector_string": null,
+      "score": null
+    },
+    "cvss_severities": {
+      "cvss_v3": {
+        "vector_string": null,
+        "score": null
+      },
+      "cvss_v4": {
+        "vector_string": null,
+        "score": null
+      }
+    },
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "pip",
+          "name": "jupyter-mcp-server"
+        },
+        "vulnerable_version_range": "<2.1.3",
+        "patched_versions": "2.1.3"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-9x8x-crjq-g64h",
+    "cve_id": "CVE-2026-77359",
+    "html_url": "https://github.com/datalayer/jupyter-mcp-server/security/advisories/GHSA-9x8x-crjq-g64h",
+    "summary": "Browser DNS rebinding can hijack the Jupyter backend through management routes",
+    "severity": "critical",
+    "state": "published",
+    "published_at": "2026-07-12T02:16:39Z",
+    "withdrawn_at": null,
+    "cvss": {
+      "vector_string": null,
+      "score": null
+    },
+    "cvss_severities": {
+      "cvss_v3": {
+        "vector_string": null,
+        "score": null
+      },
+      "cvss_v4": {
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:H/VA:H/SC:H/SI:H/SA:H",
+        "score": 9.3
+      }
+    },
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "pip",
+          "name": "jupyter-mcp-server"
+        },
+        "vulnerable_version_range": "<= 1.0.2",
+        "patched_versions": ""
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-24pw-rf5p-mgp7",
+    "cve_id": "CVE-2026-77318",
+    "html_url": "https://github.com/datalayer/jupyter-mcp-server/security/advisories/GHSA-24pw-rf5p-mgp7",
+    "summary": "Unauthenticated management routes can hijack the Jupyter backend in standalone HTTP mode",
+    "severity": "high",
+    "state": "published",
+    "published_at": "2026-07-11T19:23:43Z",
+    "withdrawn_at": null,
+    "cvss": {
+      "vector_string": null,
+      "score": null
+    },
+    "cvss_severities": {
+      "cvss_v3": {
+        "vector_string": null,
+        "score": null
+      },
+      "cvss_v4": {
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:P/VC:L/VI:H/VA:L/SC:H/SI:H/SA:L",
+        "score": 7.3
+      }
+    },
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "pip",
+          "name": "jupyter-mcp-server"
+        },
+        "vulnerable_version_range": "<= 1.0.2",
+        "patched_versions": ""
+      }
+    ]
+  }
+]
