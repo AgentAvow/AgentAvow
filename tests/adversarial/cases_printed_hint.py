@@ -332,10 +332,6 @@ CASES["ctl_console_alias_this_logger"] = pkg({
 CASES["ctl_console_alias_const"] = pkg({
     "index.js": "const log = globalThis.console;\n"
                 f"function check() {{ log.warn({HINT_MSG}); log.info('done'); }}\ncheck();\n"})
-CASES["ctl_console_alias_self_default"] = pkg({
-    "index.js": "class Client {\n  constructor() { this._logger = this._logger ?? console; }\n"
-                f"  check() {{ this._logger.error({HINT_MSG}); }}\n}}\n"
-                "new Client().check();\n"})
 CASES["f_console_alias_passed_to_fn"] = pkg({
     "index.js": CP + "const log = console;\nfunction wire(l) { l.warn = (s) => execSync(s); }\n"
                 f"wire(log);\nlog.warn({HINT_MSG});\n"})
@@ -369,6 +365,33 @@ CASES["f_console_alias_in_object"] = pkg({
 CASES["f_console_alias_other_method"] = pkg({
     "index.js": CP + "const log = console;\nlog.assert = (c, s) => execSync(s);\n"
                 f"log.warn({HINT_MSG});\n"})
+
+# Forms where the caller, not the file, decides the value: a self-default keeps whatever
+# was already there, and a default parameter / destructuring default applies only when
+# the caller passes nothing. Each must stay critical. `f_console_alias_self_default_this`
+# was the `ctl_console_alias_self_default` control (it read safe); it is now an attack.
+CASES["f_console_alias_self_default_this"] = pkg({
+    "cfg.js": CP + "module.exports = { ['_log' + 'ger']: { error: (s) => execSync(s) } };\n",
+    "index.js": "class Client {\n  constructor(opts) {\n    Object.assign(this, opts);\n"
+                "    this._logger = this._logger ?? console;\n  }\n"
+                f"  check() {{ this._logger.error({HINT_MSG}); }}\n}}\n"
+                "new Client(require('./cfg')).check();\n"})
+CASES["f_console_alias_self_default_param"] = pkg({
+    "index.js": CP + "function check(log) {\n  log = log ?? console;\n"
+                f"  log.warn({HINT_MSG});\n}}\n"
+                "check({ warn: (s) => execSync(s) });\n"})
+CASES["f_console_alias_default_param"] = pkg({
+    "index.js": CP + "function check(log = console) {\n"
+                f"  log.warn({HINT_MSG});\n}}\n"
+                "check({ warn: (s) => execSync(s) });\n"})
+CASES["f_console_alias_destructuring_default"] = pkg({
+    "index.js": CP + "function check({ logger = console } = {}) {\n"
+                f"  logger.warn({HINT_MSG});\n}}\n"
+                "check({ ['log' + 'ger']: { warn: (s) => execSync(s) } });\n"})
+CASES["f_console_alias_or_param"] = pkg({
+    "index.js": CP + "function check(logger) {\n  logger = logger || console;\n"
+                f"  logger.warn({HINT_MSG});\n}}\n"
+                "check({ warn: (s) => execSync(s) });\n"})
 
 def run(files):
     fetched = npm_result_from_tarball("adv-case", "1.0.0", tgz(files))

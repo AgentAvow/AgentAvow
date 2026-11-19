@@ -511,10 +511,7 @@ _CP = 'const cp = require("child_process");\n'
     f'const log = console;\nfunction f() {{ log.warn("install: {CMD}"); log.info("x"); }}\n',
     f'const log = globalThis.console;\nlog.error(`missing; run {CMD}`);\n',
     f'var log = window.console;\nlog.log("run {CMD}");\n',
-    'class C {\n  constructor() { this._logger = this._logger ?? console; }\n'
-    f'  f() {{ this._logger.debug("run {CMD}"); }}\n}}\n',
-    'class C {\n  constructor() { this.out = undefined || console; }\n'
-    f'  f() {{ this.out.trace("run {CMD}"); }}\n}}\n',
+    f'function f() {{ const log = console; log.warn("install: {CMD}"); }}\n',
     # The alias also keeps a direct `console.*` hint elsewhere in the file a hint.
     f'this._logger = console;\nthis._logger.info("x");\nconsole.log("run {CMD}");\n',
 ])
@@ -535,6 +532,22 @@ def test_console_alias_hint_is_low(src):
     _CP + 'class C {\n  constructor(opts) { this._logger = opts.logger ?? console; }\n'
     f'  f() {{ this._logger.warn("run {CMD}"); }}\n}}\n',
     _CP + f'const log = opts.logger || console;\nlog.warn("run {CMD}");\n',
+    # a self-default keeps a value a caller can set
+    _CP + 'class C {\n  constructor() { this._logger = this._logger ?? console; }\n'
+    f'  f() {{ this._logger.debug("run {CMD}"); }}\n}}\n',
+    _CP + 'class C {\n  constructor() { this.out = undefined || console; }\n'
+    f'  f() {{ this.out.trace("run {CMD}"); }}\n}}\n',
+    _CP + f'function f(log) {{\n  log = log ?? console;\n  log.warn("run {CMD}");\n}}\n',
+    _CP + f'function f(log) {{\n  log = log || console;\n  log.warn("run {CMD}");\n}}\n',
+    # a default parameter / destructuring default: the caller supplies the value
+    _CP + f'function f(log = console) {{\n  log.warn("run {CMD}");\n}}\n',
+    _CP + f'const f = (log = console) => {{\n  log.warn("run {CMD}");\n}};\n',
+    _CP + f'function f({{ logger = console }} = {{}}) {{\n  logger.warn("run {CMD}");\n}}\n',
+    _CP + f'function f(opts) {{\n  const {{ logger = console }} = opts;\n'
+    f'  logger.warn("run {CMD}");\n}}\n',
+    _CP + f'function f(a, logger = console) {{ logger.warn("run {CMD}"); }}\n',
+    # a plain assignment to a name the file never declares
+    _CP + f'log = console;\nlog.warn("run {CMD}");\n',
     # exported / stored in an object
     _CP + f'const log = console;\nmodule.exports = {{ log }};\nlog.warn("run {CMD}");\n',
     _CP + f'export const log = console;\nlog.warn("run {CMD}");\n',

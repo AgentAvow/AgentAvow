@@ -641,19 +641,27 @@ def _shadow_hit(rx: re.Pattern, text: str, tree: dict[str, str] | None = None) -
 # ``this._logger.warn("… curl … | sh")``). It counts as ``console`` when:
 #
 # * every binding of the name is ``NAME = console`` / ``globalThis.console`` /
-#   ``window.console``, or ``NAME = NAME ?? console`` (``||``) with the left side the
-#   same name (or ``undefined`` / ``null``), each ending the statement; ``NAME`` is a
-#   ``const`` / ``let`` / ``var`` / plain variable or ``this.NAME``;
+#   ``window.console`` and nothing else on the right, ending the statement; ``NAME`` is
+#   a ``const`` / ``let`` / ``var`` / plain variable starting its statement, or
+#   ``this.NAME``;
 # * every other use is ``NAME.<m>(`` (``this.NAME.<m>(``) with ``m`` in
 #   ``_CONSOLE_METHODS``, and there is at least one.
 #
 # Anything else (handed to a function, reassigned to something else, another method,
 # exported or put in an object, called directly, a computed member, a declaration with no
-# value, a left side such as a caller's ``opts.logger``) keeps the name unrecognised and
+# value) keeps the name unrecognised and
 # its ``= console`` a shadow hit. A variable is checked in its own file (a direct
 # ``eval`` there disqualifies every alias); ``this.NAME`` is a property any holder of the
 # object can reach, so it is checked in every code file in view and must never appear as
 # a string. No flow through parameters or across files beyond that name scan.
+#
+# Only a binding the file itself decides counts. A self-default (``NAME = NAME ??
+# console``, ``||``, a caller's ``opts.logger ?? console``) keeps whatever value was
+# already there, which a caller can set; a default parameter (``function f(log =
+# console)``, ``(log = console) =>``) or destructuring default (``{ logger = console }``)
+# applies only when the caller passes nothing. None of these is a binding: the target
+# must start its statement (not follow ``(`` / ``,`` / ``{`` / ``[`` / ``:``), and a
+# function parameter or destructured name is a non-call use that disqualifies the name.
 _CONSOLE_ALIAS_CACHE: dict[tuple[int, int], tuple] = {}
 
 
@@ -682,20 +690,19 @@ def _alias_target(t: _Toks, eq: int) -> tuple[str, str, int] | None:
     first = lhs - 1 if t.is_id(lhs - 1, "const", "let", "var") else lhs
     if t.is_id(first - 1, "export", "declare") or t.is_p(first - 1, "."):
         return None
+    # A parameter / destructuring default (``(log = console``, ``{ logger = console }``,
+    # ``a, log = console``): the caller decides the value, so it is not a binding.
+    if first == lhs and t.is_p(first - 1, "(", ",", "{", "[", ":", "=", "=>", "?", "&&",
+                                "||", "??"):
+        return None
     return t.val[lhs], "var", first
 
 
-def _same_target(t: _Toks, a: int, b: int, name: str, kind: str) -> bool:
-    """Tokens ``a`` .. ``b - 1`` spell the target ``name`` (``this.name``) again."""
-    if kind == "this":
-        return b - a == 3 and t.is_id(a, "this") and t.is_p(a + 1, ".") and t.is_id(a + 2, name)
-    return b - a == 1 and t.is_id(a, name)
-
-
-def _file_console_bindings(t: _Toks) -> list[tuple[str, str, int, int, set[int]]]:
-    """Every ``TARGET = [left ?? ] console`` statement in one file: (name, kind, offset
+def _file_console_bindings(t: _Toks) -> list[tuple[str, str, int, int, set[int], bool]]:
+    """Every ``TARGET = console`` statement in one file: (name, kind, offset
     of the operator before ``console`` (where a shadow hit starts), name-token index of
-    the target, name-token indices the binding itself uses)."""
+    the target, name-token indices the binding itself uses, whether it is a ``const`` /
+    ``let`` / ``var`` declaration)."""
     out = []
     for cname in ("console",):
         for k in t.by_val.get(cname, []):
@@ -711,25 +718,8 @@ def _file_console_bindings(t: _Toks) -> list[tuple[str, str, int, int, set[int]]
                 tgt = _alias_target(t, op)
                 if tgt is None:
                     continue
-                name, kind, _first = tgt
-                out.append((name, kind, t.st[op], op - 1, {op - 1}))
-            elif t.is_p(op, "??", "||"):
-                eq = op - 1
-                while eq >= 0 and not t.is_p(eq, "="):
-                    eq -= 1
-                if eq < 0 or eq < op - 4:
-                    continue
-                tgt = _alias_target(t, eq)
-                if tgt is None:
-                    continue
-                name, kind, _first = tgt
-                if t.is_id(eq + 1, "undefined", "null") and eq + 2 == op:
-                    uses = {eq - 1}
-                elif _same_target(t, eq + 1, op, name, kind):
-                    uses = {eq - 1, op - 1}
-                else:
-                    continue
-                out.append((name, kind, t.st[op], eq - 1, uses))
+                name, kind, first = tgt
+                out.append((name, kind, t.st[op], op - 1, {op - 1}, first != op - 1))
     return out
 
 
@@ -782,7 +772,9 @@ def _console_aliases(text: str, tree: dict[str, str]) -> tuple[
         for b in group:
             allowed |= b[4]
         if kind == "var":
-            if has_eval:
+            # A plain ``log = console`` with no declaration here assigns a name another
+            # file (or a caller's scope) owns.
+            if has_eval or not any(b[5] for b in group):
                 continue
             uses = [k for k in t.by_val.get(name, []) if not t.is_p(k - 1, ".", "?.")]
             ok = (all(k in allowed or _console_call_use(t, k) for k in uses)
