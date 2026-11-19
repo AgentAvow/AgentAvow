@@ -16,6 +16,7 @@ HARD RULES:
 from __future__ import annotations
 
 import re
+from collections import OrderedDict
 
 import httpx
 from packaging.version import InvalidVersion, Version
@@ -501,9 +502,10 @@ REPO_ADVISORY_SOURCE = "repository security advisory"
 _GH_ECOSYSTEM = {"npm": "npm", "PyPI": "pip", "crates.io": "rust"}
 _REPO_ADV_TTL_S = 6 * 3600
 _REPO_ADV_MAX_PAGES = 3
-_repo_adv_cache: dict[str, tuple[float, list]] = {}
+_repo_adv_cache: OrderedDict[str, tuple[float, list]] = OrderedDict()
 _CONSTRAINT_RE = re.compile(r"^\s*(>=|<=|>|<|=)?\s*v?([0-9A-Za-z][0-9A-Za-z.+\-_]*)\s*$")
-_SLUG_OK_RE = re.compile(r"^[\w.-]+/[\w.-]+$")
+_SLUG_OK_RE = re.compile(r"^(?!\.\.?/)[\w.-]+/(?!\.\.?$)[\w.-]+$")
+_REPO_ADV_CACHE_MAX = 512
 
 
 _RANGE_NOTE_RE = re.compile(r"\([^()]*\)")
@@ -862,35 +864,55 @@ def _summarize_matching(advisories: list, matches, eco: str,
     return out[:20]
 
 
-# An image tag that is a full release number: ``1.0.25``, ``v1.0.25``, ``1.0.25-rc1``,
-# ``1.0.25-alpine`` (the variant is dropped; a pre-release is kept). ``latest``, ``1`` and
-# ``1.0`` move between releases, so they never stand for one.
-_IMAGE_TAG_VERSION_RE = re.compile(
-    r"^v?(\d+\.\d+\.\d+)(-(?:alpha|beta|rc|pre)[0-9A-Za-z.]*)?(?:[-_][0-9A-Za-z._-]*)?$",
+# An image tag that names one release: ``1.0.25``, ``v1.0.25``, or a pre-release of it
+# (``1.0.25-rc1``, ``-dev``, ``-SNAPSHOT``, ``-beta.2``), which sorts below 1.0.25.
+# Anything else is not mapped to a release: ``latest``, ``1`` and ``1.0`` move between
+# releases; a variant such as ``1.0.25-alpine`` may be rebuilt on its own schedule; a
+# calendar tag (``2024.01.05``) is a build date, not the package's version.
+_IMAGE_TAG_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z][0-9A-Za-z.\-]*))?$")
+_IMAGE_PRE_RE = re.compile(
+    r"^(?:alpha|beta|rc|pre|preview|dev|snapshot|nightly|canary)(?:[.\-]?\d+)*$",
     re.IGNORECASE)
 
 
 def image_tag_version(tag: str | None) -> str | None:
-    """The release an image tag names, or None when the tag is not a release number."""
-    m = _IMAGE_TAG_VERSION_RE.match(str(tag or "").strip())
+    """The release an image tag names (a pre-release kept as one), or None when the tag
+    cannot be mapped to a release with confidence."""
+    m = _IMAGE_TAG_RE.match(str(tag or "").strip())
     if not m:
         return None
-    return m.group(1) + (m.group(2) or "")
+    parts = m.group(1, 2, 3)
+    if int(parts[0]) >= 1990 or any(len(p) > 1 and p.startswith("0") for p in parts):
+        return None  # a date (2024.01.05), not a release number
+    core = ".".join(parts)
+    pre = m.group(4)
+    if pre is None:
+        return core
+    return f"{core}-{pre}" if _IMAGE_PRE_RE.match(pre) else None
+
+
+# The ecosystems whose version ranges an image tag can be read against, and how.
+_IMAGE_RANGE_ECO = {"go": "semver", "npm": "semver", "rust": "semver", "pip": "PyPI"}
 
 
 def _image_pkg_matches(pkg: dict, slug: str) -> bool:
     """A repository advisory's package that IS the repository an image was built from:
-    the Go module ``github.com/<owner>/<repo>`` (or a path under it), or, in any other
-    ecosystem, a package named like the repository (``@scope/<repo>``, ``<repo>``).
-    A sibling package in a monorepo never matches."""
+    the Go module ``github.com/<owner>/<repo>`` or its major-version path ``/vN``
+    (N >= 2), or, in any other ecosystem, a package named like the repository
+    (``@scope/<repo>``, ``group:<repo>``, ``<repo>``). A nested Go module
+    (``github.com/o/r/api``) is versioned on its own and never matches; nor does a
+    sibling package in a monorepo."""
     slug = slug.lower()
     repo = slug.split("/", 1)[1]
     name = str(pkg.get("name") or "").strip().lower()
     if not name:
         return False
     if str(pkg.get("ecosystem") or "").lower() == "go":
-        return name == f"github.com/{slug}" or name.startswith(f"github.com/{slug}/")
-    return (re.sub(r"[-_.]+", "-", name.rsplit("/", 1)[-1])
+        if name == f"github.com/{slug}":
+            return True
+        m = re.fullmatch(re.escape(f"github.com/{slug}/") + r"v(\d+)", name)
+        return bool(m) and int(m.group(1)) >= 2
+    return (re.sub(r"[-_.]+", "-", re.split(r"[/:]", name)[-1])
             == re.sub(r"[-_.]+", "-", repo))
 
 
@@ -898,12 +920,46 @@ def summarize_image_repo_advisories(advisories: list, slug: str,
                                     tag: str | None) -> list[dict]:
     """Pure reducer: the published security advisories of the repository a container
     image declares as its source (``org.opencontainers.image.source``) -> entries in the
-    ``summarize_advisories`` shape, read against the image tag's release number. Only
-    advisories for the repository's own package count (``_image_pkg_matches``)."""
+    ``summarize_advisories`` shape, read against the release the image tag names. Only
+    advisories for the repository's own package count (``_image_pkg_matches``).
+
+    An advisory is read against the tag only when that can be done with confidence:
+    the tag names one release (``image_tag_version``), the repository's package lives
+    in exactly one ecosystem across its advisories, and that ecosystem's ranges can be
+    read (semver for Go / npm / crates, PEP 440 for PyPI). Otherwise the advisory is
+    listed with ``unmatched = True``: disclosed, never affected."""
     if not _SLUG_OK_RE.match(str(slug or "")):
         return []
-    return _summarize_matching(advisories, lambda pkg: _image_pkg_matches(pkg, slug),
-                               "semver", image_tag_version(tag))
+    matched: list[tuple[dict, set]] = []
+    ecos: set[str] = set()
+    for a in advisories if isinstance(advisories, list) else []:
+        if not isinstance(a, dict):
+            continue
+        mine = {str(v["package"].get("ecosystem") or "").lower()
+                for v in a.get("vulnerabilities") or []
+                if isinstance(v, dict) and isinstance(v.get("package"), dict)
+                and _image_pkg_matches(v["package"], slug)}
+        if mine:
+            matched.append((a, mine))
+            ecos |= mine
+    version = image_tag_version(tag)
+    out: list[dict] = []
+    for a, mine in matched:
+        (eco_gh,) = mine if len(mine) == 1 else (None,)
+        eco = _IMAGE_RANGE_ECO.get(eco_gh or "")
+        readable = (len(ecos) == 1 and eco is not None and version is not None
+                    and _parse_version(eco, version) is not None)
+
+        def matches(pkg: dict, _eco=eco_gh) -> bool:
+            same_eco = _eco is None or str(pkg.get("ecosystem") or "").lower() == _eco
+            return same_eco and _image_pkg_matches(pkg, slug)
+        got = _summarize_matching([a], matches, eco or "semver",
+                                  version if readable else None)
+        for e in got:
+            e["unmatched"] = not readable
+        out += got
+    out.sort(key=lambda x: (not x["affects_scanned_version"], x["id"]))
+    return out[:20]
 
 
 def merge_advisories(existing: list[dict], extra: list[dict]) -> list[dict]:
@@ -961,6 +1017,7 @@ async def fetch_repo_advisories(slug: str, token: str | None = None) -> dict:
     hit = _repo_adv_cache.get(slug)
     now = time.monotonic()
     if hit and now - hit[0] < _REPO_ADV_TTL_S:
+        _repo_adv_cache.move_to_end(slug)
         return {"checked": True, "advisories": hit[1], "cached": True}
     headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
     if token:
@@ -996,4 +1053,7 @@ async def fetch_repo_advisories(slug: str, token: str | None = None) -> dict:
     except (httpx.HTTPError, ValueError):
         return {"checked": False, "reason": "error"}
     _repo_adv_cache[slug] = (now, found)
+    _repo_adv_cache.move_to_end(slug)
+    while len(_repo_adv_cache) > _REPO_ADV_CACHE_MAX:
+        _repo_adv_cache.popitem(last=False)  # least recently used
     return {"checked": True, "advisories": found}

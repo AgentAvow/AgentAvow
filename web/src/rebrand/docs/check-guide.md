@@ -39,7 +39,10 @@ runs on that release's bytes, and a published advisory (GHSA / PYSEC / CVE) agai
 reported as a finding only when it affects the version scanned, with the fixed release named in the
 remediation. For a container image, the advisories come from the GitHub repository its
 `org.opencontainers.image.source` label names, read against the tag (or, for a tag such as `latest`, the
-`org.opencontainers.image.version` label); an image without that label has no declared source to read. In the [MCP connector](./mcp-connector.md), pin the same way inside the package name:
+`org.opencontainers.image.version` label). Only the repository's own package counts. When the tag can't be
+mapped to one release (a variant such as `-alpine`, a date tag) or the package's range can't be read, the advisory
+is listed and the scan says it couldn't be matched; it is never read as affected or clean. An image without the
+source label has no declared source to read. In the [MCP connector](./mcp-connector.md), pin the same way inside the package name:
 `chalk@5.3.0`, `@scope/name@1.2.3`, `requests==2.32.5`, `serde@1.0.200`.
 
 ### A first scan that takes a while

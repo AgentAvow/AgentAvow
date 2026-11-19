@@ -527,6 +527,8 @@ export function coverageGapNotes(input: unknown): string[] {
   if (g.repo_advisory_lookup === 'failed') notes.push("the source repository's security advisories could not be read")
   n = toInt(g.repo_advisory_range_unparsed)
   if (n > 0) notes.push(`${fmtInt(n)} repository security ${n === 1 ? 'advisory' : 'advisories'} had a version range that could not be read`)
+  n = toInt(g.repo_advisory_unmatched)
+  if (n > 0) notes.push(`${fmtInt(n)} repository security ${n === 1 ? 'advisory' : 'advisories'} could not be matched to this image's version`)
   if (g.tool_list_unread === true) notes.push("the server's tool list could not be read")
   if (g.tool_list_paged === true) {
     n = toInt(g.pages_read)

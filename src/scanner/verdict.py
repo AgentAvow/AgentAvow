@@ -688,6 +688,11 @@ def coverage_gap_notes(data: dict) -> list[str]:
         notes.append(f"{n:,} repository security "
                      f"{'advisory' if n == 1 else 'advisories'} had a version range "
                      "that could not be read")
+    n = _int(g.get("repo_advisory_unmatched"))
+    if n > 0:
+        notes.append(f"{n:,} repository security "
+                     f"{'advisory' if n == 1 else 'advisories'} could not be matched "
+                     "to this image's version")
     if g.get("tool_list_unread") is True:
         notes.append("the server's tool list could not be read")
     if g.get("tool_list_paged") is True:
