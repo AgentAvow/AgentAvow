@@ -46,7 +46,10 @@ def test_install_box_uses_the_site_commands() -> None:
 
 def test_wording_is_the_codex_wording() -> None:
     text = _visible_text()
-    low = text.lower()
+    # The one directory this page names is OpenAI's (the ChatGPT listing); any other
+    # "plugin directory" (the Claude one) stays banned.
+    low = text.lower().replace("openai&apos;s plugin directory", "")
+    assert "CHATGPT_LISTING" in PAGE
     for banned in ("letter grade", "reputation", "open source", "open-source",
                    "plugin directory", "claude.ai/directory", "CLAUDE_LISTING".lower(),
                    "asks before you install", "already connected", "every day",
