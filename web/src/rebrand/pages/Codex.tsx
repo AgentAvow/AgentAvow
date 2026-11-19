@@ -290,7 +290,7 @@ export default function RebrandCodex() {
             <code className="block px-2.5 py-2 font-mono text-[14.5px] text-text [overflow-wrap:anywhere]">{codexCmd(AGENTAVOW_MCP)}</code>
           </div>
           <p className="mt-2.5 text-[14px] text-text-muted">The skill and the <code className={code}>config.toml</code> setup are in the <a href={rp('/rebrand/docs/codex')} className={textLink}>Codex setup guide →</a></p>
-          <p className="mt-1.5 text-[14px] text-text-muted"><a href={CHATGPT_LISTING} target="_blank" rel="noopener noreferrer" onClick={() => trackListing(CHATGPT_LISTING)} className={textLink}>AgentAvow is also in OpenAI&apos;s plugin directory ↗</a></p>
+          <p className="mt-1.5 text-[14px] text-text-muted"><a href={CHATGPT_LISTING} target="_blank" rel="noopener noreferrer" onClick={() => trackListing(CHATGPT_LISTING)} className={textLink}>Or add the AgentAvow app from OpenAI&apos;s plugin directory. It works in ChatGPT and in Codex ↗</a></p>
 
           <h3 className="mt-10 text-[21px] font-bold tracking-tight">Why developers can trust the answer</h3>
           <div className="grid gap-[7px] mt-3 text-[14.5px] text-text-muted max-w-[68ch]">
