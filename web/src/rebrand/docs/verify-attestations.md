@@ -74,18 +74,30 @@ The signed revocation list does:
 GET https://agentavow.com/.well-known/key-revocations.json
 ```
 
-It returns `payload` and `jws`, a compact JWS (`EdDSA`, `kid` `agentgraph-security-v1`) over the RFC 8785
-bytes of `payload`. Under `keysCovered` the payload lists every key in the JWKS by `kid` and RFC 7638
-thumbprint. Under `revocations` it lists each revoked key with its `kid`, `thumbprint`, `effectiveFrom`,
-`reason` and a link to the public `notice`. A key in `keysCovered` with no entry was not revoked as of
-`issuedAt`; a key missing from `keysCovered` is one the list says nothing about. Treat a list older than
-`nextUpdate` (one day after `issuedAt`) as stale, and fetch it again before you rely on a pinned key.
+It returns `jws`, a compact JWS (`EdDSA`) over the RFC 8785 bytes of the list, and `payload`, an unsigned
+copy for reading. Verify the JWS with the key its header `kid` names (`agentgraph-security-v1`), then read the
+list decoded from the JWS, not the copy. The list gives:
+
+- `keysCovered`: every key in the JWKS, and every key ever revoked, by `kid` and RFC 7638 thumbprint.
+- `revocations`: each revoked key with its `kid`, `thumbprint`, `effectiveFrom`, `reason` and a link to the
+  public `notice`.
+- `issuedAt`, the time the list was served, and `nextUpdate`, one day later.
+
+A covered key with no entry in `revocations` was not revoked as of `issuedAt`. A key missing from
+`keysCovered` is one the list says nothing about. Once `nextUpdate` has passed, treat the list as stale and
+fetch it again before you rely on a pinned key. Entries are only ever added: once you have seen a validly
+signed revocation, keep it, even if a later list leaves it out.
+
+If the scan key itself is compromised, the revocation is published in the repository (`src/key_revocations.py`)
+and on this page, and a list carrying it is signed with that key one last time. The key that signs later
+lists is announced the same way, with its thumbprint in the table above.
 
 Limits. The list is signed with the scan key, so whoever stole that key could sign a list that leaves it out;
-they would still have to serve it to you in place of ours. The record behind the list is kept in the public
-repository (`src/key_revocations.py`), a second origin with its own history. Our attestations carry their own
-`issued_at`, not a timestamp from an outside authority, so `effectiveFrom` cannot show that a given signature
-was made before a compromise: treat every signature under a revoked key as revoked.
+they would still have to serve it to you in place of ours, and a revocation you have already seen stays
+revoked. The record behind the list is kept in the public repository (`src/key_revocations.py`), a second
+origin with its own history. Our attestations carry their own `issued_at`, not a timestamp from an outside
+authority, so `effectiveFrom` cannot show that a given signature was made before a compromise: treat every
+signature under a revoked key as revoked.
 
 ### The signed catalog
 
