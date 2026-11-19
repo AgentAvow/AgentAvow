@@ -327,12 +327,19 @@ def advisory_readable(vuln: dict, eco: str, version: str | None,
     the package lists explicit ``versions``, or carries a SEMVER / ECOSYSTEM range whose
     every event version parses (``introduced: 0`` included) while ``version`` parses
     too. A record with only GIT (commit) ranges, or with versions we cannot parse, is
-    not readable: its "not affected" is not an answer (``range_unparsed``)."""
-    if not version or _parse_version(eco, version) is None:
+    not readable: its "not affected" is not an answer (``range_unparsed``).
+
+    An explicit ``versions`` list answers by exact match (as ``advisory_affects``
+    does), even when ``version`` itself does not parse. A scanned version that does
+    not parse against ranges alone is unreadable on purpose: no range can place it."""
+    if not version:
         return False
+    cur_ok = _parse_version(eco, version) is not None
     for aff in _affected_entries(vuln, eco, name):
         if aff.get("versions"):
             return True
+        if not cur_ok:
+            continue
         for rng in aff.get("ranges") or []:
             if not isinstance(rng, dict):
                 continue
@@ -346,8 +353,15 @@ def advisory_readable(vuln: dict, eco: str, version: str | None,
     return False
 
 
+def advisory_order(a: dict) -> tuple:
+    """Sort key for an advisory list: affected first, then ones whose range could not
+    be read, then by id. Every list cut to 20 entries is sorted with it first."""
+    return (not a.get("affects_scanned_version"), not a.get("range_unparsed"),
+            str(a.get("id") or ""))
+
+
 def summarize_advisories(vulns: list[dict], eco: str, version: str | None,
-                         name: str | None = None) -> list[dict]:
+                         name: str | None = None, limit: int | None = 20) -> list[dict]:
     """Non-MAL advisories for the package itself, with whether the scanned version is
     affected. Deduplicated by alias (GHSA and PYSEC records describe the same flaw).
 
@@ -381,6 +395,10 @@ def summarize_advisories(vulns: list[dict], eco: str, version: str | None,
             "last_affected": _last_affected(v, eco, name),
             "affects": advisory_affects(v, eco, version, name),
             "readable": advisory_readable(v, eco, version, name),
+            # Only a live record that names this package can leave a flaw unanswered: a
+            # withdrawn one affects nothing, and one without an entry for this package
+            # has no range here to read.
+            "counts": not v.get("withdrawn") and bool(_affected_entries(v, eco, name)),
         }
         hits = [g for g in groups if g["ids"] & ids]
         merged = {"ids": set(ids), "records": [rec]}
@@ -411,12 +429,12 @@ def summarize_advisories(vulns: list[dict], eco: str, version: str | None,
         })
         # Not affected only because no record's range could be read: never "clean".
         # Set only when true, so every other entry keeps its shape.
-        if version and not affects and not any(r["readable"] for r in recs):
+        live = [r for r in recs if r["counts"]]
+        if version and not affects and live and not any(r["readable"] for r in live):
             out[-1]["range_unparsed"] = True
     # Affected first, then unreadable ones, so the 20-entry cut never drops either.
-    out.sort(key=lambda a: (not a["affects_scanned_version"],
-                            not a.get("range_unparsed"), a["id"] or ""))
-    return out[:20]
+    out.sort(key=advisory_order)
+    return out if limit is None else out[:limit]
 
 
 def summarize_incidents(vulns: list[dict], version: str | None = None,
@@ -527,7 +545,13 @@ async def fetch_incident_history(
     summary = summarize_incidents(vulns, version, eco, name)
     # The package's own (non-MAL) advisories ride along; scan.py turns the ones that
     # affect the scanned version into findings. Not part of the never-scored history.
-    summary["advisories"] = summarize_advisories(vulns, eco, version, name)
+    every = summarize_advisories(vulns, eco, version, name, limit=None)
+    summary["advisories"] = every[:20]
+    # Counted before the 20-entry cut, so a long list never hides one (scan.py reads
+    # it beside the kept entries; see ``unreadable_critical_advisories``).
+    hidden = unreadable_critical_ids(every)
+    if hidden:
+        summary["unreadable_critical"] = hidden
     return summary
 
 
@@ -1029,11 +1053,20 @@ def merge_advisories(existing: list[dict], extra: list[dict]) -> list[dict]:
 CRITICAL_CVSS = 9.0
 
 
-def unreadable_critical_advisories(advisories: list) -> int:
+def unreadable_critical_advisories(advisories: list, more_ids=()) -> int:
     """How many of a scan's own advisories from the vulnerability database (OSV) are
     critical and have a range we could not read for the scanned version. A repository
-    advisory is counted apart, at any severity (``repo_advisory_range_unparsed``)."""
-    n = 0
+    advisory is counted apart, at any severity (``repo_advisory_range_unparsed``).
+    ``more_ids`` are ones counted before the list was cut to 20 entries; an id is
+    counted once."""
+    ids = set(unreadable_critical_ids(advisories))
+    ids |= {str(i) for i in (more_ids if isinstance(more_ids, list) else []) if i}
+    return len(ids)
+
+
+def unreadable_critical_ids(advisories: list) -> list[str]:
+    """The ids ``unreadable_critical_advisories`` counts, in list order."""
+    out: list[str] = []
     for a in advisories if isinstance(advisories, list) else []:
         if not isinstance(a, dict) or a.get("source") == REPO_ADVISORY_SOURCE:
             continue
@@ -1041,9 +1074,9 @@ def unreadable_critical_advisories(advisories: list) -> int:
             continue
         c = a.get("cvss")
         hot = isinstance(c, (int, float)) and not isinstance(c, bool) and c >= CRITICAL_CVSS
-        if a.get("severity") == "critical" or hot:
-            n += 1
-    return n
+        if (a.get("severity") == "critical" or hot) and str(a.get("id") or "") not in out:
+            out.append(str(a.get("id") or ""))
+    return out
 
 
 _REDIRECT_STATUSES = (301, 302, 307, 308)

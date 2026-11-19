@@ -126,9 +126,19 @@ def test_advisory_readable(rec, readable):
     assert advisory_readable(rec, "PyPI", "2.2.6", PKG) is readable
 
 
-def test_an_unparseable_scanned_version_reads_nothing():
+def test_an_unparseable_scanned_version_cannot_be_placed_in_a_range():
+    # Deliberate: with ranges alone, no range can place a version that does not parse.
     assert advisory_readable(_osv("GHSA-b", ranges=READABLE), "PyPI", "not a version",
                              PKG) is False
+
+
+def test_an_exact_versions_list_answers_an_unparseable_scanned_version():
+    rec = _osv("GHSA-b", "CRITICAL", ranges=READABLE, versions=["1.0.0", "weird-1"])
+    assert advisory_readable(rec, "PyPI", "not a version", PKG) is True
+    (clean,) = summarize_advisories([rec], "PyPI", "not a version", PKG)
+    assert clean["affects_scanned_version"] is False and "range_unparsed" not in clean
+    (hit,) = summarize_advisories([rec], "PyPI", "weird-1", PKG)
+    assert hit["affects_scanned_version"] is True and "range_unparsed" not in hit
 
 
 def test_osv_flags_only_records_it_could_not_read():
@@ -223,3 +233,66 @@ def test_osv_copy_of_the_repo_advisory_still_withholds_the_mark(monkeypatch):
     d = decide(view)
     assert d.decision == "safe"
     assert certified_mark_status(view, d) == (False, "coverage_gaps")
+
+
+def test_a_withdrawn_record_never_costs_the_mark():
+    rec = _osv("GHSA-gone", "CRITICAL", GIT_ONLY) | {"withdrawn": "2026-11-01T00:00:00Z"}
+    (a,) = summarize_advisories([rec], "PyPI", "2.2.6", PKG)
+    assert "range_unparsed" not in a
+    assert unreadable_critical_advisories([a]) == 0
+
+
+def test_a_withdrawn_readable_twin_does_not_answer_for_a_live_record():
+    live = _osv("GHSA-x", "CRITICAL", GIT_ONLY, aliases=["PYSEC-1"])
+    gone = _osv("PYSEC-1", None, READABLE, aliases=["GHSA-x"]) | {"withdrawn": "2026-11-01"}
+    (a,) = summarize_advisories([live, gone], "PyPI", "2.2.6", PKG)
+    assert a["range_unparsed"] is True
+
+
+def test_a_record_without_an_entry_for_this_package_is_ignored():
+    rec = {"id": "GHSA-other", "summary": "flaw", "database_specific": {"severity": "CRITICAL"},
+           "affected": [{"package": {"ecosystem": "PyPI", "name": "some-other-package"},
+                         "ranges": GIT_ONLY}]}
+    (a,) = summarize_advisories([rec], "PyPI", "2.2.6", PKG)
+    assert "range_unparsed" not in a
+    assert unreadable_critical_advisories([a]) == 0
+
+
+def _many_with_one_unreadable_critical():
+    recs = [_osv(f"GHSA-a{i:03d}", "LOW", READABLE) for i in range(25)]
+    return recs + [_osv("GHSA-zzzz", "CRITICAL", GIT_ONLY)]
+
+
+def test_an_unreadable_critical_past_the_cut_still_withholds_the_mark(monkeypatch):
+    """25 readable low OSV advisories, one critical with only a commit range, and one
+    repository advisory: the merge re-sorts and cuts to 20, and the critical must still
+    be counted (it is counted before any cut, and the merge sorts the same way)."""
+    async def osv(surface, name):
+        return _many_with_one_unreadable_critical()
+    monkeypatch.setattr(ih, "fetch_osv_vulns", osv)
+    repo = {"ghsa_id": "GHSA-repo-only-0001", "state": "published", "severity": "low",
+            "summary": "repo-only flaw",
+            "vulnerabilities": [{"package": {"ecosystem": "pip", "name": PKG},
+                                 "vulnerable_version_range": "< 1.0.0",
+                                 "patched_versions": "1.0.0"}]}
+
+    async def repo_lookup(slug, token=None):
+        return {"checked": True, "advisories": [repo]}
+    monkeypatch.setattr(ih, "fetch_repo_advisories", repo_lookup)
+    inc = asyncio.run(ih.fetch_incident_history("pypi", PKG, "2.2.6"))
+    assert inc["unreadable_critical"] == ["GHSA-zzzz"]
+    r = _result("2.2.6")
+    r.incident_history = inc
+    _scan_advisories(r)
+    ids = [a["id"] for a in r.incident_history["advisories"]]
+    assert len(ids) == 20 and ids[0] == "GHSA-zzzz"  # same 3-key order after the merge
+    assert r.coverage_gaps == {"advisory_range_unparsed": 1}
+    assert certified_mark_status(_view(r))[0] is False
+
+
+def test_a_counted_id_cut_from_the_list_still_counts_once():
+    kept = [{"id": "GHSA-zzzz", "severity": "critical", "range_unparsed": True,
+             "affects_scanned_version": False}]
+    assert unreadable_critical_advisories(kept, ["GHSA-zzzz"]) == 1
+    assert unreadable_critical_advisories([], ["GHSA-zzzz"]) == 1
+    assert unreadable_critical_advisories([], "GHSA-zzzz") == 0  # not a list: ignored
