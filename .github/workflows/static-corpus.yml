@@ -55,7 +55,7 @@ jobs:
         run: pip install -e ".[prod,dev]"
 
       - name: Restore archive cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/agentavow-static-corpus
           key: static-corpus-${{ hashFiles('tests/corpus/static/manifest.json') }}
@@ -102,7 +102,7 @@ jobs:
         run: pip install -e ".[prod,dev]"
 
       - name: Restore archive cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/agentavow-install-check-corpus
           key: install-check-corpus-${{ hashFiles('tests/corpus/static/install_check_manifest.json') }}
