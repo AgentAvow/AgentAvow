@@ -6,9 +6,9 @@ import { cursorInstall, vscodeInstall } from '../lib/installLinks'
 import { AppsButtons } from './AppsStrip'
 
 /**
- * "Where it works": six tiles, Claude Code first and the only one that checks by
- * itself; the rest say plainly that you ask (or that it runs in your pipeline). Same
- * six, same order, as the strip on /get (mockup 2026-11-10).
+ * "Where it works": six tiles. Claude Code first, then the Codex CLI: the two that
+ * check by themselves. The rest say plainly that you ask (or that it runs in your
+ * pipeline). Cursor and VS Code share one tile so the grid stays at six.
  */
 
 const MCP_URL = 'https://agentavow.com/mcp'
@@ -50,18 +50,19 @@ export function WhereItWorks() {
         </>}>
           Your servers at session start, and new servers and packages before they install. Safe to connect stays quiet; Review gets one line with the reason. On Do not connect, Claude Code asks before you install it, and stops calls to a server that's already connected, unless you allow that server. The checks run on your machine, so they cost Claude nothing.
         </Tile>
-        <Tile n={2} tag="Checks when you ask" title="Claude and ChatGPT" act={<AppsButtons />}>
+        <Tile n={2} tag="Checks by itself" title="Codex CLI" act={
+          <a href={rp('/rebrand/codex')} onClick={track('codex')} className={BTN_SM}>Add it to Codex</a>
+        }>
+          The Codex CLI plugin checks your servers at session start, and stops a <code className="font-mono text-[12px] text-primary-light">codex mcp add</code> or package install that reads Do not connect.
+        </Tile>
+        <Tile n={3} tag="Checks when you ask" title="Claude and ChatGPT" act={<AppsButtons />}>
           Add AgentAvow and ask before you connect anything. Nothing runs by itself in chat.
         </Tile>
-        <Tile n={3} tag="Checks when you ask" title="Cursor" act={
+        <Tile n={4} tag="Checks when you ask" title="Cursor and VS Code" act={<>
           <a href={cursorInstall({ name: 'agentavow', url: MCP_URL })} target="_blank" rel="noopener noreferrer" onClick={track('cursor')} className={BTN_SM_GHOST}>Add to Cursor ↗</a>
-        }>
-          One-click install of the connector; your agent checks when you ask.
-        </Tile>
-        <Tile n={4} tag="Checks when you ask" title="VS Code" act={
           <a href={vscodeInstall({ name: 'agentavow', url: MCP_URL })} onClick={track('vscode')} className={BTN_SM}>Install in VS Code</a>
-        }>
-          One-click install of the connector.
+        </>}>
+          One-click install of the connector; your agent checks when you ask.
         </Tile>
         <Tile n={5} tag="Checks when you ask" title="Gemini CLI" act={
           <a href="https://github.com/AgentAvow/agentavow-gemini" target="_blank" rel="noopener noreferrer" onClick={track('gemini')} className={BTN_SM_GHOST}>Open ↗</a>
@@ -74,7 +75,7 @@ export function WhereItWorks() {
           Fail the build on Do not connect. GitHub, GitLab, Bitbucket and Azure DevOps.
         </Tile>
       </div>
-      <p className="mt-4 text-[14.5px] text-text-muted">Codex, npm and PyPI, the API and every directory listing: <Link to={rp('/rebrand/get')} className={LINK}>All the ways to get AgentAvow →</Link></p>
+      <p className="mt-4 text-[14.5px] text-text-muted">npm and PyPI, the API and every directory listing: <Link to={rp('/rebrand/get')} className={LINK}>All the ways to get AgentAvow →</Link></p>
     </>
   )
 }

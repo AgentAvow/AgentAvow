@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useLocation } from 'react-router-dom'
 import { rp } from '../basePath'
-import { claudeCodeStdio, cursorStdio, stdioServersConfig, vscodeStdio } from '../lib/installLinks'
+import { claudeCodeStdio, codexStdio, cursorStdio, stdioServersConfig, vscodeStdio } from '../lib/installLinks'
 import { parseBadgeTarget, type BadgeStyle } from '../lib/badgeTarget'
 import ListToolForm from '../components/ListToolForm'
 import SEOHead from '../../components/SEOHead'
@@ -419,7 +419,7 @@ export default function RebrandForDevelopers() {
           <div className="font-mono text-[12px] tracking-[.16em] uppercase text-primary-light font-semibold">For anyone running an agent</div>
           <h2 className={`${h2} mt-2`}>Give your agent a safety check before it connects anything.</h2>
           <p className="mt-3 max-w-[64ch] text-[15px] text-text-muted">
-            Add AgentAvow's own MCP server to Claude, ChatGPT, Cursor, or any MCP client. Your agent can ask <b className="text-text">"is this tool safe to install?"</b> and get a signed 0-100 score and findings back, before it connects an unknown server or runs a package. Free, no account, read-only.
+            Add AgentAvow's own MCP server to Claude, ChatGPT, Codex, Cursor, or any MCP client. Your agent can ask <b className="text-text">"is this tool safe to install?"</b> and get a signed 0-100 score and findings back, before it connects an unknown server or runs a package. Free, no account, read-only.
           </p>
           <div className="mt-5 flex gap-2.5 flex-wrap">
             <a href="https://claude.ai/directory/connectors/agentavow" target="_blank" rel="noopener noreferrer" onClick={() => trackCta('add_claude')} className={btnPrimary}>Add to Claude ↗</a>
@@ -429,6 +429,7 @@ export default function RebrandForDevelopers() {
             <Link to={rp('/rebrand/get')} className={btnGhost}>Every way to get it →</Link>
           </div>
           <p className="mt-4 text-[13.5px] text-text-muted">Claude Code: <code className={codeCls}>{claudeCodeStdio(AA_MCP)}</code></p>
+          <p className="mt-1.5 text-[13.5px] text-text-muted">Codex: <code className={codeCls}>{codexStdio(AA_MCP)}</code></p>
           <p onCopy={trackPluginCommandCopy} className="mt-2 text-[13.5px] text-text-muted max-w-[72ch]">Or install the Claude Code plugin, which also checks each new MCP server at session start and warns you before your agent uses one: <code className={codeCls}>/plugin marketplace add AgentAvow/AgentAvow</code> then <code className={codeCls}>/plugin install agentavow-trust@agentavow</code>. <Link to={rp('/rebrand/docs/auto-scan-claude-code')} className="text-primary-light hover:underline">How it works</Link>.</p>
           <p className="mt-2 text-[13.5px] text-text-muted max-w-[72ch]">The plugin&apos;s checks run on your machine, so they cost Claude nothing: zero tokens per check, under 1,000 a session. <Link to={`${rp('/rebrand/faq')}#context-tokens`} className="text-primary-light hover:underline">The numbers</Link>.</p>
           <div className="relative mt-4 max-w-[760px]">
