@@ -29,7 +29,7 @@ dependencies = [
     # 2.x serves protocol 2026-07-28. Capped at the validated minor: the 2.x middleware API
     # (src/bridges/mcp_streamable.py relies on it for the 2025-11-25 wire bytes) is provisional.
     "mcp>=2.3,<2.4",
-    "jsonschema>=4.20,<5.0",
+    "jsonschema>=4.26.0,<5.0",
     "Pillow>=10.0,<12.0",
     "boto3>=1.34,<2.0",
     # x402 live check: one site's subdomains share payees, shared-hosting tenants don't.
