@@ -161,6 +161,7 @@ export default function RebrandClaudeCode() {
             <div className="hidden md:block mt-5">
               <Install id="plugin-lines-hero" />
               <p className="mt-2.5 text-[14px] text-text-muted"><b className="font-semibold text-text">Free · No account</b> · Paste into Claude Code, then start a new session.</p>
+              <p className="mt-2 text-[14px] text-text-muted">Using Codex? <a href={rp('/rebrand/codex')} className="text-primary-light hover:underline">Set it up here →</a></p>
             </div>
           </div>
 
@@ -172,6 +173,7 @@ export default function RebrandClaudeCode() {
             <ChatGptLink />
             <p className="mt-4 text-[14.5px] text-text-muted">On a computer? Paste these into Claude Code. Free · No account.</p>
             <Install id="plugin-lines-phone" />
+            <p className="mt-2 text-[14px] text-text-muted">Using Codex? <a href={rp('/rebrand/codex')} className="text-primary-light hover:underline">Set it up here →</a></p>
           </div>
         </div>
       </div>
