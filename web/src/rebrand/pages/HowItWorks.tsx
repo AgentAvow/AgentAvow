@@ -252,7 +252,7 @@ agentavow scan . --fail-on do_not_connect`}</pre>
         <div className="mt-12">
           <Eyebrow>How we're different</Eyebrow>
           <h2 className="mt-2 text-xl font-bold">Everyone can give you a number. One row is ours alone.</h2>
-          <p className="mt-2 text-text-muted text-[14px] max-w-[64ch]">There are good MCP scanners and trust registries now — the ecosystem needs them. Here's the honest landscape and the one property none of them have.</p>
+          <p className="mt-2 text-text-muted text-[14px] max-w-[64ch]">There are good MCP scanners and trust registries now, and the ecosystem needs them. Here's how they compare, and the one property none of them have.</p>
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-[13.5px] border-collapse min-w-[520px]">
               <thead>
