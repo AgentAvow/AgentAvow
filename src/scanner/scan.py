@@ -7980,6 +7980,7 @@ async def _apply_repo_advisories(result, eco: str, name: str, manifest: dict | N
     from src.config import settings
     from src.scanner.incident_history import (
         _OSV_ECOSYSTEM,
+        enrich_cvss,
         fetch_repo_advisories,
         merge_advisories,
         summarize_repo_advisories,
@@ -7999,7 +8000,13 @@ async def _apply_repo_advisories(result, eco: str, name: str, manifest: dict | N
     if not mine:
         return
     inc = dict(result.incident_history or {})
-    existing = list(inc.get("advisories") or [])
+    existing = [dict(a) for a in (inc.get("advisories") or []) if isinstance(a, dict)]
+    # The same advisory already read from OSV keeps its entry, and takes the CVSS score
+    # the repository lists (OSV records carry only a vector).
+    if existing:
+        enrich_cvss(existing, mine)
+        inc["advisories"] = existing
+        result.incident_history = inc
     extra = merge_advisories(existing, mine)
     if not extra:
         return

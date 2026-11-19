@@ -225,9 +225,10 @@ Rule, first match wins:
    GitHub advisory for embedded malicious code, CWE-506; listed versions or a range); a
    known-malicious dependency; a blocking critical defect
    (shipped, installed, `kind = defect`; a capability never counts); any other critical
-   behavioral finding.
-2. `review` — a blocking high defect; a high behavioral finding; a published advisory
-   affecting the scanned version; a deprecated package; a trust score below 51; or fewer
+   behavioral finding; a published advisory affecting the scanned version with a CVSS
+   base score of 9.0 or more (section 11.3).
+2. `review` — a blocking high defect; a high behavioral finding; any other published
+   advisory affecting the scanned version; a deprecated package; a trust score below 51; or fewer
    than 8 files scanned with no critical, high or medium finding.
 3. `safe` — otherwise.
 
@@ -265,6 +266,23 @@ connect, at a score of 81 or above, when the sandbox result is final and coverag
 thin; `certified.eligible` is unchanged. Responses carry the display value as
 `certified_mark` (with `certified_mark_reason` naming why an eligible result shows no
 mark). Reference implementation: `src/scanner/verdict.py` (`certified_mark`).
+
+### 11.3 A critical published advisory reads do_not_connect (since 2026-11-18)
+The phrase layer is unsigned, so this change carries no model version; the score is
+unchanged. A published advisory (GHSA, CVE or another OSV record) for the package itself
+that affects the scanned version reads `do_not_connect` when its CVSS base score is 9.0 or
+more. The score is the numeric CVSS the publisher gives: for a GitHub repository advisory,
+the higher of its CVSS v4 and v3 scores; for an OSV record, a severity score stated as a
+number. A CVSS vector without a stated number is not scored. When no numeric score is
+given, the advisory's own severity label decides: `critical` reads `do_not_connect`, any
+other label (or none) reads `review`. Records that describe the same flaw (sharing an id
+or alias) are merged first, keeping the highest label and the highest score, so the
+result does not depend on record order. Any other affecting
+advisory reads `review` as before, and an advisory that affects only other versions is
+not an input. Every `decision_reason` names an affecting advisory by its CVE id (else its
+own id), with the fixed release when one is listed: it leads the reason when the advisory
+decides (`critical known vulnerability CVE-… affects this version (CVSS 9.8; fixed in
+2.0.1)`), and is appended to any other reason.
 
 ---
 

@@ -161,34 +161,121 @@ CASES = [
      "review", True, "one high finding: a read-only tool wrote files"),
     ("advisory_affects_version", _scan(88, 200, advisories=[
         {"id": "GHSA-abcd", "affects_scanned_version": True}]),
-     "review", True, "a published advisory affects this version (GHSA-abcd)"),
+     "review", True, "known vulnerability GHSA-abcd affects this version"),
     ("advisory_names_the_fixed_version", _scan(88, 200, advisories=[
         {"id": "GHSA-abcd", "affects_scanned_version": True, "fixed_in": "2.31.0"}]),
-     "review", True, "a published advisory affects this version (GHSA-abcd); fixed in 2.31.0"),
+     "review", True, "known vulnerability GHSA-abcd affects this version (fixed in 2.31.0)"),
     ("advisory_names_the_highest_fix", _scan(88, 200, advisories=[
         {"id": "GHSA-a", "affects_scanned_version": True, "fixed_in": "1.9.2"},
         {"id": "GHSA-b", "affects_scanned_version": True, "fixed_in": "1.10.0"},
         {"id": "GHSA-c", "affects_scanned_version": True}]),
-     "review", True, "a published advisory affects this version (GHSA-a); fixed in 1.10.0"),
+     "review", True,
+     "known vulnerability GHSA-a and 2 more advisories affect this version (fixed in 1.10.0)"),
     ("advisory_fix_ignores_unaffecting_entries", _scan(88, 200, advisories=[
         {"id": "GHSA-a", "affects_scanned_version": True, "fixed_in": "3.0.1"},
         {"id": "GHSA-old", "affects_scanned_version": False, "fixed_in": "9.9.9"}]),
-     "review", True, "a published advisory affects this version (GHSA-a); fixed in 3.0.1"),
+     "review", True, "known vulnerability GHSA-a affects this version (fixed in 3.0.1)"),
     ("advisory_fix_mixed_date_and_semver_names_none", _scan(88, 200, advisories=[
         {"id": "GHSA-a", "affects_scanned_version": True, "fixed_in": "2.0.1"},
         {"id": "GHSA-b", "affects_scanned_version": True, "fixed_in": "2026.9.1"}]),
-     "review", True, "a published advisory affects this version (GHSA-a)"),
+     "review", True, "known vulnerability GHSA-a and 1 more advisory affect this version"),
     ("advisory_fix_all_date_numbered_picks_highest", _scan(88, 200, advisories=[
         {"id": "GHSA-a", "affects_scanned_version": True, "fixed_in": "2025.9.24"},
         {"id": "GHSA-b", "affects_scanned_version": True, "fixed_in": "2026.1.14"}]),
-     "review", True, "a published advisory affects this version (GHSA-a); fixed in 2026.1.14"),
+     "review", True,
+     "known vulnerability GHSA-a and 1 more advisory affect this version (fixed in 2026.1.14)"),
     ("advisory_in_incident_history", _scan(88, 200, incident_history={"advisories": [
         {"id": "PYSEC-1", "affects_scanned_version": True}]}),
-     "review", True, "a published advisory affects this version (PYSEC-1)"),
+     "review", True, "known vulnerability PYSEC-1 affects this version"),
+    # An item without its advisory record (an older cached shape): Review, unnamed.
     ("critical_own_advisory_is_review", _scan(40, 200, [_f(
         "critical", "Published advisory affects this version: RCE",
         category="known_vulnerability", file_path="registry advisory")], crit=1),
      "review", True, "a published advisory affects this version"),
+    # ── published advisories: CVSS 9.0+ on this version answers Do not connect ──────
+    # (Kenne, 2026-11-18); every other reason names the advisory, by its CVE first.
+    ("critical_cve_9_3_do_not_connect", _scan(45, 200, [
+        _f("critical", "Published advisory affects this version: RCE",
+           category="known_vulnerability", file_path="repository security advisory"),
+        _f("high", "Lethal trifecta")], crit=1, high=1, incident_history={"advisories": [
+            {"id": "GHSA-todo-1234-abcd", "aliases": ["CVE-2026-76807"], "severity": "critical",
+             "cvss": 9.3, "fixed_in": "10.3.3", "affects_scanned_version": True}]}),
+     "do_not_connect", True,
+     "critical known vulnerability CVE-2026-76807 affects this version "
+     "(CVSS 9.3; fixed in 10.3.3)"),
+    ("high_cve_8_8_review_names_it_after_a_high", _scan(60, 200, [
+        _f("high", "Published advisory affects this version: SQL injection",
+           category="known_vulnerability", file_path="repository security advisory"),
+        _f("high", "Lethal trifecta")], high=2, incident_history={"advisories": [
+            {"id": "GHSA-mssq-1234-abcd", "aliases": ["CVE-2026-63129"], "severity": "high",
+             "cvss": 8.8, "fixed_in": "0.6.0", "affects_scanned_version": True}]}),
+     "review", True, "one high finding in its code: lethal trifecta; "
+     "known vulnerability CVE-2026-63129 affects this version (fixed in 0.6.0)"),
+    ("high_cve_8_8_review_leads_with_it", _scan(66, 200, incident_history={"advisories": [
+        {"id": "GHSA-mssq-1234-abcd", "aliases": ["CVE-2026-63129"], "severity": "high",
+         "cvss": 8.8, "fixed_in": "0.6.0", "affects_scanned_version": True}]}),
+     "review", True, "known vulnerability CVE-2026-63129 affects this version (fixed in 0.6.0)"),
+    ("cvss_decides_over_a_critical_label", _scan(66, 200, incident_history={"advisories": [
+        {"id": "GHSA-x", "aliases": ["CVE-2026-1"], "severity": "critical", "cvss": 8.9,
+         "affects_scanned_version": True}]}),
+     "review", True, "known vulnerability CVE-2026-1 affects this version"),
+    ("cvss_exactly_9_is_critical", _scan(66, 200, incident_history={"advisories": [
+        {"id": "GHSA-x", "severity": "high", "cvss": 9, "affects_scanned_version": True}]}),
+     "do_not_connect", True, "critical known vulnerability GHSA-x affects this version (CVSS 9.0)"),
+    ("no_cvss_critical_label_falls_back", _scan(66, 200, incident_history={"advisories": [
+        {"id": "GHSA-x", "aliases": ["CVE-2026-2"], "severity": "critical", "fixed_in": "1.2.0",
+         "affects_scanned_version": True}]}),
+     "do_not_connect", True, "critical known vulnerability CVE-2026-2 affects this version "
+     "(fixed in 1.2.0)"),
+    ("bad_cvss_values_fall_back_to_label", _scan(66, 200, incident_history={"advisories": [
+        {"id": "GHSA-x", "severity": "high", "cvss": True, "affects_scanned_version": True},
+        {"id": "GHSA-y", "severity": "high", "cvss": "9.8", "affects_scanned_version": True},
+        {"id": "GHSA-z", "severity": "high", "cvss": 0, "affects_scanned_version": True}]}),
+     "review", True, "known vulnerability GHSA-x and 2 more advisories affect this version"),
+    ("critical_cve_fixed_version_unchanged", _scan(72, 200, incident_history={"advisories": [
+        {"id": "GHSA-todo-1234-abcd", "aliases": ["CVE-2026-76807"], "severity": "critical",
+         "cvss": 9.3, "fixed_in": "10.3.3", "affects_scanned_version": False}]}),
+     "safe", True, "nothing found in 200 files"),
+    ("critical_cve_leads_among_several", _scan(40, 200, incident_history={"advisories": [
+        {"id": "GHSA-a", "aliases": ["CVE-2026-3"], "severity": "high", "cvss": 7.5,
+         "fixed_in": "2.0.0", "affects_scanned_version": True},
+        {"id": "GHSA-b", "aliases": ["CVE-2026-4"], "severity": "critical", "cvss": 10,
+         "fixed_in": "2.1.0", "affects_scanned_version": True}]}),
+     "do_not_connect", True, "critical known vulnerability CVE-2026-4 and 1 more advisory "
+     "affect this version (CVSS 10.0; fixed in 2.1.0)"),
+    ("critical_defect_decides_cve_appended", _scan(30, 200, [_f("critical", "Eval of input")],
+                                                   crit=1, incident_history={"advisories": [
+        {"id": "GHSA-b", "aliases": ["CVE-2026-4"], "severity": "critical", "cvss": 9.8,
+         "affects_scanned_version": True}]}),
+     "do_not_connect", True, "one critical finding in its code: eval of input; "
+     "known vulnerability CVE-2026-4 affects this version"),
+    ("critical_cve_with_dependency_clause", _scan(40, 200, [_dep("high", "a@1 (GHSA-1)")],
+                                                  incident_history={"advisories": [
+        {"id": "GHSA-b", "aliases": ["CVE-2026-4"], "cvss": 9.1,
+         "affects_scanned_version": True}]}),
+     "do_not_connect", True, "critical known vulnerability CVE-2026-4 affects this version "
+     "(CVSS 9.1); plus 1 high in dependencies"),
+    ("critical_cve_pending_sandbox", _scan(40, 200, behavioral={"ran": False, "pending": True},
+                                           incident_history={"advisories": [
+        {"id": "GHSA-b", "severity": "critical", "affects_scanned_version": True}]}),
+     "do_not_connect", False, "critical known vulnerability GHSA-b affects this version"
+      "; sandbox still running"),
+    ("mcp_card_shape_critical", _scan(40, 200, advisories_affecting_version=[
+        {"id": "GHSA-b", "severity": "critical", "fixed_in": "3.0.0"}]),
+     "do_not_connect", True, "critical known vulnerability GHSA-b affects this version "
+     "(fixed in 3.0.0)"),
+    ("malware_reason_not_appended", _scan(90, 200, incident_history={
+        "current_version_affected": True, "advisories": [
+            {"id": "GHSA-m", "severity": "critical", "affects_scanned_version": True}]}),
+     "do_not_connect", True, "this version is a known-malicious package (malware advisory)"),
+    ("non_string_severity_is_missing", _scan(66, 200, incident_history={"advisories": [
+        {"id": "GHSA-x", "severity": ["critical"], "affects_scanned_version": True},
+        {"id": "GHSA-y", "severity": {"critical": 1}, "affects_scanned_version": True},
+        {"id": "GHSA-z", "severity": 4, "affects_scanned_version": True}]}),
+     "review", True, "known vulnerability GHSA-x and 2 more advisories affect this version"),
+    ("advisory_aliases_not_a_list", _scan(66, 200, incident_history={"advisories": [
+        {"id": "GHSA-x", "aliases": "CVE-2026-9", "affects_scanned_version": True}]}),
+     "review", True, "known vulnerability GHSA-x affects this version"),
     ("deprecated", _scan(90, 200, deprecation="use foo2"), "review", True,
      "the maintainer has deprecated this package"),
     ("score_under_51", _scan(50, 200, [_f("medium")] * 8), "review", True,
@@ -275,7 +362,7 @@ CASES = [
     ("deps_advisory_branch_unchanged", _scan(88, 200, [_dep("high", "a@1 (GHSA-1)")],
                                              advisories=[{"id": "GHSA-abcd",
                                                           "affects_scanned_version": True}]),
-     "review", True, "a published advisory affects this version (GHSA-abcd)"),
+     "review", True, "known vulnerability GHSA-abcd affects this version"),
     ("deps_score_branch_unchanged", _scan(45, 200, [_dep("critical", "a@1 (GHSA-1)")] * 3),
      "review", True, "trust score 45/100 is under 51"),
     ("deps_safe", _scan(82, 300, [_dep("high", "a@1 (GHSA-1)"), _dep("high", "b@2 (GHSA-2)")]),

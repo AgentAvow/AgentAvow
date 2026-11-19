@@ -277,6 +277,78 @@ function highestFix(advisories: Obj[]): string | null {
   return schemes.size > 1 ? null : best
 }
 
+// A published advisory against the scanned version with a CVSS base score of 9.0 or more
+// (critical) answers Do not connect (Kenne, 2026-11-18); below that it reads Review. When
+// the advisory carries no CVSS score, its own "critical" severity label stands in.
+// Twin of the same helpers in src/scanner/verdict.py.
+const CRITICAL_CVSS = 9.0
+const ADVISORY_SEV_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, moderate: 2, low: 1 }
+
+function advisoryCvss(a: Obj): number | null {
+  const v = a.cvss
+  if (typeof v !== 'number' || !Number.isFinite(v) || !(v > 0 && v <= 10)) return null
+  return v
+}
+
+// The advisory's own severity label, lowercased; anything but a string is missing.
+function advisoryLabel(a: Obj): string {
+  return typeof a.severity === 'string' ? a.severity.toLowerCase() : ''
+}
+
+export function advisoryIsCritical(a: Obj): boolean {
+  const c = advisoryCvss(a)
+  if (c !== null) return c >= CRITICAL_CVSS
+  return advisoryLabel(a) === 'critical'
+}
+
+function advisoryRank(a: Obj): [number, number, number] {
+  const c = advisoryCvss(a)
+  return [advisoryIsCritical(a) ? 1 : 0, ADVISORY_SEV_RANK[advisoryLabel(a)] ?? 0, c ?? -1]
+}
+
+function rankGreater(x: [number, number, number], y: [number, number, number]): boolean {
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i]
+  return false
+}
+
+// The most severe advisory (critical first, then the severity label, then CVSS); the
+// first one wins a tie.
+function leadAdvisory(advisories: Obj[]): Obj | null {
+  let best: Obj | null = null
+  for (const a of advisories) if (best === null || rankGreater(advisoryRank(a), advisoryRank(best))) best = a
+  return best
+}
+
+// The id a reader looks up: the CVE when the advisory has one, else its own id.
+function advisoryName(a: Obj): string {
+  const ids = [a.id, ...(Array.isArray(a.aliases) ? a.aliases : [])]
+    .filter((i): i is string => typeof i === 'string' && i.trim() !== '')
+  return ids.find((i) => i.toUpperCase().startsWith('CVE-')) ?? ids[0] ?? ''
+}
+
+/** `known vulnerability CVE-2026-1 affects this version (fixed in 2.0.1)`: the published
+ * advisories that affect the scanned version, by name, for the reason line. `critical`
+ * leads with the critical one and its CVSS score. */
+export function knownVulnerabilityPhrase(advisories: Obj[], critical = false): string {
+  const lead = leadAdvisory(advisories)
+  if (lead === null) return ''
+  const name = advisoryName(lead)
+  const more = advisories.length - 1
+  const details: string[] = []
+  const c = advisoryCvss(lead)
+  if (critical && c !== null) details.push(`CVSS ${(Math.floor(c * 10 + 0.5) / 10).toFixed(1)}`)
+  const fix = highestFix(advisories)
+  if (fix) details.push(`fixed in ${fix}`)
+  const tail = details.length ? ` (${details.join('; ')})` : ''
+  const noun = critical ? 'critical known vulnerability' : 'known vulnerability'
+  if (!name) {
+    return (more <= 0 ? 'a published advisory affects this version'
+      : `${more + 1} published advisories affect this version`) + tail
+  }
+  if (more > 0) return `${noun} ${name} and ${more} more ${more === 1 ? 'advisory' : 'advisories'} affect this version${tail}`
+  return `${noun} ${name} affects this version${tail}`
+}
+
 function toInt(v: unknown): number {
   if (typeof v === 'boolean') return v ? 1 : 0
   if (typeof v === 'number') return Number.isFinite(v) ? Math.trunc(v) : 0
@@ -506,9 +578,16 @@ export function decide(input: unknown): Decision {
   const bLive = !!(b && b.ran && !b.pending && !(b.plan === 'live-probe' || b.advisory === true))
   const bFindings = bLive && b ? asList(b.findings) : []
 
+  const inc = asObj(data.incident_history)
   const suffix = !pending ? '' : (b && b.state === 'queued' ? QUEUED_SUFFIX : PENDING_SUFFIX)
-  const done = (decision: DecisionValue, reason: string): Decision =>
-    ({ decision, final: !pending, reason: reason + suffix })
+  // Published advisories against the scanned version. Every reason names them: they lead
+  // when one decides, and are appended to any other reason.
+  const rawAdv = Array.isArray(data.advisories) && data.advisories.length ? data.advisories : inc.advisories
+  const advisories = asList(rawAdv).filter((a) => a.affects_scanned_version === true)
+  if (Array.isArray(data.advisories_affecting_version)) advisories.push(...asList(data.advisories_affecting_version))
+  const advNote = advisories.length ? '; ' + knownVulnerabilityPhrase(advisories) : ''
+  const done = (decision: DecisionValue, reason: string, namesAdvisory = false): Decision =>
+    ({ decision, final: !pending, reason: reason + (namesAdvisory ? '' : advNote) + suffix })
   const sev = (i: Obj) => String(i.severity ?? '').toLowerCase()
 
   // Dependency advisories never decide, but the totals count them: a reason that counts
@@ -524,9 +603,8 @@ export function decide(input: unknown): Decision {
   const canary = bLive && ((Array.isArray(canaryList) ? canaryList.length > 0 : !!canaryList)
     || bFindings.some((f) => f.rule === 'credential_canary_exfiltrated'))
   if (canary) return done('do_not_connect', 'a planted credential left the sandbox')
-  const inc = asObj(data.incident_history)
   if (inc.current_version_affected === true) {
-    return done('do_not_connect', 'this version is a known-malicious package (malware advisory)')
+    return done('do_not_connect', 'this version is a known-malicious package (malware advisory)', true)
   }
   const mal = items.find(isMaliciousItem)
   const scMal = asObj(data.supply_chain).malicious
@@ -570,6 +648,9 @@ export function decide(input: unknown): Decision {
     const label = BEHAVIORAL_LABELS[String(f.rule ?? '')] || findingLabel(f.name)
     return done('do_not_connect', `the sandbox caught a critical behavior: ${label}` + plusDeps)
   }
+  if (advisories.some(advisoryIsCritical)) {
+    return done('do_not_connect', knownVulnerabilityPhrase(advisories, true) + plusDeps, true)
+  }
 
   // review
   if (secrets.length) return done('review', secretReason(secrets.length, findingWhere(secrets[0])) + plusDeps)
@@ -582,15 +663,8 @@ export function decide(input: unknown): Decision {
     return done('review', countPhrase(bHigh.length, 'high', label, inSandbox) + plusDeps)
   }
 
-  const rawAdv = Array.isArray(data.advisories) && data.advisories.length ? data.advisories : inc.advisories
-  const advisories = asList(rawAdv).filter((a) => a.affects_scanned_version === true)
-  if (Array.isArray(data.advisories_affecting_version)) advisories.push(...asList(data.advisories_affecting_version))
-  const advItem = items.find(isAdvisory)
-  if (advisories.length || advItem) {
-    const aid = String((advisories.length ? advisories[0].id : '') || '')
-    const fix = highestFix(advisories)
-    return done('review', 'a published advisory affects this version' + (aid ? ` (${aid})` : '') + (fix ? `; fixed in ${fix}` : ''))
-  }
+  if (advisories.length) return done('review', knownVulnerabilityPhrase(advisories), true)
+  if (items.find(isAdvisory)) return done('review', 'a published advisory affects this version')
   const dep = data.deprecation
   if (typeof dep === 'string' && dep.trim()) return done('review', 'the maintainer has deprecated this package')
   if (score < REVIEW_SCORE_FLOOR) return done('review', `trust score ${score}/100 is under ${REVIEW_SCORE_FLOOR}`)
