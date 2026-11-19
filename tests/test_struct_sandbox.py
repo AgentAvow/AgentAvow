@@ -152,3 +152,37 @@ def test_upgrade_advice_names_the_release_that_fixes_everything():
     assert _highest_fix(advs) == "2026.1.14"
     assert _highest_fix([{"fixed_in": "1.10.0"}, {"fixed_in": "1.9.3"}]) == "1.10.0"
     assert _highest_fix([{}]) is None
+
+
+def test_card_advisories_carry_cvss_and_aliases_and_redecide_like_the_server():
+    """decide() run on the card's advisories_affecting_version reaches the same answer,
+    with the same CVE named, as the server reading the full advisories."""
+    from src.scanner.verdict import decide
+
+    advs = [{"id": "GHSA-crit", "aliases": ["CVE-2026-7", 5, ""], "severity": "critical",
+             "cvss": 9.8, "fixed_in": "2.0.1", "summary": "rce",
+             "affects_scanned_version": True},
+            {"id": "GHSA-lab", "severity": "critical", "cvss": True,
+             "affects_scanned_version": True},
+            {"id": "GHSA-old", "severity": "low", "cvss": 3.1,
+             "affects_scanned_version": False}]
+    base = {"trust_score": 70, "trust_tier": "standard", "metadata": {"files_scanned": 40},
+            "findings": {"items": [], "total": 0}, "certified": {"eligible": False}}
+    server = dict(base, advisories=advs, incident_history={"advisories": advs})
+    s = _scan_struct(server, "x", "npm", "/r", "/a", None)
+    items = s["advisories_affecting_version"]
+    assert [(a["id"], a["aliases"], a["cvss"]) for a in items] == [
+        ("GHSA-crit", ["CVE-2026-7"], 9.8), ("GHSA-lab", [], None)]
+    card = decide(dict(base, advisories_affecting_version=items))
+    assert card == decide(server)
+    assert card.decision == s["decision"] == "do_not_connect"
+    assert card.reason == s["decision_reason"]
+    assert "CVE-2026-7" in card.reason and "CVSS 9.8" in card.reason
+
+    # Below 9.0 the score outranks a "critical" label on both sides: Review.
+    mild = [dict(advs[0], cvss=8.1, severity="critical")]
+    server = dict(base, advisories=mild, incident_history={"advisories": mild})
+    s = _scan_struct(server, "x", "npm", "/r", "/a", None)
+    card = decide(dict(base, advisories_affecting_version=s["advisories_affecting_version"]))
+    assert card == decide(server) and card.decision == "review"
+    assert card.reason == "known vulnerability CVE-2026-7 affects this version (fixed in 2.0.1)"

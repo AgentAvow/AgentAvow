@@ -1681,6 +1681,21 @@ def _is_date_version(v: str) -> bool:
     return len(head) == 4 and head.isdigit() and 1990 <= int(head) <= 2100
 
 
+def _advisory_cvss(a: dict) -> float | None:
+    """The advisory's CVSS base score as a number (0-10], else None."""
+    v = a.get("cvss")
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v <= 10:
+        return None
+    return float(v)
+
+
+def _advisory_aliases(a: dict) -> list[str]:
+    """The advisory's other ids (the CVE among them), strings only, at most five."""
+    raw = a.get("aliases")
+    return [str(i) for i in raw if isinstance(i, str) and i.strip()][:5] \
+        if isinstance(raw, list) else []
+
+
 def _highest_fix(advisories: list[dict]) -> str | None:
     """The release that fixes ALL the listed advisories = the highest fixed_in.
     When the fixes mix date-numbered releases (2026.8.31) with ordinary ones (2.0.1),
@@ -1830,9 +1845,13 @@ def _scan_struct(
         or (data.get("surface_detail") or data.get("artifact_scan") or {}).get("version"),
         "published_at": data.get("published_at"),
         "deprecated": dep.strip()[:300] if isinstance(dep, str) and dep.strip() else None,
+        # Each item carries the CVSS score and the aliases (the CVE id) too, so decide()
+        # run on this shape names the same CVE and reaches the same answer as the server.
+        # Additive keys: the outputSchema's item is a plain object, so it is unchanged.
         "advisories_affecting_version": [
-            {"id": a.get("id"), "severity": a.get("severity"), "fixed_in": a.get("fixed_in"),
-             "summary": (a.get("summary") or "")[:160]}
+            {"id": a.get("id"), "aliases": _advisory_aliases(a),
+             "severity": a.get("severity"), "cvss": _advisory_cvss(a),
+             "fixed_in": a.get("fixed_in"), "summary": (a.get("summary") or "")[:160]}
             for a in (data.get("advisories") or []) if a.get("affects_scanned_version")
         ][:10],
         # What the sandbox observed (None until the first run completes; see `pending`).

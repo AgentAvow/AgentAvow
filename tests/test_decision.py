@@ -264,6 +264,17 @@ CASES = [
         {"id": "GHSA-b", "severity": "critical", "fixed_in": "3.0.0"}]),
      "do_not_connect", True, "critical known vulnerability GHSA-b affects this version "
      "(fixed in 3.0.0)"),
+    # The card items carry cvss and aliases (additive): the same answer and the same CVE
+    # name the server gives for the same advisory.
+    ("mcp_card_shape_critical_cvss", _scan(40, 200, advisories_affecting_version=[
+        {"id": "GHSA-b", "aliases": ["CVE-2026-5"], "severity": "high", "cvss": 9.8,
+         "fixed_in": "3.0.0", "summary": "rce"}]),
+     "do_not_connect", True, "critical known vulnerability CVE-2026-5 affects this version "
+     "(CVSS 9.8; fixed in 3.0.0)"),
+    ("mcp_card_shape_cvss_outranks_label", _scan(66, 200, advisories_affecting_version=[
+        {"id": "GHSA-b", "aliases": ["CVE-2026-5"], "severity": "critical", "cvss": 8.1,
+         "fixed_in": None, "summary": ""}]),
+     "review", True, "known vulnerability CVE-2026-5 affects this version"),
     ("malware_reason_not_appended", _scan(90, 200, incident_history={
         "current_version_affected": True, "advisories": [
             {"id": "GHSA-m", "severity": "critical", "affects_scanned_version": True}]}),
