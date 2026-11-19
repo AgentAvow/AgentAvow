@@ -49,8 +49,8 @@ The keys are not rotated on a schedule. A key changes only when it is retired on
 
 - **Planned change.** We announce it at least 30 days ahead on this page and in the repository, with the new
   key's RFC 7638 thumbprint. Each role (scan attestations, trust-score envelopes, the catalog) has one key at
-  a time under a fixed `kid` (plus the scan key's thumbprint `kid`), so on the day of the change the new key replaces the old one under the same
-  `kid`; tell them apart by thumbprint. The retired key's public JWK and thumbprint stay on this page and in
+  a time under a fixed `kid` (plus the scan key's thumbprint `kid`), so on the day of the change the new key
+  replaces the old one under the same `kid`; tell them apart by thumbprint. The retired key's public JWK and thumbprint stay on this page and in
   the repository, so attestations it signed can still be checked.
 - **Compromise.** We add the key to the revocation list below, with the time the revocation takes effect,
   remove it from the JWKS at once, and post a notice on this page and in the repository.
