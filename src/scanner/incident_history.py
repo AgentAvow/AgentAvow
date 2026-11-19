@@ -732,6 +732,20 @@ def summarize_repo_advisories(advisories: list, eco: str, name: str,
     if not gh_eco or not name:
         return []
     want = _norm_pkg(eco, name)
+    def matches(pkg: dict) -> bool:
+        return (str(pkg.get("ecosystem") or "").lower() == gh_eco
+                and _norm_pkg(eco, str(pkg.get("name") or "")) == want)
+
+    return _summarize_matching(advisories, matches, eco, version)
+
+
+def _summarize_matching(advisories: list, matches, eco: str,
+                        version: str | None) -> list[dict]:
+    """The shared reducer behind ``summarize_repo_advisories`` and
+    ``summarize_image_repo_advisories``: each published, unwithdrawn advisory with a
+    ``vulnerabilities[]`` entry whose ``package`` ``matches``, read against ``version``
+    (semver unless ``eco`` is PyPI). ``version=None`` (an image tag that is not a
+    release number) lists the advisory as context, never affected and never unparsed."""
     out: list[dict] = []
     seen: set[str] = set()
     for a in advisories if isinstance(advisories, list) else []:
@@ -745,17 +759,13 @@ def summarize_repo_advisories(advisories: list, eco: str, name: str,
         mine = []
         for v in a.get("vulnerabilities") or []:
             pkg = v.get("package") if isinstance(v, dict) else None
-            if not isinstance(pkg, dict):
-                continue
-            if str(pkg.get("ecosystem") or "").lower() != gh_eco:
-                continue
-            if _norm_pkg(eco, str(pkg.get("name") or "")) == want:
+            if isinstance(pkg, dict) and matches(pkg):
                 mine.append(v)
         if not mine:
             continue
         seen.add(ghsa)
         affected, unparsed, fixed = False, False, None
-        if gh_patched_on_line(mine, eco, version):
+        if version is None or gh_patched_on_line(mine, eco, version):
             mine_checked = []  # patched on its own release line: not affected
         else:
             mine_checked = mine
@@ -786,6 +796,50 @@ def summarize_repo_advisories(advisories: list, eco: str, name: str,
         })
     out.sort(key=lambda x: (not x["affects_scanned_version"], x["id"]))
     return out[:20]
+
+
+# An image tag that is a full release number: ``1.0.25``, ``v1.0.25``, ``1.0.25-rc1``,
+# ``1.0.25-alpine`` (the variant is dropped; a pre-release is kept). ``latest``, ``1`` and
+# ``1.0`` move between releases, so they never stand for one.
+_IMAGE_TAG_VERSION_RE = re.compile(
+    r"^v?(\d+\.\d+\.\d+)(-(?:alpha|beta|rc|pre)[0-9A-Za-z.]*)?(?:[-_][0-9A-Za-z._-]*)?$",
+    re.IGNORECASE)
+
+
+def image_tag_version(tag: str | None) -> str | None:
+    """The release an image tag names, or None when the tag is not a release number."""
+    m = _IMAGE_TAG_VERSION_RE.match(str(tag or "").strip())
+    if not m:
+        return None
+    return m.group(1) + (m.group(2) or "")
+
+
+def _image_pkg_matches(pkg: dict, slug: str) -> bool:
+    """A repository advisory's package that IS the repository an image was built from:
+    the Go module ``github.com/<owner>/<repo>`` (or a path under it), or, in any other
+    ecosystem, a package named like the repository (``@scope/<repo>``, ``<repo>``).
+    A sibling package in a monorepo never matches."""
+    slug = slug.lower()
+    repo = slug.split("/", 1)[1]
+    name = str(pkg.get("name") or "").strip().lower()
+    if not name:
+        return False
+    if str(pkg.get("ecosystem") or "").lower() == "go":
+        return name == f"github.com/{slug}" or name.startswith(f"github.com/{slug}/")
+    return (re.sub(r"[-_.]+", "-", name.rsplit("/", 1)[-1])
+            == re.sub(r"[-_.]+", "-", repo))
+
+
+def summarize_image_repo_advisories(advisories: list, slug: str,
+                                    tag: str | None) -> list[dict]:
+    """Pure reducer: the published security advisories of the repository a container
+    image declares as its source (``org.opencontainers.image.source``) -> entries in the
+    ``summarize_advisories`` shape, read against the image tag's release number. Only
+    advisories for the repository's own package count (``_image_pkg_matches``)."""
+    if not _SLUG_OK_RE.match(str(slug or "")):
+        return []
+    return _summarize_matching(advisories, lambda pkg: _image_pkg_matches(pkg, slug),
+                               "semver", image_tag_version(tag))
 
 
 def merge_advisories(existing: list[dict], extra: list[dict]) -> list[dict]:

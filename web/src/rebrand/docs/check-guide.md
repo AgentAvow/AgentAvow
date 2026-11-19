@@ -37,7 +37,9 @@ GET https://agentavow.com/api/v1/public/scan/package/{npm|pypi|crates|docker}/{n
 For npm, PyPI and crates that is the published version; for a container image it is the tag. The scan
 runs on that release's bytes, and a published advisory (GHSA / PYSEC / CVE) against the package itself is
 reported as a finding only when it affects the version scanned, with the fixed release named in the
-remediation. In the [MCP connector](./mcp-connector.md), pin the same way inside the package name:
+remediation. For a container image, the advisories come from the GitHub repository its
+`org.opencontainers.image.source` label names, read against the tag (or, for a tag such as `latest`, the
+`org.opencontainers.image.version` label); an image without that label has no declared source to read. In the [MCP connector](./mcp-connector.md), pin the same way inside the package name:
 `chalk@5.3.0`, `@scope/name@1.2.3`, `requests==2.32.5`, `serde@1.0.200`.
 
 ### A first scan that takes a while

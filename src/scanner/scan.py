@@ -7526,13 +7526,33 @@ def _yank_finding(name: str, version: str, reason: str | None) -> Finding:
                      "release that isn't yanked."))
 
 
+_ADVISORY_ID_RE = re.compile(r"\b(?:CVE-\d{4}-\d{4,}|GHSA(?:-[23456789cfghjmpqrvwx]{4}){3})\b",
+                             re.IGNORECASE)
+DEPRECATION_QUOTE_MAX = 200
+
+
+def _deprecation_name(message: str | None) -> str:
+    """The finding's title. When the maintainer's message names an advisory (a CVE or
+    GHSA id), it is quoted, so the reader sees which vulnerability retired the release
+    (a wrapper deprecated because the core it pins has a CVE). Whitespace and control
+    characters are collapsed and the quote is capped."""
+    base = "Package deprecated by its maintainer"
+    msg = " ".join("".join(ch if ch.isprintable() else " " for ch in str(message or ""))
+                   .split())
+    if not msg or not _ADVISORY_ID_RE.search(msg):
+        return base
+    if len(msg) > DEPRECATION_QUOTE_MAX:
+        msg = msg[:DEPRECATION_QUOTE_MAX - 1].rstrip() + "…"
+    return f'{base}: "{msg}"'
+
+
 def _deprecation_finding(eco: str, name: str, version: str, message: str) -> Finding:
     """'Clean but abandoned': the maintainer retired the package. Not malicious, so it is
     a MEDIUM maintenance finding (no security fixes are coming), never a blocker."""
     where = "package.json" if eco == "npm" else "registry metadata"
     return Finding(
         category="maintenance",
-        name="Package deprecated by its maintainer",
+        name=_deprecation_name(message),
         severity="medium",
         file_path=where,
         line_number=0,
@@ -7782,6 +7802,12 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
         # cosign signature/attestation → provenance, and what the layer walk read.
         from src.scanner.docker_image import apply_docker_image_extras
         await apply_docker_image_extras(result, fetched)
+        # The security advisories of the repository the image says it was built from,
+        # read against the tag, as npm / PyPI / crates scans read their repository's.
+        try:
+            await _apply_image_repo_advisories(result, fetched)
+        except Exception:  # noqa: BLE001 — fail-open
+            logger.debug("image repo advisory lookup failed for %s", name, exc_info=True)
 
     result.trust_score = _calculate_trust_score(result)
     result.category_scores = _calculate_category_scores(result)
@@ -8016,6 +8042,49 @@ async def _apply_repo_advisories(result, eco: str, name: str, manifest: dict | N
     result.incident_history = inc
     result.findings = result.findings + _own_advisory_findings(name, version, extra)
     n = sum(1 for a in extra if a.get("range_unparsed"))
+    if n:
+        result.coverage_gaps = {**(result.coverage_gaps or {}),
+                                "repo_advisory_range_unparsed": n}
+
+
+async def _apply_image_repo_advisories(result, fetched) -> None:
+    """A container image whose ``org.opencontainers.image.source`` label names a GitHub
+    repository: that repository's published security advisories for its own package,
+    read against the image tag (or, when the tag is not a release number such as
+    ``latest``, the ``org.opencontainers.image.version`` label). One that affects the
+    release is a finding, exactly like a package's own advisory. A failed lookup is
+    disclosed (``repo_advisory_lookup``), never read as clean. Without the label there
+    is nothing to read: an image's README link is not a declared source."""
+    from src.config import settings
+    from src.scanner.incident_history import (
+        fetch_repo_advisories,
+        image_tag_version,
+        summarize_image_repo_advisories,
+    )
+
+    image = getattr(fetched, "image", None)
+    if not isinstance(image, dict):
+        return
+    slug = _github_slug(str(image.get("source_label") or ""))
+    if not slug:
+        return
+    tag = str(image.get("tag") or getattr(fetched, "version", "") or "")
+    if image_tag_version(tag) is None and image_tag_version(image.get("version_label")):
+        tag = str(image.get("version_label"))
+    got = await fetch_repo_advisories(slug, getattr(settings, "github_token", None))
+    if got.get("checked") is not True:
+        result.coverage_gaps = {**(result.coverage_gaps or {}),
+                                "repo_advisory_lookup": "failed"}
+        return
+    mine = summarize_image_repo_advisories(got.get("advisories") or [], slug, tag)
+    if not mine:
+        return
+    inc = dict(result.incident_history or {})
+    inc["advisories"] = mine
+    result.incident_history = inc
+    result.findings = result.findings + _own_advisory_findings(
+        getattr(fetched, "name", "") or "", image_tag_version(tag) or tag, mine)
+    n = sum(1 for a in mine if a.get("range_unparsed"))
     if n:
         result.coverage_gaps = {**(result.coverage_gaps or {}),
                                 "repo_advisory_range_unparsed": n}

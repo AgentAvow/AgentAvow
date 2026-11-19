@@ -1564,6 +1564,9 @@ async def fetch_docker_artifact(
             "source_label": _first_label(
                 labels, "org.opencontainers.image.source", "org.label-schema.vcs-url",
             ),
+            "version_label": _first_label(
+                labels, "org.opencontainers.image.version", "org.label-schema.version",
+            ),
             "os_release": walked.os_release,
             "packages": walked.packages,
             "layers": walked.summary(),
