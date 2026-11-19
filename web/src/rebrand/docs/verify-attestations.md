@@ -75,22 +75,35 @@ GET https://agentavow.com/.well-known/key-revocations.json
 ```
 
 It returns `jws`, a compact JWS (`EdDSA`) over the RFC 8785 bytes of the list, and `payload`, an unsigned
-copy for reading. Verify the JWS with the key its header `kid` names (`agentgraph-security-v1`), then read the
-list decoded from the JWS, not the copy. The list gives:
+copy for reading. The list gives:
 
+- `type` (`agentavow-key-revocations-v1`) and `issuer` (`did:web:agentgraph.co`).
 - `keysCovered`: every key in the JWKS, and every key ever revoked, by `kid` and RFC 7638 thumbprint.
 - `revocations`: each revoked key with its `kid`, `thumbprint`, `effectiveFrom`, `reason` and a link to the
   public `notice`.
 - `issuedAt`, the time the list was served, and `nextUpdate`, one day later.
 
-A covered key with no entry in `revocations` was not revoked as of `issuedAt`. A key missing from
-`keysCovered` is one the list says nothing about. Once `nextUpdate` has passed, treat the list as stale and
-fetch it again before you rely on a pinned key. Entries are only ever added: once you have seen a validly
-signed revocation, keep it, even if a later list leaves it out.
+To check it:
 
-If the scan key itself is compromised, the revocation is published in the repository (`src/key_revocations.py`)
-and on this page, and a list carrying it is signed with that key one last time. The key that signs later
-lists is announced the same way, with its thumbprint in the table above.
+1. Verify the JWS with a key you already trust, chosen by its RFC 7638 thumbprint, not by the header `kid`
+   alone. The list is signed under the `kid` `agentgraph-security-v1`, and a replacement scan key would
+   reuse that name with a different key.
+2. Read the list decoded from the JWS, not the unsigned copy. Accept it only if `type` and `issuer` are the
+   values above.
+3. Reject a list whose `issuedAt` is earlier than the last one you accepted. Once `nextUpdate` has passed,
+   treat the list you hold as stale and fetch it again before you rely on a pinned key.
+4. Entries are only ever added. Once you have seen a validly signed revocation, keep it, even if a later
+   list leaves it out.
+
+A covered key with no entry in `revocations` was not revoked in the record that was live when the list was
+served. A key missing from `keysCovered` is one the list says nothing about.
+
+If the scan key itself is compromised, we publish its revocation while that key is still the one signing,
+so lists carrying the revocation are signed by the key you pinned. We keep that list live for at least two
+days, so a verifier that fetches once a day sees it, and post the notice on this page and in the repository
+(`src/key_revocations.py`). Only then do we change the key. Later lists are signed by the new key under the
+same `kid`; its thumbprint is added to the table above and to the repository before it signs anything you
+should trust, so check the new thumbprint against both before you accept it.
 
 Limits. The list is signed with the scan key, so whoever stole that key could sign a list that leaves it out;
 they would still have to serve it to you in place of ours, and a revocation you have already seen stays

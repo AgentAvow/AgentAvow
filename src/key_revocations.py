@@ -7,14 +7,19 @@ signed, dated, says which keys it covers, and names each revoked key with the
 time the revocation takes effect.
 
 ``keysCovered`` holds every key in the JWKS and every revoked key. A covered key
-with no entry in ``revocations`` means "not revoked as of ``issuedAt``". A key
+with no entry in ``revocations`` means "not revoked in the record that was live when
+the list was served" (``issuedAt`` is the serve time). A key
 missing from ``keysCovered`` is one the list says nothing about. That is the
 difference between an empty list and an absent one.
 
 ``REVOCATIONS`` below is the record. It lives in the repository so the public
 GitHub history is a second origin for it, as it is for the thumbprint table.
 Entries are only ever added, never removed. Adding one is a reviewed PR plus a
-deploy; see the key policy in verify-attestations.md.
+deploy; see the key policy in verify-attestations.md. The list is signed at request
+time by whatever key ``create_jws`` loads, under the constant ``KID``, so a
+revocation of the scan key itself must be deployed and left live before that key
+is replaced (verify-attestations.md, "The revocation list"). A JWS ``typ`` header
+is a possible later addition; it would change the signed bytes, so it is not here.
 """
 from __future__ import annotations
 
