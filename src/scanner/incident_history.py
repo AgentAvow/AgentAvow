@@ -154,15 +154,25 @@ def _parse_version(eco: str, v: str):
             return Version(v)
         except InvalidVersion:
             return None
-    # npm / crates: semver. Pre-release sorts before the release.
-    core, _, pre = v.lstrip("v").partition("-")
-    core = core.split("+", 1)[0]
+    # npm / crates: semver. Pre-release sorts before the release; build metadata is
+    # ignored.
+    v = v.lstrip("v").split("+", 1)[0]
+    core, _, pre = v.partition("-")
     try:
         nums = tuple(int(x) for x in core.split("."))
     except ValueError:
         return None
     nums = (nums + (0, 0, 0))[:3]
-    return (nums, 0 if pre else 1, pre)
+    return (nums, 0 if pre else 1, _semver_pre_key(pre))
+
+
+def _semver_pre_key(pre: str) -> tuple:
+    """Semver pre-release precedence: identifiers compared left to right, a numeric one
+    as an integer and below any alphanumeric one (``rc.9`` < ``rc.10`` < ``rc.a``),
+    and a shorter list below a longer one it prefixes (``rc`` < ``rc.1``)."""
+    if not pre:
+        return ()
+    return tuple((0, int(p), "") if p.isdigit() else (1, 0, p) for p in pre.split("."))
 
 
 def _range_affects(rng: dict, eco: str, version: str) -> bool:

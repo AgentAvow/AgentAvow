@@ -273,6 +273,11 @@ CASES = [
         {"id": "GHSA-y", "severity": {"critical": 1}, "affects_scanned_version": True},
         {"id": "GHSA-z", "severity": 4, "affects_scanned_version": True}]}),
      "review", True, "known vulnerability GHSA-x and 2 more advisories affect this version"),
+    # An unmatched image advisory is disclosed but never decides: Safe stays Safe.
+    ("unmatched_repo_advisory_stays_safe", _scan(92, 340, coverage_gaps={
+        "repo_advisory_unmatched": 1}), "safe", True,
+     "nothing found in 340 files; 1 repository security advisory could not be matched "
+     "to this image's version"),
     ("advisory_aliases_not_a_list", _scan(66, 200, incident_history={"advisories": [
         {"id": "GHSA-x", "aliases": "CVE-2026-9", "affects_scanned_version": True}]}),
      "review", True, "known vulnerability GHSA-x affects this version"),
@@ -906,6 +911,12 @@ MARK_CASES = [
      True, ""),
     ("gap_repo_advisory_range_unparsed", _scan(
         92, 340, certified=CERTIFIED, coverage_gaps={"repo_advisory_range_unparsed": 1}),
+     False, "coverage_gaps"),
+    ("gap_repo_advisory_unmatched", _scan(
+        92, 340, certified=CERTIFIED, coverage_gaps={"repo_advisory_unmatched": 1}),
+     False, "coverage_gaps"),
+    ("gap_repo_advisory_unmatched_string", _scan(
+        92, 340, certified=CERTIFIED, coverage_gaps={"repo_advisory_unmatched": "2"}),
      False, "coverage_gaps"),
     ("gap_fetch_failed", _scan(92, 340, certified=CERTIFIED,
                                coverage_gaps={"fetch_failed": 1}), False, "coverage_gaps"),

@@ -804,6 +804,7 @@ export function cheapCoverageGap(input: unknown): boolean {
   // An x402 endpoint: only its listing was read, never the code behind it.
   if (g.x402_code_unread === true) return true
   if (toInt(g.repo_advisory_range_unparsed) > 0) return true
+  if (toInt(g.repo_advisory_unmatched) > 0) return true
   if (surfaceIs(data, 'openclaw') && (toInt(g.oversized_files) > 0 || toInt(g.over_file_cap) > 0
     || g.tree_truncated === true)) return true
   if (toInt(g.oversized_files) > 0) {

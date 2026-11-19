@@ -101,6 +101,24 @@ def test_a_pre_release_tag_sorts_below_its_release():
         assert a["affects_scanned_version"] is hit, tag
 
 
+def test_numeric_pre_release_identifiers_compare_as_numbers():
+    pv = ih._parse_version
+    for eco in ("npm", "semver"):
+        assert pv(eco, "1.2.3-rc.9") < pv(eco, "1.2.3-rc.10") < pv(eco, "1.2.3")
+        assert pv(eco, "1.2.3-rc") < pv(eco, "1.2.3-rc.1") < pv(eco, "1.2.3-rc.a")
+        assert pv(eco, "1.2.3-alpha.2") < pv(eco, "1.2.3-beta.1")
+        assert pv(eco, "1.2.3-2") < pv(eco, "1.2.3-10") < pv(eco, "1.2.3-a")
+        assert pv(eco, "1.2.3-rc.1+build.5") == pv(eco, "1.2.3-rc.1")
+    # an npm range and an image tag read the same way
+    assert ih.gh_range_affects("< 1.2.3-rc.10", "npm", "1.2.3-rc.9") is True
+    assert ih.gh_range_affects("< 1.2.3-rc.10", "npm", "1.2.3-rc.11") is False
+    (a,) = summarize_image_repo_advisories([_range_adv("< 1.2.3-rc.10")], SLUG, "1.2.3-rc.9")
+    assert a["affects_scanned_version"] is True
+    (b,) = summarize_image_repo_advisories([_range_adv("< 1.2.3-rc.10")], SLUG,
+                                           "1.2.3-rc.11")
+    assert b["affects_scanned_version"] is False
+
+
 @pytest.mark.parametrize("tag", ["latest", "1.0.25-alpine", "2024.01.05"])
 def test_an_unmappable_tag_is_unmatched_never_affected(tag):
     (a,) = summarize_image_repo_advisories(K8S, SLUG, tag)

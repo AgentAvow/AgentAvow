@@ -1052,6 +1052,9 @@ def cheap_coverage_gap(data: dict) -> bool:
     # this version: never Certified on that.
     if _int(g.get("repo_advisory_range_unparsed")) > 0:
         return True
+    # Same for an image tag we could not match to the advisory's version.
+    if _int(g.get("repo_advisory_unmatched")) > 0:
+        return True
     if _surface_is(data, "openclaw") and (
             _int(g.get("oversized_files")) > 0 or _int(g.get("over_file_cap")) > 0
             or g.get("tree_truncated") is True):
