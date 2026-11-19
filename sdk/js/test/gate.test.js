@@ -654,3 +654,53 @@ test('the issuer option accepts a grader you run yourself, and only that one', {
   assert.equal(r.outcome, 'unverified');
   assert.match(r.reason, /issuer did:web:agentgraph.co is not did:web:demo.invalid/);
 });
+
+test('a critical published advisory on the installed version is do_not_connect without a signed decision', { skip }, async () => {
+  const policy = mod.resolvePolicy({});
+  const adv = (a) => ({ id: 'GHSA-aaaa-bbbb-cccc', aliases: ['CVE-2026-1234'], severity: 'high',
+    fixed_in: '2.0.1', affects_scanned_version: true, ...a });
+  const item = { category: 'known_vulnerability', severity: 'critical', name: 'Published advisory affects this version: rce', file_path: 'registry advisory' };
+  const shape = (advisories, extra = {}) => ({ ...scanJson({ score: 66, critical: 1, items: [item] }), advisories, ...extra });
+
+  // CVSS 9.0 or more: do_not_connect, naming the CVE with its score and fix.
+  const d = mod.deriveDecision(verified(shape([adv({ cvss: 9.8 })])), policy);
+  assert.equal(d.decision, 'do_not_connect');
+  assert.equal(d.outcome, 'finding');
+  assert.match(d.reason, /critical known vulnerability CVE-2026-1234 affects this version \(CVSS 9\.8; fixed in 2\.0\.1\)/);
+  // Exactly 9.0 counts; incident_history.advisories is read when advisories is absent.
+  const ih = { ...scanJson({ score: 66 }), incident_history: { advisories: [adv({ cvss: 9 })] } };
+  assert.equal(mod.deriveDecision(verified(ih), policy).decision, 'do_not_connect');
+  // No numeric score: the "critical" label decides; no CVE alias: the id is named.
+  const label = mod.deriveDecision(verified(shape([adv({ severity: 'Critical', aliases: [] })])), policy);
+  assert.equal(label.decision, 'do_not_connect');
+  assert.match(label.reason, /critical known vulnerability GHSA-aaaa-bbbb-cccc affects this version \(fixed in 2\.0\.1\)/);
+  // The MCP card shape (advisories_affecting_version, no affects flag) is read too.
+  const card = { ...scanJson({ score: 66 }), advisories_affecting_version: [adv({ cvss: 9.1, affects_scanned_version: undefined })] };
+  assert.equal(mod.deriveDecision(verified(card), policy).decision, 'do_not_connect');
+  // An unsigned API "review" (an older answer) is tightened by the recompute.
+  assert.equal(mod.deriveDecision(verified(shape([adv({ cvss: 9.8 })], { decision: 'review' })), policy).decision, 'do_not_connect');
+
+  // Unchanged: below 9.0 a numeric score outranks a "critical" label; a non-string label,
+  // a boolean cvss, or an advisory that does not affect this version is not critical.
+  for (const [what, a] of [
+    ['cvss 8.9 labelled critical', adv({ cvss: 8.9, severity: 'critical' })],
+    ['label not a string', adv({ severity: ['critical'] })],
+    ['boolean cvss', adv({ cvss: true })],
+    ['other versions only', adv({ cvss: 9.8, affects_scanned_version: false })],
+  ]) {
+    const r = mod.deriveDecision(verified(shape([a])), policy);
+    assert.equal(r.decision, 'review', what);
+    assert.match(r.reason, /reads as review/, what);
+  }
+});
+
+test('a signed decision is the answer on a critical advisory', { skip }, async () => {
+  const policy = mod.resolvePolicy({});
+  const json = { ...scanJson({ score: 66 }), advisories: [{ id: 'GHSA-x', aliases: ['CVE-2026-9'], cvss: 9.8, affects_scanned_version: true }] };
+  const g = await mod.verifyGrade(mod.gradeFromResponse(SERVER, await signedScan(json, { signed: { decision: 'review' } })), signer.jwks);
+  assert.equal(g.decisionSigned, true);
+  assert.equal(mod.deriveDecision(g, policy).decision, 'review');
+  assert.equal(mod.advisoryName({ id: 'GHSA-x', aliases: ['PYSEC-1', 'cve-2026-9'] }), 'cve-2026-9');
+  assert.equal(mod.advisoryIsCritical({ cvss: 10 }), true);
+  assert.equal(mod.advisoryIsCritical({ cvss: 0, severity: 'critical' }), true);
+});
