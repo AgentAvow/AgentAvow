@@ -9,7 +9,9 @@ the critical "curl/wget piped to shell" rule as text, and none of them runs it.
 Python file: does the matched string reach ONLY human-facing output? It follows the
 string's value, conservatively, and says yes only when every path ends in
 
-* a print / log call (``console.*``, ``process.stdout|stderr.write``, a logger method
+* a print / log call (``console.*``, a name bound only to ``console`` and only called
+  with console methods (``this._logger = console``, :func:`console_aliases`),
+  ``process.stdout|stderr.write``, a logger method
   the package itself defines whose body runs nothing, Python ``print`` / ``logging`` /
   ``click.echo`` …);
 * an ``Error`` / exception message, or a ``throw`` (unless some ``catch`` in the
@@ -643,7 +645,7 @@ def _shadow_hit(rx: re.Pattern, text: str, tree: dict[str, str] | None = None) -
 #   same name (or ``undefined`` / ``null``), each ending the statement; ``NAME`` is a
 #   ``const`` / ``let`` / ``var`` / plain variable or ``this.NAME``;
 # * every other use is ``NAME.<m>(`` (``this.NAME.<m>(``) with ``m`` in
-#   ``_CONSOLE_METHODS``.
+#   ``_CONSOLE_METHODS``, and there is at least one.
 #
 # Anything else (handed to a function, reassigned to something else, another method,
 # exported or put in an object, called directly, a computed member, a declaration with no
@@ -782,8 +784,9 @@ def _console_aliases(text: str, tree: dict[str, str]) -> tuple[
         if kind == "var":
             if has_eval:
                 continue
-            ok = all(k in allowed or _console_call_use(t, k)
-                     for k in t.by_val.get(name, []) if not t.is_p(k - 1, ".", "?."))
+            uses = [k for k in t.by_val.get(name, []) if not t.is_p(k - 1, ".", "?.")]
+            ok = (all(k in allowed or _console_call_use(t, k) for k in uses)
+                  and any(k not in allowed for k in uses))
         else:
             ok = _this_alias_ok(name, text, t, allowed, tree)
         if ok:
@@ -797,6 +800,7 @@ def _this_alias_ok(name: str, text: str, t: _Toks, allowed: set[int],
     """Every mention of ``name`` in every code file is ``this.name`` bound here to
     ``console`` or called with a console method, and no file names it in a string."""
     quoted = re.compile(r"""['"`][^'"`\n]*\b""" + re.escape(name) + r"""\b""")
+    called = False
     for p, other in tree.items():
         if name not in other:
             continue
@@ -812,8 +816,11 @@ def _this_alias_ok(name: str, text: str, t: _Toks, allowed: set[int],
             if not (ot.is_p(k - 1, ".") and ot.is_id(k - 2, "this")
                     and not ot.is_p(k - 3, ".", "?.")):
                 return False
-            if not ((own and k in allowed) or _console_call_use(ot, k)):
+            if own and k in allowed:
+                continue
+            if not _console_call_use(ot, k):
                 return False
+            called = True
         # A string naming the property (``obj["_logger"]``, ``defineProperty(o, "_logger"``).
         for m in quoted.finditer(other):
             q = ot.at(m.start())
@@ -821,7 +828,7 @@ def _this_alias_ok(name: str, text: str, t: _Toks, allowed: set[int],
                 return False
             if q < 0:
                 return False
-    return True
+    return called  # a binding nothing calls is still `console` read as a value
 
 
 def _handler_body(text: str, start: int) -> str:
