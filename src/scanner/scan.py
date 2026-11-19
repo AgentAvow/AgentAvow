@@ -7526,13 +7526,37 @@ def _yank_finding(name: str, version: str, reason: str | None) -> Finding:
                      "release that isn't yanked."))
 
 
+_ADVISORY_ID_RE = re.compile(r"\b(?:CVE-\d{4}-\d{4,}|GHSA(?:-[23456789cfghjmpqrvwx]{4}){3})\b",
+                             re.IGNORECASE)
+DEPRECATION_IDS_MAX = 3
+
+
+def _deprecation_name(message: str | None) -> str:
+    """The finding's title. When the maintainer's message names advisories (CVE or GHSA
+    ids), the title cites the ids, whole and normalised (a wrapper deprecated because
+    the core it pins has a CVE). The message itself never goes into the signed title;
+    it stays in the unsigned snippet and the response's ``deprecation`` field."""
+    base = "Package deprecated by its maintainer"
+    ids: list[str] = []
+    for m in _ADVISORY_ID_RE.finditer(str(message or "")):
+        raw = m.group(0)
+        norm = ("CVE" + raw[3:]) if raw.upper().startswith("CVE") else "GHSA" + raw[4:].lower()
+        if norm not in ids:
+            ids.append(norm)
+    if not ids:
+        return base
+    more = len(ids) - DEPRECATION_IDS_MAX
+    cited = ", ".join(ids[:DEPRECATION_IDS_MAX]) + (f" and {more} more" if more > 0 else "")
+    return f"{base}, citing {cited}"
+
+
 def _deprecation_finding(eco: str, name: str, version: str, message: str) -> Finding:
     """'Clean but abandoned': the maintainer retired the package. Not malicious, so it is
     a MEDIUM maintenance finding (no security fixes are coming), never a blocker."""
     where = "package.json" if eco == "npm" else "registry metadata"
     return Finding(
         category="maintenance",
-        name="Package deprecated by its maintainer",
+        name=_deprecation_name(message),
         severity="medium",
         file_path=where,
         line_number=0,
@@ -7765,8 +7789,8 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
     # A failed lookup or an unparseable range is disclosed, never read as clean.
     try:
         await _apply_repo_advisories(result, eco, name, fetched.packaged_manifest)
-    except Exception:  # noqa: BLE001 — fail-open
-        logger.debug("repo advisory lookup failed for %s:%s", eco, name, exc_info=True)
+    except Exception:  # noqa: BLE001 — fail-open, but never read as clean
+        _repo_advisory_lookup_failed(result, f"{eco}:{name}")
     # An ecosystem OSV covers whose lookup did not complete: "no advisories" was not
     # checked, so say so beside the answer (disclosure only, never scored).
     try:
@@ -7782,6 +7806,12 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
         # cosign signature/attestation → provenance, and what the layer walk read.
         from src.scanner.docker_image import apply_docker_image_extras
         await apply_docker_image_extras(result, fetched)
+        # The security advisories of the repository the image says it was built from,
+        # read against the tag, as npm / PyPI / crates scans read their repository's.
+        try:
+            await _apply_image_repo_advisories(result, fetched)
+        except Exception:  # noqa: BLE001 — fail-open, but never read as clean
+            _repo_advisory_lookup_failed(result, f"docker:{name}")
 
     result.trust_score = _calculate_trust_score(result)
     result.category_scores = _calculate_category_scores(result)
@@ -8019,6 +8049,71 @@ async def _apply_repo_advisories(result, eco: str, name: str, manifest: dict | N
     if n:
         result.coverage_gaps = {**(result.coverage_gaps or {}),
                                 "repo_advisory_range_unparsed": n}
+
+
+def _repo_advisory_lookup_failed(result, what: str) -> None:
+    """A repository-advisory lookup that raised: disclosed as a failed lookup (never read
+    as "no advisories") and logged."""
+    logger.warning("repo advisory lookup failed for %s", what, exc_info=True)
+    result.coverage_gaps = {**(result.coverage_gaps or {}),
+                            "repo_advisory_lookup": "failed"}
+
+
+async def _apply_image_repo_advisories(result, fetched) -> None:
+    """A container image whose ``org.opencontainers.image.source`` label names a GitHub
+    repository: that repository's published security advisories for its own package,
+    read against the release the image tag names (or, when the tag names none, such as
+    ``latest``, the ``org.opencontainers.image.version`` label). One that affects the
+    release is a finding, exactly like a package's own advisory. One that cannot be
+    read against the tag with confidence is listed and disclosed
+    (``repo_advisory_unmatched``), never affected. A failed lookup is disclosed
+    (``repo_advisory_lookup``), never read as clean. Without the label there is
+    nothing to read: an image's README link is not a declared source."""
+    from src.config import settings
+    from src.scanner.incident_history import (
+        enrich_cvss,
+        fetch_repo_advisories,
+        image_tag_version,
+        merge_advisories,
+        summarize_image_repo_advisories,
+    )
+
+    image = getattr(fetched, "image", None)
+    if not isinstance(image, dict):
+        return
+    slug = _github_slug(str(image.get("source_label") or ""))
+    if not slug:
+        return
+    tag = str(image.get("tag") or getattr(fetched, "version", "") or "")
+    if image_tag_version(tag) is None and image_tag_version(image.get("version_label")):
+        tag = str(image.get("version_label"))
+    got = await fetch_repo_advisories(slug, getattr(settings, "github_token", None))
+    if got.get("checked") is not True:
+        result.coverage_gaps = {**(result.coverage_gaps or {}),
+                                "repo_advisory_lookup": "failed"}
+        return
+    mine = summarize_image_repo_advisories(got.get("advisories") or [], slug, tag)
+    if not mine:
+        return
+    inc = dict(result.incident_history or {})
+    existing = [dict(a) for a in (inc.get("advisories") or []) if isinstance(a, dict)]
+    enrich_cvss(existing, mine)
+    extra = merge_advisories(existing, mine)
+    inc["advisories"] = sorted(existing + extra,
+                               key=lambda a: (not a.get("affects_scanned_version"),
+                                              a.get("id") or ""))[:20]
+    result.incident_history = inc
+    result.findings = result.findings + _own_advisory_findings(
+        getattr(fetched, "name", "") or "", image_tag_version(tag) or tag, extra)
+    gaps = {}
+    n = sum(1 for a in extra if a.get("unmatched"))
+    if n:
+        gaps["repo_advisory_unmatched"] = n
+    n = sum(1 for a in extra if a.get("range_unparsed"))
+    if n:
+        gaps["repo_advisory_range_unparsed"] = n
+    if gaps:
+        result.coverage_gaps = {**(result.coverage_gaps or {}), **gaps}
 
 
 def _own_advisory_findings(name: str, version: str | None, advisories: list[dict]) -> list:

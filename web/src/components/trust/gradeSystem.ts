@@ -527,6 +527,8 @@ export function coverageGapNotes(input: unknown): string[] {
   if (g.repo_advisory_lookup === 'failed') notes.push("the source repository's security advisories could not be read")
   n = toInt(g.repo_advisory_range_unparsed)
   if (n > 0) notes.push(`${fmtInt(n)} repository security ${n === 1 ? 'advisory' : 'advisories'} had a version range that could not be read`)
+  n = toInt(g.repo_advisory_unmatched)
+  if (n > 0) notes.push(`${fmtInt(n)} repository security ${n === 1 ? 'advisory' : 'advisories'} could not be matched to this image's version`)
   if (g.tool_list_unread === true) notes.push("the server's tool list could not be read")
   if (g.tool_list_paged === true) {
     n = toInt(g.pages_read)
@@ -802,6 +804,7 @@ export function cheapCoverageGap(input: unknown): boolean {
   // An x402 endpoint: only its listing was read, never the code behind it.
   if (g.x402_code_unread === true) return true
   if (toInt(g.repo_advisory_range_unparsed) > 0) return true
+  if (toInt(g.repo_advisory_unmatched) > 0) return true
   if (surfaceIs(data, 'openclaw') && (toInt(g.oversized_files) > 0 || toInt(g.over_file_cap) > 0
     || g.tree_truncated === true)) return true
   if (toInt(g.oversized_files) > 0) {

@@ -1,0 +1,37 @@
+[
+  {
+    "ghsa_id": "GHSA-m932-63jc-4jqq",
+    "cve_id": "CVE-2026-130007",
+    "html_url": "https://github.com/reza-gholizade/k8s-mcp-server/security/advisories/GHSA-m932-63jc-4jqq",
+    "summary": "Missing authentication on default SSE/HTTP transport allows unauthenticated Kubernetes tool execution (CWE-306)",
+    "severity": "high",
+    "state": "published",
+    "withdrawn_at": null,
+    "published_at": "2026-08-31T11:16:42Z",
+    "cvss": {
+      "vector_string": null,
+      "score": null
+    },
+    "cvss_severities": {
+      "cvss_v3": {
+        "vector_string": null,
+        "score": null
+      },
+      "cvss_v4": {
+        "vector_string": null,
+        "score": null
+      }
+    },
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "go",
+          "name": "github.com/reza-gholizade/k8s-mcp-server"
+        },
+        "vulnerable_version_range": "<= 1.0.25",
+        "patched_versions": "1.1.0",
+        "vulnerable_functions": []
+      }
+    ]
+  }
+]
