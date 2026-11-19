@@ -7791,6 +7791,7 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
         await _apply_repo_advisories(result, eco, name, fetched.packaged_manifest)
     except Exception:  # noqa: BLE001 — fail-open, but never read as clean
         _repo_advisory_lookup_failed(result, f"{eco}:{name}")
+    _flag_unreadable_critical_advisories(result)
     # An ecosystem OSV covers whose lookup did not complete: "no advisories" was not
     # checked, so say so beside the answer (disclosure only, never scored).
     try:
@@ -8010,6 +8011,7 @@ async def _apply_repo_advisories(result, eco: str, name: str, manifest: dict | N
     from src.config import settings
     from src.scanner.incident_history import (
         _OSV_ECOSYSTEM,
+        advisory_order,
         enrich_cvss,
         fetch_repo_advisories,
         merge_advisories,
@@ -8040,15 +8042,29 @@ async def _apply_repo_advisories(result, eco: str, name: str, manifest: dict | N
     extra = merge_advisories(existing, mine)
     if not extra:
         return
-    inc["advisories"] = sorted(existing + extra,
-                               key=lambda a: (not a.get("affects_scanned_version"),
-                                              a.get("id") or ""))[:20]
+    inc["advisories"] = sorted(existing + extra, key=advisory_order)[:20]
     result.incident_history = inc
     result.findings = result.findings + _own_advisory_findings(name, version, extra)
     n = sum(1 for a in extra if a.get("range_unparsed"))
     if n:
         result.coverage_gaps = {**(result.coverage_gaps or {}),
                                 "repo_advisory_range_unparsed": n}
+
+
+def _flag_unreadable_critical_advisories(result) -> None:
+    """A critical advisory from the vulnerability database (OSV) naming this package,
+    whose range we could not read against the scanned version (a commit range, a
+    version we cannot parse): disclosed as ``advisory_range_unparsed``, which withholds
+    the Certified mark. Never a finding and never the answer: it was not read as
+    affecting. Runs after the repository advisories, which can supply a CVSS score."""
+    from src.scanner.incident_history import unreadable_critical_advisories
+
+    inc = result.incident_history or {}
+    n = unreadable_critical_advisories(inc.get("advisories") or [],
+                                       inc.get("unreadable_critical") or [])
+    if n:
+        result.coverage_gaps = {**(result.coverage_gaps or {}),
+                                "advisory_range_unparsed": n}
 
 
 def _repo_advisory_lookup_failed(result, what: str) -> None:
@@ -8071,6 +8087,7 @@ async def _apply_image_repo_advisories(result, fetched) -> None:
     nothing to read: an image's README link is not a declared source."""
     from src.config import settings
     from src.scanner.incident_history import (
+        advisory_order,
         enrich_cvss,
         fetch_repo_advisories,
         image_tag_version,
@@ -8099,9 +8116,7 @@ async def _apply_image_repo_advisories(result, fetched) -> None:
     existing = [dict(a) for a in (inc.get("advisories") or []) if isinstance(a, dict)]
     enrich_cvss(existing, mine)
     extra = merge_advisories(existing, mine)
-    inc["advisories"] = sorted(existing + extra,
-                               key=lambda a: (not a.get("affects_scanned_version"),
-                                              a.get("id") or ""))[:20]
+    inc["advisories"] = sorted(existing + extra, key=advisory_order)[:20]
     result.incident_history = inc
     result.findings = result.findings + _own_advisory_findings(
         getattr(fetched, "name", "") or "", image_tag_version(tag) or tag, extra)

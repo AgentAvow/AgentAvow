@@ -683,6 +683,11 @@ def coverage_gap_notes(data: dict) -> list[str]:
         notes.append("the vulnerability database lookup failed")
     if g.get("repo_advisory_lookup") == "failed":
         notes.append("the source repository's security advisories could not be read")
+    n = _int(g.get("advisory_range_unparsed"))
+    if n > 0:
+        notes.append(f"{n:,} critical security "
+                     f"{'advisory' if n == 1 else 'advisories'} had a version range "
+                     "that could not be read")
     n = _int(g.get("repo_advisory_range_unparsed"))
     if n > 0:
         notes.append(f"{n:,} repository security "
@@ -1051,6 +1056,10 @@ def cheap_coverage_gap(data: dict) -> bool:
     # A published advisory names this package and we could not tell if it covers
     # this version: never Certified on that.
     if _int(g.get("repo_advisory_range_unparsed")) > 0:
+        return True
+    # A critical advisory from the vulnerability database whose range we could not read
+    # against this version (Kenne, 2026-11-19).
+    if _int(g.get("advisory_range_unparsed")) > 0:
         return True
     # Same for an image tag we could not match to the advisory's version.
     if _int(g.get("repo_advisory_unmatched")) > 0:
