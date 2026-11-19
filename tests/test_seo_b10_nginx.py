@@ -141,6 +141,7 @@ def test_every_doc_is_listed_on_the_docs_page() -> None:
 
 MACHINE_WELL_KNOWN = [
     "/.well-known/jwks.json", "/.well-known/did.json", "/.well-known/agent-trust.json",
+    "/.well-known/key-revocations.json",
     "/.well-known/webhook-test-vectors.json", "/.well-known/cte-test-vectors.json",
     "/.well-known/interop-harness.json", "/.well-known/action-ref-near-miss-vectors.json",
     "/.well-known/ctef-error-codes.json",

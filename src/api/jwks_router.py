@@ -8,6 +8,7 @@ import json
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+from src.key_revocations import signed_list
 from src.signing import (
     canonicalize_jcs_strict,
     get_catalog_es256_jwk,
@@ -70,14 +71,35 @@ async def jwks() -> JSONResponse:
     published here. Includes the ES256 catalog key (kid ``catalog-es256-v1``,
     signs /.well-known/ai-catalog.json) iff CATALOG_SIGNING_KEY_P256 is set.
     """
+    return JSONResponse(
+        content={"keys": jwks_keys()},
+        headers={
+            "Cache-Control": "public, max-age=3600",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+def jwks_keys() -> list[dict]:
+    """The keys /.well-known/jwks.json publishes, in order."""
     keys = [get_jwk(), platform_thumbprint_jwk()]
     if has_dedicated_trust_v2_key():
         keys.extend(get_trust_v2_jwks())
     catalog_jwk = get_catalog_es256_jwk()
     if catalog_jwk is not None:
         keys.append(catalog_jwk)
+    return keys
+
+
+@router.get("/.well-known/key-revocations.json")
+async def key_revocations() -> JSONResponse:
+    """The signed key revocation list (src/key_revocations.py).
+
+    Covers every key in the JWKS. Signed with the platform key over the RFC 8785
+    bytes of ``payload``; re-issued on each request, valid until ``nextUpdate``.
+    """
     return JSONResponse(
-        content={"keys": keys},
+        content=signed_list(jwks_keys()),
         headers={
             "Cache-Control": "public, max-age=3600",
             "Access-Control-Allow-Origin": "*",

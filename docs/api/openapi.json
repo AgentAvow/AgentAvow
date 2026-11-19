@@ -20643,6 +20643,26 @@
         ]
       }
     },
+    "/.well-known/key-revocations.json": {
+      "get": {
+        "description": "The signed key revocation list (src/key_revocations.py).\n\nCovers every key in the JWKS. Signed with the platform key over the RFC 8785\nbytes of ``payload``; re-issued on each request, valid until ``nextUpdate``.",
+        "operationId": "key_revocations__well_known_key_revocations_json_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Key Revocations",
+        "tags": [
+          "jwks"
+        ]
+      }
+    },
     "/.well-known/mcp-registry-auth": {
       "get": {
         "description": "Domain-ownership proof for the official MCP Registry (HTTP method).\n\nThe registry fetches this file to verify we control agentavow.com, then\nchallenges us to sign a nonce with the private key matching the published\nEd25519 public key. On success it grants the ``com.agentavow/*`` namespace.\nFormat: ``v=MCPv1; k=ed25519; p=<base64 public key>``.",

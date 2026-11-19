@@ -10,6 +10,10 @@
       "reason": "Public signing keys (RFC 7517) at the RFC 8615 well-known path. did:web:agentgraph.co and every offline attestation verifier fetch them here."
     },
     {
+      "path": "/.well-known/key-revocations.json",
+      "reason": "Signed key revocation list for the JWKS keys, beside the JWKS at the RFC 8615 well-known path. Verifiers that pin a key fetch it here; the key policy in verify-attestations.md links it."
+    },
+    {
       "path": "/.well-known/did.json",
       "reason": "did:web document for the Bluesky feed generator; AT Protocol resolves it at this fixed path."
     },
