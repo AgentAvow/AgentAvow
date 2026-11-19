@@ -65,7 +65,7 @@ export const ISSUER_DID = 'did:web:agentgraph.co';
 export { DEFAULT_JWKS_URL };
 const WEB = 'https://agentavow.com';
 const MAX_REDIRECTS = 3;
-export const VERSION = '0.4.3';
+export const VERSION = '0.4.4';
 
 // ── the per-tool digest, exactly as the attestation signs it ────────────────
 
@@ -318,6 +318,14 @@ export interface Grade {
   critical: number;
   /** Shipped criticals the API's rule reads as Review, not Do not connect. */
   criticalReview: number;
+  /** The tool's own published advisories that affect the scanned version (unsigned:
+   *  `advisories` / `incident_history.advisories` with `affects_scanned_version`, plus
+   *  the card's `advisories_affecting_version`). Read only when no signed decision is
+   *  there: one with CVSS >= 9.0 (or no score and a "critical" label) is Do not connect.
+   *  `verifyGrade` keeps them, so these unsigned advisories can still tighten a verified
+   *  grade that has no signed decision (fail closed). Optional for a Grade built by
+   *  0.4.3 or earlier. */
+  advisories?: Array<Record<string, unknown>>;
   /** Shipped highs: the headline `high` count (never `high_all`). */
   high: number;
   findings: Array<Record<string, unknown>>;
@@ -353,7 +361,7 @@ export interface Grade {
 
 export function errorGrade(server: string, error: string): Grade {
   return {
-    server, score: null, tier: '', critical: 0, criticalReview: 0, high: 0, findings: [], toolDigests: {},
+    server, score: null, tier: '', critical: 0, criticalReview: 0, high: 0, advisories: [], findings: [], toolDigests: {},
     toolManifestDigest: null, reportUrl: reportUrl(server), jws: null, fetchedAt: Date.now(), error,
     scannedAt: null, apiDecision: null, decisionSigned: false, verdict: null, adoption: null, certified: false, maliciousDeps: [],
     canaryExfil: false, signature: 'missing', signatureReason: null, kid: null, attestation: null,
@@ -412,6 +420,69 @@ function findingsOf(findings: unknown): {
   };
 }
 
+// Mirrors of `src/scanner/verdict.py` (`advisory_is_critical`, `_lead_advisory`,
+// `_advisory_name`): a published advisory against the scanned version with a CVSS base
+// score of 9.0 or more answers Do not connect; with no score, its own "critical" label.
+export const CRITICAL_CVSS = 9.0;
+const ADVISORY_SEV_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, moderate: 2, low: 1 };
+
+function advisoriesOf(data: Dict): Array<Record<string, unknown>> {
+  const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
+  let raw: unknown = data.advisories;
+  if (!(Array.isArray(raw) && raw.length)) raw = isObj(data.incident_history) ? data.incident_history.advisories : [];
+  const out = (Array.isArray(raw) ? raw : []).filter(
+    (a): a is Record<string, unknown> => isObj(a) && a.affects_scanned_version === true);
+  if (Array.isArray(data.advisories_affecting_version)) out.push(...data.advisories_affecting_version.filter(isObj));
+  return out;
+}
+
+function advisoryCvss(a: Record<string, unknown>): number | null {
+  const v = a.cvss;
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= 10 ? v : null;
+}
+
+const advisoryLabel = (a: Record<string, unknown>) => (typeof a.severity === 'string' ? a.severity.toLowerCase() : '');
+
+/** CVSS 9.0 or more; without a numeric score, the advisory's own "critical" label. */
+export function advisoryIsCritical(a: Record<string, unknown>): boolean {
+  const c = advisoryCvss(a);
+  return c !== null ? c >= CRITICAL_CVSS : advisoryLabel(a) === 'critical';
+}
+
+function advisoryRank(a: Record<string, unknown>): [number, number, number] {
+  const c = advisoryCvss(a);
+  return [advisoryIsCritical(a) ? 1 : 0, ADVISORY_SEV_RANK[advisoryLabel(a)] ?? 0, c ?? -1];
+}
+
+/** The id a reader looks up: the CVE alias when there is one, else the advisory's own id. */
+export function advisoryName(a: Record<string, unknown>): string {
+  const ids = [a.id, ...(Array.isArray(a.aliases) ? a.aliases : [])]
+    .filter((i): i is string => typeof i === 'string' && i.trim() !== '');
+  return ids.find((i) => i.toUpperCase().startsWith('CVE-')) ?? ids[0] ?? '';
+}
+
+/** `critical known vulnerability CVE-… affects this version (CVSS 9.8; fixed in 2.0.1)`
+ *  for the most severe critical advisory, or null when none is critical. */
+function criticalAdvisoryPhrase(advisories: Array<Record<string, unknown>>): string | null {
+  let lead: Record<string, unknown> | null = null;
+  for (const a of advisories) {
+    if (!advisoryIsCritical(a)) continue;
+    if (lead === null) { lead = a; continue; }
+    const [x, y] = [advisoryRank(a), advisoryRank(lead)];
+    const i = x.findIndex((v, k) => v !== y[k]);
+    if (i >= 0 && x[i]! > y[i]!) lead = a;
+  }
+  if (lead === null) return null;
+  const name = advisoryName(lead);
+  const details: string[] = [];
+  const c = advisoryCvss(lead);
+  if (c !== null) details.push(`CVSS ${(Math.floor(c * 10 + 0.5) / 10).toFixed(1)}`);
+  const fix = typeof lead.fixed_in === 'string' && lead.fixed_in.trim() ? lead.fixed_in.trim() : null;
+  if (fix) details.push(`fixed in ${fix}`);
+  const tail = details.length ? ` (${details.join('; ')})` : '';
+  return `critical known vulnerability ${name || '(unnamed advisory)'} affects this version${tail}`;
+}
+
 function maliciousOf(supplyChain: unknown, items: Array<Record<string, unknown>>): string[] {
   const out = new Set<string>();
   const sc: Dict = supplyChain && typeof supplyChain === 'object' ? supplyChain as Dict : {};
@@ -459,7 +530,8 @@ export function gradeFromResponse(server: string, data: Dict): Grade {
   const adoptionRaw = data.adoption?.score ?? data.adoption_score;
   const apiDecision = DECISIONS.includes(String(data.decision)) ? String(data.decision) : null;
   return {
-    server, score, tier: String(data.trust_tier ?? ''), critical, criticalReview, high, findings: items,
+    server, score, tier: String(data.trust_tier ?? ''), critical, criticalReview, high,
+    advisories: advisoriesOf(data), findings: items,
     toolDigests: digestsOf(data.tool_digests),
     toolManifestDigest: typeof data.tool_manifest_digest === 'string' ? data.tool_manifest_digest : null,
     reportUrl: reportUrl(server),
@@ -764,6 +836,10 @@ function deriveDecisionRaw(grade: Grade, policy: ResolvedPolicy, toolName: strin
     }
     if (t === 'blocked_tier' && grade.score <= BLOCKED_TIER_CEILING) hits.push(`the blocked tier (${scoreText(grade)})`);
   }
+  // The API's rule on the tool's own published advisories, when no signed decision is
+  // there to say it (an unsigned or older response): a critical one is Do not connect.
+  const criticalAdvisory = signedAnswer ? null : criticalAdvisoryPhrase(grade.advisories ?? []);
+  if (criticalAdvisory) hits.push(criticalAdvisory);
   const tierOnly = hits.length === 1 && hits[0]?.startsWith('the blocked tier');
   if (grade.apiDecision === 'do_not_connect') hits.push('AgentAvow says do not connect');
   if (hits.length) {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.4 (unreleased; prepared 2026-11-19)
+
+- `gate`: a published advisory against the installed version with a CVSS base score of 9.0 or more (or, with no numeric score, its own `critical` label) now answers `do_not_connect` when the response carries no signed `decision`, as the API does since 2026-11-18. Before, the gate read every such advisory as `review`. The reason names the advisory by its CVE id (else its own id), with the CVSS score and fixed release when listed: `critical known vulnerability CVE-… affects this version (CVSS 9.8; fixed in 2.0.1)`. Below 9.0 a numeric score outranks a `critical` label (`review`, unchanged). The advisories are read from `advisories` / `incident_history.advisories` (`affects_scanned_version: true`) and the MCP card's `advisories_affecting_version`. The hit only runs when the response carries no signed `decision` (a signed one stays the answer), and like an unsigned API `do_not_connect` it applies whatever `policy.blockOn` says, `blockOn: []` included. The advisories are unsigned, so they can tighten a verified grade that has no signed decision, never loosen it.
+- New optional `Grade` field `advisories` (a Grade built by 0.4.3, without it, still works with `deriveDecision`); new exports `advisoryIsCritical`, `advisoryName`, `CRITICAL_CVSS`.
+- The User-Agent / `clientInfo` version now reads 0.4.4.
+
 ## 0.4.3 (unreleased; prepared 2026-11-11)
 
 - `gate`: the gate now reaches the same answer as the API on dependency advisories. It read the critical/high counts as `max(headline count, items with that severity)`, so the critical dependency advisories in `items` (counted in `critical_all`, never in the shipped `critical`) fired `blockOn: 'critical'`. `vercel/next.js` got Do not connect ("4 critical findings") while the API and MCP answered Safe to connect. The counts are now the shipped headline `critical` / `high` (never `*_all`). A response without headline counts falls back to the blocking items only (no `dependency` category, nothing `shipped: false`).
