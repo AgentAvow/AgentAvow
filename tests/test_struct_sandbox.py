@@ -186,3 +186,16 @@ def test_card_advisories_carry_cvss_and_aliases_and_redecide_like_the_server():
     card = decide(dict(base, advisories_affecting_version=s["advisories_affecting_version"]))
     assert card == decide(server) and card.decision == "review"
     assert card.reason == "known vulnerability CVE-2026-7 affects this version (fixed in 2.0.1)"
+
+
+def test_card_aliases_keep_the_cve_first_and_are_capped():
+    from src.bridges.mcp_streamable import _advisory_aliases
+    from src.scanner.verdict import _advisory_name
+
+    a = {"id": "GHSA-1", "aliases": ["PYSEC-1", "PYSEC-2", "OSV-3", "OSV-4", "OSV-5",
+                                     "CVE-2026-11", "x" * 200, "CVE-2026-12", 7, " "]}
+    got = _advisory_aliases(a)
+    assert got[:2] == ["CVE-2026-11", "CVE-2026-12"] and len(got) == 5
+    assert _advisory_name({"id": "GHSA-1", "aliases": got}) == _advisory_name(a) == "CVE-2026-11"
+    assert _advisory_aliases({"aliases": ["x" * 200]}) == ["x" * 64]
+    assert _advisory_aliases({"aliases": "CVE-2026-1"}) == []

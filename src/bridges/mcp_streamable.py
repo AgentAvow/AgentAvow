@@ -1690,10 +1690,14 @@ def _advisory_cvss(a: dict) -> float | None:
 
 
 def _advisory_aliases(a: dict) -> list[str]:
-    """The advisory's other ids (the CVE among them), strings only, at most five."""
+    """The advisory's other ids, strings only, each cut to 64 characters, at most five.
+    CVE ids are kept first (in their own order), so the card names the same CVE the
+    server's reason does even when an advisory lists more than five aliases."""
     raw = a.get("aliases")
-    return [str(i) for i in raw if isinstance(i, str) and i.strip()][:5] \
-        if isinstance(raw, list) else []
+    if not isinstance(raw, list):
+        return []
+    ids = [i[:64] for i in raw if isinstance(i, str) and i.strip()]
+    return sorted(ids, key=lambda i: not i.upper().startswith("CVE-"))[:5]
 
 
 def _highest_fix(advisories: list[dict]) -> str | None:
