@@ -307,6 +307,7 @@
     "e_stderr_target_hijacked": "do_not_connect",
     "f_console_alias_caller_logger": "do_not_connect",
     "f_console_alias_computed_member": "do_not_connect",
+    "f_console_alias_const_destructuring_default": "do_not_connect",
     "f_console_alias_default_param": "do_not_connect",
     "f_console_alias_destructuring_default": "do_not_connect",
     "f_console_alias_exported": "do_not_connect",

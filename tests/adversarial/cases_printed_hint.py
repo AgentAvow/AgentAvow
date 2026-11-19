@@ -388,6 +388,10 @@ CASES["f_console_alias_destructuring_default"] = pkg({
     "index.js": CP + "function check({ logger = console } = {}) {\n"
                 f"  logger.warn({HINT_MSG});\n}}\n"
                 "check({ ['log' + 'ger']: { warn: (s) => execSync(s) } });\n"})
+CASES["f_console_alias_const_destructuring_default"] = pkg({
+    "index.js": CP + "function check(opts) {\n  const { logger = console } = opts;\n"
+                f"  logger.warn({HINT_MSG});\n}}\n"
+                "check({ ['log' + 'ger']: { warn: (s) => execSync(s) } });\n"})
 CASES["f_console_alias_or_param"] = pkg({
     "index.js": CP + "function check(logger) {\n  logger = logger || console;\n"
                 f"  logger.warn({HINT_MSG});\n}}\n"
