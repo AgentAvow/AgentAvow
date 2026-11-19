@@ -85,6 +85,16 @@ def test_duplicate_osv_records_merge_the_same_in_either_order():
     assert decide(data).decision == "do_not_connect"
 
 
+def test_an_unlabelled_record_never_outranks_a_labelled_one():
+    low = {**_GHSA_REC, "database_specific": {"severity": "LOW"}}
+    bare = {**_PYSEC_REC, "severity": []}
+    for order in ([low, bare], [bare, low]):
+        (m,) = ih.summarize_advisories(order, "PyPI", "1.0", "pkg")
+        assert m["severity"] == "low"
+    (m,) = ih.summarize_advisories([bare], "PyPI", "1.0", "pkg")
+    assert m["severity"] == "medium"  # no label anywhere: the old default
+
+
 def test_osv_vector_strings_are_not_scored():
     rec = {**_PYSEC_REC, "severity": [{"type": "CVSS_V3",
                                        "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}]}
