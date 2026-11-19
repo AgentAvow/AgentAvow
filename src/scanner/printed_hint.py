@@ -621,16 +621,207 @@ def _decl_re(name: str) -> re.Pattern:
     return re.compile(r"\b(?:var|let|const|function|class)\s+" + re.escape(name) + r"\b")
 
 
-def _shadow_hit(rx: re.Pattern, text: str) -> bool:
+def _shadow_hit(rx: re.Pattern, text: str, tree: dict[str, str] | None = None) -> bool:
     """Does ``rx`` (``_CONSOLE_SHADOW_RE`` or its whole-tree variant) hit ``text``
-    anywhere :func:`_stderr_routing_excused` does not excuse?"""
+    anywhere :func:`_stderr_routing_excused` and :func:`console_aliases` do not excuse?
+    ``tree`` is every JS / TS code file in view (``text`` alone when None)."""
     excused: set[int] | None = None
     for m in rx.finditer(text):
         if excused is None:
-            excused = _stderr_routing_excused(text)
+            excused = _stderr_routing_excused(text) | set(
+                console_aliases(text, tree if tree is not None else {"": text})[2])
         if m.start() not in excused:
             return True
     return False
+
+
+# A name bound ONLY to ``console`` in bundled SDK code (``this._logger = console;`` then
+# ``this._logger.warn("… curl … | sh")``). It counts as ``console`` when:
+#
+# * every binding of the name is ``NAME = console`` / ``globalThis.console`` /
+#   ``window.console``, or ``NAME = NAME ?? console`` (``||``) with the left side the
+#   same name (or ``undefined`` / ``null``), each ending the statement; ``NAME`` is a
+#   ``const`` / ``let`` / ``var`` / plain variable or ``this.NAME``;
+# * every other use is ``NAME.<m>(`` (``this.NAME.<m>(``) with ``m`` in
+#   ``_CONSOLE_METHODS``.
+#
+# Anything else (handed to a function, reassigned to something else, another method,
+# exported or put in an object, called directly, a computed member, a declaration with no
+# value, a left side such as a caller's ``opts.logger``) keeps the name unrecognised and
+# its ``= console`` a shadow hit. A variable is checked in its own file (a direct
+# ``eval`` there disqualifies every alias); ``this.NAME`` is a property any holder of the
+# object can reach, so it is checked in every code file in view and must never appear as
+# a string. No flow through parameters or across files beyond that name scan.
+_CONSOLE_ALIAS_CACHE: dict[tuple[int, int], tuple] = {}
+
+
+def _console_value_end(t: _Toks, k: int) -> int | None:
+    """``console`` / ``globalThis.console`` / ``window.console`` at ``k``: the index after
+    it, else None."""
+    if t.is_p(k - 1, ".", "?."):
+        return None
+    if t.is_id(k, "console"):
+        return k + 1
+    if t.is_id(k, "globalThis", "window") and t.is_p(k + 1, ".") and t.is_id(k + 2, "console"):
+        return k + 3
+    return None
+
+
+def _alias_target(t: _Toks, eq: int) -> tuple[str, str, int] | None:
+    """For the ``=`` at ``eq``: (name, "var" | "this", first token of the target) when the
+    left side is ``[const|let|var] NAME`` or ``this.NAME``, else None."""
+    lhs = eq - 1
+    if not t.is_id(lhs) or t.val[lhs] in _KEYWORDS:
+        return None
+    if t.is_p(lhs - 1, ".", "?."):
+        if t.is_p(lhs - 1, ".") and t.is_id(lhs - 2, "this") and not t.is_p(lhs - 3, ".", "?."):
+            return t.val[lhs], "this", lhs - 2
+        return None
+    first = lhs - 1 if t.is_id(lhs - 1, "const", "let", "var") else lhs
+    if t.is_id(first - 1, "export", "declare") or t.is_p(first - 1, "."):
+        return None
+    return t.val[lhs], "var", first
+
+
+def _same_target(t: _Toks, a: int, b: int, name: str, kind: str) -> bool:
+    """Tokens ``a`` .. ``b - 1`` spell the target ``name`` (``this.name``) again."""
+    if kind == "this":
+        return b - a == 3 and t.is_id(a, "this") and t.is_p(a + 1, ".") and t.is_id(a + 2, name)
+    return b - a == 1 and t.is_id(a, name)
+
+
+def _file_console_bindings(t: _Toks) -> list[tuple[str, str, int, int, set[int]]]:
+    """Every ``TARGET = [left ?? ] console`` statement in one file: (name, kind, offset
+    of the operator before ``console`` (where a shadow hit starts), name-token index of
+    the target, name-token indices the binding itself uses)."""
+    out = []
+    for cname in ("console",):
+        for k in t.by_val.get(cname, []):
+            v = k - 2 if t.is_p(k - 1, ".") and t.is_id(k - 2, "globalThis", "window") else k
+            end = _console_value_end(t, v)
+            if end is None:
+                continue
+            if not (end >= len(t) or t.is_p(end, ";", "}")
+                    or (t.nl[end] and t.typ[end] == "id")):
+                continue
+            op = v - 1
+            if t.is_p(op, "="):
+                tgt = _alias_target(t, op)
+                if tgt is None:
+                    continue
+                name, kind, _first = tgt
+                out.append((name, kind, t.st[op], op - 1, {op - 1}))
+            elif t.is_p(op, "??", "||"):
+                eq = op - 1
+                while eq >= 0 and not t.is_p(eq, "="):
+                    eq -= 1
+                if eq < 0 or eq < op - 4:
+                    continue
+                tgt = _alias_target(t, eq)
+                if tgt is None:
+                    continue
+                name, kind, _first = tgt
+                if t.is_id(eq + 1, "undefined", "null") and eq + 2 == op:
+                    uses = {eq - 1}
+                elif _same_target(t, eq + 1, op, name, kind):
+                    uses = {eq - 1, op - 1}
+                else:
+                    continue
+                out.append((name, kind, t.st[op], eq - 1, uses))
+    return out
+
+
+def _console_call_use(t: _Toks, k: int) -> bool:
+    """The name token at ``k`` is followed by ``.<console method>(``."""
+    return (t.is_p(k + 1, ".") and t.is_id(k + 2) and t.val[k + 2] in _CONSOLE_METHODS
+            and t.is_p(k + 3, "("))
+
+
+def console_aliases(text: str, tree: dict[str, str]) -> tuple[
+        frozenset[str], frozenset[str], frozenset[int]]:
+    """For one JS / TS file ``text``: (variables, ``this.`` properties) that count as
+    ``console`` (see above), and the start offsets of the ``_CONSOLE_SHADOW_RE`` hits
+    their bindings make. ``tree`` is every JS / TS code file in view (for ``this.``)."""
+    key = (id(text), id(tree))
+    hit = _CONSOLE_ALIAS_CACHE.get(key)
+    if hit is not None and hit[0] is text and hit[1] is tree:
+        return hit[2]
+    res = _console_aliases(text, tree)
+    if len(_CONSOLE_ALIAS_CACHE) > 256:
+        _CONSOLE_ALIAS_CACHE.clear()
+    _CONSOLE_ALIAS_CACHE[key] = (text, tree, res)
+    return res
+
+
+def _console_aliases(text: str, tree: dict[str, str]) -> tuple[
+        frozenset[str], frozenset[str], frozenset[int]]:
+    none: tuple[frozenset[str], frozenset[str], frozenset[int]] = (
+        frozenset(), frozenset(), frozenset())
+    if "console" not in text:
+        return none
+    t = _Toks(text)
+    if not t.clean:
+        return none
+    binds = _file_console_bindings(t)
+    if not binds:
+        return none
+    vars_ok: set[str] = set()
+    this_ok: set[str] = set()
+    excused: set[int] = set()
+    has_eval = any(t.is_p(k + 1, "(") and not t.is_p(k - 1, ".", "?.")
+                   for k in t.by_val.get("eval", []))
+    by_name: dict[tuple[str, str], list] = {}
+    for b in binds:
+        by_name.setdefault((b[0], b[1]), []).append(b)
+    for (name, kind), group in by_name.items():
+        if (name, "var" if kind == "this" else "this") in by_name:
+            continue
+        allowed: set[int] = set()
+        for b in group:
+            allowed |= b[4]
+        if kind == "var":
+            if has_eval:
+                continue
+            ok = all(k in allowed or _console_call_use(t, k)
+                     for k in t.by_val.get(name, []) if not t.is_p(k - 1, ".", "?."))
+        else:
+            ok = _this_alias_ok(name, text, t, allowed, tree)
+        if ok:
+            (vars_ok if kind == "var" else this_ok).add(name)
+            excused.update(b[2] for b in group)
+    return frozenset(vars_ok), frozenset(this_ok), frozenset(excused)
+
+
+def _this_alias_ok(name: str, text: str, t: _Toks, allowed: set[int],
+                   tree: dict[str, str]) -> bool:
+    """Every mention of ``name`` in every code file is ``this.name`` bound here to
+    ``console`` or called with a console method, and no file names it in a string."""
+    quoted = re.compile(r"""['"`][^'"`\n]*\b""" + re.escape(name) + r"""\b""")
+    for p, other in tree.items():
+        if name not in other:
+            continue
+        if other is text:
+            ot, own = t, True
+        elif p and Path(p.lower()).suffix not in JS_EXTS:
+            return False
+        else:
+            ot, own = _Toks(other), False
+            if not ot.clean:
+                return False
+        for k in ot.by_val.get(name, []):
+            if not (ot.is_p(k - 1, ".") and ot.is_id(k - 2, "this")
+                    and not ot.is_p(k - 3, ".", "?.")):
+                return False
+            if not ((own and k in allowed) or _console_call_use(ot, k)):
+                return False
+        # A string naming the property (``obj["_logger"]``, ``defineProperty(o, "_logger"``).
+        for m in quoted.finditer(other):
+            q = ot.at(m.start())
+            if q >= 0 and ot.typ[q] in ("str", "tpl", "tpl_head", "tpl_mid", "tpl_tail"):
+                return False
+            if q < 0:
+                return False
+    return True
 
 
 def _handler_body(text: str, start: int) -> str:
@@ -924,6 +1115,7 @@ class _JsFlow:
         self._catch_ok: bool | None = None
         self.uses = 0
         self._console_ok: bool | None = None
+        self._console_tree: dict[str, str] | None = None
         self.field_memo: dict[tuple[str, str], bool] = {}
         self.comp_memo: dict[str, set[str] | None] = {}
         self.code_paths = [p for p in files if Path(p.lower()).suffix in JS_EXTS
@@ -1439,6 +1631,11 @@ class _JsFlow:
         if names[0] == "console" and len(names) == 2 and last in _CONSOLE_METHODS:
             self.require_console_unshadowed()
             return None
+        if self.console_alias(path, names):
+            # `this._logger.warn(x)` with `this._logger = console` and nothing else.
+            self.require_console_unshadowed()
+            self.require_plain_args(path, t, o)
+            return None
         if names in (["process", "stdout", "write"], ["process", "stderr", "write"]):
             # A replaced stream write (`process.stdout.write = s => execSync(s)`) is
             # caught by the same guard as a replaced console.
@@ -1831,10 +2028,26 @@ class _JsFlow:
             if lo <= k <= hi and t.is_p(k + 1, "(") and not t.is_p(k - 1, "."):
                 raise _UnclassifiedError("direct eval in scope")
 
+    def console_tree(self) -> dict[str, str]:
+        if self._console_tree is None:
+            self._console_tree = {p: self.files[p] for p in self.code_paths}
+        return self._console_tree
+
+    def console_alias(self, path: str, names: list[str]) -> bool:
+        """``NAME.<m>(`` / ``this.NAME.<m>(`` through a name bound only to ``console``
+        (:func:`console_aliases`)."""
+        if names[-1] not in _CONSOLE_METHODS or len(names) not in (2, 3):
+            return False
+        if len(names) == 3 and names[0] != "this":
+            return False
+        vars_ok, this_ok, _ = console_aliases(self.files[path], self.console_tree())
+        return names[0] in vars_ok if len(names) == 2 else names[1] in this_ok
+
     def require_console_unshadowed(self) -> None:
         if self._console_ok is None:
+            tree = self.console_tree()
             self._console_ok = not any(
-                _shadow_hit(_CONSOLE_SHADOW_RE, self.files[p]) for p in self.code_paths)
+                _shadow_hit(_CONSOLE_SHADOW_RE, self.files[p], tree) for p in self.code_paths)
         if not self._console_ok:
             raise _UnclassifiedError("console is reassigned or shadowed")
 
@@ -2966,13 +3179,15 @@ def output_replaced(files: dict[str, str]) -> bool:
     """Does any code file in ``files`` replace, wrap or alias the human-facing output a
     printed hint relies on (JS ``console`` / ``process.stdout.write``, Python
     ``sys.stdout`` / ``print``)? Then a string "only printed" may be run."""
+    js_tree = {p: t for p, t in files.items()
+               if t and Path(p.lower()).suffix in JS_EXTS and not p.lower().endswith(_DTS_SUFFIXES)}
     for p, text in files.items():
         if not text or not is_supported(p):
             continue
         if Path(p.lower()).suffix in PY_EXTS:
             if _PY_OUTPUT_REBOUND_RE.search(text):
                 return True
-        elif _shadow_hit(_OUTPUT_SHADOW_RE, text):
+        elif _shadow_hit(_OUTPUT_SHADOW_RE, text, js_tree):
             return True
     return False
 
