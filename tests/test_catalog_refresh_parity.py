@@ -261,7 +261,7 @@ def no_sandbox(monkeypatch):
 
 
 @pytest.mark.parametrize("extra,expected,why", [
-    (_ADVISORY, "review", "advisory"),
+    (_ADVISORY, "review", "known vulnerability GHSA-gxr4-xjj5-5px2"),
     (_DEPRECATED, "review", "deprecated"),
     (_MALICIOUS_DEP, "do_not_connect", "malicious"),
     ({}, "safe", "nothing found"),
@@ -308,7 +308,7 @@ async def test_capture_stores_the_answer_and_browse_reads_it(db, no_sandbox, mon
     stored = {r.repo: (r.decision, r.decision_reason) for r in
               (await db.execute(select(CommunityScan))).scalars().all()}
     assert stored["jquery"][0] == "review"
-    assert "advisory" in stored["jquery"][1]
+    assert "known vulnerability GHSA-gxr4-xjj5-5px2" in stored["jquery"][1]
     assert stored["pytest-runner"][0] == "review"
     assert stored["eslint-plugin-prettier"][0] == "do_not_connect"
 

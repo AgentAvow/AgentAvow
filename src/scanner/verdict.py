@@ -13,6 +13,8 @@ is code-analysis only, matching the signed trust_score.
 """
 from __future__ import annotations
 
+import math
+
 # The old binary rule's score bar, kept for ``is_safe_legacy`` and the MCP connector's
 # legacy fields; the answer itself is ``decide()`` (Safe can read from 51).
 SAFE_BAR = 81
@@ -108,6 +110,81 @@ def _highest_fix(advisories: list[dict]) -> str | None:
     return max(fixes, key=_version_key)
 
 
+# A published advisory against the scanned version with a CVSS base score of 9.0 or more
+# (critical) answers Do not connect (Kenne, 2026-11-18); below that it reads Review. When
+# the advisory carries no CVSS score, its own "critical" severity label stands in.
+CRITICAL_CVSS = 9.0
+_ADVISORY_SEV_RANK = {"critical": 4, "high": 3, "medium": 2, "moderate": 2, "low": 1}
+
+
+def _advisory_cvss(a: dict) -> float | None:
+    """The advisory's CVSS base score (0-10), or None when it carries none."""
+    v = a.get("cvss")
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v <= 10:
+        return None
+    return float(v)
+
+
+def advisory_is_critical(a: dict) -> bool:
+    """CVSS 9.0 or more; without a score, the advisory's own "critical" label."""
+    c = _advisory_cvss(a)
+    if c is not None:
+        return c >= CRITICAL_CVSS
+    return str(a.get("severity") or "").lower() == "critical"
+
+
+def _advisory_rank(a: dict) -> tuple:
+    c = _advisory_cvss(a)
+    return (advisory_is_critical(a),
+            _ADVISORY_SEV_RANK.get(str(a.get("severity") or "").lower(), 0),
+            c if c is not None else -1.0)
+
+
+def _lead_advisory(advisories: list[dict]) -> dict | None:
+    """The most severe advisory (critical first, then the severity label, then CVSS);
+    the first one wins a tie."""
+    best = None
+    for a in advisories:
+        if best is None or _advisory_rank(a) > _advisory_rank(best):
+            best = a
+    return best
+
+
+def _advisory_name(a: dict) -> str:
+    """The id a reader looks up: the CVE when the advisory has one, else its own id."""
+    aliases = a.get("aliases")
+    ids = [a.get("id")] + (aliases if isinstance(aliases, list) else [])
+    ids = [str(i) for i in ids if isinstance(i, str) and i.strip()]
+    return next((i for i in ids if i.upper().startswith("CVE-")), ids[0] if ids else "")
+
+
+def known_vulnerability_phrase(advisories: list[dict], critical: bool = False) -> str:
+    """``known vulnerability CVE-2026-1 affects this version (fixed in 2.0.1)``: the
+    published advisories that affect the scanned version, by name, for the reason line.
+    ``critical`` leads with the critical one and its CVSS score."""
+    lead = _lead_advisory(advisories)
+    if lead is None:
+        return ""
+    name = _advisory_name(lead)
+    more = len(advisories) - 1
+    details = []
+    c = _advisory_cvss(lead)
+    if critical and c is not None:
+        details.append(f"CVSS {math.floor(c * 10 + 0.5) / 10:.1f}")
+    fix = _highest_fix(advisories)
+    if fix:
+        details.append(f"fixed in {fix}")
+    tail = f" ({'; '.join(details)})" if details else ""
+    noun = "critical known vulnerability" if critical else "known vulnerability"
+    if not name:
+        return ("a published advisory affects this version" if more <= 0
+                else f"{more + 1} published advisories affect this version") + tail
+    if more > 0:
+        return (f"{noun} {name} and {more} more "
+                f"{'advisory' if more == 1 else 'advisories'} affect this version{tail}")
+    return f"{noun} {name} affects this version{tail}"
+
+
 def is_advisory_block(b: dict) -> bool:
     """True for a ``behavioral`` block that is advisory only — the opt-in live probe of a
     remote MCP server (``plan == "live-probe"``). Its findings are reported, never a
@@ -164,12 +241,16 @@ def verdict_label(safe: bool) -> str:
 #                                               planted credential leaving the sandbox or
 #                                               any other critical sandbox finding, a
 #                                               known-malicious dependency / OpenSSF MAL
-#                                               advisory on this version
+#                                               advisory on this version, a published
+#                                               advisory on this version with CVSS 9.0 or
+#                                               more (or labelled critical when it has no
+#                                               score; Kenne, 2026-11-18)
 #   review          "Review before you connect" a blocking critical hardcoded
 #                                               credential (category ``secret``) alone, a
 #                                               blocking high defect (static or
-#                                               sandbox), a published advisory affecting
-#                                               the scanned version, deprecation, a score
+#                                               sandbox), any other published advisory
+#                                               affecting the scanned version (every
+#                                               reason names one by id), deprecation, a score
 #                                               under 51, or a scan that could not read
 #                                               what it exists to read (an MCP tool list,
 #                                               no code at all after a tree / fetch
@@ -675,11 +756,26 @@ def decide(data: dict) -> Decision:
     b_findings = [f for f in ((b or {}).get("findings") or []) if isinstance(f, dict)] \
         if b_live else []
 
+    inc = data.get("incident_history") if isinstance(data.get("incident_history"), dict) \
+        else {}
     suffix = "" if not pending else (
         QUEUED_SUFFIX if b and b.get("state") == "queued" else PENDING_SUFFIX)
 
-    def done(decision: str, reason: str) -> Decision:
-        return Decision(decision, not pending, reason + suffix)
+    # Published advisories against the scanned version. Every reason names them: they
+    # lead when one decides, and are appended to any other reason.
+    raw_adv = data.get("advisories")
+    if not (isinstance(raw_adv, list) and raw_adv):
+        raw_adv = inc.get("advisories")
+    advisories = [a for a in (raw_adv if isinstance(raw_adv, list) else [])
+                  if isinstance(a, dict) and a.get("affects_scanned_version") is True]
+    affecting = data.get("advisories_affecting_version")
+    if isinstance(affecting, list):
+        advisories += [a for a in affecting if isinstance(a, dict)]
+    adv_note = ("; " + known_vulnerability_phrase(advisories)) if advisories else ""
+
+    def done(decision: str, reason: str, names_advisory: bool = False) -> Decision:
+        return Decision(decision, not pending,
+                        reason + ("" if names_advisory else adv_note) + suffix)
 
     # Dependency advisories are never decision inputs, but the totals beside the reason
     # count them; a reason that counts findings names them too, so the two never seem
@@ -699,11 +795,10 @@ def decide(data: dict) -> Decision:
         f.get("rule") == "credential_canary_exfiltrated" for f in b_findings))
     if canary:
         return done(DECISION_DO_NOT_CONNECT, "a planted credential left the sandbox")
-    inc = data.get("incident_history") if isinstance(data.get("incident_history"), dict) \
-        else {}
     if inc.get("current_version_affected") is True:
         return done(DECISION_DO_NOT_CONNECT,
-                    "this version is a known-malicious package (malware advisory)")
+                    "this version is a known-malicious package (malware advisory)",
+                    names_advisory=True)
     mal = _first(items, _is_malicious_item)
     sc = data.get("supply_chain") if isinstance(data.get("supply_chain"), dict) else {}
     sc_mal = sc.get("malicious")
@@ -758,6 +853,10 @@ def decide(data: dict) -> Decision:
         label = _BEHAVIORAL_LABELS.get(str(f.get("rule") or "")) or _label(f.get("name"))
         return done(DECISION_DO_NOT_CONNECT,
                     f"the sandbox caught a critical behavior: {label}" + plus_deps)
+    if any(advisory_is_critical(a) for a in advisories):
+        return done(DECISION_DO_NOT_CONNECT,
+                    known_vulnerability_phrase(advisories, critical=True) + plus_deps,
+                    names_advisory=True)
 
     # ── review ────────────────────────────────────────────────────────────────────
     if secrets:
@@ -777,20 +876,12 @@ def decide(data: dict) -> Decision:
         return done(DECISION_REVIEW,
                     _count_phrase(len(b_high), "high", label, in_sandbox) + plus_deps)
 
-    raw_adv = data.get("advisories")
-    if not (isinstance(raw_adv, list) and raw_adv):
-        raw_adv = inc.get("advisories")
-    advisories = [a for a in (raw_adv if isinstance(raw_adv, list) else [])
-                  if isinstance(a, dict) and a.get("affects_scanned_version") is True]
-    affecting = data.get("advisories_affecting_version")
-    if isinstance(affecting, list):
-        advisories += [a for a in affecting if isinstance(a, dict)]
     adv_item = _first(items, is_advisory)
-    if advisories or adv_item is not None:
-        aid = str((advisories[0].get("id") if advisories else "") or "")
-        fix = _highest_fix(advisories)
-        return done(DECISION_REVIEW, "a published advisory affects this version"
-                    + (f" ({aid})" if aid else "") + (f"; fixed in {fix}" if fix else ""))
+    if advisories:
+        return done(DECISION_REVIEW, known_vulnerability_phrase(advisories),
+                    names_advisory=True)
+    if adv_item is not None:
+        return done(DECISION_REVIEW, "a published advisory affects this version")
     dep = data.get("deprecation")
     if isinstance(dep, str) and dep.strip():
         return done(DECISION_REVIEW, "the maintainer has deprecated this package")

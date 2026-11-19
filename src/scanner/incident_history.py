@@ -685,6 +685,41 @@ def _patched(v: dict) -> str | None:
     return raw or None
 
 
+def gh_advisory_cvss(a: dict) -> float | None:
+    """The CVSS base score GitHub lists for an advisory: CVSS v4 when it has one, else
+    v3, else the legacy ``cvss`` block. None when no score above 0 is listed (GitHub
+    sends 0 or null for "not scored")."""
+    if not isinstance(a, dict):
+        return None
+    sevs = a.get("cvss_severities") if isinstance(a.get("cvss_severities"), dict) else {}
+    for block in (sevs.get("cvss_v4"), sevs.get("cvss_v3"), a.get("cvss")):
+        score = block.get("score") if isinstance(block, dict) else None
+        if (isinstance(score, (int, float)) and not isinstance(score, bool)
+                and 0 < score <= 10):
+            return float(score)
+    return None
+
+
+def enrich_cvss(existing: list[dict], extra: list[dict]) -> None:
+    """Give an ``existing`` entry with no CVSS score the score of an ``extra`` entry for
+    the same advisory (same id or alias). An OSV record carries only a vector, so the
+    repository's own advisory is where the number comes from. In place."""
+    scored: dict[str, float] = {}
+    for a in extra or []:
+        c = a.get("cvss")
+        if isinstance(c, (int, float)) and not isinstance(c, bool):
+            for i in [a.get("id")] + list(a.get("aliases") or []):
+                if i:
+                    scored[str(i)] = float(c)
+    for a in existing or []:
+        if a.get("cvss") is not None:
+            continue
+        for i in [a.get("id")] + list(a.get("aliases") or []):
+            if i and str(i) in scored:
+                a["cvss"] = scored[str(i)]
+                break
+
+
 def summarize_repo_advisories(advisories: list, eco: str, name: str,
                               version: str | None) -> list[dict]:
     """Pure reducer: a repository's published security advisories -> entries in the same
@@ -741,6 +776,7 @@ def summarize_repo_advisories(advisories: list, eco: str, name: str,
             "aliases": [cve] if cve else [],
             "summary": str(a.get("summary") or "").strip()[:200],
             "severity": _SEVERITY.get(str(a.get("severity") or "").upper(), "medium"),
+            "cvss": gh_advisory_cvss(a),
             "fixed_in": fixed,
             "last_affected": None,
             "affects_scanned_version": affected,

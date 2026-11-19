@@ -59,10 +59,11 @@ Every result leads with one answer and the one condition that triggered it (`dec
   inspect" (or, for a remote MCP server, "tool definitions clean; server code not inspected"), and its
   score stays capped at 74 or 82 (5 more if the repo has tests).
 - **Review before you connect** (`review`, *Review*) — a hardcoded credential, a high finding in the code or the
-  sandbox, a published advisory affecting the version scanned, a deprecated package, a score under 51, or a scan
+  sandbox, any other published advisory affecting the version scanned, a deprecated package, a score under 51, or a scan
   that couldn't read what it exists to read.
 - **Do not connect** (`do_not_connect`, *Don't connect*) — a critical finding (other than a hardcoded credential,
-  which on its own reads Review), a planted credential leaving the sandbox, a critical sandbox finding, or a known-malicious package or dependency.
+  which on its own reads Review), a planted credential leaving the sandbox, a critical sandbox finding, a known-malicious package or dependency, or a
+  published advisory affecting the version scanned with a CVSS score of 9.0 or more.
 
 The popularity of a tool never changes the answer. While the sandbox is still running the reason ends
 "sandbox still running" and `decision_final` is `false`; the answer can move once the run lands. The exact
