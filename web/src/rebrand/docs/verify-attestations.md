@@ -47,9 +47,11 @@ to the key that signed a scan.
 
 The keys are not rotated on a schedule. A key changes only when it is retired on purpose or compromised.
 
-- **Planned change.** We announce it at least 30 days ahead and publish the new key in the JWKS and both DID
-  documents, beside the old one, for that whole period. A retired key stays in the JWKS, so attestations it
-  signed still verify.
+- **Planned change.** We announce it at least 30 days ahead on this page and in the repository, with the new
+  key's RFC 7638 thumbprint. Each role (scan attestations, trust-score envelopes, the catalog) has one key at
+  a time under a fixed `kid`, so on the day of the change the new key replaces the old one under the same
+  `kid`; tell them apart by thumbprint. The retired key's public JWK and thumbprint stay on this page and in
+  the repository, so attestations it signed can still be checked.
 - **Compromise.** We add the key to the revocation list below, with the time the revocation takes effect,
   remove it from the JWKS at once, and post a notice on this page and in the repository.
 
@@ -101,9 +103,10 @@ served. A key missing from `keysCovered` is one the list says nothing about.
 If the scan key itself is compromised, we publish its revocation while that key is still the one signing,
 so lists carrying the revocation are signed by the key you pinned. We keep that list live for at least two
 days, so a verifier that fetches once a day sees it, and post the notice on this page and in the repository
-(`src/key_revocations.py`). Only then do we change the key. Later lists are signed by the new key under the
-same `kid`; its thumbprint is added to the table above and to the repository before it signs anything you
-should trust, so check the new thumbprint against both before you accept it.
+(`src/key_revocations.py`). Only then do we change the key. Attestations issued in those two days are still
+signed by the revoked key, so they count as revoked too. Later lists are signed by the new key under the same
+`kid`; its thumbprint is added to the table above and to the repository before the swap, so check the new
+thumbprint against both before you accept it.
 
 Limits. The list is signed with the scan key, so whoever stole that key could sign a list that leaves it out;
 they would still have to serve it to you in place of ours, and a revocation you have already seen stays

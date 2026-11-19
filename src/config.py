@@ -159,7 +159,7 @@ class Settings(BaseSettings):
     webhook_encryption_key: str | None = None
 
     # Ed25519 attestation signing key (base64-encoded 32-byte seed)
-    # Generate with: scripts/generate_signing_key.py
+    # Generate with: python3 -c "import base64,os;print(base64.b64encode(os.urandom(32)).decode())"
     attestation_signing_key_ed25519: str | None = None
 
     # Dedicated Ed25519 key for Trust Score v2 envelopes (base64 32-byte seed).
