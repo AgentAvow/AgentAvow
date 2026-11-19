@@ -321,8 +321,11 @@ export interface Grade {
   /** The tool's own published advisories that affect the scanned version (unsigned:
    *  `advisories` / `incident_history.advisories` with `affects_scanned_version`, plus
    *  the card's `advisories_affecting_version`). Read only when no signed decision is
-   *  there: one with CVSS >= 9.0 (or no score and a "critical" label) is Do not connect. */
-  advisories: Array<Record<string, unknown>>;
+   *  there: one with CVSS >= 9.0 (or no score and a "critical" label) is Do not connect.
+   *  `verifyGrade` keeps them, so these unsigned advisories can still tighten a verified
+   *  grade that has no signed decision (fail closed). Optional for a Grade built by
+   *  0.4.3 or earlier. */
+  advisories?: Array<Record<string, unknown>>;
   /** Shipped highs: the headline `high` count (never `high_all`). */
   high: number;
   findings: Array<Record<string, unknown>>;
@@ -835,7 +838,7 @@ function deriveDecisionRaw(grade: Grade, policy: ResolvedPolicy, toolName: strin
   }
   // The API's rule on the tool's own published advisories, when no signed decision is
   // there to say it (an unsigned or older response): a critical one is Do not connect.
-  const criticalAdvisory = signedAnswer ? null : criticalAdvisoryPhrase(grade.advisories);
+  const criticalAdvisory = signedAnswer ? null : criticalAdvisoryPhrase(grade.advisories ?? []);
   if (criticalAdvisory) hits.push(criticalAdvisory);
   const tierOnly = hits.length === 1 && hits[0]?.startsWith('the blocked tier');
   if (grade.apiDecision === 'do_not_connect') hits.push('AgentAvow says do not connect');

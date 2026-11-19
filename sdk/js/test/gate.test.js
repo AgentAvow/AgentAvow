@@ -704,3 +704,14 @@ test('a signed decision is the answer on a critical advisory', { skip }, async (
   assert.equal(mod.advisoryIsCritical({ cvss: 10 }), true);
   assert.equal(mod.advisoryIsCritical({ cvss: 0, severity: 'critical' }), true);
 });
+
+test('a 0.4.3-shaped Grade (no advisories) and blockOn: [] behave as documented', { skip }, () => {
+  const json = { ...scanJson({ score: 92 }), advisories: [{ id: 'GHSA-x', aliases: ['CVE-2026-9'], cvss: 9.8, affects_scanned_version: true }] };
+  const old = verified(scanJson({ score: 92 }));
+  delete old.advisories;
+  assert.equal(mod.deriveDecision(old, mod.resolvePolicy({})).decision, 'safe');
+  // The critical-CVE hit is the API's rule, not a policy trigger: blockOn: [] keeps it.
+  const d = mod.deriveDecision(verified(json), mod.resolvePolicy({ blockOn: [] }));
+  assert.equal(d.decision, 'do_not_connect');
+  assert.match(d.reason, /CVE-2026-9/);
+});
