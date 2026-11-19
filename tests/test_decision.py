@@ -268,6 +268,11 @@ CASES = [
         "current_version_affected": True, "advisories": [
             {"id": "GHSA-m", "severity": "critical", "affects_scanned_version": True}]}),
      "do_not_connect", True, "this version is a known-malicious package (malware advisory)"),
+    ("non_string_severity_is_missing", _scan(66, 200, incident_history={"advisories": [
+        {"id": "GHSA-x", "severity": ["critical"], "affects_scanned_version": True},
+        {"id": "GHSA-y", "severity": {"critical": 1}, "affects_scanned_version": True},
+        {"id": "GHSA-z", "severity": 4, "affects_scanned_version": True}]}),
+     "review", True, "known vulnerability GHSA-x and 2 more advisories affect this version"),
     ("advisory_aliases_not_a_list", _scan(66, 200, incident_history={"advisories": [
         {"id": "GHSA-x", "aliases": "CVE-2026-9", "affects_scanned_version": True}]}),
      "review", True, "known vulnerability GHSA-x affects this version"),

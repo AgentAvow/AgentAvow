@@ -275,6 +275,41 @@ def _last_affected(vuln: dict, eco: str | None = None, name: str | None = None) 
     return best[1] if best else None
 
 
+_SEVERITY_RANK = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+
+
+def osv_numeric_cvss(v: dict) -> float | None:
+    """A numeric CVSS base score an OSV record's publisher states outright (a
+    ``severity[].score`` that is a plain number). A vector string is not scored here:
+    without a full calculator the advisory's own severity label stands in instead."""
+    best = None
+    for sev in v.get("severity") or [] if isinstance(v, dict) else []:
+        raw = sev.get("score") if isinstance(sev, dict) else None
+        try:
+            n = float(str(raw).strip())
+        except (TypeError, ValueError):
+            continue
+        if 0 < n <= 10 and (best is None or n > best):
+            best = n
+    return best
+
+
+def _highest_version(eco: str, versions: list) -> str | None:
+    """The highest of ``versions`` (None entries skipped); an unparseable one sorts
+    below any parseable one, then by text, so the pick never depends on order."""
+    vals = [str(x) for x in versions if x]
+    if not vals:
+        return None
+
+    def key(x: str):
+        k = _parse_version(eco or "", x)
+        return (k is not None, k if k is not None else (), x)
+    try:
+        return max(vals, key=key)
+    except TypeError:
+        return sorted(vals)[-1]
+
+
 def summarize_advisories(vulns: list[dict], eco: str, version: str | None,
                          name: str | None = None) -> list[dict]:
     """Non-MAL advisories for the package itself, with whether the scanned version is
@@ -288,26 +323,52 @@ def summarize_advisories(vulns: list[dict], eco: str, version: str | None,
     ``fixed_in`` is the release that fixes it; when the record has no fix event,
     ``last_affected`` is the newest release it names as affected, so a reader is told
     why the scanned version is clear ("affected up to 1.40.12") instead of "fixed"."""
-    out: list[dict] = []
-    seen: set[str] = set()
+    # Records that share an id or alias describe one flaw. They are merged so the
+    # result does not depend on the order OSV returns them in: the highest severity
+    # label, the highest numeric CVSS, affected if any record says so.
+    groups: list[dict] = []
     for v in vulns:
         if _is_mal(v):
             continue
         ids = {str(v.get("id", ""))} | {str(a) for a in (v.get("aliases") or [])}
-        if ids & seen:
-            continue
-        seen |= ids
-        sev = _SEVERITY.get(str((v.get("database_specific") or {}).get("severity") or "")
-                            .upper(), "medium")
-        primary = next((i for i in sorted(ids) if i.startswith("GHSA-")), v.get("id"))
+        ids.discard("")
+        rec = {
+            "ids": ids,
+            "rid": str(v.get("id") or ""),
+            "summary": (v.get("summary") or "").strip()[:200],
+            "severity": _SEVERITY.get(str((v.get("database_specific") or {})
+                                          .get("severity") or "").upper(), "medium"),
+            "cvss": osv_numeric_cvss(v),
+            "fixed_in": _fixed_in(v, eco, name, version),
+            "last_affected": _last_affected(v, eco, name),
+            "affects": advisory_affects(v, eco, version, name),
+        }
+        hits = [g for g in groups if g["ids"] & ids]
+        merged = {"ids": set(ids), "records": [rec]}
+        for g in hits:
+            merged["ids"] |= g["ids"]
+            merged["records"] += g["records"]
+            groups.remove(g)
+        groups.append(merged)
+    out: list[dict] = []
+    for g in groups:
+        recs = sorted(g["records"], key=lambda r: r["rid"])
+        ids = g["ids"]
+        primary = next((i for i in sorted(ids) if i.startswith("GHSA-")),
+                       min((r["rid"] for r in recs if r["rid"]), default=None))
+        affects = any(r["affects"] for r in recs)
+        pool = [r for r in recs if r["affects"]] if affects else recs
+        cvss = [r["cvss"] for r in recs if r["cvss"] is not None]
         out.append({
             "id": primary,
             "aliases": sorted(i for i in ids if i and i != primary)[:5],
-            "summary": (v.get("summary") or "").strip()[:200],
-            "severity": sev,
-            "fixed_in": _fixed_in(v, eco, name, version),
-            "last_affected": _last_affected(v, eco, name),
-            "affects_scanned_version": advisory_affects(v, eco, version, name),
+            "summary": next((r["summary"] for r in recs if r["summary"]), ""),
+            "severity": max((r["severity"] for r in recs),
+                            key=lambda x: _SEVERITY_RANK.get(x, 0)),
+            "cvss": max(cvss) if cvss else None,
+            "fixed_in": _highest_version(eco, [r["fixed_in"] for r in pool]),
+            "last_affected": _highest_version(eco, [r["last_affected"] for r in pool]),
+            "affects_scanned_version": affects,
         })
     out.sort(key=lambda a: (not a["affects_scanned_version"], a["id"] or ""))
     return out[:20]
@@ -686,18 +747,21 @@ def _patched(v: dict) -> str | None:
 
 
 def gh_advisory_cvss(a: dict) -> float | None:
-    """The CVSS base score GitHub lists for an advisory: CVSS v4 when it has one, else
-    v3, else the legacy ``cvss`` block. None when no score above 0 is listed (GitHub
-    sends 0 or null for "not scored")."""
+    """The CVSS base score GitHub lists for an advisory: the higher of CVSS v4 and v3
+    when both are listed (the conservative read), else the legacy ``cvss`` block. None
+    when no score above 0 is listed (GitHub sends 0 or null for "not scored")."""
     if not isinstance(a, dict):
         return None
+
+    def score(block) -> float | None:
+        n = block.get("score") if isinstance(block, dict) else None
+        if isinstance(n, (int, float)) and not isinstance(n, bool) and 0 < n <= 10:
+            return float(n)
+        return None
     sevs = a.get("cvss_severities") if isinstance(a.get("cvss_severities"), dict) else {}
-    for block in (sevs.get("cvss_v4"), sevs.get("cvss_v3"), a.get("cvss")):
-        score = block.get("score") if isinstance(block, dict) else None
-        if (isinstance(score, (int, float)) and not isinstance(score, bool)
-                and 0 < score <= 10):
-            return float(score)
-    return None
+    listed = [n for n in (score(sevs.get("cvss_v4")), score(sevs.get("cvss_v3")))
+              if n is not None]
+    return max(listed) if listed else score(a.get("cvss"))
 
 
 def enrich_cvss(existing: list[dict], extra: list[dict]) -> None:
