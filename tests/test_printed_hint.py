@@ -496,3 +496,85 @@ def test_question_budget_per_package():
     h = Hints({"a.js": f'console.log("{CMD}");\n'}, package=True)
     h.asked = Hints.MAX_QUESTIONS
     assert h.why_not("a.js", 1, PAT) == "too many findings to follow"
+
+
+# ---------------------------------------------------------------------------
+# A name bound only to `console` (bundled SDK code: `this._logger = console`)
+# ---------------------------------------------------------------------------
+
+_CP = 'const cp = require("child_process");\n'
+
+
+@pytest.mark.parametrize("src", [
+    'class C {\n  constructor() { this._logger = console; }\n'
+    f'  f() {{ this._logger.warn("install: {CMD}"); }}\n}}\n',
+    f'const log = console;\nfunction f() {{ log.warn("install: {CMD}"); log.info("x"); }}\n',
+    f'const log = globalThis.console;\nlog.error(`missing; run {CMD}`);\n',
+    f'var log = window.console;\nlog.log("run {CMD}");\n',
+    f'function f() {{ const log = console; log.warn("install: {CMD}"); }}\n',
+    # The alias also keeps a direct `console.*` hint elsewhere in the file a hint.
+    f'this._logger = console;\nthis._logger.info("x");\nconsole.log("run {CMD}");\n',
+])
+def test_console_alias_hint_is_low(src):
+    assert _single(src) == {"low"}
+
+
+@pytest.mark.parametrize("src", [
+    # handed to a function
+    _CP + f'const log = console;\nwire(log);\nlog.warn("run {CMD}");\n',
+    # reassigned to something else
+    _CP + 'let log = console;\nlog = { warn: (s) => cp.execSync(s) };\n'
+    f'log.warn("run {CMD}");\n',
+    _CP + 'class C {\n  constructor() { this._logger = console; }\n'
+    '  g() { this._logger = { warn: (s) => cp.execSync(s) }; }\n'
+    f'  f() {{ this._logger.warn("run {CMD}"); }}\n}}\n',
+    # a caller-supplied left side
+    _CP + 'class C {\n  constructor(opts) { this._logger = opts.logger ?? console; }\n'
+    f'  f() {{ this._logger.warn("run {CMD}"); }}\n}}\n',
+    _CP + f'const log = opts.logger || console;\nlog.warn("run {CMD}");\n',
+    # a self-default keeps a value a caller can set
+    _CP + 'class C {\n  constructor() { this._logger = this._logger ?? console; }\n'
+    f'  f() {{ this._logger.debug("run {CMD}"); }}\n}}\n',
+    _CP + 'class C {\n  constructor() { this.out = undefined || console; }\n'
+    f'  f() {{ this.out.trace("run {CMD}"); }}\n}}\n',
+    _CP + f'function f(log) {{\n  log = log ?? console;\n  log.warn("run {CMD}");\n}}\n',
+    _CP + f'function f(log) {{\n  log = log || console;\n  log.warn("run {CMD}");\n}}\n',
+    # a default parameter / destructuring default: the caller supplies the value
+    _CP + f'function f(log = console) {{\n  log.warn("run {CMD}");\n}}\n',
+    _CP + f'const f = (log = console) => {{\n  log.warn("run {CMD}");\n}};\n',
+    _CP + f'function f({{ logger = console }} = {{}}) {{\n  logger.warn("run {CMD}");\n}}\n',
+    _CP + f'function f(opts) {{\n  const {{ logger = console }} = opts;\n'
+    f'  logger.warn("run {CMD}");\n}}\n',
+    _CP + f'function f(a, logger = console) {{ logger.warn("run {CMD}"); }}\n',
+    # a plain assignment to a name the file never declares
+    _CP + f'log = console;\nlog.warn("run {CMD}");\n',
+    # exported / stored in an object
+    _CP + f'const log = console;\nmodule.exports = {{ log }};\nlog.warn("run {CMD}");\n',
+    _CP + f'export const log = console;\nlog.warn("run {CMD}");\n',
+    # another method, a direct call, a computed member
+    _CP + 'const log = console;\nlog.assert = (c, s) => cp.execSync(s);\n'
+    f'log.warn("run {CMD}");\n',
+    _CP + f'const log = console;\nlog("run {CMD}");\nlog.warn("run {CMD}");\n',
+    _CP + f'const log = console;\nlog[k]("run {CMD}");\n',
+    # the property reached through another object or a string
+    _CP + 'class C {\n  constructor() { this._logger = console; }\n'
+    f'  f() {{ this._logger.warn("run {CMD}"); }}\n}}\n'
+    'const c = new C();\nc._logger.warn = (s) => cp.execSync(s);\n',
+    _CP + 'class C {\n  constructor() { this._logger = console; }\n'
+    f'  f() {{ this._logger.warn("run {CMD}"); }}\n}}\n'
+    'const c = new C();\nc["_logger"].warn = (s) => cp.execSync(s);\n',
+    # a direct eval can reach the variable by name
+    _CP + f'const log = console;\neval(src);\nlog.warn("run {CMD}");\n',
+])
+def test_console_alias_misuse_stays_critical(src):
+    assert _single(src) == {"critical"}
+
+
+def test_console_alias_property_written_in_another_file_stays_critical():
+    a = ('class C {\n  constructor() { this._logger = console; }\n'
+         f'  f() {{ this._logger.warn("run {CMD}"); }}\n}}\nmodule.exports = {{ C }};\n')
+    b = (_CP + 'const { C } = require("./a");\nconst c = new C();\n'
+         'c._logger.warn = (s) => cp.execSync(s);\nc.f();\n')
+    files = {"a.js": a, "index.js": b}
+    assert why_not(files, "a.js", _line_of(a), PAT, package=True) is not None
+    assert why_not({"a.js": a}, "a.js", _line_of(a), PAT, package=True) is None
