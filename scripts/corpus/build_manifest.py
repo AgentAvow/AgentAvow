@@ -10,7 +10,9 @@ Sources (both public and reproducible; the exact snapshot is recorded in the man
   The module is read as text and parsed with a regex; it is never executed.
 
 Plus the pinned extras: ``pypi/mcp`` (official MCP Python SDK), the 20-package sample of
-the precision-pass scope report, and the sandbox eval's ``known_good`` MCP packages.
+the precision-pass scope report, the sandbox eval's ``known_good`` MCP packages, and the
+false positives of the verdict-accuracy audit (``AUDIT_PINNED``, kept at the audited
+version so the exact archive that misread stays a regression fixture).
 
 Each package is pinned to the version current at build time, with the archive that
 production would scan (``_pick_pypi_url``: a wheel first, the sdist only when no wheel
@@ -19,7 +21,7 @@ list decides the installed surface (``_pypi_sdist_and_wheel``), each with its sh
 downloadable files, or whose archive exceeds the production download cap are excluded
 (listed under ``excluded`` with the reason) and the next package backfills.
 
-``expect`` / ``expect_reason`` written by a human are carried over on a re-pin.
+``expect`` / ``expect_reason`` / ``known_fp`` written by a human are carried over on a re-pin.
 
 Usage (network; downloads into the cache, never executes):
     python -I scripts/corpus/build_manifest.py --cache <dir> [--n 200]
@@ -70,6 +72,13 @@ SCOPE_SAMPLE = [
     ("npm", "lodash"), ("npm", "axios"), ("npm", "chalk"), ("npm", "commander"),
 ]
 REQUIRED_EXTRAS = [("pypi", "mcp")]
+# Verdict-accuracy audit 2026-11:
+# single-tool false positives, pinned to the version that read Do not connect.
+AUDIT_PINNED = [
+    ("pypi", "av", "19.0.2"),            # getattr(__builtins__, name, OSError)
+    ("pypi", "mitmproxy", "12.3.1"),     # ZWJ flag tag sequences, d=4 placeholder EC key
+    ("pypi", "agent-audit", "0.20.0"),   # `# BAD:` curl|bash in a rule's code_example
+]
 SANDBOX_CORPUS = Path(__file__).resolve().parents[2] / "scripts/sandbox/eval/corpus.json"
 
 
@@ -95,8 +104,9 @@ def npm_top(client: httpx.Client) -> list[str]:
     return re.findall(r"'([^']+)'", body)
 
 
-def resolve_pypi(client: httpx.Client, name: str) -> dict:
-    r = client.get(f"https://pypi.org/pypi/{quote(name)}/json")
+def resolve_pypi(client: httpx.Client, name: str, version: str | None = None) -> dict:
+    path = f"{quote(name)}/{quote(version)}" if version else quote(name)
+    r = client.get(f"https://pypi.org/pypi/{path}/json")
     if r.status_code != 200:
         return {"excluded": f"PyPI metadata HTTP {r.status_code}"}
     meta = r.json()
@@ -241,6 +251,19 @@ def main() -> int:
                     p.setdefault("also", []).append(src)
             continue
         take(eco, [name], src, None)
+    for eco, name, version in AUDIT_PINNED:
+        pid = f"{eco}/{name.lower()}"
+        if pid in seen:
+            continue
+        seen.add(pid)
+        with _client() as c:
+            res = resolve_pypi(c, name, version)
+        if "excluded" in res:
+            excluded.append({"id": pid, "source": "verdict-audit-2026-11",
+                             "reason": res["excluded"]})
+            continue
+        res.update(id=pid, source="verdict-audit-2026-11")
+        packages.append(res)
 
     # Malicious-package advisories on the pinned versions: exclude (no backfill needed
     # for extras; top-N lists would be re-run if this ever fires).
@@ -276,7 +299,7 @@ def main() -> int:
     for p in packages:
         prev = old.get(p["id"])
         if prev:
-            for k in ("expect", "expect_reason", "subset"):
+            for k in ("expect", "expect_reason", "subset", "known_fp"):
                 if k in prev:
                     p[k] = prev[k]
         p["archive"].pop("integrity", None)
@@ -299,7 +322,8 @@ def main() -> int:
                     "file": "lib/top-download.js", "url": NPM_HIGH_IMPACT_TARBALL,
                     "rule": f"first {args.n} (ordered by weekly downloads)"},
             "extras": "pypi/mcp; precision-scope §1 sample; "
-                      "scripts/sandbox/eval/corpus.json known_good",
+                      "scripts/sandbox/eval/corpus.json known_good; "
+                      "verdict-audit-2026-11 pinned false positives",
         },
         "excluded": excluded,
         "packages": packages,

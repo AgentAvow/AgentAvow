@@ -13,7 +13,7 @@
    "url": "https://registry.npmjs.org/npm-high-impact/-/npm-high-impact-1.13.0.tgz",
    "rule": "first 200 (ordered by weekly downloads)"
   },
-  "extras": "pypi/mcp; precision-scope \u00a71 sample; scripts/sandbox/eval/corpus.json known_good"
+  "extras": "pypi/mcp; precision-scope \u00a71 sample; scripts/sandbox/eval/corpus.json known_good; verdict-audit-2026-11 pinned false positives"
  },
  "excluded": [],
  "packages": [
@@ -6099,6 +6099,53 @@
    "deprecation": "Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.",
    "id": "npm/@modelcontextprotocol/server-puppeteer",
    "source": "sandbox-known-good"
+  },
+  {
+   "ecosystem": "pypi",
+   "name": "av",
+   "version": "19.0.2",
+   "archive": {
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/7c/42/067d0bcd2c07103f18cc23b510a8289dd80330e984c49d51ce0bafcee017/av-19.0.2-cp312-abi3-macosx_14_0_arm64.whl",
+    "sha256": "b0dff6dfcc6ff9944fbbff15bc4ee2d90a2c1695d493bdea96e86f48823e9feb",
+    "size": 18556422
+   },
+   "wheel": null,
+   "id": "pypi/av",
+   "source": "verdict-audit-2026-11",
+   "known_fp": {
+    "label": "do_not_connect",
+    "class": "builtin looked up on __builtins__ by a computed key",
+    "detail": "av/error.py:199 getattr(__builtins__, name, OSError) subclasses a builtin exception named by a parameter. The exemption requires a literal exception-class key: a computed key can name any builtin (eval), so recall wins over this one package."
+   }
+  },
+  {
+   "ecosystem": "pypi",
+   "name": "mitmproxy",
+   "version": "12.3.1",
+   "archive": {
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/a7/b2/886992a28a7bf86e47691d7a33e26eba370ee71d89b77d3128412910a33e/mitmproxy-12.3.1-py3-none-any.whl",
+    "sha256": "87afb808ac8d55383dbe6aa30eadeb0fedaeffd26210e7e23c25c9cd43bdb36a",
+    "size": 1123686
+   },
+   "wheel": null,
+   "id": "pypi/mitmproxy",
+   "source": "verdict-audit-2026-11"
+  },
+  {
+   "ecosystem": "pypi",
+   "name": "agent-audit",
+   "version": "0.20.0",
+   "archive": {
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/67/8d/839224978f39afbf65c3be59d5dad55253e4c8fcb74dbe6393a361f70e6e/agent_audit-0.20.0-py3-none-any.whl",
+    "sha256": "0f38b00ad570ccbbfac761bbc2751217b1f7bb79df6d53dfc1747179da7d63e7",
+    "size": 364565
+   },
+   "wheel": null,
+   "id": "pypi/agent-audit",
+   "source": "verdict-audit-2026-11"
   }
  ]
 }
