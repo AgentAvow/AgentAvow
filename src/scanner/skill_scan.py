@@ -309,7 +309,7 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md",
                 "An oversized always-loaded description crowds the model's context on purpose.",
             ))
         # injection/unicode over the always-loaded text via the shared engine
-        result.findings.extend(_scan_text(blob, skill_md_path))
+        result.findings.extend(_scan_text(blob, skill_md_path, whole_skill_md=False))
     else:
         result.findings.append(_finding(
             "skill_capability", "No SKILL.md found — not a recognizable Agent Skill",
@@ -319,11 +319,19 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md",
     # 2a. plain-text injection in the skill's prose: the SKILL.md body (its frontmatter
     # is read above) and every markdown / text file the skill ships, with context rules
     # for skills that talk about injection (src/scanner/skill_prose.py).
+    from src.scanner.skill_prose import body_offset as _body_offset
     from src.scanner.skill_prose import scan_prose as _scan_prose
     for path in sorted(files):
         if files[path] and path.lower().endswith(_PROSE_EXT):
-            result.findings.extend(_scan_prose(
-                files[path], path, skip_frontmatter=path.lower().endswith("skill.md")))
+            is_md = path.lower().endswith("skill.md")
+            result.findings.extend(_scan_prose(files[path], path, skip_frontmatter=is_md))
+            # Hidden / smuggled Unicode in the same text (Tags-block characters, a
+            # zero-width run): the agent reads it, a reviewer does not see it. The
+            # frontmatter is read above with the always-loaded text.
+            first = _body_offset(files[path]) if is_md else 0
+            result.findings.extend(
+                f for f in _scan_text(files[path], path)
+                if f.category == "hidden_unicode" and (f.line_number or 0) > first)
 
     # 2b. encoded instructions in the skill's prose (SKILL.md, every other markdown /
     # text file it ships): decoded and read with the injection matcher.
@@ -625,13 +633,15 @@ def _credential_findings(path: str, text: str, extern: dict[str, str] | None = N
     return out
 
 
-def _scan_text(text: str, where: str) -> list:
-    """Reuse the repo scanner's 14-category engine over a skill file."""
+def _scan_text(text: str, where: str, *, whole_skill_md: bool = True) -> list:
+    """Reuse the repo scanner's 14-category engine over a skill file.
+    ``whole_skill_md=False``: ``text`` is not the whole file (the always-loaded name and
+    description), so the strict engine grades all of it."""
     if not text or not text.strip():
         return []
     from src.scanner.scan import _scan_content
     try:
-        findings, _pos, _sup = _scan_content(text, where)
+        findings, _pos, _sup = _scan_content(text, where, skill_body_prose=whole_skill_md)
     except Exception:
         return []
     # Only this file is in view: a maintainer-script downgrade stands only when no

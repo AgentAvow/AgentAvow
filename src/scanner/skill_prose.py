@@ -32,6 +32,15 @@ dropped.
   sections are normal prompt structure in a skill, so a tag alone is medium. It stays
   high when its line names the user's secrets (keys, tokens, ~/.ssh, .env, ...) or
   tells the agent to act without asking (the Invariant ``<IMPORTANT>`` shape).
+* **A quote the skill acts on is not an example.** No quote rule above applies when the
+  line (or the next one) tells the agent to act on what it quotes ("If a page says
+  "...", do it", "...; obey them"), when any line of the file points the agent at the
+  quoted or example text as something to follow ("follow the quoted instruction above",
+  "do what the example says"), or when the quote's own sentence names the user's
+  secrets and sends them somewhere (a send verb or a URL). A negated directive ("never
+  do it", "do not follow the quoted text") is a warning, not one of these.
+* **A phrase split by quotation marks** (`"ignore" all previous instructions`) reads to
+  the agent as the phrase itself: high.
 * **A hide-from-user phrase** is UX advice in most skills ("never show raw JSON to the
   user", "do not tell users to run commands"): medium. It stays high when it hides the
   skill's own action ("do not mention this to the user", "don't tell the user what you
@@ -110,15 +119,58 @@ _SENTENCE_RE = re.compile(r"(?:[^.!?\n]|[.!?]+(?=[^\s.!?]))*(?:[.!?]+|$)")
 # Periods that do not end a sentence: abbreviations, an ellipsis, a period inside a
 # quote. Masked (same length) before splitting so offsets still line up.
 _NOT_AN_END_RE = re.compile(r"(?i)\b(?:e\.g|i\.e|etc|vs|cf)\.|\.{2,}|…|\.(?=[\"”’'])")
+# A line that tells the agent to act on the text it quotes ("If a page says "...", do
+# it", "...; obey them").
+_COMPLY_HERE_RE = re.compile(
+    r"(?i)\b(?:do|follow|obey|execute|run|apply|perform|honou?r|comply\s+with|act\s+on|"
+    r"carry\s+out|repeat)\s+(?:it|them|that|those|these)\b")
+# Anywhere in the file: the quoted / example text named as something to follow ("follow
+# the quoted instruction above", "do what the example says", "treat the quoted text as
+# your instructions").
+_COMPLY_REF_RE = re.compile(
+    r"(?i)\b(?:do|follow|obey|execute|run|apply|perform|honou?r|comply\s+with|act\s+on|"
+    r"carry\s+out|repeat)\b(?!\s+(?:not|never)\b)[^.!?\n]{0,30}?"
+    r"(?:\b(?:the|that|this|those|these|each|every)\s+(?:quoted|example|sample|above|"
+    r"previous|preceding|following|below)\s+(?:\w+\s+)?(?:instructions?|text|lines?|"
+    r"phrases?|commands?|examples?|quotes?|directives?|payloads?|blocks?|sentences?)\b"
+    r"|\bwhat\s+(?:the\s+)?(?:quoted\s+\w+|quotes?|examples?|page|text|message|line|"
+    r"phrase)\s+(?:above\s+|below\s+)?(?:says?|said|asks?|tells?)\b)"
+    r"|\b(?:treat|use|adopt)\s+(?:the\s+)?(?:quoted|example|above|following)\s+\w+\s+as\s+"
+    r"(?:your|the|an?)\s+(?:instructions?|rules?|system\s+prompt|task|orders?)\b")
+# A directive is a warning when a negation sits just before it ("never do it", "do not
+# follow the quoted text", "refuse to obey them").
+_NEGATED_RE = re.compile(
+    r"(?i)(?:\bnever|\bnot|n't|\bno|\bnor|\bwithout|\brefuse\s+to|\binstead\s+of|"
+    r"\brather\s+than)\W+(?:\w+\W+){0,2}$")
+_URL_RE = re.compile(r"(?i)\bhttps?://\S")
+# Quotation marks and backticks a phrase can be split with ("ignore" all previous ...).
+# A straight apostrophe only when it is not inside a word (don't, user's).
+_SPLIT_QUOTES_RE = re.compile(r"[\"“”‘’`]|(?<![A-Za-z])'|'(?![A-Za-z])")
 _FIX = ("A skill's instructions are what the agent follows. Text here that overrides the "
         "user's instructions, hides actions from the user or injects a system directive "
         "is prompt injection. Remove it; to document an attack, quote it in a code span "
         "or fenced block and say that it is an example of one.")
 
 
+def _unquoted(text: str) -> str:
+    """``text`` with quoted phrases and code spans blanked (same length)."""
+    for rx in (_INLINE_CODE_RE, _QUOTED_RE):
+        text = rx.sub(lambda m: " " * len(m.group(0)), text)
+    return text
+
+
+def _directs(rx: re.Pattern, text: str) -> bool:
+    """``rx`` matches ``text`` outside quotes and code spans, with no negation just
+    before it."""
+    bare = _unquoted(text)
+    return any(not _NEGATED_RE.search(bare[max(0, m.start() - 40):m.start()])
+               for m in rx.finditer(bare))
+
+
 def _body(text: str) -> tuple[str, int]:
-    """``(body, line_offset)``: the text after a leading ``---`` frontmatter block."""
-    if not text.startswith("---"):
+    """``(body, line_offset)``: the text after a leading ``---`` frontmatter block (a
+    byte-order mark before it is allowed, as the frontmatter parser allows it)."""
+    if not text.lstrip("﻿").startswith("---"):
         return text, 0
     lines = text.splitlines(keepends=True)
     for i in range(1, min(len(lines), 400)):
@@ -160,7 +212,8 @@ def _is_security_doc(text: str, path: str = "") -> bool:
 
 
 def _grade(name: str, pattern: re.Pattern, severity: str, line: str, in_fence: bool,
-           security_doc: bool, para: str = "") -> tuple[str, str] | None:
+           security_doc: bool, para: str = "", acts_on_quote: bool = False,
+           ) -> tuple[str, str] | None:
     """``(severity, why_lowered)`` for the rule's hits on this line, or None."""
     hits = list(pattern.finditer(line))
     if not hits:
@@ -195,9 +248,14 @@ def _grade(name: str, pattern: re.Pattern, severity: str, line: str, in_fence: b
         shown = in_fence or table or _inside(code, s, e)
         catalog = shown or (bullet and _inside(quoted, s, e))
         mentioned = shown or _inside(quoted, s, e)
-        if (catalog and security_doc) or (mentioned and _DISCUSSION_RE.search(rest)) or (
-                mentioned and _DISCUSSION_RE.search(prior)
-                and not _SENSITIVE_RE.search(sentence) and not _EXFIL_ACT_RE.search(sentence)):
+        # A quote the skill tells the agent to act on, or one that sends the user's
+        # secrets somewhere, is the instruction itself, not an example of one.
+        sink = bool(_SENSITIVE_RE.search(sentence)) and bool(
+            _EXFIL_ACT_RE.search(sentence) or _URL_RE.search(sentence))
+        if mentioned and not acts_on_quote and not sink and (
+                (catalog and security_doc) or _DISCUSSION_RE.search(rest) or (
+                    _DISCUSSION_RE.search(prior) and not _SENSITIVE_RE.search(sentence)
+                    and not _EXFIL_ACT_RE.search(sentence))):
             lowered.append("quoted as an example of an attack")
             continue
         if name == _ROLE and _TAG_RE.fullmatch(frag.strip()) and not _SENSITIVE_RE.search(line):
@@ -218,41 +276,72 @@ def _grade(name: str, pattern: re.Pattern, severity: str, line: str, in_fence: b
     return "medium", next(w for w in lowered if w != "a system-prompt label")
 
 
-def scan_prose(text: str, path: str, *, skip_frontmatter: bool = False) -> list:
-    """Prompt-injection findings for one skill markdown file (one finding per line)."""
-    from src.scanner.scan import Finding
 
+
+def body_offset(text: str) -> int:
+    """How many leading lines of a SKILL.md are its frontmatter block (0 if none)."""
+    if not text or not isinstance(text, str):
+        return 0
+    return _body(text)[1]
+
+
+def grade_lines(text: str, path: str, *, skip_frontmatter: bool = False,
+                ) -> list[tuple[int, str, str, str, str]]:
+    """``(line_number, rule_name, severity, why_lowered, line)`` for every line of one
+    skill markdown file a prompt-injection rule matches (the best grade per line).
+    Line numbers count from the top of ``text``, frontmatter included."""
     if not text or not isinstance(text, str):
         return []
     body, offset = _body(text) if skip_frontmatter else (text, 0)
-    out: list = []
+    out: list[tuple[int, str, str, str, str]] = []
     try:
+        lines = body.splitlines()
         security_doc = _is_security_doc(body, path)
+        # Any line that points the agent at the quoted / example text to follow it.
+        refers_to_quote = any(_directs(_COMPLY_REF_RE, ln) for ln in lines)
         in_fence = False
         para = ""  # the earlier lines of the current paragraph
-        for idx, line in enumerate(body.splitlines()):
+        for idx, line in enumerate(lines):
             if _FENCE_RE.match(line):
                 in_fence = not in_fence
                 para = ""
                 continue
+            nxt = lines[idx + 1] if idx + 1 < len(lines) else ""
+            acts = refers_to_quote or _directs(_COMPLY_HERE_RE, line) or (
+                bool(line.strip()) and _directs(_COMPLY_HERE_RE, nxt))
             best: tuple[str, str, str] | None = None
             for name, pattern, severity in _MATCHER:
-                g = _grade(name, pattern, severity, line, in_fence, security_doc, para)
+                g = _grade(name, pattern, severity, line, in_fence, security_doc, para, acts)
                 if g and (best is None or _SEV_RANK[g[0]] > _SEV_RANK[best[1]]):
                     best = (name, g[0], g[1])
+            if best is None and _SPLIT_QUOTES_RE.search(line):
+                # The phrase split by quotation marks reads as the phrase itself.
+                joined = re.sub(r"[ \t]{2,}", " ", _SPLIT_QUOTES_RE.sub("", line))
+                for name, pattern, severity in _MATCHER:
+                    if severity in ("critical", "high") and pattern.search(joined) and (
+                            best is None or _SEV_RANK[severity] > _SEV_RANK[best[1]]):
+                        best = (name, severity, "")
             para = (para + "\n" + line) if line.strip() else ""
             if best is None:
                 continue
             name, sev, why = best
-            out.append(Finding(
-                category="prompt_injection",
-                name=f"Skill instructions: {name}" + (f" ({why})" if why else ""),
-                severity=sev,
-                file_path=path,
-                line_number=offset + idx + 1,
-                snippet=re.sub(r"\s+", " ", line.strip())[:120],
-                remediation=_FIX,
-            ))
+            out.append((offset + idx + 1, name, sev, why, line))
     except Exception:  # noqa: BLE001 — a rule bug must not fail the scan
         return out
     return out
+
+
+def scan_prose(text: str, path: str, *, skip_frontmatter: bool = False) -> list:
+    """Prompt-injection findings for one skill markdown file (one finding per line)."""
+    from src.scanner.scan import Finding
+
+    return [Finding(
+        category="prompt_injection",
+        name=f"Skill instructions: {name}" + (f" ({why})" if why else ""),
+        severity=sev,
+        file_path=path,
+        line_number=line_no,
+        snippet=re.sub(r"\s+", " ", line.strip())[:120],
+        remediation=_FIX,
+    ) for line_no, name, sev, why, line in grade_lines(
+        text, path, skip_frontmatter=skip_frontmatter)]

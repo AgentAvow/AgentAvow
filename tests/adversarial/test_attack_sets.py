@@ -26,6 +26,8 @@ production package path (npm_result_from_tarball -> apply_artifact_scan -> trust
   .env (#388; skill path)
 * ``cases_shown_cmd`` - an install hint only shown (shell, Go, Rust, JS) whose text
   can still reach a process (#378; scanned as a source repo with ``scan_local``)
+* ``cases_repo_skill_prose`` - every ``cases_skill_prose`` case, plus repo-only shapes,
+  scanned as a source repo (#459; ``scan_local``): a SKILL.md body reads the same there
 
 Every case's label is pinned in ``expected.json``. A scanner change that moves one fails
 here; regenerate with ``python -I tests/adversarial/expected_labels.py --write`` in the
@@ -47,7 +49,8 @@ EXPECTED = json.loads((HERE / "expected.json").read_text())
 SETS = ("cases_npm_scripts", "cases_printed_hint", "cases_trifecta", "cases_exfil_precision",
         "cases_browser_profile", "cases_signing_key",
         "cases_encoded_instructions", "cases_bytecode", "cases_skill_prose",
-        "cases_a2a_cards", "cases_skill_secret_flow", "cases_shown_cmd")
+        "cases_a2a_cards", "cases_skill_secret_flow", "cases_shown_cmd",
+        "cases_repo_skill_prose")
 
 # Attacks that still read safe today, with the label they should read.
 KNOWN_GAPS: dict[tuple[str, str], str] = {
@@ -77,6 +80,14 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     # A file that names prompt injection once can carry a live payload as a catalog
     # entry (a fenced block, a quoted list item): it reads medium.
     ("cases_skill_prose", "gap_security_doc_fenced_payload"): "review",
+    # The same catalog-entry gap on the repository path (#459 grades a SKILL.md body
+    # with the skill path's rules).
+    ("cases_repo_skill_prose", "gap_security_doc_fenced_payload"): "review",
+    # Older than #459: in a repository scan, markdown a skill ships beside its SKILL.md
+    # (references/, notes/) is graded as documentation, so an override phrase there is
+    # medium. The skill scan reads it high.
+    ("cases_repo_skill_prose", "referenced_md_override"): "review",
+    ("cases_repo_skill_prose", "shipped_notes_override"): "review",
     # Card analysis is pure: a hostname that resolves to a private address is not seen.
     ("cases_a2a_cards", "gap_dns_name_to_private"): "review",
     # Older than #388: table entries merged into a NEW name (`M = {**T["a"], **T["b"]}`,
