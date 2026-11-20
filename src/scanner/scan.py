@@ -5093,6 +5093,15 @@ def _scan_content(
                     # local and package scans restore it when another file replaces
                     # the output (`package_context.recheck_printed_hints`).
                     finding.pre_hint = npx_pre  # type: ignore[attr-defined]
+                if (name == pipe_shell.PIPE_TO_SHELL and finding.severity == "critical"
+                        and is_metadata and Path(file_path).name.lower() == "skill.md"):
+                    # Shown to a person in a SKILL.md install section (#461, owner
+                    # decision): high. The caller re-checks the tree for a file that
+                    # runs it (skill_install.restore_runs) and puts the critical back.
+                    from src.scanner import skill_install
+                    if skill_install.human_install_line(
+                            lines, idx, skill_install.body_offset(lines), file_path):
+                        skill_install.lower(finding, line)
                 if (name == "curl/wget piped to shell"
                         and Path(file_path).name.lower() == "package.json"):
                     # A maintainer-only package.json script (`test:e2e:docker`) that no
@@ -9028,6 +9037,27 @@ async def scan_repo(
         result.findings.extend(_bc_findings)
         gaps.update(_bc_gaps)
         npm_scripts.restore_externally_invoked(result.findings, repo_texts)
+        # A SKILL.md install command lowered to high: critical again when anything in
+        # the tree can run it, or a file that could is in the tree but was not read.
+        from src.scanner import skill_install
+        tree_paths = [it["path"] for it in tree if isinstance(it, dict) and it.get("path")]
+        runner_texts = dict(repo_texts)
+        extra = skill_install.unread_runners(result.findings, repo_texts, tree_paths)[
+            :skill_install.MAX_EXTRA_READS]
+
+        async def _fetch_runner(p: str) -> tuple[str, str | None]:
+            try:
+                async with sem:
+                    return p, await asyncio.wait_for(
+                        _fetch_file_content(owner, repo, p, token, ref=ref),
+                        timeout=per_file_timeout)
+            except Exception:  # noqa: BLE001 — unread: the critical stays
+                return p, None
+
+        for p, text in await asyncio.gather(*(_fetch_runner(p) for p in extra)):
+            if text:
+                runner_texts[p] = text
+        skill_install.restore_runs(result.findings, runner_texts, tree_paths)
         # A test-named file that is not test code (or that running code uses) is graded
         # as shipped code.
         result.findings = _regrade_misnamed_tests(
