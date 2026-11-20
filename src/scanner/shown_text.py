@@ -817,6 +817,14 @@ _PASS_RUNNER_RE = re.compile(
     r"(?:exec\w*|spawn\w*|run\w*|system|eval|sh|shell)\s*\)")
 
 
+# Function.prototype.call on a builtin method, not subprocess.call.
+_PROTO_CALL_RE = re.compile(
+    r"(?:\bprototype\.\w+|\bhasOwnProperty|\bpropertyIsEnumerable)\s*\.\s*$")
+# A whole Python def header on one line (a one-line body `def f(c): run(c[k])` is not).
+_DEF_LINE_RE = re.compile(
+    r"^\s*(?:async\s+)?def\s+\w+\s*\([^:]*(?::[^:]*)*?\)\s*(?:->[^:]+)?:\s*(?:#.*)?$")
+
+
 def _computed_exec_site(json_path: str, texts: dict[str, str]) -> tuple[str, int] | None:
     base = Path(json_path).name
     stem = Path(json_path).stem
@@ -834,9 +842,15 @@ def _computed_exec_site(json_path: str, texts: dict[str, str]) -> tuple[str, int
         for i, ln in enumerate(lines):
             if ln.lstrip().startswith(("#", "//", "*", "/*")):
                 continue
+            if _DEF_LINE_RE.match(ln):
+                # `def run_verification(task: dict) -> tuple[str, str]:` declares a
+                # function; its annotations are not a computed read into a sink.
+                continue
             if _PASS_RUNNER_RE.search(ln):
                 return fp, i + 1
             for m in _SINK_CALL_RE.finditer(ln):
+                if _PROTO_CALL_RE.search(ln[:m.start()]):
+                    continue  # `Object.prototype.hasOwnProperty.call(o, k)`
                 if _COMPUTED_INDEX_RE.search(ln[m.end(): m.end() + 200]):
                     return fp, i + 1
             for m in _ITER_VALUES_RE.finditer(ln):

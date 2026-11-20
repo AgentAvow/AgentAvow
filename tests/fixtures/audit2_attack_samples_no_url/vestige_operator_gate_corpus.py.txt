@@ -1,0 +1,25 @@
+
+def cmd_corpus(argv):
+    """Run an eval corpus through classify(). Pure classification; nothing executes."""
+    name = argv[0] if argv else "guardfall"
+    path = pj(os.path.dirname(os.path.abspath(__file__)), "corpora", name + ".json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            corpus = json.load(f)
+    except Exception as exc:
+        print("cannot load corpus %s: %s" % (name, exc))
+        return 2
+    os.environ["OPERATOR_HOME"] = os.environ.get("OPERATOR_HOME", tempfile.mkdtemp(prefix="opgate-corpus-"))
+    cfg = load_config()
+    passed, failed = 0, []
+    for case in corpus["cases"]:
+        cid, cmd, expect = case["id"], case["cmd"], case["expect"]
+        cwd = "/tmp"
+        tmpd = None
+        if case.get("fixtures"):                       # materialize script fixtures (never executed)
+            tmpd = tempfile.mkdtemp(prefix="opgate-fixture-")
+            for fx in case["fixtures"]:
+                fp = pj(tmpd, fx["name"])
+                os.makedirs(os.path.dirname(fp), exist_ok=True)
+                with open(fp, "w", encoding="utf-8") as f:
+                    f.write(fx["body"])

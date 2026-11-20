@@ -1,0 +1,16 @@
+				log.overlay = { open: false, query: "", status: "idle", results: [], error: null };
+			}
+			return log.overlay;
+		}
+
+		function setOverlay(sessionId, patch) {
+			touchSession(sessionId);
+			notifyShell();
+			var state = overlayOf(sessionId);
+			for (var key in patch) {
+				if (Object.prototype.hasOwnProperty.call(patch, key)) state[key] = patch[key];
+			}
+			notify(sessionId);
+		}
+
+		/**

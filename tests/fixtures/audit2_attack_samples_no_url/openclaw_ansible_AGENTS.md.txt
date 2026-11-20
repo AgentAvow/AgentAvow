@@ -1,0 +1,31 @@
+
+## Testing Checklist
+
+Before committing changes:
+
+```bash
+# 1. Syntax check
+ansible-playbook playbook.yml --syntax-check
+
+# 2. Dry run
+ansible-playbook playbook.yml --check
+
+# 3. Full install (on test VM)
+curl -fsSL https://raw.githubusercontent.com/.../install.sh | bash
+
+# 4. Verify security
+sudo ufw status verbose
+sudo iptables -L DOCKER-USER -n
+sudo ss -tlnp  # Only SSH + localhost should listen
+
+# 5. External port scan
+nmap -p- TEST_SERVER_IP  # Only port 22 should be open
+
+# 6. Test isolation
+sudo docker run -p 80:80 nginx
+curl http://TEST_SERVER_IP:80  # Should fail
+curl http://localhost:80        # Should work
+```
+
+## Common Mistakes to Avoid
+
