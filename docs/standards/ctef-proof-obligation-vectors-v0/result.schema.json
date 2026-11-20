@@ -1,0 +1,224 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentavow.com/standards/ctef-proof-obligation-results-v1/result.schema.json",
+  "x-spdx-license-identifier": "Apache-2.0",
+  "title": "CTEF proof-obligation result v1",
+  "description": "One explicit, profile-defined result object for one exact proof obligation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "obligation_id",
+    "claim_id",
+    "proposition",
+    "verification_profile",
+    "evidence_commitment",
+    "trust_basis",
+    "layer",
+    "obligation_kind",
+    "completion",
+    "verdict",
+    "diagnostic_reason",
+    "dependencies",
+    "dependent_claims",
+    "terminal",
+    "terminal_scope",
+    "promotion"
+  ],
+  "properties": {
+    "obligation_id": { "type": "string", "minLength": 1 },
+    "claim_id": { "type": "string", "minLength": 1 },
+    "proposition": { "type": "string", "minLength": 1 },
+    "verification_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "const": "ctef-proof-obligation-results-v1" },
+        "version": { "const": "1.0.0" }
+      }
+    },
+    "evidence_commitment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "canonicalization", "domain", "status", "digest"],
+      "properties": {
+        "algorithm": { "const": "SHA-256" },
+        "canonicalization": { "const": "CTEF-JCS-subset-v1" },
+        "domain": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["committed", "unavailable"] },
+        "digest": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }
+      },
+      "allOf": [
+        { "if": { "properties": { "status": { "const": "committed" } } }, "then": { "properties": { "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } } },
+        { "if": { "properties": { "status": { "const": "unavailable" } } }, "then": { "properties": { "digest": { "type": "null" } } } }
+      ]
+    },
+    "trust_basis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assumptions", "signer_roles", "key_ids", "fixture_key_provenance"],
+      "properties": {
+        "assumptions": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "signer_roles": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "key_ids": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "fixture_key_provenance": { "type": "string", "minLength": 1 }
+      }
+    },
+    "layer": { "enum": ["L1_evidence", "L2_governance"] },
+    "obligation_kind": { "type": "string", "minLength": 1 },
+    "completion": { "enum": ["completed", "incomplete", "not_evaluated"] },
+    "verdict": { "enum": ["satisfied", "refuted", "indeterminate"] },
+    "diagnostic_reason": {
+      "enum": [
+        "none",
+        "binding_mismatch",
+        "binding_unresolved",
+        "evidence_unavailable",
+        "verification_failed",
+        "enforcement_evidence_missing",
+        "outcome_unwitnessed",
+        "procedure_unavailable",
+        "policy_denied"
+      ]
+    },
+    "dependencies": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["obligation_id", "mandatory"],
+        "properties": {
+          "obligation_id": { "type": "string", "minLength": 1 },
+          "mandatory": { "const": true }
+        }
+      }
+    },
+    "dependent_claims": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "terminal": { "type": "boolean" },
+    "terminal_scope": { "enum": ["none", "specific_proposition_only"] },
+    "promotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_id", "status", "mandatory_dependencies_satisfied", "blocked_by", "rule"],
+      "properties": {
+        "claim_id": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["eligible", "blocked", "refuted", "indeterminate"] },
+        "mandatory_dependencies_satisfied": { "type": "boolean" },
+        "blocked_by": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "rule": { "const": "eligible iff completion is completed, verdict is satisfied, and every mandatory dependency is eligible" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "completion": { "enum": ["incomplete", "not_evaluated"] } } },
+      "then": {
+        "properties": {
+          "verdict": { "const": "indeterminate" },
+          "terminal": { "const": false },
+          "terminal_scope": { "const": "none" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "verdict": { "const": "satisfied" } } },
+      "then": {
+        "properties": {
+          "completion": { "const": "completed" },
+          "diagnostic_reason": { "const": "none" },
+          "terminal": { "const": false },
+          "terminal_scope": { "const": "none" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "verdict": { "const": "refuted" } } },
+      "then": {
+        "properties": {
+          "completion": { "const": "completed" },
+          "terminal": { "const": true },
+          "terminal_scope": { "const": "specific_proposition_only" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "diagnostic_reason": { "const": "binding_mismatch" } } },
+      "then": { "properties": { "completion": { "const": "completed" }, "verdict": { "const": "refuted" } } }
+    },
+    {
+      "if": { "properties": { "diagnostic_reason": { "const": "binding_unresolved" } } },
+      "then": { "properties": { "completion": { "const": "completed" }, "verdict": { "const": "indeterminate" } } }
+    },
+    {
+      "if": { "properties": { "diagnostic_reason": { "const": "evidence_unavailable" } } },
+      "then": { "properties": { "completion": { "const": "completed" }, "verdict": { "const": "indeterminate" } } }
+    },
+    {
+      "if": { "properties": { "diagnostic_reason": { "const": "verification_failed" } } },
+      "then": { "properties": { "completion": { "const": "completed" }, "verdict": { "const": "refuted" } } }
+    },
+    {
+      "if": { "properties": { "diagnostic_reason": { "const": "enforcement_evidence_missing" } } },
+      "then": { "properties": { "completion": { "const": "completed" }, "verdict": { "const": "indeterminate" } } }
+    },
+    {
+      "if": { "properties": { "diagnostic_reason": { "const": "outcome_unwitnessed" } } },
+      "then": { "properties": { "completion": { "const": "completed" }, "verdict": { "const": "indeterminate" } } }
+    },
+    {
+      "if": { "properties": { "diagnostic_reason": { "const": "procedure_unavailable" } } },
+      "then": { "properties": { "completion": { "enum": ["incomplete", "not_evaluated"] }, "verdict": { "const": "indeterminate" } } }
+    },
+    {
+      "if": { "properties": { "diagnostic_reason": { "const": "policy_denied" } } },
+      "then": { "properties": { "completion": { "const": "completed" }, "verdict": { "const": "refuted" } } }
+    },
+    {
+      "if": { "properties": { "promotion": { "properties": { "status": { "const": "eligible" } } } } },
+      "then": {
+        "properties": {
+          "completion": { "const": "completed" },
+          "verdict": { "const": "satisfied" },
+          "promotion": {
+            "properties": {
+              "mandatory_dependencies_satisfied": { "const": true },
+              "blocked_by": { "maxItems": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "promotion": { "properties": { "status": { "const": "blocked" } } } } },
+      "then": {
+        "properties": {
+          "completion": { "const": "completed" },
+          "verdict": { "const": "satisfied" },
+          "promotion": {
+            "properties": {
+              "mandatory_dependencies_satisfied": { "const": false },
+              "blocked_by": { "minItems": 1 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "promotion": { "properties": { "status": { "const": "refuted" } } } } },
+      "then": { "properties": { "completion": { "const": "completed" }, "verdict": { "const": "refuted" } } }
+    },
+    {
+      "if": { "properties": { "promotion": { "properties": { "status": { "const": "indeterminate" } } } } },
+      "then": { "properties": { "verdict": { "const": "indeterminate" } } }
+    },
+    {
+      "if": { "properties": { "promotion": { "properties": { "mandatory_dependencies_satisfied": { "const": true } } } } },
+      "then": { "properties": { "promotion": { "properties": { "blocked_by": { "maxItems": 0 } } } } }
+    },
+    {
+      "if": { "properties": { "promotion": { "properties": { "mandatory_dependencies_satisfied": { "const": false } } } } },
+      "then": { "properties": { "promotion": { "properties": { "blocked_by": { "minItems": 1 } } } } }
+    }
+  ]
+}

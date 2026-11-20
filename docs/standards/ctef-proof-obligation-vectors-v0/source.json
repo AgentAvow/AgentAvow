@@ -1,0 +1,2028 @@
+{
+  "suite": "CTEF proof-obligation results conformance vectors",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "attribution": {
+    "contributor": "@Jsand-187",
+    "project_attribution": "Kin / SolaraKin / AgentChain",
+    "public_discussion": "A2A Discussion #1734, comment 18528762, dated 2026-09-20",
+    "discussion_url": "https://github.com/a2aproject/A2A/discussions/1734#discussioncomment-18528762",
+    "scope": "The profile and fixtures are a new standalone standards contribution. This attribution records conceptual provenance and does not assert exclusive ownership, maintainer acceptance, runtime authority, or copied proprietary implementation."
+  },
+  "fixture_key_provenance": "Four synthetic Ed25519 test keypairs were generated offline once in memory to produce the pinned signatures. Only public DER SubjectPublicKeyInfo keys and static signatures are retained; private components were not written to disk. Regeneration uses no key generation, private key, seed, random input, or network.",
+  "trust_roots": {
+    "subject": {
+      "key_id": "ctef-test-only-subject-v1",
+      "algorithm": "Ed25519",
+      "public_key_format": "DER-SPKI-base64",
+      "public_key": "MCowBQYDK2VwAyEAGOfLM66o+x8Fs7+qCQwluhgW+NSE5kB/DQLnUfbqS4Q=",
+      "provenance": "TEST ONLY: synthetic public trust root generated offline for this conformance fixture; not a production identity, authority, observer, or finality root."
+    },
+    "governance": {
+      "key_id": "ctef-test-only-governance-v1",
+      "algorithm": "Ed25519",
+      "public_key_format": "DER-SPKI-base64",
+      "public_key": "MCowBQYDK2VwAyEA/umaXBjOpETkrNLrWXQmH5XQsQo3BnGel/SPTHRwd2s=",
+      "provenance": "TEST ONLY: synthetic public trust root generated offline for this conformance fixture; not a production identity, authority, observer, or finality root."
+    },
+    "enforcement_observer": {
+      "key_id": "ctef-test-only-enforcement_observer-v1",
+      "algorithm": "Ed25519",
+      "public_key_format": "DER-SPKI-base64",
+      "public_key": "MCowBQYDK2VwAyEAGfeZihP9sU0IB+FD/uE0dlIDiGmT3SgVb2Wf2mgfkJw=",
+      "provenance": "TEST ONLY: synthetic public trust root generated offline for this conformance fixture; not a production identity, authority, observer, or finality root."
+    },
+    "finality_witness": {
+      "key_id": "ctef-test-only-finality_witness-v1",
+      "algorithm": "Ed25519",
+      "public_key_format": "DER-SPKI-base64",
+      "public_key": "MCowBQYDK2VwAyEALs0lJld4otNjowFsho4U+ei2WSNS4jCG5Z0i3FDlRIk=",
+      "provenance": "TEST ONLY: synthetic public trust root generated offline for this conformance fixture; not a production identity, authority, observer, or finality root."
+    }
+  },
+  "vectors": [
+    {
+      "id": "case-01-authenticated-without-authorization",
+      "title": "Valid authentication with authority evidence absent",
+      "coverage": {
+        "case_number": 1,
+        "polarity": "negative",
+        "targeted_root_obligation_id": "AUTHORIZED",
+        "positive_control_id": "case-02-authenticated-and-authorized",
+        "assertion": "Authentication is satisfied; authorization is completed but indeterminate because its distinct decision evidence is unavailable."
+      },
+      "input": {
+        "profile": {
+          "id": "ctef-proof-obligation-results-v1",
+          "version": "1.0.0"
+        },
+        "result_id": "result-authz-boundary-01",
+        "action": {
+          "subject": "did:example:ctef-fixture-agent",
+          "action_type": "transfer",
+          "scope": "payments:10",
+          "nonce": "fixture-nonce-001"
+        },
+        "binding": {
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+        },
+        "authentication": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHENTICATED",
+            "claim_id": "claim.authenticated_action",
+            "result_id": "result-authz-boundary-01",
+            "subject": "did:example:ctef-fixture-agent",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-subject-v1",
+            "value": "KdZEvkj8f6J5VJ17dHTtFI0oh/BGYy7+OWRXTMcj4kTlvNcebFy9zn0tm/safdpCS2lCshzGdr2G1SLCTCUkBQ=="
+          }
+        },
+        "authorization_evidence": null,
+        "enforcement_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "ENFORCED",
+            "claim_id": "claim.enforced_action",
+            "result_id": "result-authz-boundary-01",
+            "event_id": "synthetic-enforcement-event-001",
+            "state": "applied",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "effective_action": {
+              "subject": "did:example:ctef-fixture-agent",
+              "action_type": "transfer",
+              "scope": "payments:10",
+              "nonce": "fixture-nonce-001"
+            },
+            "effective_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "authorization_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "policy_profile": "synthetic-payment-policy-v1"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-enforcement_observer-v1",
+            "value": "HYuj/EPXORFxzoROVAUkV+pauAVbA03cloTSbohQvAYiattY96qMc9MgMkXwqCTst2bQZ4cyR6GMBvmARPjfDg=="
+          }
+        },
+        "outcome_record": {
+          "result_id": "result-authz-boundary-01",
+          "status": "completed",
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+          "output": {
+            "result": "synthetic-success",
+            "amount": 1,
+            "unit": "fixture-only"
+          },
+          "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+        },
+        "finality_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "FINALITY_WITNESSED",
+            "claim_id": "claim.synthetic_finality_commitment_match",
+            "result_id": "result-authz-boundary-01",
+            "witness_profile": "synthetic-finality-witness-v1",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460",
+            "observed_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-finality_witness-v1",
+            "value": "QYz0nhBAEiPpFbGQaq1kOL8JS6ywv9QXmBxhWdBF1+2j8PZq1NQEDvDnMNAPvzPaJFH7MQLS3VObM4ryINoNBw=="
+          }
+        },
+        "procedure": {
+          "unavailable_obligation_ids": []
+        }
+      }
+    },
+    {
+      "id": "case-02-authenticated-and-authorized",
+      "title": "Same authentication basis with an independently checked authorization decision",
+      "coverage": {
+        "case_number": 2,
+        "polarity": "positive",
+        "targeted_root_obligation_id": null,
+        "positive_control_id": null,
+        "assertion": "The distinct governance signature and policy decision satisfy AUTHORIZED; authentication alone does not do so."
+      },
+      "input": {
+        "profile": {
+          "id": "ctef-proof-obligation-results-v1",
+          "version": "1.0.0"
+        },
+        "result_id": "result-authz-boundary-01",
+        "action": {
+          "subject": "did:example:ctef-fixture-agent",
+          "action_type": "transfer",
+          "scope": "payments:10",
+          "nonce": "fixture-nonce-001"
+        },
+        "binding": {
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+        },
+        "authentication": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHENTICATED",
+            "claim_id": "claim.authenticated_action",
+            "result_id": "result-authz-boundary-01",
+            "subject": "did:example:ctef-fixture-agent",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-subject-v1",
+            "value": "KdZEvkj8f6J5VJ17dHTtFI0oh/BGYy7+OWRXTMcj4kTlvNcebFy9zn0tm/safdpCS2lCshzGdr2G1SLCTCUkBQ=="
+          }
+        },
+        "authorization_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHORIZED",
+            "claim_id": "claim.authorized_action",
+            "result_id": "result-authz-boundary-01",
+            "decision_id": "decision-fixture-001",
+            "decision": "allow",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "action_type": "transfer",
+            "scope": "payments:10",
+            "policy": {
+              "id": "synthetic-payment-policy-v1",
+              "version": "1",
+              "action_types": [
+                "transfer"
+              ],
+              "scope_prefix": "payments:"
+            }
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-governance-v1",
+            "value": "s/MKnIQ1gNeD0Yem2EZZ/XT3muZx1IxEkhxVZz5sjUu2d5scGQ9X7VRvod9cQ1kiJxLgIPLSh+Hh51tnAWVcAg=="
+          }
+        },
+        "enforcement_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "ENFORCED",
+            "claim_id": "claim.enforced_action",
+            "result_id": "result-authz-boundary-01",
+            "event_id": "synthetic-enforcement-event-001",
+            "state": "applied",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "effective_action": {
+              "subject": "did:example:ctef-fixture-agent",
+              "action_type": "transfer",
+              "scope": "payments:10",
+              "nonce": "fixture-nonce-001"
+            },
+            "effective_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "authorization_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "policy_profile": "synthetic-payment-policy-v1"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-enforcement_observer-v1",
+            "value": "HYuj/EPXORFxzoROVAUkV+pauAVbA03cloTSbohQvAYiattY96qMc9MgMkXwqCTst2bQZ4cyR6GMBvmARPjfDg=="
+          }
+        },
+        "outcome_record": {
+          "result_id": "result-authz-boundary-01",
+          "status": "completed",
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+          "output": {
+            "result": "synthetic-success",
+            "amount": 1,
+            "unit": "fixture-only"
+          },
+          "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+        },
+        "finality_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "FINALITY_WITNESSED",
+            "claim_id": "claim.synthetic_finality_commitment_match",
+            "result_id": "result-authz-boundary-01",
+            "witness_profile": "synthetic-finality-witness-v1",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460",
+            "observed_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-finality_witness-v1",
+            "value": "QYz0nhBAEiPpFbGQaq1kOL8JS6ywv9QXmBxhWdBF1+2j8PZq1NQEDvDnMNAPvzPaJFH7MQLS3VObM4ryINoNBw=="
+          }
+        },
+        "procedure": {
+          "unavailable_obligation_ids": []
+        }
+      }
+    },
+    {
+      "id": "case-03-authorized-without-enforcement-witness",
+      "title": "Valid authorization without independent enforcement evidence",
+      "coverage": {
+        "case_number": 3,
+        "polarity": "negative",
+        "targeted_root_obligation_id": "ENFORCED",
+        "positive_control_id": "case-04-authorized-with-enforcement-witness",
+        "assertion": "ENFORCED is completed and indeterminate; authorization remains independently satisfied."
+      },
+      "input": {
+        "profile": {
+          "id": "ctef-proof-obligation-results-v1",
+          "version": "1.0.0"
+        },
+        "result_id": "result-enforcement-boundary-02",
+        "action": {
+          "subject": "did:example:ctef-fixture-agent",
+          "action_type": "transfer",
+          "scope": "payments:10",
+          "nonce": "fixture-nonce-001"
+        },
+        "binding": {
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+        },
+        "authentication": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHENTICATED",
+            "claim_id": "claim.authenticated_action",
+            "result_id": "result-enforcement-boundary-02",
+            "subject": "did:example:ctef-fixture-agent",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-subject-v1",
+            "value": "1NDEIsneRZsQ0yJCmXgh5eknwpllFbO9FNW7r9nwPdLWOFBoCAkYLok0+SRXpUpp1lLa9SDls6dB342nekuWCg=="
+          }
+        },
+        "authorization_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHORIZED",
+            "claim_id": "claim.authorized_action",
+            "result_id": "result-enforcement-boundary-02",
+            "decision_id": "decision-fixture-001",
+            "decision": "allow",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "action_type": "transfer",
+            "scope": "payments:10",
+            "policy": {
+              "id": "synthetic-payment-policy-v1",
+              "version": "1",
+              "action_types": [
+                "transfer"
+              ],
+              "scope_prefix": "payments:"
+            }
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-governance-v1",
+            "value": "DDAPFPEBflwTqTTay41wARhn6Uq/VzBuyiVPoWBx8fbkSuHR5LWrnQOnAGD3P0o6eAMzV5pg/FUiQ7eQRrBjAg=="
+          }
+        },
+        "enforcement_evidence": null,
+        "outcome_record": {
+          "result_id": "result-enforcement-boundary-02",
+          "status": "completed",
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+          "output": {
+            "result": "synthetic-success",
+            "amount": 1,
+            "unit": "fixture-only"
+          },
+          "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+        },
+        "finality_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "FINALITY_WITNESSED",
+            "claim_id": "claim.synthetic_finality_commitment_match",
+            "result_id": "result-enforcement-boundary-02",
+            "witness_profile": "synthetic-finality-witness-v1",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460",
+            "observed_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-finality_witness-v1",
+            "value": "j5vw1EfMb1NoNpEhQAqwGvgErR3c8KzFmYiA2Q/H5UP+OGcxuSqka0iDH4nqxrP39kK1+v/hQ74CTleafbBsCQ=="
+          }
+        },
+        "procedure": {
+          "unavailable_obligation_ids": []
+        }
+      }
+    },
+    {
+      "id": "case-04-authorized-with-enforcement-witness",
+      "title": "Same authorization basis with a checked enforcement observation",
+      "coverage": {
+        "case_number": 4,
+        "polarity": "positive",
+        "targeted_root_obligation_id": null,
+        "positive_control_id": null,
+        "assertion": "The signed observer statement is bound to the action, obligation, result identifier, and policy profile."
+      },
+      "input": {
+        "profile": {
+          "id": "ctef-proof-obligation-results-v1",
+          "version": "1.0.0"
+        },
+        "result_id": "result-enforcement-boundary-02",
+        "action": {
+          "subject": "did:example:ctef-fixture-agent",
+          "action_type": "transfer",
+          "scope": "payments:10",
+          "nonce": "fixture-nonce-001"
+        },
+        "binding": {
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+        },
+        "authentication": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHENTICATED",
+            "claim_id": "claim.authenticated_action",
+            "result_id": "result-enforcement-boundary-02",
+            "subject": "did:example:ctef-fixture-agent",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-subject-v1",
+            "value": "1NDEIsneRZsQ0yJCmXgh5eknwpllFbO9FNW7r9nwPdLWOFBoCAkYLok0+SRXpUpp1lLa9SDls6dB342nekuWCg=="
+          }
+        },
+        "authorization_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHORIZED",
+            "claim_id": "claim.authorized_action",
+            "result_id": "result-enforcement-boundary-02",
+            "decision_id": "decision-fixture-001",
+            "decision": "allow",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "action_type": "transfer",
+            "scope": "payments:10",
+            "policy": {
+              "id": "synthetic-payment-policy-v1",
+              "version": "1",
+              "action_types": [
+                "transfer"
+              ],
+              "scope_prefix": "payments:"
+            }
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-governance-v1",
+            "value": "DDAPFPEBflwTqTTay41wARhn6Uq/VzBuyiVPoWBx8fbkSuHR5LWrnQOnAGD3P0o6eAMzV5pg/FUiQ7eQRrBjAg=="
+          }
+        },
+        "enforcement_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "ENFORCED",
+            "claim_id": "claim.enforced_action",
+            "result_id": "result-enforcement-boundary-02",
+            "event_id": "synthetic-enforcement-event-001",
+            "state": "applied",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "effective_action": {
+              "subject": "did:example:ctef-fixture-agent",
+              "action_type": "transfer",
+              "scope": "payments:10",
+              "nonce": "fixture-nonce-001"
+            },
+            "effective_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "authorization_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "policy_profile": "synthetic-payment-policy-v1"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-enforcement_observer-v1",
+            "value": "VReMpA0LXslLVnMrPUbfQOdl4KfM8JjXYwaYUloCfc6SkkwYEMYYxCsEFBQZOsqiEhB9TDJUVmciZFanHQ/5CA=="
+          }
+        },
+        "outcome_record": {
+          "result_id": "result-enforcement-boundary-02",
+          "status": "completed",
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+          "output": {
+            "result": "synthetic-success",
+            "amount": 1,
+            "unit": "fixture-only"
+          },
+          "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+        },
+        "finality_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "FINALITY_WITNESSED",
+            "claim_id": "claim.synthetic_finality_commitment_match",
+            "result_id": "result-enforcement-boundary-02",
+            "witness_profile": "synthetic-finality-witness-v1",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460",
+            "observed_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-finality_witness-v1",
+            "value": "j5vw1EfMb1NoNpEhQAqwGvgErR3c8KzFmYiA2Q/H5UP+OGcxuSqka0iDH4nqxrP39kK1+v/hQ74CTleafbBsCQ=="
+          }
+        },
+        "procedure": {
+          "unavailable_obligation_ids": []
+        }
+      }
+    },
+    {
+      "id": "case-05-recorded-outcome-without-finality-witness",
+      "title": "Recorded and internally consistent outcome without a finality witness",
+      "coverage": {
+        "case_number": 5,
+        "polarity": "negative",
+        "targeted_root_obligation_id": "FINALITY_WITNESSED",
+        "positive_control_id": "case-06-recorded-outcome-with-finality-witness",
+        "assertion": "The missing independent witness leaves the precise finality proposition indeterminate."
+      },
+      "input": {
+        "profile": {
+          "id": "ctef-proof-obligation-results-v1",
+          "version": "1.0.0"
+        },
+        "result_id": "result-finality-boundary-03",
+        "action": {
+          "subject": "did:example:ctef-fixture-agent",
+          "action_type": "transfer",
+          "scope": "payments:10",
+          "nonce": "fixture-nonce-001"
+        },
+        "binding": {
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+        },
+        "authentication": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHENTICATED",
+            "claim_id": "claim.authenticated_action",
+            "result_id": "result-finality-boundary-03",
+            "subject": "did:example:ctef-fixture-agent",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-subject-v1",
+            "value": "l8DwIsjiVggE3i6oZqykF97bS4bG8WcLhuYXKBZDqHjbgqHEg8lLDMGwX/mhdBg1zXA64YVbuzqGF+44NvduAw=="
+          }
+        },
+        "authorization_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHORIZED",
+            "claim_id": "claim.authorized_action",
+            "result_id": "result-finality-boundary-03",
+            "decision_id": "decision-fixture-001",
+            "decision": "allow",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "action_type": "transfer",
+            "scope": "payments:10",
+            "policy": {
+              "id": "synthetic-payment-policy-v1",
+              "version": "1",
+              "action_types": [
+                "transfer"
+              ],
+              "scope_prefix": "payments:"
+            }
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-governance-v1",
+            "value": "gOCCdtQ+339OuNde+S4iAc37wVbDkN68ZOJEDs+gmWCA3kOmwn/5q0ad2ZqAKR7thox0aoQIdXakZ6x2HJdSDA=="
+          }
+        },
+        "enforcement_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "ENFORCED",
+            "claim_id": "claim.enforced_action",
+            "result_id": "result-finality-boundary-03",
+            "event_id": "synthetic-enforcement-event-001",
+            "state": "applied",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "effective_action": {
+              "subject": "did:example:ctef-fixture-agent",
+              "action_type": "transfer",
+              "scope": "payments:10",
+              "nonce": "fixture-nonce-001"
+            },
+            "effective_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "authorization_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "policy_profile": "synthetic-payment-policy-v1"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-enforcement_observer-v1",
+            "value": "tdaRgjqIiEkkpBcOfbVLHlBMqlzuWtbgjGfUm7B1LwxZv5W9cQHFfnDZCEWMl2Dqa5hav88LpIc/DPGw98QXCw=="
+          }
+        },
+        "outcome_record": {
+          "result_id": "result-finality-boundary-03",
+          "status": "completed",
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+          "output": {
+            "result": "synthetic-success",
+            "amount": 1,
+            "unit": "fixture-only"
+          },
+          "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+        },
+        "finality_evidence": null,
+        "procedure": {
+          "unavailable_obligation_ids": []
+        }
+      }
+    },
+    {
+      "id": "case-06-recorded-outcome-with-finality-witness",
+      "title": "Same recorded outcome with the profile-defined synthetic finality witness",
+      "coverage": {
+        "case_number": 6,
+        "polarity": "positive",
+        "targeted_root_obligation_id": null,
+        "positive_control_id": null,
+        "assertion": "The signature proves only the fixture-defined commitment match under the pinned synthetic trust root."
+      },
+      "input": {
+        "profile": {
+          "id": "ctef-proof-obligation-results-v1",
+          "version": "1.0.0"
+        },
+        "result_id": "result-finality-boundary-03",
+        "action": {
+          "subject": "did:example:ctef-fixture-agent",
+          "action_type": "transfer",
+          "scope": "payments:10",
+          "nonce": "fixture-nonce-001"
+        },
+        "binding": {
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+        },
+        "authentication": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHENTICATED",
+            "claim_id": "claim.authenticated_action",
+            "result_id": "result-finality-boundary-03",
+            "subject": "did:example:ctef-fixture-agent",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-subject-v1",
+            "value": "l8DwIsjiVggE3i6oZqykF97bS4bG8WcLhuYXKBZDqHjbgqHEg8lLDMGwX/mhdBg1zXA64YVbuzqGF+44NvduAw=="
+          }
+        },
+        "authorization_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHORIZED",
+            "claim_id": "claim.authorized_action",
+            "result_id": "result-finality-boundary-03",
+            "decision_id": "decision-fixture-001",
+            "decision": "allow",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "action_type": "transfer",
+            "scope": "payments:10",
+            "policy": {
+              "id": "synthetic-payment-policy-v1",
+              "version": "1",
+              "action_types": [
+                "transfer"
+              ],
+              "scope_prefix": "payments:"
+            }
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-governance-v1",
+            "value": "gOCCdtQ+339OuNde+S4iAc37wVbDkN68ZOJEDs+gmWCA3kOmwn/5q0ad2ZqAKR7thox0aoQIdXakZ6x2HJdSDA=="
+          }
+        },
+        "enforcement_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "ENFORCED",
+            "claim_id": "claim.enforced_action",
+            "result_id": "result-finality-boundary-03",
+            "event_id": "synthetic-enforcement-event-001",
+            "state": "applied",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "effective_action": {
+              "subject": "did:example:ctef-fixture-agent",
+              "action_type": "transfer",
+              "scope": "payments:10",
+              "nonce": "fixture-nonce-001"
+            },
+            "effective_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "authorization_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "policy_profile": "synthetic-payment-policy-v1"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-enforcement_observer-v1",
+            "value": "tdaRgjqIiEkkpBcOfbVLHlBMqlzuWtbgjGfUm7B1LwxZv5W9cQHFfnDZCEWMl2Dqa5hav88LpIc/DPGw98QXCw=="
+          }
+        },
+        "outcome_record": {
+          "result_id": "result-finality-boundary-03",
+          "status": "completed",
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+          "output": {
+            "result": "synthetic-success",
+            "amount": 1,
+            "unit": "fixture-only"
+          },
+          "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+        },
+        "finality_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "FINALITY_WITNESSED",
+            "claim_id": "claim.synthetic_finality_commitment_match",
+            "result_id": "result-finality-boundary-03",
+            "witness_profile": "synthetic-finality-witness-v1",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460",
+            "observed_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-finality_witness-v1",
+            "value": "clDYJEY8AhuZTOCCu/Lay16Awjzz6Lea3GPIPMefT5zRChJ7WDbnQDSvU4HpzdBNYp+SrKRNG9STPdJgNGunBw=="
+          }
+        },
+        "procedure": {
+          "unavailable_obligation_ids": []
+        }
+      }
+    },
+    {
+      "id": "case-07-tampered-authentication-material",
+      "title": "Authentication message tampering with the original signature retained",
+      "coverage": {
+        "case_number": 7,
+        "polarity": "negative",
+        "targeted_root_obligation_id": "AUTHENTICATED",
+        "positive_control_id": "case-08-intact-authentication-control",
+        "assertion": "A completed signature check refutes only the exact authentication proposition; it says nothing about whether an event occurred."
+      },
+      "input": {
+        "profile": {
+          "id": "ctef-proof-obligation-results-v1",
+          "version": "1.0.0"
+        },
+        "result_id": "result-authentication-integrity-04",
+        "action": {
+          "subject": "did:example:ctef-fixture-agent",
+          "action_type": "transfer",
+          "scope": "payments:10",
+          "nonce": "fixture-nonce-001"
+        },
+        "binding": {
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+        },
+        "authentication": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHENTICATED",
+            "claim_id": "claim.authenticated_action",
+            "result_id": "result-authentication-integrity-04",
+            "subject": "did:example:tampered-subject",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-subject-v1",
+            "value": "KFbNboUIxWu7mAyESWfbxo2PaZ7N/hR+zyCTmx9LeF8t6JE0qnUrl9TXDRkvYnDyeYYCezG1p513zzv8yiujAA=="
+          }
+        },
+        "authorization_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHORIZED",
+            "claim_id": "claim.authorized_action",
+            "result_id": "result-authentication-integrity-04",
+            "decision_id": "decision-fixture-001",
+            "decision": "allow",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "action_type": "transfer",
+            "scope": "payments:10",
+            "policy": {
+              "id": "synthetic-payment-policy-v1",
+              "version": "1",
+              "action_types": [
+                "transfer"
+              ],
+              "scope_prefix": "payments:"
+            }
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-governance-v1",
+            "value": "5VGjpWSom/STKxWBMoQ/Eb3fU4xzZuvSrKDWwmeUCKE7HEFE402cmGn20BHd9lNg5SvnNx4e2HOW7EkwspTzAg=="
+          }
+        },
+        "enforcement_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "ENFORCED",
+            "claim_id": "claim.enforced_action",
+            "result_id": "result-authentication-integrity-04",
+            "event_id": "synthetic-enforcement-event-001",
+            "state": "applied",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "effective_action": {
+              "subject": "did:example:ctef-fixture-agent",
+              "action_type": "transfer",
+              "scope": "payments:10",
+              "nonce": "fixture-nonce-001"
+            },
+            "effective_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "authorization_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "policy_profile": "synthetic-payment-policy-v1"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-enforcement_observer-v1",
+            "value": "SFxMa04zCEdkZXHp7rvrCY+ReIESUDV0EDvgUx2L1MpsBFWc6y3gO0nhUMOgcp59k2X05xTagv+K3a/b4d1zDQ=="
+          }
+        },
+        "outcome_record": {
+          "result_id": "result-authentication-integrity-04",
+          "status": "completed",
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+          "output": {
+            "result": "synthetic-success",
+            "amount": 1,
+            "unit": "fixture-only"
+          },
+          "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+        },
+        "finality_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "FINALITY_WITNESSED",
+            "claim_id": "claim.synthetic_finality_commitment_match",
+            "result_id": "result-authentication-integrity-04",
+            "witness_profile": "synthetic-finality-witness-v1",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460",
+            "observed_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-finality_witness-v1",
+            "value": "xw3P9wV6B9FG8Z9MXlZRiGttVi8U37+M5JXOI7xfQ+VQofyfWPfKBbdU4jyUO4BhxT3d48EfTfZSBBRN3h+QAg=="
+          }
+        },
+        "procedure": {
+          "unavailable_obligation_ids": []
+        }
+      }
+    },
+    {
+      "id": "case-08-intact-authentication-control",
+      "title": "Intact authentication positive control",
+      "coverage": {
+        "case_number": 8,
+        "polarity": "positive",
+        "targeted_root_obligation_id": null,
+        "positive_control_id": null,
+        "assertion": "The signed material and pinned public fixture key verify."
+      },
+      "input": {
+        "profile": {
+          "id": "ctef-proof-obligation-results-v1",
+          "version": "1.0.0"
+        },
+        "result_id": "result-authentication-integrity-04",
+        "action": {
+          "subject": "did:example:ctef-fixture-agent",
+          "action_type": "transfer",
+          "scope": "payments:10",
+          "nonce": "fixture-nonce-001"
+        },
+        "binding": {
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+        },
+        "authentication": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHENTICATED",
+            "claim_id": "claim.authenticated_action",
+            "result_id": "result-authentication-integrity-04",
+            "subject": "did:example:ctef-fixture-agent",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-subject-v1",
+            "value": "KFbNboUIxWu7mAyESWfbxo2PaZ7N/hR+zyCTmx9LeF8t6JE0qnUrl9TXDRkvYnDyeYYCezG1p513zzv8yiujAA=="
+          }
+        },
+        "authorization_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHORIZED",
+            "claim_id": "claim.authorized_action",
+            "result_id": "result-authentication-integrity-04",
+            "decision_id": "decision-fixture-001",
+            "decision": "allow",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "action_type": "transfer",
+            "scope": "payments:10",
+            "policy": {
+              "id": "synthetic-payment-policy-v1",
+              "version": "1",
+              "action_types": [
+                "transfer"
+              ],
+              "scope_prefix": "payments:"
+            }
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-governance-v1",
+            "value": "5VGjpWSom/STKxWBMoQ/Eb3fU4xzZuvSrKDWwmeUCKE7HEFE402cmGn20BHd9lNg5SvnNx4e2HOW7EkwspTzAg=="
+          }
+        },
+        "enforcement_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "ENFORCED",
+            "claim_id": "claim.enforced_action",
+            "result_id": "result-authentication-integrity-04",
+            "event_id": "synthetic-enforcement-event-001",
+            "state": "applied",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "effective_action": {
+              "subject": "did:example:ctef-fixture-agent",
+              "action_type": "transfer",
+              "scope": "payments:10",
+              "nonce": "fixture-nonce-001"
+            },
+            "effective_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "authorization_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "policy_profile": "synthetic-payment-policy-v1"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-enforcement_observer-v1",
+            "value": "SFxMa04zCEdkZXHp7rvrCY+ReIESUDV0EDvgUx2L1MpsBFWc6y3gO0nhUMOgcp59k2X05xTagv+K3a/b4d1zDQ=="
+          }
+        },
+        "outcome_record": {
+          "result_id": "result-authentication-integrity-04",
+          "status": "completed",
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+          "output": {
+            "result": "synthetic-success",
+            "amount": 1,
+            "unit": "fixture-only"
+          },
+          "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+        },
+        "finality_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "FINALITY_WITNESSED",
+            "claim_id": "claim.synthetic_finality_commitment_match",
+            "result_id": "result-authentication-integrity-04",
+            "witness_profile": "synthetic-finality-witness-v1",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460",
+            "observed_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-finality_witness-v1",
+            "value": "xw3P9wV6B9FG8Z9MXlZRiGttVi8U37+M5JXOI7xfQ+VQofyfWPfKBbdU4jyUO4BhxT3d48EfTfZSBBRN3h+QAg=="
+          }
+        },
+        "procedure": {
+          "unavailable_obligation_ids": []
+        }
+      }
+    },
+    {
+      "id": "case-09-completed-binding-mismatch",
+      "title": "Completed action commitment recomputation detects a mismatch",
+      "coverage": {
+        "case_number": 9,
+        "polarity": "negative",
+        "targeted_root_obligation_id": "ACTION_BOUND",
+        "positive_control_id": "case-10-matched-binding-control",
+        "assertion": "The mismatch is terminal for the exact binding proposition and blocks every dependent positive claim."
+      },
+      "input": {
+        "profile": {
+          "id": "ctef-proof-obligation-results-v1",
+          "version": "1.0.0"
+        },
+        "result_id": "result-binding-boundary-05",
+        "action": {
+          "subject": "did:example:ctef-fixture-agent",
+          "action_type": "transfer",
+          "scope": "payments:10",
+          "nonce": "fixture-nonce-001"
+        },
+        "binding": {
+          "action_commitment": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "authentication": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHENTICATED",
+            "claim_id": "claim.authenticated_action",
+            "result_id": "result-binding-boundary-05",
+            "subject": "did:example:ctef-fixture-agent",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-subject-v1",
+            "value": "IEGoc5WWEBO4XoH50eS3cjkvHPS02hUFnO2o/96IVIzD6GvvA3Blw2MBE0bY6E1B+i+Au43dPtQrLB1z55fcDw=="
+          }
+        },
+        "authorization_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHORIZED",
+            "claim_id": "claim.authorized_action",
+            "result_id": "result-binding-boundary-05",
+            "decision_id": "decision-fixture-001",
+            "decision": "allow",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "action_type": "transfer",
+            "scope": "payments:10",
+            "policy": {
+              "id": "synthetic-payment-policy-v1",
+              "version": "1",
+              "action_types": [
+                "transfer"
+              ],
+              "scope_prefix": "payments:"
+            }
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-governance-v1",
+            "value": "5ZwCBbzSi7gz87b8IohkFC95BWgLeA8B7UuqhUsCksTxy2PpOyiyuhU3F+cOZebGJGU/Jx4GJteWGx8sDHIoBQ=="
+          }
+        },
+        "enforcement_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "ENFORCED",
+            "claim_id": "claim.enforced_action",
+            "result_id": "result-binding-boundary-05",
+            "event_id": "synthetic-enforcement-event-001",
+            "state": "applied",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "effective_action": {
+              "subject": "did:example:ctef-fixture-agent",
+              "action_type": "transfer",
+              "scope": "payments:10",
+              "nonce": "fixture-nonce-001"
+            },
+            "effective_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "authorization_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "policy_profile": "synthetic-payment-policy-v1"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-enforcement_observer-v1",
+            "value": "d3aY8vrnfE3l6erDl0r9WNzqIX+loOJaB+ScGIiY2tUDfeQzPG57RKL9ev9vp2n6J/oHu1+0bigpPuQXOF2MDQ=="
+          }
+        },
+        "outcome_record": {
+          "result_id": "result-binding-boundary-05",
+          "status": "completed",
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+          "output": {
+            "result": "synthetic-success",
+            "amount": 1,
+            "unit": "fixture-only"
+          },
+          "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+        },
+        "finality_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "FINALITY_WITNESSED",
+            "claim_id": "claim.synthetic_finality_commitment_match",
+            "result_id": "result-binding-boundary-05",
+            "witness_profile": "synthetic-finality-witness-v1",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460",
+            "observed_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-finality_witness-v1",
+            "value": "5fWAR6xx70ccfrBbfxfYFTIP2SbBahqE6lt6IXjts/IqKI8I6wF8UlDZD0dVp0gf64Cz4YvU8YvkOWTwK6nTAQ=="
+          }
+        },
+        "procedure": {
+          "unavailable_obligation_ids": []
+        }
+      }
+    },
+    {
+      "id": "case-10-matched-binding-control",
+      "title": "Matching action commitment positive control",
+      "coverage": {
+        "case_number": 10,
+        "polarity": "positive",
+        "targeted_root_obligation_id": null,
+        "positive_control_id": null,
+        "assertion": "The supplied binding commitment matches the recomputed action commitment."
+      },
+      "input": {
+        "profile": {
+          "id": "ctef-proof-obligation-results-v1",
+          "version": "1.0.0"
+        },
+        "result_id": "result-binding-boundary-05",
+        "action": {
+          "subject": "did:example:ctef-fixture-agent",
+          "action_type": "transfer",
+          "scope": "payments:10",
+          "nonce": "fixture-nonce-001"
+        },
+        "binding": {
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+        },
+        "authentication": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHENTICATED",
+            "claim_id": "claim.authenticated_action",
+            "result_id": "result-binding-boundary-05",
+            "subject": "did:example:ctef-fixture-agent",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-subject-v1",
+            "value": "IEGoc5WWEBO4XoH50eS3cjkvHPS02hUFnO2o/96IVIzD6GvvA3Blw2MBE0bY6E1B+i+Au43dPtQrLB1z55fcDw=="
+          }
+        },
+        "authorization_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHORIZED",
+            "claim_id": "claim.authorized_action",
+            "result_id": "result-binding-boundary-05",
+            "decision_id": "decision-fixture-001",
+            "decision": "allow",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "action_type": "transfer",
+            "scope": "payments:10",
+            "policy": {
+              "id": "synthetic-payment-policy-v1",
+              "version": "1",
+              "action_types": [
+                "transfer"
+              ],
+              "scope_prefix": "payments:"
+            }
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-governance-v1",
+            "value": "5ZwCBbzSi7gz87b8IohkFC95BWgLeA8B7UuqhUsCksTxy2PpOyiyuhU3F+cOZebGJGU/Jx4GJteWGx8sDHIoBQ=="
+          }
+        },
+        "enforcement_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "ENFORCED",
+            "claim_id": "claim.enforced_action",
+            "result_id": "result-binding-boundary-05",
+            "event_id": "synthetic-enforcement-event-001",
+            "state": "applied",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "effective_action": {
+              "subject": "did:example:ctef-fixture-agent",
+              "action_type": "transfer",
+              "scope": "payments:10",
+              "nonce": "fixture-nonce-001"
+            },
+            "effective_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "authorization_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "policy_profile": "synthetic-payment-policy-v1"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-enforcement_observer-v1",
+            "value": "d3aY8vrnfE3l6erDl0r9WNzqIX+loOJaB+ScGIiY2tUDfeQzPG57RKL9ev9vp2n6J/oHu1+0bigpPuQXOF2MDQ=="
+          }
+        },
+        "outcome_record": {
+          "result_id": "result-binding-boundary-05",
+          "status": "completed",
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+          "output": {
+            "result": "synthetic-success",
+            "amount": 1,
+            "unit": "fixture-only"
+          },
+          "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+        },
+        "finality_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "FINALITY_WITNESSED",
+            "claim_id": "claim.synthetic_finality_commitment_match",
+            "result_id": "result-binding-boundary-05",
+            "witness_profile": "synthetic-finality-witness-v1",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460",
+            "observed_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-finality_witness-v1",
+            "value": "5fWAR6xx70ccfrBbfxfYFTIP2SbBahqE6lt6IXjts/IqKI8I6wF8UlDZD0dVp0gf64Cz4YvU8YvkOWTwK6nTAQ=="
+          }
+        },
+        "procedure": {
+          "unavailable_obligation_ids": []
+        }
+      }
+    },
+    {
+      "id": "case-11-missing-binding-evidence",
+      "title": "Completed binding check with the binding commitment unavailable",
+      "coverage": {
+        "case_number": 11,
+        "polarity": "negative",
+        "targeted_root_obligation_id": "ACTION_BOUND",
+        "positive_control_id": "case-10-matched-binding-control",
+        "assertion": "The check completed but is indeterminate, not refuted and not terminal."
+      },
+      "input": {
+        "profile": {
+          "id": "ctef-proof-obligation-results-v1",
+          "version": "1.0.0"
+        },
+        "result_id": "result-binding-boundary-05",
+        "action": {
+          "subject": "did:example:ctef-fixture-agent",
+          "action_type": "transfer",
+          "scope": "payments:10",
+          "nonce": "fixture-nonce-001"
+        },
+        "binding": {
+          "action_commitment": null
+        },
+        "authentication": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHENTICATED",
+            "claim_id": "claim.authenticated_action",
+            "result_id": "result-binding-boundary-05",
+            "subject": "did:example:ctef-fixture-agent",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-subject-v1",
+            "value": "IEGoc5WWEBO4XoH50eS3cjkvHPS02hUFnO2o/96IVIzD6GvvA3Blw2MBE0bY6E1B+i+Au43dPtQrLB1z55fcDw=="
+          }
+        },
+        "authorization_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHORIZED",
+            "claim_id": "claim.authorized_action",
+            "result_id": "result-binding-boundary-05",
+            "decision_id": "decision-fixture-001",
+            "decision": "allow",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "action_type": "transfer",
+            "scope": "payments:10",
+            "policy": {
+              "id": "synthetic-payment-policy-v1",
+              "version": "1",
+              "action_types": [
+                "transfer"
+              ],
+              "scope_prefix": "payments:"
+            }
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-governance-v1",
+            "value": "5ZwCBbzSi7gz87b8IohkFC95BWgLeA8B7UuqhUsCksTxy2PpOyiyuhU3F+cOZebGJGU/Jx4GJteWGx8sDHIoBQ=="
+          }
+        },
+        "enforcement_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "ENFORCED",
+            "claim_id": "claim.enforced_action",
+            "result_id": "result-binding-boundary-05",
+            "event_id": "synthetic-enforcement-event-001",
+            "state": "applied",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "effective_action": {
+              "subject": "did:example:ctef-fixture-agent",
+              "action_type": "transfer",
+              "scope": "payments:10",
+              "nonce": "fixture-nonce-001"
+            },
+            "effective_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "authorization_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "policy_profile": "synthetic-payment-policy-v1"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-enforcement_observer-v1",
+            "value": "d3aY8vrnfE3l6erDl0r9WNzqIX+loOJaB+ScGIiY2tUDfeQzPG57RKL9ev9vp2n6J/oHu1+0bigpPuQXOF2MDQ=="
+          }
+        },
+        "outcome_record": {
+          "result_id": "result-binding-boundary-05",
+          "status": "completed",
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+          "output": {
+            "result": "synthetic-success",
+            "amount": 1,
+            "unit": "fixture-only"
+          },
+          "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+        },
+        "finality_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "FINALITY_WITNESSED",
+            "claim_id": "claim.synthetic_finality_commitment_match",
+            "result_id": "result-binding-boundary-05",
+            "witness_profile": "synthetic-finality-witness-v1",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460",
+            "observed_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-finality_witness-v1",
+            "value": "5fWAR6xx70ccfrBbfxfYFTIP2SbBahqE6lt6IXjts/IqKI8I6wF8UlDZD0dVp0gf64Cz4YvU8YvkOWTwK6nTAQ=="
+          }
+        },
+        "procedure": {
+          "unavailable_obligation_ids": []
+        }
+      }
+    },
+    {
+      "id": "case-12-authentication-procedure-unavailable",
+      "title": "Authentication procedure unavailable before its check completed",
+      "coverage": {
+        "case_number": 12,
+        "polarity": "negative",
+        "targeted_root_obligation_id": "AUTHENTICATED",
+        "positive_control_id": "case-08-intact-authentication-control",
+        "assertion": "AUTHENTICATED is incomplete plus indeterminate, distinct from a completed indeterminate result."
+      },
+      "input": {
+        "profile": {
+          "id": "ctef-proof-obligation-results-v1",
+          "version": "1.0.0"
+        },
+        "result_id": "result-authentication-integrity-04",
+        "action": {
+          "subject": "did:example:ctef-fixture-agent",
+          "action_type": "transfer",
+          "scope": "payments:10",
+          "nonce": "fixture-nonce-001"
+        },
+        "binding": {
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+        },
+        "authentication": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHENTICATED",
+            "claim_id": "claim.authenticated_action",
+            "result_id": "result-authentication-integrity-04",
+            "subject": "did:example:ctef-fixture-agent",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-subject-v1",
+            "value": "KFbNboUIxWu7mAyESWfbxo2PaZ7N/hR+zyCTmx9LeF8t6JE0qnUrl9TXDRkvYnDyeYYCezG1p513zzv8yiujAA=="
+          }
+        },
+        "authorization_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHORIZED",
+            "claim_id": "claim.authorized_action",
+            "result_id": "result-authentication-integrity-04",
+            "decision_id": "decision-fixture-001",
+            "decision": "allow",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "action_type": "transfer",
+            "scope": "payments:10",
+            "policy": {
+              "id": "synthetic-payment-policy-v1",
+              "version": "1",
+              "action_types": [
+                "transfer"
+              ],
+              "scope_prefix": "payments:"
+            }
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-governance-v1",
+            "value": "5VGjpWSom/STKxWBMoQ/Eb3fU4xzZuvSrKDWwmeUCKE7HEFE402cmGn20BHd9lNg5SvnNx4e2HOW7EkwspTzAg=="
+          }
+        },
+        "enforcement_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "ENFORCED",
+            "claim_id": "claim.enforced_action",
+            "result_id": "result-authentication-integrity-04",
+            "event_id": "synthetic-enforcement-event-001",
+            "state": "applied",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "effective_action": {
+              "subject": "did:example:ctef-fixture-agent",
+              "action_type": "transfer",
+              "scope": "payments:10",
+              "nonce": "fixture-nonce-001"
+            },
+            "effective_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "authorization_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "policy_profile": "synthetic-payment-policy-v1"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-enforcement_observer-v1",
+            "value": "SFxMa04zCEdkZXHp7rvrCY+ReIESUDV0EDvgUx2L1MpsBFWc6y3gO0nhUMOgcp59k2X05xTagv+K3a/b4d1zDQ=="
+          }
+        },
+        "outcome_record": {
+          "result_id": "result-authentication-integrity-04",
+          "status": "completed",
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+          "output": {
+            "result": "synthetic-success",
+            "amount": 1,
+            "unit": "fixture-only"
+          },
+          "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+        },
+        "finality_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "FINALITY_WITNESSED",
+            "claim_id": "claim.synthetic_finality_commitment_match",
+            "result_id": "result-authentication-integrity-04",
+            "witness_profile": "synthetic-finality-witness-v1",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460",
+            "observed_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-finality_witness-v1",
+            "value": "xw3P9wV6B9FG8Z9MXlZRiGttVi8U37+M5JXOI7xfQ+VQofyfWPfKBbdU4jyUO4BhxT3d48EfTfZSBBRN3h+QAg=="
+          }
+        },
+        "procedure": {
+          "unavailable_obligation_ids": [
+            "AUTHENTICATED"
+          ]
+        }
+      }
+    },
+    {
+      "id": "case-13-rewritten-action-with-stale-authorization-binding",
+      "title": "Enforcement guardrail rewrites the action but retains the prior authorization binding",
+      "coverage": {
+        "case_number": 13,
+        "polarity": "negative",
+        "targeted_root_obligation_id": "ENFORCED",
+        "positive_control_id": "case-14-rebound-effective-action-control",
+        "assertion": "The observer signature is valid, but its effective-action and authorization commitments disagree."
+      },
+      "input": {
+        "profile": {
+          "id": "ctef-proof-obligation-results-v1",
+          "version": "1.0.0"
+        },
+        "result_id": "result-enforcement-rebind-13",
+        "action": {
+          "subject": "did:example:ctef-fixture-agent",
+          "action_type": "transfer",
+          "scope": "payments:10",
+          "nonce": "fixture-nonce-001"
+        },
+        "binding": {
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+        },
+        "authentication": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHENTICATED",
+            "claim_id": "claim.authenticated_action",
+            "result_id": "result-enforcement-rebind-13",
+            "subject": "did:example:ctef-fixture-agent",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-subject-v1",
+            "value": "i0r5dFSlSyen4uPe2NdpbH0aVN5xTmccdeafIHjoYrcqFKlt8t96vIWpn9k42Cv/a9nUBG+NM6hzpiYgYZVCAw=="
+          }
+        },
+        "authorization_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHORIZED",
+            "claim_id": "claim.authorized_action",
+            "result_id": "result-enforcement-rebind-13",
+            "decision_id": "decision-fixture-001",
+            "decision": "allow",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "action_type": "transfer",
+            "scope": "payments:10",
+            "policy": {
+              "id": "synthetic-payment-policy-v1",
+              "version": "1",
+              "action_types": [
+                "transfer"
+              ],
+              "scope_prefix": "payments:"
+            }
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-governance-v1",
+            "value": "w36tGgYgzhA7+PaoAohSHcgXeg+XlEzWuYlFr9vjrhvr8AXESYu1ZcS5PPK2tkwI/z8bgloAjtyt/lRMTlUVDQ=="
+          }
+        },
+        "enforcement_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "ENFORCED",
+            "claim_id": "claim.enforced_action",
+            "result_id": "result-enforcement-rebind-13",
+            "event_id": "synthetic-enforcement-event-001",
+            "state": "applied",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "effective_action": {
+              "subject": "did:example:ctef-fixture-agent",
+              "action_type": "transfer",
+              "scope": "payments:100",
+              "nonce": "fixture-nonce-001"
+            },
+            "effective_action_commitment": "f25c3465773797a756ffbbd00afc640a517ee5a89c6b42171bd455c253c4eee2",
+            "authorization_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "policy_profile": "synthetic-payment-policy-v1"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-enforcement_observer-v1",
+            "value": "zBP7GxzX/gWyTggcoNIKDWExzX4tHnD2eDSKoazTzHKAahTyqEkxQxRTE+kBf362IB+/05HBEosQNyx1SCExAw=="
+          }
+        },
+        "outcome_record": {
+          "result_id": "result-enforcement-rebind-13",
+          "status": "completed",
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+          "output": {
+            "result": "synthetic-success",
+            "amount": 1,
+            "unit": "fixture-only"
+          },
+          "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+        },
+        "finality_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "FINALITY_WITNESSED",
+            "claim_id": "claim.synthetic_finality_commitment_match",
+            "result_id": "result-enforcement-rebind-13",
+            "witness_profile": "synthetic-finality-witness-v1",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460",
+            "observed_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-finality_witness-v1",
+            "value": "MGt0WYFnoLz6zw0oV0vJib6rAEm36J1/YVDrq51t3z/FMD16XJMWQALZLO08s7/jGwD0FvZl3CFqR5oohLyoCA=="
+          }
+        },
+        "procedure": {
+          "unavailable_obligation_ids": []
+        }
+      }
+    },
+    {
+      "id": "case-14-rebound-effective-action-control",
+      "title": "Rewritten action with a newly checked authorization binding",
+      "coverage": {
+        "case_number": 14,
+        "polarity": "positive",
+        "targeted_root_obligation_id": null,
+        "positive_control_id": null,
+        "assertion": "The effective action, authorization decision, and independent observation share the corrected commitment."
+      },
+      "input": {
+        "profile": {
+          "id": "ctef-proof-obligation-results-v1",
+          "version": "1.0.0"
+        },
+        "result_id": "result-enforcement-rebind-13",
+        "action": {
+          "subject": "did:example:ctef-fixture-agent",
+          "action_type": "transfer",
+          "scope": "payments:100",
+          "nonce": "fixture-nonce-001"
+        },
+        "binding": {
+          "action_commitment": "f25c3465773797a756ffbbd00afc640a517ee5a89c6b42171bd455c253c4eee2"
+        },
+        "authentication": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHENTICATED",
+            "claim_id": "claim.authenticated_action",
+            "result_id": "result-enforcement-rebind-13",
+            "subject": "did:example:ctef-fixture-agent",
+            "action_commitment": "f25c3465773797a756ffbbd00afc640a517ee5a89c6b42171bd455c253c4eee2"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-subject-v1",
+            "value": "QTV8ScX+CTxAhcpmv3ZnHyMfqjNqM/P6IjYNYOW0i+r8IdZJvtTXMh4PAy5mNPMGAkg0Q6Z/kCX6DIlTcbLLBg=="
+          }
+        },
+        "authorization_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHORIZED",
+            "claim_id": "claim.authorized_action",
+            "result_id": "result-enforcement-rebind-13",
+            "decision_id": "decision-fixture-rebound-013",
+            "decision": "allow",
+            "action_commitment": "f25c3465773797a756ffbbd00afc640a517ee5a89c6b42171bd455c253c4eee2",
+            "action_type": "transfer",
+            "scope": "payments:100",
+            "policy": {
+              "id": "synthetic-payment-policy-v1",
+              "version": "1",
+              "action_types": [
+                "transfer"
+              ],
+              "scope_prefix": "payments:"
+            }
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-governance-v1",
+            "value": "7y6iBuOYfdcGVyMB4Nww2I1636CkdQpxWGeFJCyC74iyNneJrWAhNhZHtF5X44LhQ3ociGJE6fZWTSCfCkpqDg=="
+          }
+        },
+        "enforcement_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "ENFORCED",
+            "claim_id": "claim.enforced_action",
+            "result_id": "result-enforcement-rebind-13",
+            "event_id": "synthetic-enforcement-event-001",
+            "state": "applied",
+            "action_commitment": "f25c3465773797a756ffbbd00afc640a517ee5a89c6b42171bd455c253c4eee2",
+            "effective_action": {
+              "subject": "did:example:ctef-fixture-agent",
+              "action_type": "transfer",
+              "scope": "payments:100",
+              "nonce": "fixture-nonce-001"
+            },
+            "effective_action_commitment": "f25c3465773797a756ffbbd00afc640a517ee5a89c6b42171bd455c253c4eee2",
+            "authorization_action_commitment": "f25c3465773797a756ffbbd00afc640a517ee5a89c6b42171bd455c253c4eee2",
+            "policy_profile": "synthetic-payment-policy-v1"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-enforcement_observer-v1",
+            "value": "RhoEUjP5cigbMGmbuiOJG32k45xGXFciUb420ZNum9w9/EKbY9PNrRocKl84XssNc05MoN8yqKmOmKlVFIWODQ=="
+          }
+        },
+        "outcome_record": {
+          "result_id": "result-enforcement-rebind-13",
+          "status": "completed",
+          "action_commitment": "f25c3465773797a756ffbbd00afc640a517ee5a89c6b42171bd455c253c4eee2",
+          "output": {
+            "result": "synthetic-success",
+            "amount": 1,
+            "unit": "fixture-only"
+          },
+          "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+        },
+        "finality_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "FINALITY_WITNESSED",
+            "claim_id": "claim.synthetic_finality_commitment_match",
+            "result_id": "result-enforcement-rebind-13",
+            "witness_profile": "synthetic-finality-witness-v1",
+            "action_commitment": "f25c3465773797a756ffbbd00afc640a517ee5a89c6b42171bd455c253c4eee2",
+            "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460",
+            "observed_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-finality_witness-v1",
+            "value": "hipb20OfP5DIOF/pQC2MFhKY8p/KG3/2urhXYhgSyrYBSfTRWnUmdegOfGFGnNKFTWicN6Gk6EBUr67Vc8B7CQ=="
+          }
+        },
+        "procedure": {
+          "unavailable_obligation_ids": []
+        }
+      }
+    },
+    {
+      "id": "case-15-independent-finality-outcome-divergence",
+      "title": "Independent witness reports a commitment divergent from the recorded outcome",
+      "coverage": {
+        "case_number": 15,
+        "polarity": "negative",
+        "targeted_root_obligation_id": "FINALITY_WITNESSED",
+        "positive_control_id": "case-06-recorded-outcome-with-finality-witness",
+        "assertion": "Only the finality-match proposition is refuted; OUTCOME_RECORDED remains satisfied and execution is not disproved."
+      },
+      "input": {
+        "profile": {
+          "id": "ctef-proof-obligation-results-v1",
+          "version": "1.0.0"
+        },
+        "result_id": "result-finality-boundary-03",
+        "action": {
+          "subject": "did:example:ctef-fixture-agent",
+          "action_type": "transfer",
+          "scope": "payments:10",
+          "nonce": "fixture-nonce-001"
+        },
+        "binding": {
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+        },
+        "authentication": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHENTICATED",
+            "claim_id": "claim.authenticated_action",
+            "result_id": "result-finality-boundary-03",
+            "subject": "did:example:ctef-fixture-agent",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-subject-v1",
+            "value": "l8DwIsjiVggE3i6oZqykF97bS4bG8WcLhuYXKBZDqHjbgqHEg8lLDMGwX/mhdBg1zXA64YVbuzqGF+44NvduAw=="
+          }
+        },
+        "authorization_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHORIZED",
+            "claim_id": "claim.authorized_action",
+            "result_id": "result-finality-boundary-03",
+            "decision_id": "decision-fixture-001",
+            "decision": "allow",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "action_type": "transfer",
+            "scope": "payments:10",
+            "policy": {
+              "id": "synthetic-payment-policy-v1",
+              "version": "1",
+              "action_types": [
+                "transfer"
+              ],
+              "scope_prefix": "payments:"
+            }
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-governance-v1",
+            "value": "gOCCdtQ+339OuNde+S4iAc37wVbDkN68ZOJEDs+gmWCA3kOmwn/5q0ad2ZqAKR7thox0aoQIdXakZ6x2HJdSDA=="
+          }
+        },
+        "enforcement_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "ENFORCED",
+            "claim_id": "claim.enforced_action",
+            "result_id": "result-finality-boundary-03",
+            "event_id": "synthetic-enforcement-event-001",
+            "state": "applied",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "effective_action": {
+              "subject": "did:example:ctef-fixture-agent",
+              "action_type": "transfer",
+              "scope": "payments:10",
+              "nonce": "fixture-nonce-001"
+            },
+            "effective_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "authorization_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "policy_profile": "synthetic-payment-policy-v1"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-enforcement_observer-v1",
+            "value": "tdaRgjqIiEkkpBcOfbVLHlBMqlzuWtbgjGfUm7B1LwxZv5W9cQHFfnDZCEWMl2Dqa5hav88LpIc/DPGw98QXCw=="
+          }
+        },
+        "outcome_record": {
+          "result_id": "result-finality-boundary-03",
+          "status": "completed",
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+          "output": {
+            "result": "synthetic-success",
+            "amount": 1,
+            "unit": "fixture-only"
+          },
+          "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+        },
+        "finality_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "FINALITY_WITNESSED",
+            "claim_id": "claim.synthetic_finality_commitment_match",
+            "result_id": "result-finality-boundary-03",
+            "witness_profile": "synthetic-finality-witness-v1",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460",
+            "observed_commitment": "e3f617479a8b258195f6acfb0d135fcc359248e577b7a4a92ee8288bb2089268"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-finality_witness-v1",
+            "value": "UcEhPWiRA5Q3DJ5OOJ8+7taAp9+g98P7js9djclvNrF6UzT0yBISUt8dmucygJLHDm9iAoSOcbUpHSmQCTZhAQ=="
+          }
+        },
+        "procedure": {
+          "unavailable_obligation_ids": []
+        }
+      }
+    },
+    {
+      "id": "case-16-refuted-authentication-isolation",
+      "title": "A refuted authentication branch blocks descendants while the outcome branch remains valid",
+      "coverage": {
+        "case_number": 16,
+        "polarity": "negative",
+        "targeted_root_obligation_id": "AUTHENTICATED",
+        "positive_control_id": "case-08-intact-authentication-control",
+        "assertion": "AUTHENTICATED is the only local failure; the separately satisfied outcome-record claim remains eligible."
+      },
+      "input": {
+        "profile": {
+          "id": "ctef-proof-obligation-results-v1",
+          "version": "1.0.0"
+        },
+        "result_id": "result-authentication-integrity-04",
+        "action": {
+          "subject": "did:example:ctef-fixture-agent",
+          "action_type": "transfer",
+          "scope": "payments:10",
+          "nonce": "fixture-nonce-001"
+        },
+        "binding": {
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+        },
+        "authentication": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHENTICATED",
+            "claim_id": "claim.authenticated_action",
+            "result_id": "result-authentication-integrity-04",
+            "subject": "did:example:tampered-subject",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-subject-v1",
+            "value": "KFbNboUIxWu7mAyESWfbxo2PaZ7N/hR+zyCTmx9LeF8t6JE0qnUrl9TXDRkvYnDyeYYCezG1p513zzv8yiujAA=="
+          }
+        },
+        "authorization_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "AUTHORIZED",
+            "claim_id": "claim.authorized_action",
+            "result_id": "result-authentication-integrity-04",
+            "decision_id": "decision-fixture-001",
+            "decision": "allow",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "action_type": "transfer",
+            "scope": "payments:10",
+            "policy": {
+              "id": "synthetic-payment-policy-v1",
+              "version": "1",
+              "action_types": [
+                "transfer"
+              ],
+              "scope_prefix": "payments:"
+            }
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-governance-v1",
+            "value": "5VGjpWSom/STKxWBMoQ/Eb3fU4xzZuvSrKDWwmeUCKE7HEFE402cmGn20BHd9lNg5SvnNx4e2HOW7EkwspTzAg=="
+          }
+        },
+        "enforcement_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "ENFORCED",
+            "claim_id": "claim.enforced_action",
+            "result_id": "result-authentication-integrity-04",
+            "event_id": "synthetic-enforcement-event-001",
+            "state": "applied",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "effective_action": {
+              "subject": "did:example:ctef-fixture-agent",
+              "action_type": "transfer",
+              "scope": "payments:10",
+              "nonce": "fixture-nonce-001"
+            },
+            "effective_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "authorization_action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "policy_profile": "synthetic-payment-policy-v1"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-enforcement_observer-v1",
+            "value": "SFxMa04zCEdkZXHp7rvrCY+ReIESUDV0EDvgUx2L1MpsBFWc6y3gO0nhUMOgcp59k2X05xTagv+K3a/b4d1zDQ=="
+          }
+        },
+        "outcome_record": {
+          "result_id": "result-authentication-integrity-04",
+          "status": "completed",
+          "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+          "output": {
+            "result": "synthetic-success",
+            "amount": 1,
+            "unit": "fixture-only"
+          },
+          "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+        },
+        "finality_evidence": {
+          "message": {
+            "profile_id": "ctef-proof-obligation-results-v1",
+            "profile_version": "1.0.0",
+            "obligation_id": "FINALITY_WITNESSED",
+            "claim_id": "claim.synthetic_finality_commitment_match",
+            "result_id": "result-authentication-integrity-04",
+            "witness_profile": "synthetic-finality-witness-v1",
+            "action_commitment": "fc473b0f116da659ca1f3598a8ba9a168ae0cc4e4283b4a2d62eb5122ffb1ebb",
+            "output_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460",
+            "observed_commitment": "b7e2e80f2a9d76ea4ca7c789079ef889d67288e934ad925e818e453b6e45a460"
+          },
+          "signature": {
+            "algorithm": "Ed25519",
+            "key_id": "ctef-test-only-finality_witness-v1",
+            "value": "xw3P9wV6B9FG8Z9MXlZRiGttVi8U37+M5JXOI7xfQ+VQofyfWPfKBbdU4jyUO4BhxT3d48EfTfZSBBRN3h+QAg=="
+          }
+        },
+        "procedure": {
+          "unavailable_obligation_ids": []
+        }
+      }
+    }
+  ],
+  "spdx_license_identifier": "Apache-2.0"
+}
