@@ -123,7 +123,9 @@ example-server https://mcp.example.com/mcp K7Q2M-9XA3B
   names it. A Claude command that runs `--allow-line` asks too. A different folder that
   happens to be named AgentAvow, such as a checkout of this repo or the plugin's own
   install folder, does not count, and neither does a word that only contains "allow"
-  (such as "shallow") in a command about another cache folder.
+  (such as "shallow") in a command about another cache folder. In a heredoc that only
+  writes text to a file, a word such as "allowBuilds" in that text doesn't count; the
+  folder's name or one of its files' names still does.
 
 Settings, all optional, read from the environment and never sent anywhere:
 
@@ -238,7 +240,7 @@ AgentAvow, so it never sends it.
 **Once a day** (the first session start of each UTC day, even when there is nothing new
 to check) the session-start hook sends one more small request, a POST to
 `https://agentavow.com/api/v1/public/plugin/active` with the same install ID header and
-a body of `{"version": "0.1.45", "app": "desktop"}`: the plugin version and the app
+a body of `{"version": "0.1.46", "app": "desktop"}`: the plugin version and the app
 type, one of `desktop`, `cli`, `sdk`, `cloud` or `other`, read from Claude Code's
 `CLAUDE_CODE_ENTRYPOINT`. No tool, server, path or repo name goes in it. It lets
 AgentAvow count the machines the plugin protects, including the many days the hook
