@@ -2,7 +2,7 @@
 
 A signed statement that one action consumed a named artifact in a named role, with
 the evidence a verifier recomputes from. Proposed on
-[aeoess/agent-governance-vocabulary#185](https://github.com/aeoess/agent-governance-vocabulary/issues/185)
+[NOSAI-Federation/agent-governance-vocabulary#185](https://github.com/NOSAI-Federation/agent-governance-vocabulary/issues/185)
 as the record that has to exist before any attribution formula can be discussed.
 Apache-2.0. The name is deliberately plain and belongs to no project: the record says
 what was consumed, not what it was worth.

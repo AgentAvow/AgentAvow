@@ -1,7 +1,7 @@
 # Tool-manifest-digest vectors (v0)
 
 Conformance vectors for the boundary proposed on
-[aeoess/agent-governance-vocabulary#177](https://github.com/aeoess/agent-governance-vocabulary/issues/177):
+[NOSAI-Federation/agent-governance-vocabulary#177](https://github.com/NOSAI-Federation/agent-governance-vocabulary/issues/177):
 **tool-safety evidence consumed by a pre-execution gate, bound by the tool-definition digest.**
 Proposed consumer-input shape and expected outcomes for the boundary to refine, not a
 finalized schema.
@@ -79,7 +79,7 @@ not observe. A behavioral axis is a separate artifact with its own ceiling.
 ## What the subject and the digest are not
 
 Two boundaries recorded from the first consumer run (an APS-side consumer, reported on
-[#177](https://github.com/aeoess/agent-governance-vocabulary/issues/177#issuecomment-5899072203)).
+[#177](https://github.com/NOSAI-Federation/agent-governance-vocabulary/issues/177#issuecomment-5899072203)).
 Both are limits of the artifact, not of the consumer.
 
 - **The subject is a repo or server, not a named tool.** `subject.id` identifies what was

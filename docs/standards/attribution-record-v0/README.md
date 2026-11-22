@@ -1,6 +1,6 @@
 # Consumed-artifact record (v0): one pinned fixture
 
-A first cut at the record [aeoess/agent-governance-vocabulary#185](https://github.com/aeoess/agent-governance-vocabulary/issues/185)
+A first cut at the record [NOSAI-Federation/agent-governance-vocabulary#185](https://github.com/NOSAI-Federation/agent-governance-vocabulary/issues/185)
 asked for before any attribution formula: a signed, per-action statement of which
 artifacts the action consumed, in which role, with evidence a verifier recomputes from.
 The definition is in [RECORD.md](./RECORD.md). This directory is the fixture: one
@@ -13,7 +13,7 @@ Zero dependencies, Node 18+. Nothing is fetched. Exits non-zero on any failure.
 
 ## The pair
 
-Edge E2 of the [#179 boundary map](https://github.com/aeoess/agent-governance-vocabulary/pull/179):
+Edge E2 of the [#179 boundary map](https://github.com/NOSAI-Federation/agent-governance-vocabulary/pull/179):
 APS decision evidence consumed by a PriorSeal exact-call authorization.
 
 - Producer: `aeoess/agent-passport-system` at

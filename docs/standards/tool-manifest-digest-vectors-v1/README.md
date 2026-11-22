@@ -1,8 +1,8 @@
 # Tool-manifest-digest vectors (v1): one named tool
 
 Extends [v0](../tool-manifest-digest-vectors-v0/) for the boundary on
-[aeoess/agent-governance-vocabulary#177](https://github.com/aeoess/agent-governance-vocabulary/issues/177)
-(edge E1 in [#179](https://github.com/aeoess/agent-governance-vocabulary/pull/179)).
+[NOSAI-Federation/agent-governance-vocabulary#177](https://github.com/NOSAI-Federation/agent-governance-vocabulary/issues/177)
+(edge E1 in [#179](https://github.com/NOSAI-Federation/agent-governance-vocabulary/pull/179)).
 v0 bound a gate to a whole server by its manifest digest. The first consumer run recorded
 that the attestation carried no tool name, so a gate authorizing one tool had nothing to
 bind to. v1 closes that: the attestation now signs one digest per served tool, keyed by
@@ -159,7 +159,7 @@ not an independent record. A run of either reader by someone who wrote neither w
 - **Probity reader** (`probityai/agent-evidence-vectors`, Apache-2.0), owned by Probity:
   [`interop/agentavow-signed-map-v1/` at `d759fb4`](https://github.com/probityai/agent-evidence-vectors/tree/d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1),
   merged in [PR #43](https://github.com/probityai/agent-evidence-vectors/pull/43) and
-  reported on [#177](https://github.com/aeoess/agent-governance-vocabulary/issues/177).
+  reported on [#177](https://github.com/NOSAI-Federation/agent-governance-vocabulary/issues/177).
   A separate reader in Python (name encoding, JWS and canonical-bytes checks, the six
   axes, the served-definition digest) that reads the vector file at `36426cf` unchanged.
   It matches all thirteen name-to-key pairs, the three served-definition digests, the
