@@ -31,7 +31,10 @@ A maintainer script stops being maintainer-only when a consumer script reaches i
 :func:`restore_externally_invoked` then checks the rest of the tree: a local file a
 reachable script runs must be present, and if it is, no file in the tree may spawn a
 process (or reach one by a computed name); no code or config file may name the
-script, match it with a glob, or spawn a package manager with a built name.
+script, match it with a glob, or spawn a package manager with a built name. The last
+check is skipped for a nested package.json the root package's ``files`` list never
+ships (an editor extension's folder in a CLI repo): see
+:func:`unshipped_subpackage`.
 
 Unparseable input (invalid JSON, a duplicate key, a non-string script) answers
 ``None``: the caller keeps its finding as it was.
@@ -1126,6 +1129,81 @@ def _restore_dev_tooling(findings: list, texts: dict[str, str],
         findings[:] = [f for f in findings if f.file_path != path] + fresh
 
 
+# Workspace / monorepo manifests: with one of these the root install can install a
+# nested package, so no sub-package counts as unshipped.
+_WORKSPACE_FILES = frozenset({"pnpm-workspace.yaml", "pnpm-workspace.yml", "lerna.json",
+                              "rush.json", "nx.json", "turbo.json"})
+_GLOB_CHARS = frozenset("*?[{!")
+# A namespace import / re-export (`import * as path from "node:path"`, `export * from`)
+# is module syntax, not a script glob, even on a line that names `node`.
+_STAR_IMPORT_RE = re.compile(r"\b(?:import|export)\s+(?:type\s+)?\*(?=\s*(?:as\b|from\b))")
+
+
+def _covers(entry: str, sub: str) -> bool:
+    """Whether a root ``files`` entry (or a ``main`` / ``bin`` path) can ship anything
+    under folder ``sub``. Over-approximate: a glob counts when its static prefix and
+    ``sub`` overlap at all."""
+    e = entry.strip()
+    while e.startswith("./"):
+        e = e[2:]
+    e = e.strip("/")
+    if not e or e in (".", "..") or e.startswith("../"):
+        return True
+    cut = next((i for i, c in enumerate(e) if c in _GLOB_CHARS), None)
+    if cut is not None:
+        e = e[:cut].rsplit("/", 1)[0] if "/" in e[:cut] else ""
+        if not e:
+            return True
+    return e == sub or sub.startswith(e + "/") or e.startswith(sub + "/")
+
+
+def unshipped_subpackage(pkg_path: str, texts: dict[str, str]) -> bool:
+    """Whether ``pkg_path`` is a nested package.json that the tree's root package
+    never ships or installs: the root package.json has a ``files`` list, no entry of
+    it (nor ``main`` / ``bin``, which npm always packs) reaches the folder, and the
+    tree declares no workspaces. npm packs only ``files`` for a registry install and
+    for a git dependency alike, so neither copy holds the folder, and nothing outside
+    it can run its scripts there. Any doubt (no root manifest, no ``files``,
+    unparseable JSON, a glob touching the folder) answers ``False``."""
+    norm = {p[2:] if p.startswith("./") else p: t for p, t in texts.items()}
+    path = pkg_path[2:] if pkg_path.startswith("./") else pkg_path
+    if "/" not in path or "package.json" not in norm:
+        return False
+    sub = path.rsplit("/", 1)[0]
+    # Only a folder above the sub-package can make it a workspace (a fixture repo
+    # elsewhere in the tree cannot).
+    parts = sub.split("/")
+    above = {"/".join(parts[:i]) for i in range(len(parts))}
+
+    def _dir(p: str) -> str:
+        return p.rsplit("/", 1)[0] if "/" in p else ""
+
+    for p, t in norm.items():
+        leaf = p.rsplit("/", 1)[-1].lower()
+        if _dir(p) not in above:
+            continue
+        if leaf in _WORKSPACE_FILES or (leaf == "package.json" and t
+                                        and '"workspaces"' in t):
+            return False
+    try:
+        root = json.loads((norm["package.json"] or "").lstrip("﻿"))
+    except ValueError:
+        return False
+    files = root.get("files") if isinstance(root, dict) else None
+    if not isinstance(files, list) or not all(isinstance(x, str) for x in files):
+        return False
+    shipped = [x for x in files if not x.strip().startswith("!")]
+    main, bin_ = root.get("main"), root.get("bin")
+    shipped += [main] if isinstance(main, str) else []
+    if isinstance(bin_, str):
+        shipped.append(bin_)
+    elif isinstance(bin_, dict):
+        shipped += [v for v in bin_.values() if isinstance(v, str)]
+    elif bin_ is not None:
+        return False
+    return not any(_covers(x, sub) for x in shipped)
+
+
 def restore_externally_invoked(findings: list, texts: dict[str, str], *,
                                registry_artifact: bool = False) -> None:
     """Undo the maintainer-script downgrade of a pipe-to-shell finding when the
@@ -1137,6 +1215,13 @@ def restore_externally_invoked(findings: list, texts: dict[str, str], *,
 
     ``registry_artifact``: ``texts`` is a published tarball, where npm runs only the
     install trio; elsewhere (a repo / local tree) the git-dependency roots count too.
+
+    In a repo / local tree, a sub-package the root never ships
+    (:func:`unshipped_subpackage`) skips the tree-wide "some file builds a script name
+    at runtime" signal: code elsewhere in the tree runs ``npm`` in the consumer's
+    folder, and the sub-package's folder is not on the consumer's machine. Its own
+    install hooks, a hook file of its own beside any spawner, and any code naming the
+    script still restore the finding.
     Every caller of ``_scan_content`` that can see a package.json must call this."""
     _restore_allowlist_hosts(findings, texts)
     restore_signature_hosts(findings, texts)
@@ -1155,12 +1240,16 @@ def restore_externally_invoked(findings: list, texts: dict[str, str], *,
     roots = REGISTRY_ROOTS if registry_artifact else CONSUMER_ROOTS
     missing: dict[str, bool] = {}
     named: set[str] = set()
+    own_named: dict[str, set[str]] = {}
+    unshipped: dict[str, bool] = {}
     for path in {f.file_path for f in marked}:
+        unshipped[path] = not registry_artifact and unshipped_subpackage(path, texts)
         info = parse_scripts(texts[path]) if texts.get(path) else None
         if info is None:
             missing[path] = True
             continue
         found, missing[path] = _named_files(info, path, roots, texts)
+        own_named[path] = found
         named |= found
     code: list[str] = []
     for p, t in texts.items():
@@ -1185,7 +1274,10 @@ def restore_externally_invoked(findings: list, texts: dict[str, str], *,
                or any(_PM_STRING_RE.search(t) for t in spawners))
     if spawners and named:
         for path in missing:
-            missing[path] = True
+            # An unshipped sub-package answers only for the files its OWN install
+            # hooks run (another package's hook files never reach its scripts).
+            if not unshipped[path] or own_named.get(path):
+                missing[path] = True
     # Glob words (`run-p "build:*"`) count anywhere; a bare `*` / `**` (match every
     # script) only on a line that names a script runner, since elsewhere it is a
     # doc-comment margin or a multiplication.
@@ -1194,11 +1286,11 @@ def restore_externally_invoked(findings: list, texts: dict[str, str], *,
     globs |= {_RUNNER_PREFIX_RE.sub("", g) for t in code for ln in t.split("\n")
               if _RUNNER_LINE_RE.search(ln)
               and not ln.lstrip().startswith(("*", "/*", "//", "#"))
-              for g in _GLOB_WORD_RE.findall(f" {ln} ")}
+              for g in _GLOB_WORD_RE.findall(f" {_STAR_IMPORT_RE.sub(' ', ln)} ")}
     for f in marked:
         sev, payload, owners = f._maintainer_restore
         path = f.file_path
-        if (missing[path] or dynamic or any(
+        if (missing[path] or (dynamic and not unshipped[path]) or any(
                 any(script_word_re(n).search(t) for t in code)
                 or any(fnmatch.fnmatchcase(n, g) for g in globs) for n in owners)):
             f.severity, f.payload, f.remediation = sev, payload, ""
