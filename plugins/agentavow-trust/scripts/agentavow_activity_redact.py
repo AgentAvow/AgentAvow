@@ -179,19 +179,27 @@ def _scrub(text: str, limit: int) -> str:
 # MCP argument names are judged more widely than names inside commands: a name is all
 # there is to go on, and masking a harmless value costs little.
 _SECRET_ARG_NAME = re.compile(
-    _NAME + r"|pwd|private[_-]?key|cookie|bearer", re.IGNORECASE
+    _NAME + r"|pwd|private[_-]?key|cookie|bearer|signature|connection[_-]?string|keyfile"
+    r"|[cx]srf|jwt|session[_-]?id",
+    re.IGNORECASE,
 )
 _CAMEL = re.compile(r"([a-z0-9])([A-Z])")
 _SEGMENT_SPLIT = re.compile(r"[^a-z0-9]+")
-# A name segment that marks a secret on its own (``key``, ``access_key``, ``signingKey``),
-# but not as part of a longer word (``keyword``, ``monkey``).
-_SECRET_SEGMENTS = frozenset({"key"})
-# A {"name": "X-Api-Key", "value": "..."} pair: the label names the secret, the value holds it.
-_PAIR_LABELS = frozenset({"name", "key", "header", "field"})
-_PAIR_VALUES = frozenset({"value", "val", "content"})
+# Name segments that mark a secret on their own (``key``, ``access_key``, ``signingKey``,
+# ``pin``), but not as part of a longer word (``keyword``, ``monkey``, ``spinner``).
+_SECRET_SEGMENTS = frozenset({"key", "pin", "otp", "dsn", "session", "sig"})
+# A {"name": "X-Api-Key", "value": "..."} pair: a label key whose value is a secret's name
+# means the dict's other entries may hold that secret, so they are all masked.
+_PAIR_LABELS = frozenset({"name", "key", "header", "field", "label", "variable", "var", "env",
+                          "param"})
+_IDENTIFIER = re.compile(r"[\w.$-]{1,64}")
 # Bounds for walking a nested MCP argument: past these the value is cut anyway.
 _MASK_DEPTH = 8
 _MASK_ITEMS = 200
+
+
+def _segments(name: str) -> list[str]:
+    return _SEGMENT_SPLIT.split(_CAMEL.sub(r"\1_\2", name).lower())
 
 
 def _secret_name(name: object) -> bool:
@@ -201,23 +209,43 @@ def _secret_name(name: object) -> bool:
     name = name[:256]
     if _SECRET_ARG_NAME.search(name):
         return True
-    segments = _SEGMENT_SPLIT.split(_CAMEL.sub(r"\1_\2", name).lower())
-    return not _SECRET_SEGMENTS.isdisjoint(segments)
+    segments = _segments(name)
+    if not _SECRET_SEGMENTS.isdisjoint(segments):
+        return True
+    return "header" in segments and "value" in segments  # headerValue
+
+
+def _names_secret(value: object) -> bool:
+    """True when a value is itself a secret's name (``"X-Api-Key"``), not free text."""
+    return (isinstance(value, str) and _IDENTIFIER.fullmatch(value) is not None
+            and _secret_name(value))
+
+
+def _label_key(key: object) -> bool:
+    """True for a key that labels a pair: ``name``, ``headerName``, ``env_var``."""
+    return isinstance(key, str) and _segments(key[:256])[-1] in _PAIR_LABELS
 
 
 def _names_a_secret(pair: dict) -> bool:
-    """True when a dict is a label/value pair whose label is a secret's name."""
+    """True when a dict holds a label (``name``, ``header``...) whose value is a secret's name."""
     for n, (k, v) in enumerate(pair.items()):
         if n >= _MASK_ITEMS:
             return False
-        if isinstance(k, str) and k.lower() in _PAIR_LABELS and _secret_name(v):
+        if _label_key(k) and _names_secret(v):
             return True
     return False
+
+
+def _hidden(key: object, pair: bool) -> bool:
+    """True when a dict entry's value is masked: a secret's name, or a secret pair's value."""
+    return _secret_name(key) or (pair and not _label_key(key))
 
 
 def _mask(value: object, depth: int = 0) -> object:
     """A copy of a nested value with every secret-named dict key's value replaced.
 
+    Also masks the value of a label/value pair (``{"name": "X-Api-Key", "value": ...}``)
+    and of a two-item list (``["X-Api-Key", ...]``) whose label is a secret's name.
     Walks at most ``_MASK_DEPTH`` levels and ``_MASK_ITEMS`` items per container,
     which is more than a value cut to ``MCP_VALUE_LIMIT`` characters can show.
     """
@@ -229,13 +257,13 @@ def _mask(value: object, depth: int = 0) -> object:
         for n, (k, v) in enumerate(value.items()):
             if n >= _MASK_ITEMS:
                 break
-            hidden = _secret_name(k) or (
-                pair and isinstance(k, str) and k.lower() in _PAIR_VALUES)
-            out[k] = _mark("secret") if hidden else _mask(v, depth + 1)
+            out[k] = _mark("secret") if _hidden(k, pair) else _mask(v, depth + 1)
         return out
     if isinstance(value, (list, tuple)):
         if depth >= _MASK_DEPTH:
             return "…"
+        if len(value) == 2 and _names_secret(value[0]):
+            return [value[0], _mark("secret")]
         return [_mask(v, depth + 1) for v in value[:_MASK_ITEMS]]
     if isinstance(value, str):
         return value[: MCP_VALUE_LIMIT + 256]
@@ -347,17 +375,19 @@ def summarize_input(tool: str, tool_input: object, cwd: str | None) -> dict:
         }
 
     if tool.startswith("mcp__"):
-        pair = _names_a_secret(args)
-        return {
-            "args": {
-                cut(str(name), TEXT_LIMIT): (
-                    _mark("secret")
-                    if pair and isinstance(name, str) and name.lower() in _PAIR_VALUES
-                    else _mcp_value(name, value)
-                )
-                for name, value in args.items()
+        try:
+            pair = _names_a_secret(args)
+            return {
+                "args": {
+                    cut(str(name), TEXT_LIMIT): (
+                        _mark("secret") if pair and not _label_key(name)
+                        else _mcp_value(name, value)
+                    )
+                    for name, value in args.items()
+                }
             }
-        }
+        except Exception:  # odd input: keep the names only, never a value
+            return {"arg_names": sorted(cut(str(k), TEXT_LIMIT) for k in args)}
 
     return {"arg_names": sorted(cut(str(k), TEXT_LIMIT) for k in args)}
 

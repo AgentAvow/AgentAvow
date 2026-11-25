@@ -202,8 +202,9 @@ and a line after it (a failed Claude Code call has only the line before, for now
 each subagent and session start or end gets one. A line holds a short, redacted summary:
 the command, the file path and size, the URL, the search query or Grep/Glob pattern, or
 MCP argument names with their values redacted and cut to 200 characters (a value whose
-name looks secret, such as `password`, `token`, `cookie`, `private_key` or `key`, is not
-kept, nor the value of a `{"name": "X-Api-Key", "value": ...}` pair). It never
+name looks secret, such as `password`, `token`, `cookie`, `session`, `private_key` or `key`,
+is not kept, nor the value of a `{"name": "X-Api-Key", "value": ...}` or
+`["X-Api-Key", ...]` pair). It never
 records prompts, replies, tool output, file contents or environment values. It is kept
 in `~/.cache/agentavow/activity/` (only you can read it), and nothing in it leaves your
 machine. Logs older than 30 days are deleted at session start, even after you turn the

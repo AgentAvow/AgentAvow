@@ -399,13 +399,13 @@ def test_mcp_secret_named_args_are_redacted(name, value):
 
 
 def test_mcp_nested_secret_keys_are_redacted():
-    value = {"s": {"token": ["leak1", "leak2"], "pin": 7}, "user": "alice",
+    value = {"s": {"token": ["leak1", "leak2"], "port": 7}, "user": "alice",
              "password": "hunter2", "h": [{"Authorization": "Basic dXNlcjpwYXNz", "accept": "json"}],
              "d": {"client_secret": "s3cr3tValue!"}}
     out = R.summarize_input("mcp__srv__tool", {"config": value}, None)["args"]["config"]
     for secret in ("hunter2", "dXNlcjpwYXNz", "s3cr3tValue!", "leak1", "leak2"):
         assert secret not in out
-    assert "alice" in out and "json" in out and "'pin': 7" in out
+    assert "alice" in out and "json" in out and "'port': 7" in out
     assert out.count("[redacted:secret]") == 4
 
 
@@ -437,3 +437,36 @@ def test_summarize_output_dict():
 
 def test_summarize_output_str_counts_utf8():
     assert R.summarize_output("héllo") == {"ok": None, "out_bytes": 6}
+
+
+@pytest.mark.parametrize("name", ["session", "sessionid", "session_id", "jwt", "otp", "signature",
+                                  "dsn", "connection_string", "connectionString", "keyfile", "csrf",
+                                  "pin", "headerValue"])
+def test_mcp_more_secret_names_are_masked(name):
+    args = R.summarize_input("mcp__srv__tool", {name: "zz1"}, None)["args"]
+    assert args == {name: "[redacted:secret]"}
+
+
+@pytest.mark.parametrize("pair", [
+    {"name": "Authorization", "data": "zz1"},
+    {"name": "Authorization", "text": "zz1"},
+    {"headerName": "X-Api-Key", "headerValue": "zz1"},
+    {"label": "X-Api-Key", "value": "zz1"},
+    {"variable": "API_TOKEN", "value": "zz1"},
+    {"env_var": "DB_PASSWORD", "v": "zz1"},
+])
+def test_mcp_secret_pair_masks_every_sibling(pair):
+    for args in ({"req": {"h": [pair]}}, pair):
+        out = str(R.summarize_input("mcp__srv__tool", args, None)["args"])
+        assert "zz1" not in out
+
+
+def test_mcp_secret_two_item_list_masks_its_value():
+    args = {"r": [["X-Api-Key", "zz1"], ["Cookie", "zz2"], ["Accept", "json"]]}
+    out = R.summarize_input("mcp__srv__tool", args, None)["args"]["r"]
+    assert "zz1" not in out and "zz2" not in out and "json" in out
+
+
+def test_mcp_free_text_label_does_not_mask_siblings():
+    args = {"name": "Rotate the API key", "body": "steps here"}
+    assert R.summarize_input("mcp__srv__tool", args, None)["args"] == args
