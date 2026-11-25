@@ -13,9 +13,17 @@ from __future__ import annotations
 
 import pytest
 
+from src.scanner import printed_hint
 from src.scanner.artifact_fetch import ArtifactFetchResult, _make_file
 from src.scanner.patterns import DYNAMIC_REMOTE_LOAD_PATTERNS
-from src.scanner.printed_hint import Hints, why_not
+from src.scanner.printed_hint import (
+    Hints,
+    _alias_target,
+    _console_value_end,
+    _Toks,
+    console_aliases,
+    why_not,
+)
 from src.scanner.scan import ScanResult, _calculate_trust_score, _scan_content, apply_artifact_scan
 
 RULE = "curl/wget piped to shell"
@@ -496,3 +504,185 @@ def test_question_budget_per_package():
     h = Hints({"a.js": f'console.log("{CMD}");\n'}, package=True)
     h.asked = Hints.MAX_QUESTIONS
     assert h.why_not("a.js", 1, PAT) == "too many findings to follow"
+
+
+# ---------------------------------------------------------------------------
+# A name bound only to `console` (bundled SDK code: `this._logger = console`)
+# ---------------------------------------------------------------------------
+
+_CP = 'const cp = require("child_process");\n'
+
+
+@pytest.mark.parametrize("src", [
+    'class C {\n  constructor() { this._logger = console; }\n'
+    f'  f() {{ this._logger.warn("install: {CMD}"); }}\n}}\n',
+    f'const log = console;\nfunction f() {{ log.warn("install: {CMD}"); log.info("x"); }}\n',
+    f'const log = globalThis.console;\nlog.error(`missing; run {CMD}`);\n',
+    f'var log = window.console;\nlog.log("run {CMD}");\n',
+    f'function f() {{ const log = console; log.warn("install: {CMD}"); }}\n',
+    # The alias also keeps a direct `console.*` hint elsewhere in the file a hint.
+    f'this._logger = console;\nthis._logger.info("x");\nconsole.log("run {CMD}");\n',
+])
+def test_console_alias_hint_is_low(src):
+    assert _single(src) == {"low"}
+
+
+@pytest.mark.parametrize("src", [
+    # handed to a function
+    _CP + f'const log = console;\nwire(log);\nlog.warn("run {CMD}");\n',
+    # reassigned to something else
+    _CP + 'let log = console;\nlog = { warn: (s) => cp.execSync(s) };\n'
+    f'log.warn("run {CMD}");\n',
+    _CP + 'class C {\n  constructor() { this._logger = console; }\n'
+    '  g() { this._logger = { warn: (s) => cp.execSync(s) }; }\n'
+    f'  f() {{ this._logger.warn("run {CMD}"); }}\n}}\n',
+    # a caller-supplied left side
+    _CP + 'class C {\n  constructor(opts) { this._logger = opts.logger ?? console; }\n'
+    f'  f() {{ this._logger.warn("run {CMD}"); }}\n}}\n',
+    _CP + f'const log = opts.logger || console;\nlog.warn("run {CMD}");\n',
+    # a self-default keeps a value a caller can set
+    _CP + 'class C {\n  constructor() { this._logger = this._logger ?? console; }\n'
+    f'  f() {{ this._logger.debug("run {CMD}"); }}\n}}\n',
+    _CP + 'class C {\n  constructor() { this.out = undefined || console; }\n'
+    f'  f() {{ this.out.trace("run {CMD}"); }}\n}}\n',
+    _CP + f'function f(log) {{\n  log = log ?? console;\n  log.warn("run {CMD}");\n}}\n',
+    _CP + f'function f(log) {{\n  log = log || console;\n  log.warn("run {CMD}");\n}}\n',
+    # a default parameter / destructuring default: the caller supplies the value
+    _CP + f'function f(log = console) {{\n  log.warn("run {CMD}");\n}}\n',
+    _CP + f'const f = (log = console) => {{\n  log.warn("run {CMD}");\n}};\n',
+    _CP + f'function f({{ logger = console }} = {{}}) {{\n  logger.warn("run {CMD}");\n}}\n',
+    _CP + f'function f(opts) {{\n  const {{ logger = console }} = opts;\n'
+    f'  logger.warn("run {CMD}");\n}}\n',
+    _CP + f'function f(a, logger = console) {{ logger.warn("run {CMD}"); }}\n',
+    # a plain assignment to a name the file never declares
+    _CP + f'log = console;\nlog.warn("run {CMD}");\n',
+    # exported / stored in an object
+    _CP + f'const log = console;\nmodule.exports = {{ log }};\nlog.warn("run {CMD}");\n',
+    _CP + f'export const log = console;\nlog.warn("run {CMD}");\n',
+    # another method, a direct call, a computed member
+    _CP + 'const log = console;\nlog.assert = (c, s) => cp.execSync(s);\n'
+    f'log.warn("run {CMD}");\n',
+    _CP + f'const log = console;\nlog("run {CMD}");\nlog.warn("run {CMD}");\n',
+    _CP + f'const log = console;\nlog[k]("run {CMD}");\n',
+    # the property reached through another object or a string
+    _CP + 'class C {\n  constructor() { this._logger = console; }\n'
+    f'  f() {{ this._logger.warn("run {CMD}"); }}\n}}\n'
+    'const c = new C();\nc._logger.warn = (s) => cp.execSync(s);\n',
+    _CP + 'class C {\n  constructor() { this._logger = console; }\n'
+    f'  f() {{ this._logger.warn("run {CMD}"); }}\n}}\n'
+    'const c = new C();\nc["_logger"].warn = (s) => cp.execSync(s);\n',
+    # a direct eval can reach the variable by name
+    _CP + f'const log = console;\neval(src);\nlog.warn("run {CMD}");\n',
+])
+def test_console_alias_misuse_stays_critical(src):
+    assert _single(src) == {"critical"}
+
+
+def test_console_alias_property_written_in_another_file_stays_critical():
+    a = ('class C {\n  constructor() { this._logger = console; }\n'
+         f'  f() {{ this._logger.warn("run {CMD}"); }}\n}}\nmodule.exports = {{ C }};\n')
+    b = (_CP + 'const { C } = require("./a");\nconst c = new C();\n'
+         'c._logger.warn = (s) => cp.execSync(s);\nc.f();\n')
+    files = {"a.js": a, "index.js": b}
+    assert why_not(files, "a.js", _line_of(a), PAT, package=True) is not None
+    assert why_not({"a.js": a}, "a.js", _line_of(a), PAT, package=True) is None
+
+
+# ---------------------------------------------------------------------------
+# console_aliases and its helpers, branch by branch
+# ---------------------------------------------------------------------------
+
+_NONE = (frozenset(), frozenset(), frozenset())
+_THIS_CLASS = ('class C {\n  constructor() { this._logger = console; }\n'
+               '  f() { this._logger.warn("x"); }\n}\n')
+
+
+def _aliases(text: str, tree: dict[str, str] | None = None):
+    return console_aliases(text, {"a.js": text} if tree is None else tree)
+
+
+def test_console_value_end_rejects_console_as_a_member():
+    t = _Toks("a.console;\n")
+    assert _console_value_end(t, t.val.index("console")) is None
+
+
+def test_console_value_end_rejects_global_object_without_console():
+    t = _Toks("globalThis.process;\nwindow;\n")
+    assert _console_value_end(t, t.val.index("globalThis")) is None
+    assert _console_value_end(t, t.val.index("window")) is None
+
+
+@pytest.mark.parametrize("src", ["obj.log = console;", "a?.log = console;",
+                                 "x.this.log = console;"])
+def test_alias_target_ignores_property_of_other_than_this(src):
+    t = _Toks(src)
+    assert _alias_target(t, t.val.index("=")) is None
+
+
+@pytest.mark.parametrize("src", [
+    'const arr = [];\narr[0] = console;\narr[0].warn("x");\n',
+    'x.this = console;\nx.this.warn("x");\n',
+])
+def test_alias_target_ignores_non_identifier_or_keyword_left_side(src):
+    assert _aliases(src) == _NONE
+
+
+@pytest.mark.parametrize("src", [
+    'obj._logger = console;\nobj._logger.warn("x");\n',
+    'x.this._logger = console;\nx.this._logger.warn("x");\n',
+])
+def test_console_aliases_ignores_property_of_other_than_this(src):
+    assert _aliases(src) == _NONE
+
+
+def test_console_aliases_ignores_files_that_do_not_tokenize_cleanly():
+    ok = 'const log = console;\nlog.warn("x");\n'
+    assert _aliases(ok)[0] == {"log"}
+    assert _aliases(ok + "const s = `open\n") == _NONE
+
+
+def test_console_aliases_ignores_name_bound_as_both_variable_and_property():
+    var = 'const _logger = console;\n_logger.warn("x");\n'
+    assert _aliases(var)[0] == {"_logger"}
+    assert _aliases(_THIS_CLASS)[1] == {"_logger"}
+    assert _aliases(var + _THIS_CLASS) == _NONE
+
+
+def test_console_aliases_ignores_console_member_of_another_object():
+    assert _aliases('const log = obj.console;\nlog.warn("x");\n') == _NONE
+
+
+def test_console_aliases_cache_is_bounded():
+    texts = [f'const log{i} = console;\nlog{i}.warn("x");\n' for i in range(300)]
+    trees = [{"a.js": s} for s in texts]
+    for s, tree in zip(texts, trees):
+        assert console_aliases(s, tree)[0] == {s.split()[1]}
+    assert len(printed_hint._CONSOLE_ALIAS_CACHE) <= 257
+    assert console_aliases(texts[0], trees[0])[0] == {"log0"}
+
+
+def test_this_alias_skips_tree_files_that_do_not_mention_the_name():
+    tree = {"a.js": _THIS_CLASS, "b.js": "module.exports = 1;\n"}
+    assert _aliases(_THIS_CLASS, tree)[1] == {"_logger"}
+
+
+def test_this_alias_ignores_non_js_files_in_tree():
+    tree = {"a.js": _THIS_CLASS, "README.md": "the _logger field\n"}
+    assert _aliases(_THIS_CLASS, tree) == _NONE
+
+
+def test_this_alias_rejects_tree_file_that_does_not_tokenize_cleanly():
+    tree = {"a.js": _THIS_CLASS, "b.js": "this._logger.warn(`x\n"}
+    assert _aliases(_THIS_CLASS, tree) == _NONE
+
+
+def test_this_alias_allows_quote_inside_a_regex_before_the_name():
+    src = _THIS_CLASS.replace('this._logger.warn("x");',
+                              "const re = /'/; this._logger.warn(\"x\");")
+    assert _aliases(src)[1] == {"_logger"}
+
+
+def test_this_alias_rejects_quote_in_a_comment_before_the_name():
+    src = _THIS_CLASS.replace('this._logger.warn("x");',
+                              "// don't this._logger.warn\n    this._logger.warn(\"x\");")
+    assert _aliases(src) == _NONE

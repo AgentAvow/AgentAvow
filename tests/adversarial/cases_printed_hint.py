@@ -321,6 +321,82 @@ CASES["e_stderr_target_hijacked"] = pkg({
                    "printNextSteps(process.argv[2]);\n"}, main="install.mjs")
 
 
+# (f) An install hint logged through a name bound only to `console` (bundled SDK code:
+# `this._logger = console; … this._logger.warn(hint)`). Accepted only when every use of
+# the name is a console method call and the name is bound to nothing else.
+HINT_MSG = f"'Missing helper; install it with: ' + {Q}"
+CASES["ctl_console_alias_this_logger"] = pkg({
+    "index.js": "class Client {\n  constructor() { this._logger = console; }\n"
+                f"  check() {{ this._logger.warn({HINT_MSG}); }}\n}}\n"
+                "new Client().check();\n"})
+CASES["ctl_console_alias_const"] = pkg({
+    "index.js": "const log = globalThis.console;\n"
+                f"function check() {{ log.warn({HINT_MSG}); log.info('done'); }}\ncheck();\n"})
+CASES["f_console_alias_passed_to_fn"] = pkg({
+    "index.js": CP + "const log = console;\nfunction wire(l) { l.warn = (s) => execSync(s); }\n"
+                f"wire(log);\nlog.warn({HINT_MSG});\n"})
+CASES["f_console_alias_reassigned_exec"] = pkg({
+    "index.js": CP + "let log = console;\nlog = { warn: (s) => execSync(s) };\n"
+                f"log.warn({HINT_MSG});\n"})
+CASES["f_console_alias_this_exec_object"] = pkg({
+    "index.js": CP + "class Client {\n  constructor(debug) {\n"
+                "    this._logger = console;\n"
+                "    if (debug) this._logger = { warn: (s) => execSync(s) };\n  }\n"
+                f"  check() {{ this._logger.warn({HINT_MSG}); }}\n}}\n"
+                "new Client(process.env.D).check();\n"})
+CASES["f_console_alias_exported"] = pkg({
+    "log.js": "const log = console;\nmodule.exports = { log };\n"
+              f"log.warn({HINT_MSG});\n",
+    "index.js": CP + "const m = require('./log');\nm.log.warn = (s) => execSync(s);\n"
+                "require('./log');\n"})
+CASES["f_console_alias_computed_member"] = pkg({
+    "index.js": CP + "const log = console;\nconst k = process.env.K || 'warn';\n"
+                f"log[k]({HINT_MSG});\n"})
+CASES["f_console_alias_caller_logger"] = pkg({
+    "index.js": CP + "class Client {\n  constructor(opts) {\n"
+                "    this._logger = opts.logger ?? console;\n  }\n"
+                f"  check() {{ this._logger.warn({HINT_MSG}); }}\n}}\n"
+                "new Client({ logger: { warn: (s) => execSync(s) } }).check();\n"})
+
+CASES["f_console_alias_in_object"] = pkg({
+    "index.js": CP + "const log = console;\nconst sinks = { log };\n"
+                "sinks.log.warn = (s) => execSync(s);\n"
+                f"log.warn({HINT_MSG});\n"})
+CASES["f_console_alias_other_method"] = pkg({
+    "index.js": CP + "const log = console;\nlog.assert = (c, s) => execSync(s);\n"
+                f"log.warn({HINT_MSG});\n"})
+
+# Forms where the caller, not the file, decides the value: a self-default keeps whatever
+# was already there, and a default parameter / destructuring default applies only when
+# the caller passes nothing. Each must stay critical. `f_console_alias_self_default_this`
+# was the `ctl_console_alias_self_default` control (it read safe); it is now an attack.
+CASES["f_console_alias_self_default_this"] = pkg({
+    "cfg.js": CP + "module.exports = { ['_log' + 'ger']: { error: (s) => execSync(s) } };\n",
+    "index.js": "class Client {\n  constructor(opts) {\n    Object.assign(this, opts);\n"
+                "    this._logger = this._logger ?? console;\n  }\n"
+                f"  check() {{ this._logger.error({HINT_MSG}); }}\n}}\n"
+                "new Client(require('./cfg')).check();\n"})
+CASES["f_console_alias_self_default_param"] = pkg({
+    "index.js": CP + "function check(log) {\n  log = log ?? console;\n"
+                f"  log.warn({HINT_MSG});\n}}\n"
+                "check({ warn: (s) => execSync(s) });\n"})
+CASES["f_console_alias_default_param"] = pkg({
+    "index.js": CP + "function check(log = console) {\n"
+                f"  log.warn({HINT_MSG});\n}}\n"
+                "check({ warn: (s) => execSync(s) });\n"})
+CASES["f_console_alias_destructuring_default"] = pkg({
+    "index.js": CP + "function check({ logger = console } = {}) {\n"
+                f"  logger.warn({HINT_MSG});\n}}\n"
+                "check({ ['log' + 'ger']: { warn: (s) => execSync(s) } });\n"})
+CASES["f_console_alias_const_destructuring_default"] = pkg({
+    "index.js": CP + "function check(opts) {\n  const { logger = console } = opts;\n"
+                f"  logger.warn({HINT_MSG});\n}}\n"
+                "check({ ['log' + 'ger']: { warn: (s) => execSync(s) } });\n"})
+CASES["f_console_alias_or_param"] = pkg({
+    "index.js": CP + "function check(logger) {\n  logger = logger || console;\n"
+                f"  logger.warn({HINT_MSG});\n}}\n"
+                "check({ warn: (s) => execSync(s) });\n"})
+
 def run(files):
     fetched = npm_result_from_tarball("adv-case", "1.0.0", tgz(files))
     r = ScanResult(repo="npm:adv-case", stars=0, description="", framework="")
