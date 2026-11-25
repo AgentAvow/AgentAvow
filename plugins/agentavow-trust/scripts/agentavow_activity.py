@@ -44,7 +44,7 @@ if _HERE not in sys.path:
 
 import agentavow_activity_redact as _redact  # noqa: E402
 
-__version__ = "0.1.46"
+__version__ = "0.1.47"
 
 ACTIVITY_DIR = pathlib.Path.home() / ".cache" / "agentavow" / "activity"
 

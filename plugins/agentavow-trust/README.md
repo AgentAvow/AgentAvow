@@ -195,6 +195,14 @@ The hook makes no extra request for it and nothing from your machine is run in t
 sandbox. The `/agentavow-trust:scan` command and the scan-before-connect skill report the full sandbox
 observation (tools called, network, file writes, credentials) as its own section.
 
+## Activity log (preview)
+
+Off unless you set `AGENTAVOW_ACTIVITY=on`. Then each tool call, subagent and session
+start or end gets one line with a short, redacted summary (the command, file path and
+size, URL or argument names). It never records prompts, replies, tool output, file
+contents or environment values. It is kept in `~/.cache/agentavow/activity/` (only you
+can read it) for 30 days, and nothing in it leaves your machine. Not on Windows yet.
+
 ## What the hook reads and what leaves your machine
 
 What leaves your machine: the server URL or package name being checked, and a random
@@ -239,7 +247,7 @@ AgentAvow, so it never sends it.
 **Once a day** (the first session start of each UTC day, even when there is nothing new
 to check) the session-start hook sends one more small request, a POST to
 `https://agentavow.com/api/v1/public/plugin/active` with the same install ID header and
-a body of `{"version": "0.1.46", "app": "desktop"}`: the plugin version and the app
+a body of `{"version": "0.1.47", "app": "desktop"}`: the plugin version and the app
 type, one of `desktop`, `cli`, `sdk`, `cloud` or `other`, read from Claude Code's
 `CLAUDE_CODE_ENTRYPOINT`. No tool, server, path or repo name goes in it. It lets
 AgentAvow count the machines the plugin protects, including the many days the hook
