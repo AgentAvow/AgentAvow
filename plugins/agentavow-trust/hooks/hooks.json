@@ -68,19 +68,6 @@
         ]
       }
     ],
-    "PostToolUseFailure": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run_hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/agentavow_activity.py\"",
-            "async": true,
-            "timeout": 10
-          }
-        ]
-      }
-    ],
     "SubagentStart": [
       {
         "hooks": [

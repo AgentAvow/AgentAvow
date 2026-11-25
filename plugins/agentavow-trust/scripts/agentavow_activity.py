@@ -506,6 +506,10 @@ def cleanup(now: datetime) -> None:
 # Recorder: payload -> event line
 # ---------------------------------------------------------------------------
 
+# PostToolUseFailure is handled (ok=False) but not registered in hooks/hooks.json yet:
+# Codex reads the same file, and Codex 0.166 does not list that event. An event it does
+# not know could make it reject the whole file, which would switch off the gate and the
+# install check for every Codex user. Registering it later is a one-entry change there.
 EVENTS = frozenset({
     "PreToolUse", "PostToolUse", "PostToolUseFailure",
     "SessionStart", "SessionEnd", "SubagentStart", "SubagentStop",
@@ -514,8 +518,13 @@ TOOL_EVENTS = frozenset({"PreToolUse", "PostToolUse", "PostToolUseFailure"})
 
 
 def _enabled() -> bool:
-    """Release 1: on only when AGENTAVOW_ACTIVITY is ``on`` (any case)."""
-    return os.environ.get("AGENTAVOW_ACTIVITY", "").strip().lower() == "on"
+    """Release 1: on only when AGENTAVOW_ACTIVITY is ``on`` (any case).
+
+    run_hook.sh applies the same rule before starting Python, so a log that is off
+    costs no process per tool call. Release 2 flips the rule (off only for ``off``)
+    in both places; tests pin that they agree.
+    """
+    return os.environ.get("AGENTAVOW_ACTIVITY", "").lower() == "on"
 
 
 def _text(value: object) -> str | None:

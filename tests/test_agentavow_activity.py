@@ -78,7 +78,7 @@ def _raw(mod) -> str:
 
 
 def test_off_unless_switched_on(act, monkeypatch, capsys):
-    for value in (None, "", "off", "1", "true", "yes"):
+    for value in (None, "", "off", "1", "true", "yes", " on", "onn"):
         if value is None:
             monkeypatch.delenv("AGENTAVOW_ACTIVITY", raising=False)
         else:
@@ -95,7 +95,7 @@ def test_off_unless_switched_on(act, monkeypatch, capsys):
     assert line["agent"] == "claude-code"
     assert line["cwd"] == "/work/project"
     assert line["seq"] == 1 and line["v"] == 0
-    monkeypatch.setenv("AGENTAVOW_ACTIVITY", " ON ")
+    monkeypatch.setenv("AGENTAVOW_ACTIVITY", "ON")
     _run(act, monkeypatch, capsys, _payload())
     assert len(_lines(act)) == 2
 
@@ -362,7 +362,12 @@ def test_hooks_json_wires_the_recorder():
         [h] = groups[0]["hooks"]
         return groups[0], h
 
-    for event in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
+    # Only events both Claude Code and Codex list: Codex shares this file, and an event
+    # it does not know could make it drop the whole file (gate and install check too).
+    assert set(hooks) <= {"SessionStart", "SessionEnd", "PreToolUse", "PostToolUse",
+                          "SubagentStart", "SubagentStop"}
+    assert "PostToolUseFailure" not in hooks
+    for event in ("PreToolUse", "PostToolUse"):
         group, h = recorder(event)
         assert group["matcher"] == "*"
         assert h["command"] == RECORDER and h["async"] is True
@@ -411,3 +416,41 @@ def test_run_hook_passes_arguments_and_skips_python_for_empty_notes(tmp_path):
     r = run("a b", "c")
     assert r.stdout.strip() == "['a b', 'c']"
     assert run().stdout.strip() == "[]"
+
+
+SWITCH_VALUES = [None, "", "off", "OFF", "on", "On", "ON", "oN", " on", "on ", "onn", "1", "yes"]
+
+
+def test_run_hook_and_enabled_agree_on_the_switch(tmp_path, monkeypatch):
+    """The launcher starts no Python for the recorder unless the switch is on, and its
+    rule matches _enabled() for every value (release 2 flips both, in both places)."""
+    folder = tmp_path / "scripts"
+    folder.mkdir()
+    stub = folder / "agentavow_activity.py"
+    stub.write_text("import sys; print(sys.argv[1:])\n")
+    other = folder / "agentavow_precheck.py"
+    other.write_text("import sys; print('ran')\n")
+    home = tmp_path / "home"
+    home.mkdir()
+
+    def run(script, value, *args) -> str:
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home)}
+        if value is not None:
+            env["AGENTAVOW_ACTIVITY"] = value
+        r = subprocess.run(["sh", str(LAUNCHER), str(script), *args], input="{}",
+                           capture_output=True, text=True, timeout=30, env=env)
+        assert (r.returncode, r.stderr) == (0, "")
+        return r.stdout.strip()
+
+    for value in SWITCH_VALUES:
+        if value is None:
+            monkeypatch.delenv("AGENTAVOW_ACTIVITY", raising=False)
+        else:
+            monkeypatch.setenv("AGENTAVOW_ACTIVITY", value)
+        on = A._enabled()
+        assert on == (value is not None and value.lower() == "on"), value
+        for args in ([], ["--session-start"], ["--session-end"]):
+            assert run(stub, value, *args) == (str(args) if on else ""), (value, args)
+        # --report always runs (it reads what is there); other scripts are not affected.
+        assert run(stub, value, "--report") == "['--report']"
+        assert run(other, value) == "ran"
