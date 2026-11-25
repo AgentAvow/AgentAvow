@@ -219,6 +219,9 @@ In any terminal, run the same command without the `!`. Find the folder with
 not the log is on. Options: `--days N`, `--session <id>` (one session's timeline),
 `--rule <id>` and `--export` (the raw JSON lines).
 
+`--export` is for saving to a file, for example `--export > activity.jsonl`: it prints each
+line exactly as stored, so the copy still checks against the hash chain.
+
 ## What the hook reads and what leaves your machine
 
 What leaves your machine: the server URL or package name being checked, and a random

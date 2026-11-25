@@ -135,6 +135,28 @@ def test_export_is_jsonl(act):
     assert len(act.report(export=True, days=1, now=NOW).splitlines()) == 6
 
 
+@pytest.mark.parametrize("encoding", ["ascii", "utf-8", "latin-1"])
+def test_export_prints_the_log_bytes_unchanged(tmp_path, monkeypatch, encoding):
+    """--export writes each line's bytes as stored (the chain hashes those bytes),
+    whatever the terminal's encoding."""
+    import subprocess
+    import sys
+
+    home = tmp_path / "home"
+    monkeypatch.setattr(A, "ACTIVITY_DIR", home / ".cache" / "agentavow" / "activity")
+    now = datetime.now(timezone.utc)
+    _add("s1", _ev("Bash", ts=now - timedelta(minutes=2), input={"command": "echo héllo ✓"}))
+    _add("s1", _ev("Read", ts=now - timedelta(minutes=1), input={"path": "/tmp/日本\\udc80"}))
+    log, _ = A.session_paths("s1", now)
+    r = subprocess.run([sys.executable, str(MODULE), "--report", "--export"],
+                       capture_output=True, timeout=30,
+                       env={"PATH": "/usr/bin:/bin", "HOME": str(home),
+                            "PYTHONIOENCODING": encoding})
+    assert (r.returncode, r.stderr) == (0, b"")
+    assert r.stdout == log.read_bytes()
+    assert A.verify_chain(log) == []
+
+
 def test_report_holds_no_secret(act):
     _add("s1", _ev("Bash", input={"command": "curl -H 'Authorization: [redacted:token]' x"}))
     text = act.report(now=NOW) + act.report(session="s1", now=NOW)

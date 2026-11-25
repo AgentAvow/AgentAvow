@@ -689,8 +689,8 @@ def _parse_ts(value: object) -> datetime | None:
     return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
 
 
-def _read_log(path: pathlib.Path) -> list[tuple[dict, str, datetime]]:
-    """Valid event lines of one log as (event, raw line, time); anything else is skipped."""
+def _read_log(path: pathlib.Path) -> list[tuple[dict, bytes, datetime]]:
+    """Valid event lines of one log as (event, raw line bytes, time); others are skipped."""
     out = []
     try:
         data = path.read_bytes()
@@ -703,7 +703,7 @@ def _read_log(path: pathlib.Path) -> list[tuple[dict, str, datetime]]:
             continue
         ts = _parse_ts(obj.get("ts")) if isinstance(obj, dict) else None
         if ts is not None:
-            out.append((obj, raw.decode("utf-8", "replace"), ts))
+            out.append((obj, raw, ts))
     return out
 
 
@@ -805,14 +805,15 @@ def _warnings(stems: list[str]) -> list[str]:
     return out
 
 
-def report(days: int = 7, session: str | None = None, rule: str | None = None,
-           export: bool = False, now: datetime | None = None) -> str:
-    """The report as plain text (raw JSON lines for ``export``). Never raises on bad logs."""
-    now = now or datetime.now(timezone.utc)
-    days = min(days, 3650) if isinstance(days, int) and days > 0 else 7
+def _clamp_days(days: object) -> int:
+    return min(days, 3650) if isinstance(days, int) and days > 0 else 7
+
+
+def _rows(days: int, session: str | None, now: datetime):
+    """(rows, session stems seen): rows are (event, raw bytes, time, stem), oldest first."""
     cutoff = now - timedelta(days=days)
     wanted = _sid(session) if session else None
-    rows: list[tuple[dict, str, datetime, str]] = []  # event, raw, time, session stem
+    rows: list[tuple[dict, bytes, datetime, str]] = []
     stems_seen: list[str] = []
     for path in _log_files():
         stem = path.name[: -len(".jsonl")]
@@ -824,10 +825,25 @@ def report(days: int = 7, session: str | None = None, rule: str | None = None,
             stems_seen.append(stem)
         rows.extend((*r, stem) for r in keep)
     rows.sort(key=lambda r: r[2])
-    warnings = _warnings(list(dict.fromkeys(stems_seen)))
+    return rows, stems_seen
 
+
+def export_bytes(days: int = 7, session: str | None = None,
+                 now: datetime | None = None) -> bytes:
+    """The raw JSON lines for the range, each exactly as stored (the chain hashes those)."""
+    rows, _ = _rows(_clamp_days(days), session, now or datetime.now(timezone.utc))
+    return b"".join(r[1] + b"\n" for r in rows)
+
+
+def report(days: int = 7, session: str | None = None, rule: str | None = None,
+           export: bool = False, now: datetime | None = None) -> str:
+    """The report as plain text (raw JSON lines for ``export``). Never raises on bad logs."""
+    now = now or datetime.now(timezone.utc)
+    days = _clamp_days(days)
     if export:
-        return "\n".join(r[1] for r in rows)
+        return export_bytes(days, session, now).decode("utf-8", "replace").rstrip("\n")
+    rows, stems_seen = _rows(days, session, now)
+    warnings = _warnings(list(dict.fromkeys(stems_seen)))
 
     if not rows:
         what = f"session {_clean(session)}" if session else f"the last {days} days"
@@ -921,6 +937,17 @@ def _report_args(argv: list[str]) -> dict:
     return kwargs
 
 
+def _write_bytes(data: bytes) -> None:
+    """Write bytes to stdout as they are, not re-encoded for the terminal."""
+    buf = getattr(sys.stdout, "buffer", None)
+    if buf is None:
+        sys.stdout.write(data.decode("utf-8", "replace"))
+        return
+    sys.stdout.flush()
+    buf.write(data)
+    buf.flush()
+
+
 def _read_stdin() -> str:
     """The payload text. Bytes that are not UTF-8 become U+FFFD whatever the locale, so
     they cannot keep a call out of the log."""
@@ -937,8 +964,13 @@ def main(argv: list[str]) -> int:
             return 0
         mode = argv[0] if argv else None
         if mode == "--report":  # the person's own view: on or off, no stdin, no recording
+            kwargs = _report_args(argv[1:])
             try:
-                text = report(**_report_args(argv[1:]))
+                if kwargs.pop("export", False):
+                    kwargs.pop("rule", None)
+                    _write_bytes(export_bytes(**kwargs))
+                    return 0
+                text = report(**kwargs)
             except Exception as exc:
                 text = ("AgentAvow activity: the report could not be built "
                         f"({type(exc).__name__}).")
