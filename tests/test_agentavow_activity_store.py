@@ -425,3 +425,66 @@ def test_torn_write_then_lost_state_save_is_not_a_false_break(tmp_path, monkeypa
     assert A.append_event("s1", {"i": 5}, now=T0)["seq"] == 5
     assert A.verify_session("s1") == [4]
     assert A.load_state("s1")["breaks"] == []
+
+
+# --- fix round 4: a line that lost only its trailing newline is healed, not flagged ---
+
+
+def _strip_last_newline(log):
+    data = log.read_bytes()
+    assert data.endswith(b"\n")
+    log.write_bytes(data[:-1])
+
+
+def test_line_missing_only_its_newline_is_not_flagged(tmp_path, monkeypatch):
+    log, _ = _three(monkeypatch, tmp_path)
+    A.append_event("s1", {"i": 3}, now=T0)
+    _strip_last_newline(log)  # line 4 complete but unterminated (state saved)
+    assert A.verify_session("s1") == []
+    assert A.append_event("s1", {"i": 4}, now=T0)["seq"] == 5
+    A.append_event("s1", {"i": 5}, now=T0)
+    assert _seqs(log) == [1, 2, 3, 4, 5, 6]
+    assert A.verify_session("s1") == []
+
+
+def test_newline_only_tear_then_killed_recovery_is_clean(tmp_path, monkeypatch):
+    log, state = _three(monkeypatch, tmp_path)
+    snap = state.read_bytes()
+    A.append_event("s1", {"i": 3}, now=T0)
+    state.write_bytes(snap)  # the write was killed before the state save ...
+    _strip_last_newline(log)  # ... and before its newline reached the disk
+    real = A.save_state
+    monkeypatch.setattr(A, "save_state", lambda *a, **k: (_ for _ in ()).throw(OSError("full")))
+    assert A.append_event("s1", {"i": 4}, now=T0) is None  # log written, state save lost
+    monkeypatch.setattr(A, "save_state", real)
+    assert A.append_event("s1", {"i": 5}, now=T0)["seq"] == 6
+    assert _seqs(log) == [1, 2, 3, 4, 5, 6]
+    assert A.verify_session("s1") == []
+    assert A.load_state("s1")["breaks"] == []
+
+
+def test_first_line_missing_only_its_newline_is_not_flagged(tmp_path, monkeypatch):
+    monkeypatch.setattr(A, "ACTIVITY_DIR", tmp_path / "act")
+    A.append_event("s1", {"i": 0}, now=T0)
+    log, state = A.session_paths("s1", T0)
+    state.unlink()  # killed before the first state save
+    _strip_last_newline(log)
+    assert A.append_event("s1", {"i": 1}, now=T0)["seq"] == 2
+    assert _seqs(log) == [1, 2]
+    assert A.verify_session("s1") == []
+
+
+def test_dropping_last_line_with_the_newline_before_it_is_flagged(tmp_path, monkeypatch):
+    log, _ = _four(monkeypatch, tmp_path)
+    log.write_bytes(b"\n".join(_lines(log)[:3]))  # line 3 now unterminated
+    assert A.verify_session("s1") != []
+    A.append_event("s1", {"i": 9}, now=T0)
+    assert A.verify_session("s1") != []
+
+
+def test_editing_last_line_and_stripping_its_newline_is_flagged(tmp_path, monkeypatch):
+    log, _ = _three(monkeypatch, tmp_path)
+    log.write_bytes(log.read_bytes()[:-1].replace(b'"i":2', b'"i":9'))
+    assert A.verify_session("s1") != []
+    A.append_event("s1", {"i": 3}, now=T0)
+    assert A.verify_session("s1") != []

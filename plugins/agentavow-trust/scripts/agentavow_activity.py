@@ -136,7 +136,9 @@ def _tail(log_file: pathlib.Path) -> dict:
     Keys: ``torn`` (non-empty file not ending in a newline), ``last_line`` (the
     torn bytes when torn, else the last complete line, else None), and for the
     last complete line ``seq``, ``prev`` and ``hash`` (None when there is none
-    or it does not parse).
+    or it does not parse). Unterminated bytes that are exactly the next chained
+    line (only the newline was lost) count as the last complete line, with
+    ``torn`` still set.
     """
     info = _tail_empty()
     size = log_file.stat().st_size
@@ -156,6 +158,8 @@ def _tail(log_file: pathlib.Path) -> dict:
     parts = data.split(b"\n")
     info["torn"] = parts[-1] != b""
     complete = parts[:-1]
+    if info["torn"] and _lost_only_newline(parts[-1], complete):
+        complete = parts  # a whole line; ``torn`` stays set so the writer adds the newline
     info["last_line"] = parts[-1] if info["torn"] else (complete[-1] if complete else None)
     if len(complete) >= 2:
         # Torn-line recovery: the line before the last is unparseable, and its
@@ -183,6 +187,30 @@ def _tail(log_file: pathlib.Path) -> dict:
         except (ValueError, KeyError, TypeError, AttributeError):
             pass
     return info
+
+
+def _lost_only_newline(raw: bytes, complete: list[bytes]) -> bool:
+    """True when unterminated bytes are exactly the next chained line, minus its newline.
+
+    Their ``prev`` must be the hash of the last complete line and their ``seq``
+    that line's seq + 1 (None and 1 when there is no complete line).
+    """
+    want_seq, want_prev = 1, None
+    try:
+        obj = json.loads(raw)
+        if complete:
+            before = json.loads(complete[-1])
+            want_seq = before["seq"] + 1 if type(before["seq"]) is int else None
+            want_prev = hashlib.sha256(complete[-1]).hexdigest()
+    except (ValueError, KeyError, TypeError):
+        return False
+    return (
+        isinstance(obj, dict)
+        and want_seq is not None
+        and type(obj.get("seq")) is int
+        and obj["seq"] == want_seq
+        and obj.get("prev") == want_prev
+    )
 
 
 def _tail_mismatch(state: dict, tail: dict) -> bool:
