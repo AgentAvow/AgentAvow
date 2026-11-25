@@ -10,6 +10,7 @@ the event is simply not recorded.
 """
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import hashlib
 import json
@@ -61,6 +62,7 @@ def _fresh_state() -> dict:
         "cwd": None,
         "total_checked_ts": None,
         "total_over": False,
+        "breaks": [],
     }
 
 
@@ -128,16 +130,18 @@ def session_paths(session_id: str, now: datetime) -> tuple[pathlib.Path, pathlib
     return ACTIVITY_DIR / day / (sid + ".jsonl"), _state_path(session_id)
 
 
-def _tail(log_file: pathlib.Path) -> tuple[bool, bytes | None, int | None]:
-    """Return (torn, last_line, last_complete_seq) from the end of the log.
+def _tail(log_file: pathlib.Path) -> dict:
+    """Describe the end of the log.
 
-    ``torn`` is true when the file is non-empty and does not end in a newline;
-    ``last_line`` is then the torn bytes, which become one (flagged) line.
-    ``last_complete_seq`` is the seq of the last complete, parseable line.
+    Keys: ``torn`` (non-empty file not ending in a newline), ``last_line`` (the
+    torn bytes when torn, else the last complete line, else None), and for the
+    last complete line ``seq``, ``prev`` and ``hash`` (None when there is none
+    or it does not parse).
     """
+    info = _tail_empty()
     size = log_file.stat().st_size
     if size == 0:
-        return False, None, None
+        return info
     chunk = 65536
     with open(log_file, "rb") as f:
         while True:
@@ -150,16 +154,75 @@ def _tail(log_file: pathlib.Path) -> tuple[bool, bytes | None, int | None]:
     if start > 0:
         data = data[data.index(b"\n") + 1:]
     parts = data.split(b"\n")
-    torn = parts[-1] != b""
+    info["torn"] = parts[-1] != b""
     complete = parts[:-1]
-    last_line = parts[-1] if torn else (complete[-1] if complete else None)
-    seq = None
+    info["last_line"] = parts[-1] if info["torn"] else (complete[-1] if complete else None)
     if complete:
+        info["hash"] = hashlib.sha256(complete[-1]).hexdigest()
         try:
-            seq = int(json.loads(complete[-1])["seq"])
-        except (ValueError, KeyError, TypeError):
-            seq = None
-    return torn, last_line, seq
+            obj = json.loads(complete[-1])
+            info["seq"], info["prev"] = int(obj["seq"]), obj.get("prev")
+        except (ValueError, KeyError, TypeError, AttributeError):
+            pass
+    return info
+
+
+def _tail_mismatch(state: dict, tail: dict) -> bool:
+    """True when the log's last complete line contradicts the state.
+
+    The log is written before the state, so the state may lag the log (a kill
+    between the two writes, or two in a row) but is never legitimately ahead.
+    """
+    s = int(state.get("seq") or 0)
+    if s == 0:
+        return False
+    if tail["hash"] is None:
+        return tail["last_line"] is None  # empty or missing log, state says otherwise
+    if tail["seq"] is None:
+        return False  # unparseable last line: verify_chain flags it
+    if tail["seq"] < s:
+        return True
+    if tail["seq"] == s:
+        return tail["hash"] != state.get("prev")
+    if tail["seq"] == s + 1:
+        return tail["prev"] != state.get("prev")
+    return False
+
+
+def _count_lines(log_file: pathlib.Path) -> int:
+    try:
+        data = log_file.read_bytes()
+    except OSError:
+        return 0
+    return data.count(b"\n") + (1 if data and not data.endswith(b"\n") else 0)
+
+
+_held: dict[str, int] = {}
+
+
+@contextlib.contextmanager
+def session_lock(session_id: str):
+    """Hold the session's flock. Re-entrant in-process: append_event inside it is safe."""
+    sid = _sid(session_id)
+    if _held.get(sid):
+        _held[sid] += 1
+        try:
+            yield
+        finally:
+            _held[sid] -= 1
+        return
+    _mkdir(ACTIVITY_DIR)
+    _mkdir(ACTIVITY_DIR / "sessions")
+    fd = os.open(_lock_path(session_id), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        _held[sid] = 1
+        try:
+            yield
+        finally:
+            _held.pop(sid, None)
+    finally:
+        os.close(fd)
 
 
 def _mkdir(path: pathlib.Path) -> None:
@@ -202,17 +265,32 @@ def append_event(
 
 def _append_event(session_id: str, event: dict, flagged: bool, now: datetime | None) -> dict | None:
     now = now or datetime.now(timezone.utc)
-    _mkdir(ACTIVITY_DIR)
-    _mkdir(ACTIVITY_DIR / "sessions")
-    lock_fd = os.open(_lock_path(session_id), os.O_RDWR | os.O_CREAT, 0o600)
-    try:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+    with session_lock(session_id):
         state = load_state(session_id)
         if not state.get("day"):
             state["day"] = _find_day(session_id) or now.strftime("%Y-%m-%d")
         log_dir = ACTIVITY_DIR / state["day"]
         _mkdir(log_dir)
         log_file = log_dir / (_sid(session_id) + ".jsonl")
+
+        # The log is the source of truth for seq and prev (the state may be lost or stale).
+        tail = _tail(log_file) if log_file.exists() else _tail_empty()
+        seq_base = tail["seq"]
+        if seq_base is None and tail["last_line"] is not None:
+            seq_base = int(state.get("seq") or 0)
+        seq_base = seq_base or 0
+        if _tail_mismatch(state, tail):
+            breaks = list(state.get("breaks") or [])
+            breaks.append(
+                {
+                    "line": _count_lines(log_file) + 1,
+                    "state_seq": int(state.get("seq") or 0),
+                    "log_seq": tail["seq"] or 0,
+                    "ts": now.isoformat(),
+                }
+            )
+            state["breaks"] = breaks[-100:]
+            seq_base = max(seq_base, int(state.get("seq") or 0))
 
         # Caps: past either one, only flagged events are still written.
         over = False
@@ -231,103 +309,97 @@ def _append_event(session_id: str, event: dict, flagged: bool, now: datetime | N
             save_state(session_id, state)
             return None
 
-        # The log is the source of truth for seq and prev (the state may be lost or stale).
-        torn, last_line, last_seq = (False, None, None)
-        if log_file.exists():
-            torn, last_line, last_seq = _tail(log_file)
-        if last_line is None:
-            seq, prev = 1, None
-        else:
-            if last_seq is None:
-                last_seq = int(state.get("seq") or 0)
-            seq, prev = last_seq + 1, hashlib.sha256(last_line).hexdigest()
-
+        prev = hashlib.sha256(tail["last_line"]).hexdigest() if tail["last_line"] else None
         line = dict(event)
         line["v"] = 0
-        line["seq"] = seq
+        line["seq"] = seq_base + 1
         line["prev"] = prev
         raw = json.dumps(
             line, sort_keys=True, separators=(",", ":"), ensure_ascii=False
         ).encode("utf-8")
         fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         try:
-            _write_all(fd, (b"\n" if torn else b"") + raw + b"\n")
+            _write_all(fd, (b"\n" if tail["torn"] else b"") + raw + b"\n")
         finally:
             os.close(fd)
         state["seq"] = line["seq"]
         state["prev"] = hashlib.sha256(raw).hexdigest()
         save_state(session_id, state)
         return line
-    finally:
-        os.close(lock_fd)
+
+
+def _tail_empty() -> dict:
+    return {"torn": False, "last_line": None, "seq": None, "prev": None, "hash": None}
 
 
 def verify_chain(log_file: pathlib.Path) -> list[int]:
-    """Return the 1-based line numbers whose ``prev`` does not match the line before."""
+    """Return the 1-based line numbers that break the chain.
+
+    A line breaks it when its ``prev`` is not the hash of the line before, or its
+    ``seq`` is not the previous line's ``seq`` + 1 (the first line must be 1).
+    """
     try:
         data = pathlib.Path(log_file).read_bytes()
     except OSError:
         return []
     broken: list[int] = []
     prev_hash = None
+    prev_seq: int | None = 0
     lines = data.split(b"\n")
-    if data.endswith(b"\n"):
+    if data.endswith(b"\n") or not data:
         lines.pop()
     for n, raw in enumerate(lines, 1):
+        bad = False
+        seq = None
         try:
-            prev = json.loads(raw).get("prev")
+            obj = json.loads(raw)
+            bad = obj.get("prev") != prev_hash
+            seq = obj.get("seq")
+            seq = seq if isinstance(seq, int) else None
         except (ValueError, AttributeError):
-            prev = object()
-        if prev != prev_hash:
+            bad = True
+        if prev_seq is not None and seq != prev_seq + 1:
+            bad = True
+        if bad:
             broken.append(n)
         prev_hash = hashlib.sha256(raw).hexdigest()
+        prev_seq = seq
     return broken
 
 
 def verify_session(session_id: str) -> list[int]:
-    """verify_chain on the session's log, plus a check of its tail against the state.
+    """Every break in a session's log, as sorted unique line numbers.
 
-    Catches a cut or edited tail, which the chain alone cannot see. The state may
-    be exactly one event behind the log (a kill between the log write and the
-    state write). A break is reported at ``len(lines) + 1``.
+    The union of the chain check, the breaks recorded in the state when an append
+    found the log contradicting it, and a live check of the log's tail against the
+    state (which catches a cut or edited tail). The state may lag the log by any
+    number of events (kills between the log write and the state write). A tail
+    break is reported at ``len(lines) + 1``.
     """
     log_file, _ = session_paths(session_id, datetime.now(timezone.utc))
-    broken = verify_chain(log_file)
+    broken = set(verify_chain(log_file))
     state = load_state(session_id)
-    state_seq = int(state.get("seq") or 0)
-    if state_seq == 0:
-        return broken
-    try:
-        data = log_file.read_bytes()
-    except OSError:
-        data = b""
-    lines = data.split(b"\n")
-    lines = lines[:-1] if data.endswith(b"\n") or not data else lines
-    n = len(lines)
-    last_seq, last_prev = 0, None
-    if n:
+    for b in state.get("breaks") or []:
         try:
-            obj = json.loads(lines[-1])
-            last_seq, last_prev = int(obj.get("seq") or 0), obj.get("prev")
-        except (ValueError, AttributeError, TypeError):
-            last_seq = -1
-    last_hash = hashlib.sha256(lines[-1]).hexdigest() if n else None
-    if n == 0 or last_seq < state_seq:
-        ok = False
-    elif last_seq == state_seq:
-        ok = last_hash == state.get("prev")
-    elif last_seq == state_seq + 1:
-        ok = last_prev == state.get("prev")
-    else:
-        ok = True  # state far behind the log: nothing to compare against
-    if not ok and (n + 1) not in broken:
-        broken.append(n + 1)
-    return broken
+            broken.add(int(b["line"]))
+        except (KeyError, TypeError, ValueError):
+            pass
+    if int(state.get("seq") or 0) > 0:
+        tail = _tail(log_file) if log_file.exists() else _tail_empty()
+        if _tail_mismatch(state, tail):
+            broken.add(_count_lines(log_file) + 1)
+    return sorted(broken)
 
 
 def cleanup(now: datetime) -> None:
     """Delete day folders older than 30 days, with the state files of their sessions."""
     cutoff = (now - timedelta(days=RETENTION_DAYS)).strftime("%Y-%m-%d")
+    try:
+        for f in os.scandir(ACTIVITY_DIR / "sessions"):
+            if f.name.endswith(".tmp") and f.stat().st_mtime < now.timestamp() - 3600:
+                _unlink(f.path)
+    except OSError:
+        pass
     try:
         entries = list(os.scandir(ACTIVITY_DIR))
     except OSError:

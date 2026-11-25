@@ -265,3 +265,149 @@ def test_clean_session_and_state_one_behind(tmp_path, monkeypatch):
     log, _ = _three(monkeypatch, tmp_path)
     assert A.verify_session("s1") == []
     assert A.verify_session("never-seen") == []
+
+
+# --- fix round 2: breaks survive the next append; session_lock; write guards ---
+
+
+def _four(monkeypatch, tmp_path):
+    monkeypatch.setattr(A, "ACTIVITY_DIR", tmp_path / "act")
+    for i in range(4):
+        A.append_event("s1", {"i": i}, now=T0)
+    return A.session_paths("s1", T0)
+
+
+def test_cut_then_append_keeps_the_break(tmp_path, monkeypatch):
+    log, _ = _four(monkeypatch, tmp_path)
+    log.write_bytes(b"\n".join(_lines(log)[:2]) + b"\n")
+    assert A.append_event("s1", {"i": 9}, now=T0)["seq"] == 5
+    assert _seqs(log) == [1, 2, 5]
+    assert 3 in A.verify_chain(log)
+    assert 3 in A.verify_session("s1")
+    assert A.load_state("s1")["breaks"][0]["line"] == 3
+
+
+def test_edited_last_then_append_keeps_the_break(tmp_path, monkeypatch):
+    log, _ = _three(monkeypatch, tmp_path)
+    lines = _lines(log)
+    lines[2] = lines[2].replace(b'"i":2', b'"i":7')
+    log.write_bytes(b"\n".join(lines) + b"\n")
+    A.append_event("s1", {"i": 3}, now=T0)
+    assert 4 in A.verify_session("s1")
+
+
+def test_emptied_then_append_keeps_the_break(tmp_path, monkeypatch):
+    log, _ = _three(monkeypatch, tmp_path)
+    log.write_bytes(b"")
+    A.append_event("s1", {"i": 3}, now=T0)
+    assert 1 in A.verify_session("s1")
+
+
+def test_break_survives_lost_state(tmp_path, monkeypatch):
+    log, state = _four(monkeypatch, tmp_path)
+    log.write_bytes(b"\n".join(_lines(log)[:2]) + b"\n")
+    A.append_event("s1", {"i": 9}, now=T0)
+    state.unlink()
+    assert 3 in A.verify_session("s1")
+
+
+def test_state_two_behind_is_clean(tmp_path, monkeypatch):
+    log, _ = _three(monkeypatch, tmp_path)
+    st = A.load_state("s1")
+    st["seq"] = 1
+    st["prev"] = hashlib.sha256(_lines(log)[0]).hexdigest()
+    A.save_state("s1", st)
+    assert A.verify_session("s1") == []
+    A.append_event("s1", {"i": 3}, now=T0)
+    assert _seqs(log) == [1, 2, 3, 4]
+    assert A.verify_session("s1") == []
+    assert A.load_state("s1")["breaks"] == []
+
+
+def test_breaks_keep_newest_100(tmp_path, monkeypatch):
+    log, _ = _three(monkeypatch, tmp_path)
+    for _ in range(105):
+        st = A.load_state("s1")
+        st["seq"] = st["seq"] + 5  # state ahead of the log
+        A.save_state("s1", st)
+        A.append_event("s1", {"i": 0}, now=T0)
+    assert len(A.load_state("s1")["breaks"]) == 100
+
+
+def test_session_lock_is_reentrant_for_append(tmp_path, monkeypatch):
+    import threading
+
+    monkeypatch.setattr(A, "ACTIVITY_DIR", tmp_path / "act")
+    result = []
+
+    def run():
+        with A.session_lock("s1"):
+            st = A.load_state("s1")
+            st["shown_rules"] = ["r1"]
+            A.save_state("s1", st)
+            result.append(A.append_event("s1", {"i": 1}, now=T0))
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(10)
+    assert not t.is_alive(), "append_event deadlocked under session_lock"
+    assert result[0]["seq"] == 1
+    assert A.load_state("s1")["shown_rules"] == ["r1"]
+
+
+def test_session_lock_excludes_other_processes(tmp_path):
+    act = tmp_path / "act"
+    ctx = multiprocessing.get_context("fork")
+    ready, go = ctx.Event(), ctx.Event()
+
+    def holder():
+        mod = _load()
+        mod.ACTIVITY_DIR = act
+        with mod.session_lock("s1"):
+            ready.set()
+            go.wait(10)
+
+    p = ctx.Process(target=holder)
+    p.start()
+    assert ready.wait(10)
+    q = ctx.Process(target=_worker, args=(str(act), "s1", 1))
+    q.start()
+    q.join(0.5)
+    assert q.is_alive()  # blocked on the lock
+    go.set()
+    q.join(10)
+    p.join(10)
+    assert q.exitcode == 0
+    assert A.verify_chain(act / "2026-11-25" / "s1.jsonl") == []
+
+
+def test_short_write_still_yields_whole_line(tmp_path, monkeypatch):
+    monkeypatch.setattr(A, "ACTIVITY_DIR", tmp_path / "act")
+    real = os.write
+    calls = []
+
+    def fake(fd, data):
+        calls.append(1)
+        return real(fd, bytes(data)[:5]) if len(calls) == 1 else real(fd, data)
+
+    with monkeypatch.context() as m:
+        m.setattr(A.os, "write", fake)
+        assert A.append_event("s1", {"i": 1}, now=T0) is not None
+    log, _ = A.session_paths("s1", T0)
+    assert A.verify_chain(log) == [] and len(_lines(log)) == 1
+    json.loads(_lines(log)[0])
+
+
+def test_save_state_leaves_no_tmp_and_cleanup_removes_stale_tmp(tmp_path, monkeypatch):
+    monkeypatch.setattr(A, "ACTIVITY_DIR", tmp_path / "act")
+    A.append_event("s1", {"i": 1}, now=T0)
+    sess = tmp_path / "act" / "sessions"
+    assert list(sess.glob("*.tmp")) == []
+    stale, fresh = sess / "a.json.1.tmp", sess / "b.json.2.tmp"
+    stale.write_text("x")
+    fresh.write_text("x")
+    old = T0.timestamp() - 7200
+    os.utime(stale, (old, old))
+    os.utime(fresh, (T0.timestamp() - 60, T0.timestamp() - 60))
+    A.cleanup(T0)
+    assert not stale.exists() and fresh.exists()
