@@ -477,6 +477,32 @@ def test_run_hook_and_enabled_agree_on_the_switch(tmp_path, monkeypatch):
         assert run(other, value) == "ran"
 
 
+@pytest.mark.parametrize("switch,args", [(None, []), ("off", ["--session-end"]),
+                                         (None, ["--session-start"]), (None, ["--notes"]),
+                                         ("on", ["--notes"])])
+def test_off_launcher_drains_a_big_payload(tmp_path, switch, args):
+    """With the log off (or no note pending) the launcher still reads stdin to the end,
+    without Python, so the host never gets a broken pipe on a big PostToolUse payload."""
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home)}
+    if switch:
+        env["AGENTAVOW_ACTIVITY"] = switch
+    big = json.dumps(_payload("PostToolUse", tool_response={"stdout": "x" * 300_000})).encode()
+    assert len(big) > 300_000
+    proc = subprocess.Popen(["sh", str(LAUNCHER), str(MODULE), *args], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    try:
+        proc.stdin.write(big)
+        proc.stdin.close()
+    except BrokenPipeError:
+        proc.kill()
+        pytest.fail("the launcher exited before reading stdin")
+    out, err = proc.stdout.read(), proc.stderr.read()
+    assert (proc.wait(timeout=30), out, err) == (0, b"", b"")
+    assert not (home / ".cache").exists()
+
+
 def test_readme_names_every_hook_script():
     readme = (PLUGIN_DIR / "README.md").read_text()
     for script in sorted((PLUGIN_DIR / "scripts").glob("*.py")):
