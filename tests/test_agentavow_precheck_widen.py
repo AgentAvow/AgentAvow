@@ -304,7 +304,7 @@ def test_first_session_with_nothing_still_shows_the_intro(hook, monkeypatch, cap
 def test_hooks_launch_through_the_sh_wrapper():
     hooks = json.loads((PLUGIN_DIR / "hooks" / "hooks.json").read_text())["hooks"]
     commands = [h["command"] for group in hooks.values() for m in group for h in m["hooks"]]
-    assert len(commands) == 3
+    assert len(commands) == 10  # 3 checks + 7 activity-log entries (0.1.47)
     for c in commands:
         assert c.startswith('sh "${CLAUDE_PLUGIN_ROOT}/scripts/run_hook.sh" "${CLAUDE_PLUGIN_ROOT}/')
     assert "os.environ" not in LAUNCHER.read_text()

@@ -93,6 +93,7 @@ def test_versions_agree():
     assert _load(PLUGIN_DIR / "scripts" / "agentavow_pre_install.py").__version__ == plugin["version"]
     codex = json.loads((PLUGIN_DIR / ".codex-plugin" / "plugin.json").read_text())
     assert codex["version"] == plugin["version"]
+    assert _load(PLUGIN_DIR / "scripts" / "agentavow_activity.py").__version__ == plugin["version"]
 
 
 def test_plugin_registers_both_hooks_with_short_timeouts():

@@ -1,24 +1,48 @@
 #!/usr/bin/env python3
 """AgentAvow local activity log: what the agent did in a session, kept on this machine.
 
-Entry-point module. This part holds the storage layer: one append-only JSON Lines
-file per session with a SHA-256 hash chain (tamper evidence), a per-session state
-file guarded by an flock, size caps and 30-day cleanup. Standard library only.
+Entry-point module, run by hooks/hooks.json through run_hook.sh:
 
-Fail-open: ``append_event`` never raises. A full disk or a read-only folder means
-the event is simply not recorded.
+    agentavow_activity.py                  record one event from the stdin payload (async)
+    agentavow_activity.py --session-start  record SessionStart, then 30-day cleanup
+    agentavow_activity.py --session-end    record SessionEnd (append only, nothing else)
+    agentavow_activity.py --notes|--report not built yet: exit 0, print nothing
+
+It is off unless AGENTAVOW_ACTIVITY=on, and off on Windows. The recorder never prints
+anything: no decision, no message. Only a summary of each event is kept (see
+agentavow_activity_redact.py), never prompts, assistant messages or tool output.
+
+The storage layer: one append-only JSON Lines file per session with a SHA-256 hash
+chain (tamper evidence), a per-session state file guarded by an flock, size caps and
+30-day cleanup. Standard library only.
+
+Fail-open: ``main`` and ``append_event`` never raise. A full disk, a read-only folder
+or a bad payload means the event is simply not recorded.
 """
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import hashlib
 import json
 import os
 import pathlib
 import re
+import sys
 import time
 from datetime import datetime, timedelta, timezone
+
+try:
+    import fcntl
+except ImportError:  # Windows: the log is off there, and main() returns first
+    fcntl = None
+
+# Sibling modules: the script's folder is sys.path[0] when run as a hook, but not when
+# this file is loaded by path (tests), so make sure it is there.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+import agentavow_activity_redact as _redact  # noqa: E402
 
 __version__ = "0.1.46"
 
@@ -476,3 +500,127 @@ def cleanup(now: datetime) -> None:
             os.rmdir(d.path)
         except OSError:
             pass
+
+
+# ---------------------------------------------------------------------------
+# Recorder: payload -> event line
+# ---------------------------------------------------------------------------
+
+EVENTS = frozenset({
+    "PreToolUse", "PostToolUse", "PostToolUseFailure",
+    "SessionStart", "SessionEnd", "SubagentStart", "SubagentStop",
+})
+TOOL_EVENTS = frozenset({"PreToolUse", "PostToolUse", "PostToolUseFailure"})
+
+
+def _enabled() -> bool:
+    """Release 1: on only when AGENTAVOW_ACTIVITY is ``on`` (any case)."""
+    return os.environ.get("AGENTAVOW_ACTIVITY", "").strip().lower() == "on"
+
+
+def _text(value: object) -> str | None:
+    return _redact.cut(value, _redact.TEXT_LIMIT) if isinstance(value, str) else None
+
+
+def _gate():
+    """The pre-tool gate module (same folder), for its MCP name split and cache lookup."""
+    import agentavow_pretool_gate
+
+    return agentavow_pretool_gate
+
+
+def _answer(server: str) -> str | None:
+    """The server's AgentAvow answer (safe, review or do_not_connect) from scanned.json.
+
+    Read-only; any failure means no answer.
+    """
+    try:
+        gate = _gate()
+        cache = json.loads(gate.CACHE.read_text("utf-8"))
+        found = gate.find_record(cache, server) if isinstance(cache, dict) else None
+        if found:
+            decision = found[1].get("decision")
+            if decision in gate.DECISION_PHRASES:
+                return decision
+    except Exception:
+        pass
+    return None
+
+
+def build_event(payload: dict, *, now: datetime | None = None) -> dict | None:
+    """The fields to record for one hook payload, or None when it is not one to record.
+
+    Only named fields are copied. Prompts, assistant messages, tool output and
+    transcript paths are never read into the event.
+    """
+    if not isinstance(payload, dict):
+        return None
+    event = payload.get("hook_event_name")
+    session = payload.get("session_id")
+    if event not in EVENTS or not isinstance(session, str) or not session:
+        return None
+    now = now or datetime.now(timezone.utc)
+    out: dict = {
+        "ts": now.isoformat(timespec="milliseconds"),
+        "agent": "codex" if "turn_id" in payload else "claude-code",
+        "event": event,
+        "session": _text(session),
+        "cwd": _text(payload.get("cwd")),
+    }
+    if payload.get("agent_id") is not None:
+        out["subagent"] = {"id": _text(str(payload["agent_id"])),
+                           "type": _text(payload.get("agent_type"))}
+    duration = payload.get("duration_ms")
+    if isinstance(duration, (int, float)) and not isinstance(duration, bool):
+        out["duration_ms"] = duration
+    if event == "SessionStart" and isinstance(payload.get("source"), str):
+        out["source"] = _text(payload["source"])
+    if event == "SessionEnd" and isinstance(payload.get("reason"), str):
+        out["reason"] = _text(payload["reason"])
+    if event in TOOL_EVENTS:
+        tool = payload.get("tool_name")
+        tool = tool if isinstance(tool, str) else ""
+        out["tool"] = _text(tool)
+        out["input"] = _redact.summarize_input(tool, payload.get("tool_input"), out["cwd"])
+        if tool.startswith("mcp__"):
+            parts = _gate().parse_tool_name(tool)
+            if parts:
+                out["mcp_server"], out["mcp_tool"] = _text(parts[0]), _text(parts[1])
+                answer = _answer(parts[0])
+                if answer:
+                    out["answer"] = answer
+        if event != "PreToolUse":
+            out["ok"] = event == "PostToolUse"
+            if "tool_response" in payload:
+                out["out_bytes"] = _redact.summarize_output(payload["tool_response"])["out_bytes"]
+    return out
+
+
+def _record(payload: object, now: datetime) -> None:
+    event = build_event(payload, now=now)
+    if event is not None:
+        append_event(payload["session_id"], event, now=now)
+
+
+def main(argv: list[str]) -> int:
+    """Hook entry point. Always returns 0 and prints nothing (fail-open)."""
+    try:
+        if os.name == "nt":
+            return 0
+        mode = argv[0] if argv else None
+        if mode not in (None, "--session-start", "--session-end"):
+            return 0  # --notes and --report come in later releases; unknown flags are ignored
+        if not _enabled():
+            return 0
+        payload = json.loads(sys.stdin.read())
+        now = datetime.now(timezone.utc)
+        _record(payload, now)
+        if mode == "--session-start":
+            cleanup(now)
+    except Exception:
+        pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
