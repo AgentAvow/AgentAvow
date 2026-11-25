@@ -699,26 +699,42 @@ def _log_files() -> list[pathlib.Path]:
     return files
 
 
+def _clean(value: object) -> str:
+    """Printable text only: ESC, CR, BEL, bidi overrides and the like become ``?``.
+
+    Everything the plain-text report prints passes through here, so a logged string
+    cannot move the cursor, overwrite a line or hide a flag on the person's terminal.
+    """
+    return "".join(c if c.isprintable() else "?" for c in str(value))
+
+
 def _short(value: object, limit: int = _SUMMARY_LIMIT) -> str:
-    text = " ".join(str(value).split())
+    text = " ".join(_clean(value).split())
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def _summary(ev: dict) -> str:
+    try:
+        return _summary_of(ev)
+    except Exception:
+        return ""
+
+
+def _summary_of(ev: dict) -> str:
     """One short line for an event, from the redacted summary the log already holds."""
     data = ev.get("input")
     if isinstance(data, dict):
         for key in ("command", "path", "url", "query"):
             if data.get(key):
                 return _short(data[key])
-        if data.get("paths"):
+        if isinstance(data.get("paths"), (list, tuple)) and data["paths"]:
             return _short(", ".join(str(p) for p in data["paths"]))
-        if data.get("pattern"):
+        if data.get("pattern") and isinstance(data["pattern"], str):
             where = f" in {data['path']}" if data.get("path") else ""
             return _short(f"{data['pattern']}{where}")
         if isinstance(data.get("args"), dict) and data["args"]:
             return _short(" ".join(f"{k}={v}" for k, v in data["args"].items()))
-        if data.get("arg_names"):
+        if isinstance(data.get("arg_names"), (list, tuple)) and data["arg_names"]:
             return _short("args: " + ", ".join(str(n) for n in data["arg_names"]))
     for key in ("source", "reason"):
         if ev.get(key):
@@ -762,7 +778,7 @@ def _warnings(stems: list[str]) -> list[str]:
         if broken:
             shown = ", ".join(str(n) for n in broken[:_MAX_WARN_LINES])
             more = ", …" if len(broken) > _MAX_WARN_LINES else ""
-            out.append(f"Warning: the log for session {stem} was changed or cut "
+            out.append(f"Warning: the log for session {_clean(stem)} was changed or cut "
                        f"(lines {shown}{more}).")
     return out
 
@@ -771,7 +787,7 @@ def report(days: int = 7, session: str | None = None, rule: str | None = None,
            export: bool = False, now: datetime | None = None) -> str:
     """The report as plain text (raw JSON lines for ``export``). Never raises on bad logs."""
     now = now or datetime.now(timezone.utc)
-    days = days if isinstance(days, int) and days > 0 else 7
+    days = min(days, 3650) if isinstance(days, int) and days > 0 else 7
     cutoff = now - timedelta(days=days)
     wanted = _sid(session) if session else None
     rows: list[tuple[dict, str, datetime, str]] = []  # event, raw, time, session stem
@@ -792,7 +808,7 @@ def report(days: int = 7, session: str | None = None, rule: str | None = None,
         return "\n".join(r[1] for r in rows)
 
     if not rows:
-        what = f"session {session}" if session else f"the last {days} days"
+        what = f"session {_clean(session)}" if session else f"the last {days} days"
         text = (f"AgentAvow activity: no events for {what}." if session
                 else f"AgentAvow activity: nothing recorded in {what}.")
         if not session and not _enabled():
@@ -800,14 +816,18 @@ def report(days: int = 7, session: str | None = None, rule: str | None = None,
         return "\n".join([*warnings, text])
 
     if session:
-        head = f"AgentAvow activity, session {session} · {len(rows)} events"
+        head = f"AgentAvow activity, session {_clean(session)} · {len(rows)} events"
         lines = []
         for ev, _raw, ts, _stem in rows:
-            name = ev.get("tool") or ev.get("event") or "?"
-            line = f"{ts.astimezone(timezone.utc):%H:%M:%S}  {name}  {_summary(ev)}".rstrip()
-            flag = _flag_of(ev)
-            if flag:
-                line += f"  [{flag.get('severity', 'flag')}: {flag.get('note', '')}]"
+            try:
+                name = _short(ev.get("tool") or ev.get("event") or "?", 80)
+                line = f"{ts.astimezone(timezone.utc):%H:%M:%S}  {name}  {_summary(ev)}".rstrip()
+                flag = _flag_of(ev)
+                if flag:
+                    line += (f"  [{_short(flag.get('severity', 'flag'), 20)}: "
+                             f"{_short(flag.get('note', ''), 160)}]")
+            except Exception:
+                line = f"{ts:%H:%M:%S}  ?"
             lines.append(line)
         return "\n".join([*warnings, head, *lines])
 
@@ -823,10 +843,14 @@ def report(days: int = 7, session: str | None = None, rule: str | None = None,
             f"{len(flags)} flags")
     out = [*warnings, head, ""]
     for ev, flag, ts, stem in flags:
-        label = _SEVERITY.get(str(flag.get("severity")).lower(), (3, str(flag.get("severity", "?")).upper()))[1]
-        out.append(f"{label:<5} {_day_text(ts)} {ts:%H:%M}  {_short(flag.get('note', ''), 160)}")
-        agent = "Codex" if ev.get("agent") == "codex" else "Claude Code"
-        out.append(f"      session {stem} ({agent}, {_short(ev.get('cwd') or '?', 60)})")
+        try:
+            label = _SEVERITY.get(str(flag.get("severity")).lower(),
+                                  (3, _short(flag.get("severity", "?"), 12).upper()))[1]
+            agent = "Codex" if ev.get("agent") == "codex" else "Claude Code"
+            out.append(f"{label:<5} {_day_text(ts)} {ts:%H:%M}  {_short(flag.get('note', ''), 160)}")
+            out.append(f"      session {_clean(stem)} ({agent}, {_short(ev.get('cwd') or '?', 60)})")
+        except Exception:
+            out.append(f"?     {_day_text(ts)} {ts:%H:%M}  (flag could not be shown)")
     if flags:
         out.append("")
     counts: dict[str, int] = {}
@@ -837,19 +861,21 @@ def report(days: int = 7, session: str | None = None, rule: str | None = None,
             counts[_group(tool)] = counts.get(_group(tool), 0) + 1
         server = ev.get("mcp_server")
         if isinstance(server, str) and server:
-            answer = ev.get("answer") if ev.get("answer") in _ANSWER_WORDS else None
+            answer = ev.get("answer")
+            answer = answer if isinstance(answer, str) and answer in _ANSWER_WORDS else None
             servers[server] = answer or servers.get(server)
     if counts:
         top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:3]
-        out.append("Most active: " + " · ".join(f"{n} {c:,}" for n, c in top))
+        out.append("Most active: " + " · ".join(f"{_short(n, 60)} {c:,}" for n, c in top))
     if servers:
         answers = set(servers.values())
         if len(answers) == 1 and None not in answers:
-            out.append(f"MCP servers called: {', '.join(servers)} "
+            out.append(f"MCP servers called: {', '.join(_short(n, 60) for n in servers)} "
                        f"(all {_ANSWER_WORDS[answers.pop()]})")
         else:
             out.append("MCP servers called: " + ", ".join(
-                f"{n} ({_ANSWER_WORDS.get(a, 'not scanned')})" for n, a in servers.items()))
+                f"{_short(n, 60)} ({_ANSWER_WORDS.get(a, 'not scanned')})"
+                for n, a in servers.items()))
     return "\n".join(out).rstrip()
 
 
@@ -880,7 +906,12 @@ def main(argv: list[str]) -> int:
             return 0
         mode = argv[0] if argv else None
         if mode == "--report":  # the person's own view: on or off, no stdin, no recording
-            print(report(**_report_args(argv[1:])))
+            try:
+                text = report(**_report_args(argv[1:]))
+            except Exception as exc:
+                text = ("AgentAvow activity: the report could not be built "
+                        f"({type(exc).__name__}).")
+            print(text)
             return 0
         if mode not in (None, "--session-start", "--session-end"):
             return 0  # --notes comes in a later release; unknown flags are ignored

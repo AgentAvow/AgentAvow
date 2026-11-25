@@ -159,3 +159,63 @@ def test_main_report_prints_and_never_reads_stdin(act, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out.splitlines()[0])["v"] == 0
     assert A.main(["--report", "--days", "bogus"]) == 0
     assert capsys.readouterr().out.startswith("AgentAvow activity, ")
+
+
+# --- fix round 1: odd field types, terminal escapes -------------------------------
+
+
+def test_odd_typed_fields_do_not_crash(act):
+    _add("s1", _ev("Bash"))
+    _add("s1", _ev("mcp__x__y", mcp_server="x", mcp_tool="y", answer=["safe"]))
+    _add("s1", _ev("apply_patch", input={"paths": 5, "bytes": 3}))
+    _add("s1", _ev("Grep", input={"pattern": 7, "arg_names": 9, "args": 3}))
+    _add("s1", _ev("Edit", input="oops"))
+    text = act.report(now=NOW)
+    assert "6 events" not in text and "5 events" in text
+    assert "MCP servers called: x (not scanned)" in text
+    assert len(act.report(session="s1", now=NOW).splitlines()) == 6
+
+
+def test_every_field_wrong_type_still_reports_the_rest(act):
+    _add("s1", _ev("Bash"))
+    junk = {"ts": NOW.isoformat(), "agent": 1, "event": ["a"], "session": {}, "cwd": 5,
+            "tool": {"a": 1}, "mcp_server": [1], "mcp_tool": 2, "answer": {"a": 1},
+            "input": [1], "ok": "x", "out_bytes": [], "duration_ms": {}, "source": 3,
+            "reason": [], "subagent": "s", "flag": {"rule": [], "severity": {}, "note": 4}}
+    _add("s1", junk, flagged=True)
+    _add("s1", {**junk, "flag": "str", "tool": None})
+    _add("s1", _ev("Edit"))
+    text = act.report(now=NOW)
+    assert "4 events" in text and "Most active: Bash 1 · Edit 1" in text
+    assert len(act.report(session="s1", now=NOW).splitlines()) == 5
+    assert len(act.report(export=True, now=NOW).splitlines()) == 4
+
+
+def test_huge_days_is_clamped(act):
+    _seed()
+    assert act.report(days=10**12, now=NOW).startswith("AgentAvow activity, ")
+    assert A.main(["--report", "--days", "1000000000000"]) == 0
+
+
+def test_main_prints_one_line_if_report_fails(act, monkeypatch, capsys):
+    def boom(**_):
+        raise ValueError("x")
+
+    monkeypatch.setattr(A, "report", boom)
+    assert A.main(["--report"]) == 0
+    assert capsys.readouterr().out == (
+        "AgentAvow activity: the report could not be built (ValueError).\n")
+
+
+def test_terminal_escapes_are_neutralised(act):
+    evil = "echo \x1b[2K\x1b[1Ahidden\r\x07 ‮sdrawkcab"
+    _add("s1", _ev("Bash", input={"command": evil}))
+    _add("s1", _ev("Bash", sid="s1\x1b[2K", mcp_server="sv\x1b[1A", cwd="/a\x1bb",
+                   flag={"rule": "r", "severity": "high", "note": evil}), flagged=True)
+    for text in (act.report(now=NOW), act.report(session="s1", now=NOW),
+                 act.report(session="s1\x1b[2K", now=NOW)):
+        assert not any(not c.isprintable() for c in text.replace("\n", ""))
+    assert "echo ?[2K?[1Ahidden" in act.report(session="s1", now=NOW)
+    assert "\x1b" in act.report(export=True, now=NOW) or "\\u001b" in act.report(
+        export=True, now=NOW)
+    assert not any(c in act.report(export=True, now=NOW) for c in "\x1b\r\x07")
