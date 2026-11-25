@@ -201,7 +201,8 @@ Off unless you set `AGENTAVOW_ACTIVITY=on`. Then each tool call gets a line befo
 and a line after it (a failed Claude Code call has only the line before, for now), and
 each subagent and session start or end gets one. A line holds a short, redacted summary:
 the command, the file path and size, the URL, the search query or Grep/Glob pattern, or
-MCP argument names with their values redacted and cut to 200 characters. It never
+MCP argument names with their values redacted and cut to 200 characters (a value whose
+name looks secret, such as `password`, `token` or `client_secret`, is not kept). It never
 records prompts, replies, tool output, file contents or environment values. It is kept
 in `~/.cache/agentavow/activity/` (only you can read it), and nothing in it leaves your
 machine. Logs older than 30 days are deleted at session start, even after you turn the
@@ -215,9 +216,11 @@ directly, without passing through the model, so this is the view to trust:
 ```
 
 In any terminal, run the same command without the `!`. Find the folder with
-`claude plugin list --json` (the `installPath` of `agentavow-trust`). It works whether or
-not the log is on. Options: `--days N`, `--session <id>` (one session's timeline),
-`--rule <id>` and `--export` (the raw JSON lines).
+`claude plugin list --json` (the `installPath` of `agentavow-trust`). In Codex, the
+script is in Codex's plugin cache:
+`~/.codex/plugins/cache/<marketplace>/agentavow-trust/<version>/scripts/agentavow_activity.py`.
+It works whether or not the log is on. Options: `--days N`, `--session <id>` (one
+session's timeline), `--rule <id>` and `--export` (the raw JSON lines). Times are UTC.
 
 `--export` is for saving to a file, for example `--export > activity.jsonl`: it prints each
 line exactly as stored, so the copy still checks against the hash chain.
