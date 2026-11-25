@@ -197,11 +197,14 @@ observation (tools called, network, file writes, credentials) as its own section
 
 ## Activity log (preview)
 
-Off unless you set `AGENTAVOW_ACTIVITY=on`. Then each tool call, subagent and session
-start or end gets one line with a short, redacted summary (the command, file path and
-size, URL or argument names). It never records prompts, replies, tool output, file
-contents or environment values. It is kept in `~/.cache/agentavow/activity/` (only you
-can read it) for 30 days, and nothing in it leaves your machine. Not on Windows yet.
+Off unless you set `AGENTAVOW_ACTIVITY=on`. Then each tool call gets a line before it
+and a line after it (a failed Claude Code call has only the line before, for now), and
+each subagent and session start or end gets one. A line holds a short, redacted summary:
+the command, the file path and size, the URL, the search query or Grep/Glob pattern, or
+MCP argument names with their values redacted and cut to 200 characters. It never
+records prompts, replies, tool output, file contents or environment values. It is kept
+in `~/.cache/agentavow/activity/` (only you can read it) for 30 days, and nothing in it
+leaves your machine. Not on Windows yet.
 
 ## What the hook reads and what leaves your machine
 
@@ -214,8 +217,10 @@ code, so we can count how many machines the plugin protects. To turn both off, s
 
 The hooks are three Python scripts, `scripts/agentavow_precheck.py` (session start),
 `scripts/agentavow_pre_install.py` (install time) and `scripts/agentavow_pretool_gate.py`
-(per call), started by the `scripts/run_hook.sh` launcher. They use only the standard
-library and you can read all of them.
+(per call), started by the `scripts/run_hook.sh` launcher. The activity log adds
+`scripts/agentavow_activity.py` and `scripts/agentavow_activity_redact.py`; they read
+only the hook's own input and the local cache, and send nothing. All of them use only
+the standard library and you can read all of them.
 
 **The session-start hook reads**, looking only for `mcpServers` entries:
 `~/.claude.json`, `.mcp.json` in the current folder, `.claude/settings.json` and
