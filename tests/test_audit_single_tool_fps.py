@@ -142,6 +142,62 @@ class TestBuiltinExceptionLookup:
         assert f and f[0].name == "Obfuscated eval (Python)"
 
 
+LOOKUP = "base = getattr(__builtins__, 'TimeoutError', OSError)\n"
+CLASS_USE = "isinstance(err, base)\n"
+
+
+class TestBuiltinLookupFileRules:
+    """Each file-wide rule of ``_builtin_class_lookup``: the lookup + class use alone is
+    low; any one of these additions keeps the critical."""
+
+    def test_lookup_with_class_use_alone_is_low(self):
+        assert not _crit(_scan(LOOKUP + CLASS_USE, "pkg/errors.py"))
+
+    @pytest.mark.parametrize("extra", [
+        "# see the __builtins__ docs\n",
+        "print(__builtins__)\n",
+    ])
+    def test_builtins_mentioned_off_a_lookup_line_keeps_critical(self, extra):
+        assert _crit(_scan(LOOKUP + CLASS_USE + extra, "pkg/errors.py"), "obfuscation")
+
+    def test_file_that_does_not_parse_keeps_critical(self):
+        code = LOOKUP + CLASS_USE + "def broken(:\n"
+        assert _crit(_scan(code, "pkg/errors.py"), "obfuscation")
+
+    def test_lookup_continued_from_the_line_above_keeps_critical(self):
+        code = "x = \\\n" + LOOKUP + CLASS_USE
+        assert _crit(_scan(code, "pkg/errors.py"), "obfuscation")
+
+    @pytest.mark.parametrize("extra", [
+        "try:\n    pass\nexcept KeyError as TimeoutError:\n    pass\n",
+        "def f():\n    global OSError\n",
+        "match err:\n    case TimeoutError:\n        pass\n",
+        "match err:\n    case [*OSError]:\n        pass\n",
+        "match err:\n    case {**OSError}:\n        pass\n",
+    ])
+    def test_key_or_default_bound_by_other_statements_keeps_critical(self, extra):
+        assert _crit(_scan(LOOKUP + CLASS_USE + extra, "pkg/errors.py"), "obfuscation")
+
+    @pytest.mark.parametrize("extra", [
+        "d = err.__dict__\n",
+        "import sys\nm = sys.modules\n",
+        "from builtins import print\n",
+        "from __main__ import x\n",
+    ])
+    def test_name_indirection_keeps_critical(self, extra):
+        assert _crit(_scan(LOOKUP + CLASS_USE + extra, "pkg/errors.py"), "obfuscation")
+
+
+class TestPyLogicalLines:
+    def test_spans_join_bracketed_lines(self):
+        from src.scanner.scan import _py_logical_lines
+        assert _py_logical_lines("x = (1,\n     2)\ny = 3\n") == [(0, 1), (2, 2)]
+
+    def test_text_that_does_not_tokenize_is_none(self):
+        from src.scanner.scan import _py_logical_lines
+        assert _py_logical_lines("x = (\n") is None
+
+
 # ── mitmproxy: emoji flags with a ZWJ between the tags ─────────────────────────
 
 # Verbatim lines 510 / 1364 / 1681 of mitmproxy/utils/emoji.py.
