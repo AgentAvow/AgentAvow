@@ -454,6 +454,7 @@ def test_mcp_more_secret_names_are_masked(name):
     {"label": "X-Api-Key", "value": "zz1"},
     {"variable": "API_TOKEN", "value": "zz1"},
     {"env_var": "DB_PASSWORD", "v": "zz1"},
+    {"name": " X-Api-Key ", "value": "zz1"},
 ])
 def test_mcp_secret_pair_masks_every_sibling(pair):
     for args in ({"req": {"h": [pair]}}, pair):

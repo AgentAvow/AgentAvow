@@ -217,8 +217,10 @@ def _secret_name(name: object) -> bool:
 
 def _names_secret(value: object) -> bool:
     """True when a value is itself a secret's name (``"X-Api-Key"``), not free text."""
-    return (isinstance(value, str) and _IDENTIFIER.fullmatch(value) is not None
-            and _secret_name(value))
+    if not isinstance(value, str):
+        return False
+    value = value[:256].strip()
+    return _IDENTIFIER.fullmatch(value) is not None and _secret_name(value)
 
 
 def _label_key(key: object) -> bool:
