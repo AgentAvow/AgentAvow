@@ -206,6 +206,18 @@ records prompts, replies, tool output, file contents or environment values. It i
 in `~/.cache/agentavow/activity/` (only you can read it) for 30 days, and nothing in it
 leaves your machine. Not on Windows yet.
 
+To read it, run the report yourself. In Claude Code the `!` prefix shows the output
+directly, without passing through the model, so this is the view to trust:
+
+```
+! python3 ~/.claude/plugins/cache/<marketplace>/agentavow-trust/<version>/scripts/agentavow_activity.py --report
+```
+
+In any terminal, run the same command without the `!`. Find the folder with
+`claude plugin list --json` (the `installPath` of `agentavow-trust`). It works whether or
+not the log is on. Options: `--days N`, `--session <id>` (one session's timeline),
+`--rule <id>` and `--export` (the raw JSON lines).
+
 ## What the hook reads and what leaves your machine
 
 What leaves your machine: the server URL or package name being checked, and a random

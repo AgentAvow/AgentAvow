@@ -6,7 +6,9 @@ Entry-point module, run by hooks/hooks.json through run_hook.sh:
     agentavow_activity.py                  record one event from the stdin payload (async)
     agentavow_activity.py --session-start  record SessionStart, then 30-day cleanup
     agentavow_activity.py --session-end    record SessionEnd (append only, nothing else)
-    agentavow_activity.py --notes|--report not built yet: exit 0, print nothing
+    agentavow_activity.py --notes          not built yet: exit 0, print nothing
+    agentavow_activity.py --report         print the report (plain text); the person runs it
+                                           themselves, on or off, and it reads no stdin
 
 It is off unless AGENTAVOW_ACTIVITY=on, and off on Windows. The recorder never prints
 anything: no decision, no message. Only a summary of each event is kept (see
@@ -644,14 +646,244 @@ def _record(payload: object, now: datetime) -> None:
         append_event(payload["session_id"], event, now=now)
 
 
+# ---------------------------------------------------------------------------
+# The trusted report (--report): run by the person, read-only, plain text
+# ---------------------------------------------------------------------------
+
+_DAY_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+_SEVERITY = {"high": (0, "HIGH"), "medium": (1, "MED"), "med": (1, "MED"), "low": (2, "LOW")}
+_ANSWER_WORDS = {"safe": "Safe to connect", "review": "Review before you connect",
+                 "do_not_connect": "Do not connect"}
+_SUMMARY_LIMIT = 100
+_MAX_WARN_LINES = 10
+
+
+def _parse_ts(value: object) -> datetime | None:
+    try:
+        ts = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+
+
+def _read_log(path: pathlib.Path) -> list[tuple[dict, str, datetime]]:
+    """Valid event lines of one log as (event, raw line, time); anything else is skipped."""
+    out = []
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return out
+    for raw in data.split(b"\n"):
+        try:
+            obj = json.loads(raw)
+        except ValueError:
+            continue
+        ts = _parse_ts(obj.get("ts")) if isinstance(obj, dict) else None
+        if ts is not None:
+            out.append((obj, raw.decode("utf-8", "replace"), ts))
+    return out
+
+
+def _log_files() -> list[pathlib.Path]:
+    files: list[pathlib.Path] = []
+    try:
+        days = sorted(d.name for d in os.scandir(ACTIVITY_DIR)
+                      if _DAY_RE.fullmatch(d.name) and d.is_dir(follow_symlinks=False))
+        for day in days:
+            for f in sorted(os.scandir(ACTIVITY_DIR / day), key=lambda e: e.name):
+                if f.name.endswith(".jsonl") and f.is_file(follow_symlinks=False):
+                    files.append(pathlib.Path(f.path))
+    except OSError:
+        pass
+    return files
+
+
+def _short(value: object, limit: int = _SUMMARY_LIMIT) -> str:
+    text = " ".join(str(value).split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _summary(ev: dict) -> str:
+    """One short line for an event, from the redacted summary the log already holds."""
+    data = ev.get("input")
+    if isinstance(data, dict):
+        for key in ("command", "path", "url", "query"):
+            if data.get(key):
+                return _short(data[key])
+        if data.get("paths"):
+            return _short(", ".join(str(p) for p in data["paths"]))
+        if data.get("pattern"):
+            where = f" in {data['path']}" if data.get("path") else ""
+            return _short(f"{data['pattern']}{where}")
+        if isinstance(data.get("args"), dict) and data["args"]:
+            return _short(" ".join(f"{k}={v}" for k, v in data["args"].items()))
+        if data.get("arg_names"):
+            return _short("args: " + ", ".join(str(n) for n in data["arg_names"]))
+    for key in ("source", "reason"):
+        if ev.get(key):
+            return _short(ev[key])
+    sub = ev.get("subagent")
+    if isinstance(sub, dict) and sub.get("type"):
+        return _short(f"subagent {sub['type']}")
+    return ""
+
+
+def _group(tool: str) -> str:
+    """mcp__server__tool counts under mcp__server."""
+    if tool.startswith("mcp__"):
+        return "mcp__" + tool[5:].split("__", 1)[0]
+    return tool
+
+
+def _day_text(ts: datetime) -> str:
+    return f"{_MONTHS[ts.month - 1]} {ts.day}"
+
+
+def _range_text(first: datetime, last: datetime) -> str:
+    a, b = _day_text(first), _day_text(last)
+    if a == b:
+        return a
+    return f"{a}-{b.split(' ', 1)[1]}" if first.month == last.month else f"{a}-{b}"
+
+
+def _flag_of(ev: dict) -> dict | None:
+    flag = ev.get("flag")
+    return flag if isinstance(flag, dict) else None
+
+
+def _warnings(stems: list[str]) -> list[str]:
+    out = []
+    for stem in stems:
+        try:
+            broken = verify_session(stem)
+        except Exception:
+            continue
+        if broken:
+            shown = ", ".join(str(n) for n in broken[:_MAX_WARN_LINES])
+            more = ", …" if len(broken) > _MAX_WARN_LINES else ""
+            out.append(f"Warning: the log for session {stem} was changed or cut "
+                       f"(lines {shown}{more}).")
+    return out
+
+
+def report(days: int = 7, session: str | None = None, rule: str | None = None,
+           export: bool = False, now: datetime | None = None) -> str:
+    """The report as plain text (raw JSON lines for ``export``). Never raises on bad logs."""
+    now = now or datetime.now(timezone.utc)
+    days = days if isinstance(days, int) and days > 0 else 7
+    cutoff = now - timedelta(days=days)
+    wanted = _sid(session) if session else None
+    rows: list[tuple[dict, str, datetime, str]] = []  # event, raw, time, session stem
+    stems_seen: list[str] = []
+    for path in _log_files():
+        stem = path.name[: -len(".jsonl")]
+        if wanted is not None and stem != wanted:
+            continue
+        found = _read_log(path)
+        keep = [r for r in found if wanted is not None or r[2] >= cutoff]
+        if keep or not found:
+            stems_seen.append(stem)
+        rows.extend((*r, stem) for r in keep)
+    rows.sort(key=lambda r: r[2])
+    warnings = _warnings(list(dict.fromkeys(stems_seen)))
+
+    if export:
+        return "\n".join(r[1] for r in rows)
+
+    if not rows:
+        what = f"session {session}" if session else f"the last {days} days"
+        text = (f"AgentAvow activity: no events for {what}." if session
+                else f"AgentAvow activity: nothing recorded in {what}.")
+        if not session and not _enabled():
+            text += "\nIt is off; set AGENTAVOW_ACTIVITY=on to turn it on."
+        return "\n".join([*warnings, text])
+
+    if session:
+        head = f"AgentAvow activity, session {session} · {len(rows)} events"
+        lines = []
+        for ev, _raw, ts, _stem in rows:
+            name = ev.get("tool") or ev.get("event") or "?"
+            line = f"{ts.astimezone(timezone.utc):%H:%M:%S}  {name}  {_summary(ev)}".rstrip()
+            flag = _flag_of(ev)
+            if flag:
+                line += f"  [{flag.get('severity', 'flag')}: {flag.get('note', '')}]"
+            lines.append(line)
+        return "\n".join([*warnings, head, *lines])
+
+    flags = []
+    for ev, _raw, ts, stem in rows:
+        flag = _flag_of(ev)
+        if flag and (rule is None or flag.get("rule") == rule):
+            flags.append((ev, flag, ts, stem))
+    flags.sort(key=lambda f: (_SEVERITY.get(str(f[1].get("severity")).lower(), (3, ""))[0],
+                              -f[2].timestamp()))
+    head = (f"AgentAvow activity, {_range_text(rows[0][2], rows[-1][2])} · "
+            f"{len(rows):,} events · {len(set(r[3] for r in rows))} sessions · "
+            f"{len(flags)} flags")
+    out = [*warnings, head, ""]
+    for ev, flag, ts, stem in flags:
+        label = _SEVERITY.get(str(flag.get("severity")).lower(), (3, str(flag.get("severity", "?")).upper()))[1]
+        out.append(f"{label:<5} {_day_text(ts)} {ts:%H:%M}  {_short(flag.get('note', ''), 160)}")
+        agent = "Codex" if ev.get("agent") == "codex" else "Claude Code"
+        out.append(f"      session {stem} ({agent}, {_short(ev.get('cwd') or '?', 60)})")
+    if flags:
+        out.append("")
+    counts: dict[str, int] = {}
+    servers: dict[str, str | None] = {}
+    for ev, _raw, _ts, _stem in rows:
+        tool = ev.get("tool")
+        if ev.get("event") == "PreToolUse" and isinstance(tool, str) and tool:
+            counts[_group(tool)] = counts.get(_group(tool), 0) + 1
+        server = ev.get("mcp_server")
+        if isinstance(server, str) and server:
+            answer = ev.get("answer") if ev.get("answer") in _ANSWER_WORDS else None
+            servers[server] = answer or servers.get(server)
+    if counts:
+        top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:3]
+        out.append("Most active: " + " · ".join(f"{n} {c:,}" for n, c in top))
+    if servers:
+        answers = set(servers.values())
+        if len(answers) == 1 and None not in answers:
+            out.append(f"MCP servers called: {', '.join(servers)} "
+                       f"(all {_ANSWER_WORDS[answers.pop()]})")
+        else:
+            out.append("MCP servers called: " + ", ".join(
+                f"{n} ({_ANSWER_WORDS.get(a, 'not scanned')})" for n, a in servers.items()))
+    return "\n".join(out).rstrip()
+
+
+def _report_args(argv: list[str]) -> dict:
+    kwargs: dict = {}
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--export":
+            kwargs["export"] = True
+        elif arg in ("--days", "--session", "--rule") and i + 1 < len(argv):
+            i += 1
+            if arg == "--days":
+                try:
+                    kwargs["days"] = int(argv[i])
+                except ValueError:
+                    pass
+            else:
+                kwargs[arg[2:]] = argv[i]
+        i += 1
+    return kwargs
+
+
 def main(argv: list[str]) -> int:
     """Hook entry point. Always returns 0 and prints nothing (fail-open)."""
     try:
         if os.name == "nt":
             return 0
         mode = argv[0] if argv else None
+        if mode == "--report":  # the person's own view: on or off, no stdin, no recording
+            print(report(**_report_args(argv[1:])))
+            return 0
         if mode not in (None, "--session-start", "--session-end"):
-            return 0  # --notes and --report come in later releases; unknown flags are ignored
+            return 0  # --notes comes in a later release; unknown flags are ignored
         if not _enabled() or _redact is None:
             return 0
         payload = json.loads(sys.stdin.read())

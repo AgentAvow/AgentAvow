@@ -180,7 +180,7 @@ def test_session_end_only_appends(act, monkeypatch, capsys):
 
 
 def test_later_modes_are_silent_no_ops(act, monkeypatch, capsys):
-    for argv in (["--notes"], ["--report"], ["--report", "today"], ["--unknown"]):
+    for argv in (["--notes"], ["--unknown"]):
         assert _run(act, monkeypatch, capsys, _payload("PostToolUse", tool_response={}),
                     argv) == (0, "")
     assert not pathlib.Path(act.ACTIVITY_DIR).exists() or _lines(act) == []
@@ -471,7 +471,7 @@ def test_a_broken_sibling_module_still_fails_open(tmp_path):
     payload = json.dumps(_payload())
     for broken in ("raise RuntimeError('broken')\n", "def (:\n", ""):
         (folder / "agentavow_activity_redact.py").write_text(broken)
-        for argv in ([], ["--session-start"], ["--session-end"], ["--notes"], ["--report"]):
+        for argv in ([], ["--session-start"], ["--session-end"], ["--notes"]):
             r = subprocess.run(
                 [sys.executable, str(folder / "agentavow_activity.py"), *argv],
                 input=payload, capture_output=True, text=True, timeout=30,
