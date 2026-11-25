@@ -867,6 +867,137 @@ def _restore_helper_scripts(findings: list, texts: dict[str, str]) -> None:
             f._helper_restore = None
 
 
+# Code that can reach a file without naming it: a directory listing, a glob, or a read
+# / import / path built at runtime.
+_FIND_FILE_RE = re.compile(
+    r"\breaddir(?:Sync)?\b|\bopendir(?:Sync)?\b|\bglob\w*|\blistdir\b|\bscandir\b|"
+    r"\bos\.walk\b|\biterdir\b|\brglob\b|\bwalkSync\b|\bfs\.promises\b|"
+    r"\b(?:readFile|readFileSync|createReadStream|loadJson|load_json)\s*\(\s*[^'\"`\s)]|"
+    r"\bopen\s*\(\s*[^'\"\s)]|\bread_text\s*\(|\bread_bytes\s*\(|\bjson\.load\s*\(|"
+    r"\brequire\s*\(\s*[^'\"`\s)]|\bimport\s*\(\s*[^'\"`\s)]|__import__|\bimportlib\b|"
+    r"\bwith_name\b|\bjoinpath\b|\bpath\.(?:join|resolve)\b|\bos\.path\.join\b|"
+    r"\bPath\s*\(|\b__dirname\b|\b__file__\b|\bimport\.meta\b")
+# A shipped stand-in for the tools a pipe runs (a `curl` or `sh` earlier on PATH).
+_TOOL_NAMES = frozenset({"curl", "wget", "sh", "bash", "dash", "zsh", "ksh"})
+
+
+def _test_path(path: str) -> bool:
+    from src.scanner.scan import _is_test_fixture_file
+    return _is_test_fixture_file(path)
+
+
+NOT_REACHED, REACHED, NAMED = 0, 1, 2
+
+
+def _tree_reaches(path: str, texts: dict[str, str], *, exclude: set[str]) -> int:
+    """Whether something in the tree can reach ``path`` and run or rewrite what it
+    holds, so a lowered pipe-to-shell there gets its severity back (#387 review, round
+    3). ``NAMED``: the file is unseen, or a consumer run string, an agent-instruction
+    file, a shell script or spawning code names its path or file name. ``REACHED``:
+    any of the looser signs below. Over-approximate, the conservative direction:
+
+    * the file is unseen;
+    * code that can execute something (``_SPAWN_RE``) names its path, file name, stem,
+      or directory, or finds files without naming them (``_FIND_FILE_RE``: a listing,
+      a glob, a computed read or import). Test files count only when something a
+      consumer runs names them;
+    * anything a consumer can run names it (``consumer_run_strings``, install hooks
+      included), or an agent-instruction file or another shell script does;
+    * any shipped file routes fetches or wraps curl / wget
+      (``pipe_shell.routes_elsewhere``: a proxy / config / resolver setting, a
+      .curlrc), or the tree ships its own ``curl`` / ``sh``."""
+    from src.scanner.package_context import is_agent_instruction_file
+    from src.scanner.pipe_shell import routes_elsewhere
+
+    if path not in texts:
+        return NAMED
+    p = path.rsplit("/", 1)
+    name = p[-1]
+    stem = name.rsplit(".", 1)[0] if "." in name else name
+    parent = p[0] if len(p) == 2 else ""
+    words = [w for w in (name, stem, parent, parent.rsplit("/", 1)[-1],
+                         path.rsplit(".", 1)[0].replace("/", ".")) if len(w) > 1]
+    rx = re.compile(r"(?<![\w\-])(?:" + "|".join(re.escape(w) for w in words)
+                    + r")(?![\w\-])")
+    runs = consumer_run_strings(texts, roots=None)
+    # A consumer's scripts (install hooks, start, bin …) name it: NAMED. Any other
+    # package script (`test`, a maintainer script) only REACHED.
+    consumer_blob = "\n".join(consumer_run_strings(texts, roots=CONSUMER_ROOTS))
+    if path in consumer_blob or rx.search(consumer_blob):
+        return NAMED
+    run_blob = "\n".join(runs)
+    level = REACHED if (path in run_blob or rx.search(run_blob)) else NOT_REACHED
+    for p2, t in texts.items():
+        if not t or p2 == path or p2 in exclude:
+            continue
+        low = p2.lower().rsplit("/", 1)[-1]
+        if low in _TOOL_NAMES:
+            level = REACHED
+        if is_agent_instruction_file(p2) or low.rsplit(".", 1)[-1] in ("sh", "bash", "zsh"):
+            if path in t or rx.search(t):
+                return NAMED
+        if not _is_code_file(p2):
+            continue
+        if _test_path(p2) and not _names_file(p2, runs):
+            continue
+        if routes_elsewhere(t):
+            level = REACHED
+        if _SPAWN_RE.search(t):
+            if path in t or _names_file(path, [t]):
+                return NAMED
+            if rx.search(t) or _FIND_FILE_RE.search(t):
+                level = REACHED
+    return level
+
+
+def _restore_attack_samples(findings: list, texts: dict[str, str]) -> None:
+    """An attack sample lowered to low (``attack_sample.sample_key``, or a reserved-host
+    sample in a test, ``pipe_shell.WHY_RESERVED_TEST``) gets back what it would have
+    been when the tree can reach it (``_tree_reaches``): its severity before the
+    lowering, or in a dataset dir high with the dataset check still to come
+    (``_restore_datasets``). A file that is not installed keeps its cap."""
+    from src.scanner.attack_sample import WHY
+    from src.scanner.pipe_shell import WHY_RESERVED_TEST
+    from src.scanner.scan import _is_dataset_file
+
+    marked = [f for f in findings if getattr(f, "_sample_restore", None)
+              and f.severity in ("low", "info") and f.remediation in (WHY, WHY_RESERVED_TEST)
+              and getattr(f, "installed", True) is not False]
+    exclude = {f.file_path for f in marked}
+    for f in marked:
+        level = _tree_reaches(f.file_path, texts, exclude=exclude - {f.file_path})
+        if level == NOT_REACHED:
+            continue
+        sev, payload, why = f._sample_restore
+        if level == NAMED and f.remediation == WHY_RESERVED_TEST:
+            # A test sample something a consumer runs names (copied out by an install
+            # hook, run on an agent file's say-so): graded as shipped.
+            sev, payload = "critical", True
+        f._sample_restore = None
+        f.severity, f.remediation = sev, why
+        f.payload = f.payload or payload
+        if sev == "critical" and _is_dataset_file(f.file_path):
+            f.severity, f.remediation = "high", DATASET_WHY
+            f._dataset_restore = "critical"
+
+
+def _restore_no_url(findings: list, texts: dict[str, str]) -> None:
+    """A host-elided pipe-to-shell lowered to low (``pipe_shell.NO_URL``) gets its
+    critical back when the tree can reach the file (``_tree_reaches``: code, a package
+    script, an install hook or an agent file that names it or finds files at runtime,
+    a routing setting anywhere, or the file unseen). A pipe in a file a hook runs is
+    never only a hint (#387 review)."""
+    from src.scanner.pipe_shell import WHY_NO_URL
+
+    marked = [f for f in findings if getattr(f, "_no_url_restore", None)
+              and f.severity == "low" and f.remediation == WHY_NO_URL]
+    exclude = {f.file_path for f in marked}
+    for f in marked:
+        if _tree_reaches(f.file_path, texts, exclude=exclude - {f.file_path}) != NOT_REACHED:
+            f.severity, f.remediation = f._no_url_restore, ""
+            f._no_url_restore = None
+
+
 def mark_allowlist(finding: object, severity: str, keys: set[str]) -> None:
     """A webhook/tunnel-host match that is an allowlist element (scan.py
     ``_host_allowlist_entry``), reported low until the rest of the tree is checked."""
@@ -1142,8 +1273,10 @@ def restore_externally_invoked(findings: list, texts: dict[str, str], *,
     restore_signature_hosts(findings, texts)
     restore_tunnel_data(findings, texts)
     restore_signing_relaxed(findings, texts)
+    _restore_attack_samples(findings, texts)
     _restore_datasets(findings, texts)
     _restore_helper_scripts(findings, texts)
+    _restore_no_url(findings, texts)
     _restore_dev_tooling(findings, texts,
                          REGISTRY_ROOTS if registry_artifact else CONSUMER_ROOTS)
     # (A finding a later pass already capped further, e.g. to info in an uninstalled

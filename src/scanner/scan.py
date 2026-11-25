@@ -4923,8 +4923,15 @@ def _scan_content(
                     pipe_class = pipe_shell.classify_line(line, pattern, file_path)
                     if pipe_class == pipe_shell.DROP:
                         continue
+                    if (pipe_class == pipe_shell.NO_URL
+                            and not pipe_shell.no_url_file_ok(content)):
+                        # Something in the file can route the fetch or rewrite the
+                        # elided URL before it runs (#387 review, round 3).
+                        pipe_class = pipe_shell.CRITICAL
                     if pipe_class in (pipe_shell.OFFICIAL, pipe_shell.PINNED):
                         effective_severity = "high"
+                    elif pipe_class == pipe_shell.NO_URL:
+                        effective_severity = "low"
                     if _pipe_shown(idx, line, pattern):
                         # Shown, never run (round 2): help / error text of a shell
                         # script, or a web page's display text. Reported, not dropped.
@@ -4959,6 +4966,7 @@ def _scan_content(
                 # fetch nobody's script: low, even if the test file spawns processes.
                 # Shell scripts keep the rule above.
                 reserved_why = ""
+                reserved_pre = (effective_severity, remote_payload, pipe_shell.why(pipe_class))
                 if (name == pipe_shell.PIPE_TO_SHELL and test_fixture_file
                         and effective_severity in ("critical", "high", "medium")
                         and Path(file_path).suffix.lower() not in _SHELL_PAYLOAD_EXTS
@@ -4966,6 +4974,25 @@ def _scan_content(
                         and pipe_shell.reserved_hosts_only(line, pattern, file_path)):
                     effective_severity, remote_payload = "low", False
                     reserved_why = pipe_shell.WHY_RESERVED_TEST
+                # An attack sample in a security tool's test / lesson data (a test case
+                # next to an `expect` / `category` key): low (src/scanner/attack_sample.py,
+                # audit round 2, class N2).
+                if (name == pipe_shell.PIPE_TO_SHELL
+                        and effective_severity in ("critical", "high", "medium")):
+                    from src.scanner import attack_sample
+                    if attack_sample.sample_key(file_path, content, lines, idx,
+                                                pattern) is not None:
+                        f_sample = Finding(
+                            category="dynamic_remote_load", name=name, severity="low",
+                            file_path=file_path, line_number=line_num,
+                            snippet=stripped[:120], remediation=attack_sample.WHY)
+                        # What it would have been (not a dataclass field): the tree pass
+                        # restores it when code, a package script or an agent file can
+                        # reach the sample (npm_scripts._restore_attack_samples).
+                        f_sample._sample_restore = (  # type: ignore[attr-defined]
+                            effective_severity, remote_payload, pipe_shell.why(pipe_class))
+                        findings.append(f_sample)
+                        break
                 npx_pre = None
                 if name.startswith("Unpinned npx") and _npx_not_a_load(
                         file_path, line, dm.start(),
@@ -5088,6 +5115,18 @@ def _scan_content(
                     payload=remote_payload,
                     remediation=reserved_why or pipe_shell.why(pipe_class),
                 )
+                if reserved_why:
+                    # A reserved-host sample in a test is low only while nothing in the
+                    # tree can reach and rewrite it: a package script that copies it
+                    # out, an agent file or runtime code that runs it
+                    # (npm_scripts._restore_attack_samples; #387 review, round 3).
+                    finding._sample_restore = reserved_pre  # type: ignore[attr-defined]
+                if (pipe_class == pipe_shell.NO_URL and effective_severity == "low"
+                        and not reserved_why):
+                    # Host-elided URL: low until the tree check finds an install hook,
+                    # a consumer run string or spawning code that names this file
+                    # (npm_scripts._restore_no_url, via restore_externally_invoked).
+                    finding._no_url_restore = "critical"  # type: ignore[attr-defined]
                 if npx_pre is not None:
                     # What it would have been (not a dataclass field): repository,
                     # local and package scans restore it when another file replaces
