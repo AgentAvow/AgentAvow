@@ -20,6 +20,8 @@ production package path (npm_result_from_tarball -> apply_artifact_scan -> trust
   repo-tree and wheel paths)
 * ``cases_skill_prose`` - plain-text injection in a skill's body and shipped markdown,
   with the context rules for skills that talk about injection (2026-11-07; skill path)
+* ``cases_rule_exemptions`` - builtin exception lookup, emoji flag tags and YAML rule
+  examples: each narrow exemption's bypass twins (#380)
 * ``cases_a2a_cards`` - A2A Agent Card grading: interfaces, auth, skill text, the card
   signature (2026-11-07; runs ``analyze_a2a_card``, not an npm tarball)
 * ``cases_skill_secret_flow`` - per-entry config tables and URL settings read from a
@@ -47,7 +49,8 @@ EXPECTED = json.loads((HERE / "expected.json").read_text())
 SETS = ("cases_npm_scripts", "cases_printed_hint", "cases_trifecta", "cases_exfil_precision",
         "cases_browser_profile", "cases_signing_key",
         "cases_encoded_instructions", "cases_bytecode", "cases_skill_prose",
-        "cases_a2a_cards", "cases_skill_secret_flow", "cases_shown_cmd")
+        "cases_a2a_cards", "cases_rule_exemptions", "cases_skill_secret_flow",
+        "cases_shown_cmd")
 
 # Attacks that still read safe today, with the label they should read.
 KNOWN_GAPS: dict[tuple[str, str], str] = {

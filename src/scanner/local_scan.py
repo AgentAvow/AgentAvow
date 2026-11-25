@@ -300,6 +300,9 @@ def scan_local(root: str | Path, *, name: str | None = None) -> ScanResult:
     # A printed install hint lowered per file holds only with the whole tree in view.
     from src.scanner.package_context import recheck_printed_hints
     recheck_printed_hints(result.findings, local_texts)
+    from src.scanner.scan import restore_unread_rule_examples
+    restore_unread_rule_examples(result.findings, local_texts,
+                                 [it["path"] for it in tree if it.get("size", 1)])
 
     # --- oversized source files: head + tail, disclosed (as scan_repo does) ---
     oversized = _oversized_scan_files(tree, user_excludes)

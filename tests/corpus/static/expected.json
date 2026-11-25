@@ -3831,6 +3831,29 @@
    "not_installed": 0,
    "rules": {}
   },
+  "pypi/agent-audit": {
+   "version": "0.20.0",
+   "score": 57,
+   "label": "review",
+   "reason": "2 high findings in its code, including instruction-override phrase",
+   "files_scanned": 96,
+   "severity": {
+    "critical": 0,
+    "high": 2,
+    "medium": 2,
+    "low": 2,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {
+    "high: Generic API Key assignment": 1,
+    "high: Instruction-override phrase": 1,
+    "low: Unpinned remote resource (branch/latest/HEAD)": 1,
+    "low: curl/wget piped to shell": 1,
+    "medium: Unpinned npx/uvx package (no @version pin)": 2
+   }
+  },
   "pypi/aiobotocore": {
    "version": "3.9.2",
    "score": 86,
@@ -4002,6 +4025,25 @@
    "capabilities": 1,
    "not_installed": 0,
    "rules": {}
+  },
+  "pypi/av": {
+   "version": "19.0.2",
+   "score": 45,
+   "label": "do_not_connect",
+   "reason": "one critical finding in its code: obfuscated eval (Python)",
+   "files_scanned": 59,
+   "severity": {
+    "critical": 1,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {
+    "critical: Obfuscated eval (Python)": 1
+   }
   },
   "pypi/azure-core": {
    "version": "1.41.0",
@@ -5478,6 +5520,27 @@
    "capabilities": 0,
    "not_installed": 0,
    "rules": {}
+  },
+  "pypi/mitmproxy": {
+   "version": "12.3.1",
+   "score": 72,
+   "label": "safe",
+   "reason": "no critical or high findings in 246 files; 1 file over 500 KB was not fully read",
+   "files_scanned": 246,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 12,
+    "low": 2,
+    "info": 0
+   },
+   "capabilities": 13,
+   "not_installed": 0,
+   "rules": {
+    "low: Private Key block (trivial placeholder EC key)": 1,
+    "low: Source file too large to scan in full": 1,
+    "medium: Zero-width / invisible character": 12
+   }
   },
   "pypi/more-itertools": {
    "version": "11.1.0",

@@ -355,8 +355,9 @@ def markdown_unicode_hits(text: str) -> list[DescriptionHit]:
     (outside a well-formed emoji tag sequence) are critical; a bidi control and a run of
     four or more zero-width characters are medium (prose has no code to reorder, but the
     text a reader sees is not the text an agent reads); ANSI escapes are medium."""
-    from src.scanner.scan import _benign_unicode_only
+    from src.scanner.scan import _benign_unicode_only, non_rgi_flag_count
 
+    non_rgi = non_rgi_flag_count(text)
     out: list[DescriptionHit] = []
     for i, line in enumerate(text.split("\n"), 1):
         hit: DescriptionHit | None = None
@@ -366,7 +367,7 @@ def markdown_unicode_hits(text: str) -> list[DescriptionHit]:
                     hit = DescriptionHit(i, ZERO_WIDTH_RUN_NAME, "medium", line.strip()[:120])
                     break
                 continue
-            if rx.search(line) and not _benign_unicode_only(name, rx, line):
+            if rx.search(line) and not _benign_unicode_only(name, rx, line, non_rgi):
                 hit = DescriptionHit(i, name, "critical" if sev == "critical" else "medium",
                                      line.strip()[:120])
                 break

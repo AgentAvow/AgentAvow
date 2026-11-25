@@ -623,6 +623,9 @@ def calibrate_package_findings(findings: list, fetched) -> list:
     # A shell script's shown text whose output another file runs; JSON data fields no
     # code runs (the JS / Python hint is the branch below).
     restore_shown_scripts(findings, pkg.texts)
+    from src.scanner.scan import restore_unread_rule_examples
+    restore_unread_rule_examples(findings, pkg.texts, [
+        p for p, af in pkg.files.items() if getattr(af, "text", None) != ""])
     _lower_shown_in_tree(findings, pkg.texts, hints, replaced, code_hints=False)
 
     for f in findings:
@@ -764,8 +767,12 @@ def restore_shown_scripts(findings: list, texts: dict[str, str]) -> list:
     """A shell script's help / error text lowered per file (``shown_pre``) is restored
     when any file in view runs that script's OUTPUT (``sh help.sh | sh`` in a
     package.json script, ``eval "$(./help.sh)"`` in another script, a Makefile or
-    Dockerfile …). Mutates and returns ``findings``."""
+    Dockerfile …). A YAML rule example lowered per file is restored the same way when a
+    file in view runs that field (``scan.restore_rule_examples``). Mutates and returns
+    ``findings``."""
+    from src.scanner.scan import restore_rule_examples
     from src.scanner.shown_text import HTML_EXTS, WHY_SHOWN, script_output_run
+    restore_rule_examples(findings, texts)
     memo: dict[str, bool] = {}
     for f in findings:
         pre = getattr(f, "shown_pre", None)
