@@ -68,7 +68,7 @@ _SID_RE = re.compile(r"[A-Za-z0-9_-]{1,128}")
 def _sid(session_id: str) -> str:
     if _SID_RE.fullmatch(session_id or ""):
         return session_id
-    return hashlib.sha256(str(session_id).encode("utf-8")).hexdigest()[:32]
+    return hashlib.sha256(str(session_id).encode("utf-8", "surrogatepass")).hexdigest()[:32]
 
 
 def _state_path(session_id: str) -> pathlib.Path:
@@ -424,9 +424,10 @@ def _append_event(session_id: str, event: dict, flagged: bool, now: datetime | N
         line["v"] = 0
         line["seq"] = seq_base + 1
         line["prev"] = prev
-        raw = json.dumps(
-            line, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-        ).encode("utf-8")
+        try:
+            raw = _dump_line(line)
+        except UnicodeEncodeError:  # a lone surrogate: keep it as a visible \udcXX
+            raw = _dump_line(_no_surrogates(line))
         fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         try:
             _write_all(fd, (b"\n" if tail["torn"] else b"") + raw + b"\n")
@@ -436,6 +437,26 @@ def _append_event(session_id: str, event: dict, flagged: bool, now: datetime | N
         state["prev"] = hashlib.sha256(raw).hexdigest()
         save_state(session_id, state)
         return line
+
+
+def _dump_line(line: dict) -> bytes:
+    return json.dumps(line, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8")
+
+
+def _no_surrogates(value: object) -> object:
+    """A copy with each lone surrogate in a string (key or value) spelled as ``\\udcXX``.
+
+    A payload's JSON can carry one (``"\\udc80"``); UTF-8 cannot, so without this the
+    line would not be written and the call would be missing from the log.
+    """
+    if isinstance(value, str):
+        return value.encode("utf-8", "backslashreplace").decode("utf-8")
+    if isinstance(value, dict):
+        return {_no_surrogates(k): _no_surrogates(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_no_surrogates(v) for v in value]
+    return value
 
 
 def _tail_empty() -> dict:
@@ -899,6 +920,15 @@ def _report_args(argv: list[str]) -> dict:
     return kwargs
 
 
+def _read_stdin() -> str:
+    """The payload text. Bytes that are not UTF-8 become U+FFFD whatever the locale, so
+    they cannot keep a call out of the log."""
+    buf = getattr(sys.stdin, "buffer", None)
+    if buf is None:
+        return sys.stdin.read()
+    return buf.read().decode("utf-8", "replace")
+
+
 def main(argv: list[str]) -> int:
     """Hook entry point. Always returns 0 and prints nothing (fail-open)."""
     try:
@@ -917,7 +947,7 @@ def main(argv: list[str]) -> int:
             return 0  # --notes comes in a later release; unknown flags are ignored
         if not _enabled() or _redact is None:
             return 0
-        payload = json.loads(sys.stdin.read())
+        payload = json.loads(_read_stdin())
         now = datetime.now(timezone.utc)
         _record(payload, now)
         if mode == "--session-start":

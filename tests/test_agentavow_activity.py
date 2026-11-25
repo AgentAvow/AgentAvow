@@ -325,6 +325,43 @@ def test_unwritable_cache_fails_open(act, tmp_path, monkeypatch, capsys):
     assert not (parent / "activity").exists()
 
 
+def test_lone_surrogates_are_recorded_readably(act, monkeypatch, capsys):
+    """A lone surrogate cannot keep a call out of the log: it is kept as a visible escape."""
+    _run(act, monkeypatch, capsys, _payload(tool_input={"command": "rm -rf build\udc80"}))
+    _run(act, monkeypatch, capsys, _payload(tool_name="mcp__s\udcff__t",
+                                            tool_input={"k\ud800": "v\udfff"}))
+    _run(act, monkeypatch, capsys, _payload(cwd="/w/\udc80", agent_id="a\ud83d",
+                                            agent_type="Explore"))
+    lines = _lines(act)
+    assert len(lines) == 3
+    assert lines[0]["input"]["command"] == "rm -rf build\\udc80"
+    assert lines[1]["tool"] == "mcp__s\\udcff__t"
+    assert lines[1]["input"]["args"] == {"k\\ud800": "v\\udfff"}
+    assert lines[2]["cwd"] == "/w/\\udc80" and lines[2]["subagent"]["id"] == "a\\ud83d"
+    assert act.verify_session(SID) == []
+    surrogate_sid = "s\udc80"
+    _run(act, monkeypatch, capsys, _payload(session_id=surrogate_sid))
+    assert len(_lines(act)) == 4
+    assert act.verify_session(surrogate_sid) == []
+
+
+def test_invalid_utf8_on_stdin_is_still_recorded(tmp_path):
+    home = tmp_path / "home"
+    payload = json.dumps(_payload(tool_input={"command": "rm -rf buildXX"})).encode()
+    payload = payload.replace(b"XX", b"\xff\xfe")
+    for n, locale in enumerate(("en_US.UTF-8", "C.UTF-8", "C"), 1):
+        env = {"PATH": os.environ.get("PATH", ""), "HOME": str(home),
+               "AGENTAVOW_ACTIVITY": "on", "LC_ALL": locale}
+        r = subprocess.run([sys.executable, str(MODULE)], input=payload, capture_output=True,
+                           timeout=30, env=env)
+        assert (r.returncode, r.stdout, r.stderr) == (0, b"", b""), locale
+        logs = list((home / ".cache" / "agentavow" / "activity").glob("*/*.jsonl"))
+        assert len(logs) == 1, locale
+        lines = [json.loads(x) for x in logs[0].read_text("utf-8").splitlines()]
+        assert len(lines) == n, locale
+        assert lines[-1]["input"]["command"] == "rm -rf build��", locale
+
+
 def test_huge_payload_is_fast(act, monkeypatch, capsys):
     command = "cat > big.txt <<'EOF'\n" + ("line of heredoc text\n" * 5000) + "EOF"
     assert len(command) > 100_000
