@@ -288,7 +288,7 @@ _held: dict[str, int] = {}
 LOCK_WAIT_SECONDS = 1.0
 
 
-class LockTimeout(OSError):
+class LockTimeoutError(OSError):
     """The session lock stayed held by another process for LOCK_WAIT_SECONDS."""
 
 
@@ -303,7 +303,7 @@ def _flock_bounded(fd: int) -> None:
             pass
         left = deadline - time.monotonic()
         if left <= 0:
-            raise LockTimeout("session lock busy")
+            raise LockTimeoutError("session lock busy")
         time.sleep(min(pause, left))
         pause = min(pause * 2, 0.02)
 
@@ -312,7 +312,7 @@ def _flock_bounded(fd: int) -> None:
 def session_lock(session_id: str):
     """Hold the session's flock. Re-entrant in-process: append_event inside it is safe.
 
-    Waits at most LOCK_WAIT_SECONDS for another process, then raises LockTimeout.
+    Waits at most LOCK_WAIT_SECONDS for another process, then raises LockTimeoutError.
     """
     sid = _sid(session_id)
     if _held.get(sid):
@@ -892,8 +892,10 @@ def report(days: int = 7, session: str | None = None, rule: str | None = None,
             label = _SEVERITY.get(str(flag.get("severity")).lower(),
                                   (3, _short(flag.get("severity", "?"), 12).upper()))[1]
             agent = "Codex" if ev.get("agent") == "codex" else "Claude Code"
-            out.append(f"{label:<5} {_day_text(ts)} {ts:%H:%M}  {_short(flag.get('note', ''), 160)}")
-            out.append(f"      session {_clean(stem)} ({agent}, {_short(ev.get('cwd') or '?', 60)})")
+            note = _short(flag.get("note", ""), 160)
+            cwd = _short(ev.get("cwd") or "?", 60)
+            out.append(f"{label:<5} {_day_text(ts)} {ts:%H:%M}  {note}")
+            out.append(f"      session {_clean(stem)} ({agent}, {cwd})")
         except Exception:
             out.append(f"?     {_day_text(ts)} {ts:%H:%M}  (flag could not be shown)")
     if flags:

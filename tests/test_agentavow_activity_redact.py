@@ -370,7 +370,7 @@ def test_mcp_nested_secret_keys_are_redacted():
 def test_mcp_huge_nested_value_is_fast_and_cut():
     import time
 
-    value = {"rows": [{"id": i, "token": "t%d" % i} for i in range(200_000)]}
+    value = {"rows": [{"id": i, "token": f"t{i}"} for i in range(200_000)]}
     t0 = time.perf_counter()
     out = R.summarize_input("mcp__srv__tool", {"q": value}, None)["args"]["q"]
     assert time.perf_counter() - t0 < 0.2

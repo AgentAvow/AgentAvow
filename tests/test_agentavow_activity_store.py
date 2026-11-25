@@ -516,6 +516,12 @@ def test_append_gives_up_on_a_held_lock_within_a_second(tmp_path, monkeypatch):
         start = time.monotonic()
         assert A.append_event("s1", {"i": 2}, now=T0) is None
         assert time.monotonic() - start < 1.5
+        assert issubclass(A.LockTimeoutError, OSError)
+        try:
+            with A.session_lock("s1"):
+                raise AssertionError("the lock was taken while another process held it")
+        except A.LockTimeoutError:
+            pass
     finally:
         holder.kill()
         holder.wait(10)
