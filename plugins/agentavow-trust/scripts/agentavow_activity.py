@@ -4,7 +4,8 @@
 Entry-point module, run by hooks/hooks.json through run_hook.sh:
 
     agentavow_activity.py                  record one event from the stdin payload (async)
-    agentavow_activity.py --session-start  record SessionStart, then 30-day cleanup
+    agentavow_activity.py --session-start  record SessionStart, then 30-day cleanup (while
+                                           off: cleanup only, if the folder exists)
     agentavow_activity.py --session-end    record SessionEnd (append only, nothing else)
     agentavow_activity.py --notes          not built yet: exit 0, print nothing
     agentavow_activity.py --report         print the report (plain text); the person runs it
@@ -945,7 +946,12 @@ def main(argv: list[str]) -> int:
             return 0
         if mode not in (None, "--session-start", "--session-end"):
             return 0  # --notes comes in a later release; unknown flags are ignored
-        if not _enabled() or _redact is None:
+        if not _enabled():
+            if mode == "--session-start" and ACTIVITY_DIR.is_dir():
+                _read_stdin()  # read to the end; nothing from it is kept
+                cleanup(datetime.now(timezone.utc))  # logs from when it was on still age out
+            return 0
+        if _redact is None:
             return 0
         payload = json.loads(_read_stdin())
         now = datetime.now(timezone.utc)

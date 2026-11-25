@@ -9,7 +9,9 @@
 #   - AGENTAVOW_ACTIVITY: unless it is "on" (any case), the activity log script exits
 #     here before any Python starts (its --report still runs), so a log that is off
 #     costs no process per tool call. This matches _enabled() in agentavow_activity.py;
-#     release 2 flips the rule (off only for "off") in both places.
+#     release 2 flips the rule (off only for "off") in both places. One exception:
+#     "--session-start" still runs while off if $HOME/.cache/agentavow/activity exists,
+#     so logs from when it was on are still deleted after 30 days (it records nothing).
 #   - $HOME: "--notes" with no pending note to show starts no Python either.
 # Where it exits early it first reads stdin to the end (cat, no Python): the host may
 # still be writing a large payload, and exiting unread would give it a broken pipe.
@@ -18,7 +20,11 @@ script="$1"
 shift
 case "$script" in
   */agentavow_activity.py | agentavow_activity.py)
-    if [ "$1" != "--report" ]; then
+    if [ "$1" = "--report" ]; then
+      :
+    elif [ "$1" = "--session-start" ] && [ -d "$HOME/.cache/agentavow/activity" ]; then
+      :
+    else
       case "$AGENTAVOW_ACTIVITY" in
         [Oo][Nn]) ;;
         *) cat >/dev/null 2>&1; exit 0 ;;

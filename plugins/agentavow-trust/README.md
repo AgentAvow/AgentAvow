@@ -203,8 +203,9 @@ each subagent and session start or end gets one. A line holds a short, redacted 
 the command, the file path and size, the URL, the search query or Grep/Glob pattern, or
 MCP argument names with their values redacted and cut to 200 characters. It never
 records prompts, replies, tool output, file contents or environment values. It is kept
-in `~/.cache/agentavow/activity/` (only you can read it) for 30 days, and nothing in it
-leaves your machine. Not on Windows yet.
+in `~/.cache/agentavow/activity/` (only you can read it), and nothing in it leaves your
+machine. Logs older than 30 days are deleted at session start, even after you turn the
+log off; delete `~/.cache/agentavow/activity` to remove them all now. Not on Windows yet.
 
 To read it, run the report yourself. In Claude Code the `!` prefix shows the output
 directly, without passing through the model, so this is the view to trust:

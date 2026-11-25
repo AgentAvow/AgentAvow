@@ -170,6 +170,56 @@ def test_session_start_runs_cleanup(act, monkeypatch, capsys):
     assert [line["event"] for line in _lines(act)] == ["SessionStart"]
 
 
+def _old_and_new_days(folder: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
+    now = datetime.now(timezone.utc)
+    old = folder / (now - timedelta(days=40)).strftime("%Y-%m-%d")
+    new = folder / (now - timedelta(days=2)).strftime("%Y-%m-%d")
+    for day in (old, new):
+        day.mkdir(parents=True)
+        (day / "s.jsonl").write_text("{}\n")
+    return old, new
+
+
+def test_session_start_cleans_up_while_off(act, monkeypatch, capsys):
+    """After the log is turned off, old days still go at session start; nothing is recorded."""
+    monkeypatch.setenv("AGENTAVOW_ACTIVITY", "off")
+    old, new = _old_and_new_days(pathlib.Path(act.ACTIVITY_DIR))
+    before = sorted(pathlib.Path(act.ACTIVITY_DIR).rglob("*"))
+    assert _run(act, monkeypatch, capsys, _payload("SessionStart", source="startup"),
+                ["--session-start"]) == (0, "")
+    assert not old.exists() and (new / "s.jsonl").read_text() == "{}\n"
+    assert sorted(pathlib.Path(act.ACTIVITY_DIR).rglob("*")) == [
+        p for p in before if not str(p).startswith(str(old))]
+    for argv in ([], ["--session-end"]):  # only session start cleans up while off
+        monkeypatch.setenv("AGENTAVOW_ACTIVITY", "off")
+        _run(act, monkeypatch, capsys, _payload(), argv)
+    assert (new / "s.jsonl").read_text() == "{}\n"
+
+
+def test_launcher_lets_session_start_clean_up_while_off(tmp_path):
+    home = tmp_path / "home"
+    folder = home / ".cache" / "agentavow" / "activity"
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home)}
+
+    def run(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["sh", str(LAUNCHER), str(MODULE), *args],
+                              input=json.dumps(_payload("SessionStart", source="startup")),
+                              capture_output=True, text=True, timeout=30, env=env)
+
+    r = run("--session-start")  # no folder: nothing to clean, nothing made
+    assert (r.returncode, r.stdout, r.stderr) == (0, "", "")
+    assert not (home / ".cache").exists()
+    old, new = _old_and_new_days(folder)
+    for args in ([], ["--session-end"]):
+        assert run(*args).returncode == 0
+        assert old.exists()
+    r = run("--session-start")
+    assert (r.returncode, r.stdout, r.stderr) == (0, "", "")
+    assert not old.exists()
+    assert sorted(p.name for p in folder.iterdir()) == [new.name]
+    assert (new / "s.jsonl").read_text() == "{}\n"
+
+
 def test_session_end_only_appends(act, monkeypatch, capsys):
     old = (datetime.now(timezone.utc) - timedelta(days=40)).strftime("%Y-%m-%d")
     folder = pathlib.Path(act.ACTIVITY_DIR) / old
