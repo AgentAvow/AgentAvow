@@ -53,7 +53,7 @@ import sys
 import time
 import urllib.error
 
-__version__ = "0.1.45"
+__version__ = "0.1.46"
 
 TIMEOUT = 12  # seconds per scan: an install is rare, so a slower fresh scan is fine
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -917,17 +917,15 @@ def _own_dir() -> pathlib.Path:
 
 
 # A second line of defence only: an allow line Claude writes does not count anyway (it
-# lacks the code the gate shows the person alone). These catch the plain and the common
-# disguised spellings of AgentAvow's folder in a shell command, so reading the key or
-# changing the files is put to the person; no string match can catch every disguise.
-_NAMED_FILE = re.compile(r"allowed[-_]?servers|allow\.key|allow[-_]line")
-_STANDALONE = re.compile(r"(?<![\w.@-])agentavow(?![\w.-])")
+# lacks the code the gate shows the person alone). Only exact matches count: AgentAvow's
+# cache folder as a path, or one of its files (or the allow-line command) by name. Words
+# alone (allowed, scanned, the name AgentAvow) never do; no string match can catch every
+# disguise.
+_NAMED_FILE = re.compile(r"allowed[-_]?servers|allow\.key|allow[-_]line|scanned\.json")
 # The GitHub org and repo (AgentAvow/AgentAvow, github.com/AgentAvow/...), not the folder.
 _REPO_SLUG = re.compile(r"agentavow/agentavow|(?:github(?:usercontent)?|gitlab)\.com/+agentavow")
 _PATH_PART = re.compile(r"/agentavow(?![\w.-])")
 _CACHE_DIR = re.compile(r"\.cache\b|xdg_cache_home")
-# "allow" starting a word (allowed, allow.key, allow-list), not inside one (shallow, swallow).
-_ALLOW_WORD = re.compile(r"(?<![a-z])allow")
 _GLOB_AFTER_CACHE = re.compile(r"\.cache/+[^\s/]*[*?\[]")
 # `cd` into a folder named agentavow (the whole name: a checkout at AgentAvow-wt-x is not).
 _CD_INTO = re.compile(r"\b(?:cd|pushd|chdir)\b[\s(]+[^;&|\n]*(?<![\w.@-])agentavow(?![\w.-])")
@@ -1035,10 +1033,10 @@ def _cd_cannot_reach_own_dir(s: str, cwd: object) -> bool:
 
 
 def _shell_names_own_files(command: str, cwd: object = None) -> bool:
-    """Whether a shell command names AgentAvow's cache folder or one of its files, in
-    any of the spellings a person or a script would use: ~ / $HOME / ${HOME} /
-    expanduser, quotes or backslashes inside a word, path pieces joined in Python,
-    `cd` into the folder, a glob over ~/.cache. Our own repo and package names
+    """Whether a shell command names AgentAvow's cache folder as a path or one of its
+    files by name, in any of the spellings a person or a script would use: ~ / $HOME /
+    ${HOME} / expanduser / XDG_CACHE_HOME, quotes or backslashes inside a word, `cd`
+    into the folder, a glob over ~/.cache. Our own repo and package names
     (AgentAvow/AgentAvow, agentavow-trust, agentavow_precheck) do not count, and
     neither does a folder named AgentAvow anywhere but the cache folder: the test is
     where a folder sits (its parent, or the working directory for a relative `cd`),
@@ -1050,12 +1048,9 @@ def _shell_names_own_files(command: str, cwd: object = None) -> bool:
     t = _other_agentavow_dirs(_REPO_SLUG_ANY_CASE.sub("", raw), cwd).lower()
     if _PATH_PART.search(t):  # .../agentavow as a folder, however the rest is spelled
         return True
-    standalone = bool(_STANDALONE.search(t))
-    if _CACHE_DIR.search(s) and (standalone or _GLOB_AFTER_CACHE.search(s)
-                                 or _ALLOW_WORD.search(s)):
+    if _CACHE_DIR.search(s) and _GLOB_AFTER_CACHE.search(s):
         return True
-    cd_in = bool(_CD_INTO.search(t)) and not _cd_cannot_reach_own_dir(s, cwd)
-    return standalone and (cd_in or bool(re.search(r"\b(?:allow|scanned)", s)))
+    return bool(_CD_INTO.search(t)) and not _cd_cannot_reach_own_dir(s, cwd)
 
 
 def _path_in_own_dir(raw: str, cwd: object) -> bool:

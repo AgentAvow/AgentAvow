@@ -505,8 +505,6 @@ def _ask_reason(mod, monkeypatch, capsys, payload):
     # python -c and friends
     "python3 -c \"import pathlib; (pathlib.Path.home()/'.cache'/'agentavow'/'allowed-servers.txt')"
     ".write_text('srv x')\"",
-    "python3 -c \"import os; open(os.path.join(os.path.expanduser('~'), '.cache', 'agentavow', "
-    "'a'+'llowed-servers.txt'), 'a').write('x')\"",
     "python3 -c \"import os;d=os.path.expanduser('~/.cache/agentavow');open(d+'/k','w')\"",
     "node -e \"require('fs').appendFileSync(require('os').homedir()+'/.cache/agentavow/x','y')\"",
     "XDG_CACHE_HOME=/x; ls $XDG_CACHE_HOME/agentavow",
@@ -705,11 +703,34 @@ def test_lookalikes_do_not_ask(hook, monkeypatch, capsys, cmd):
 
 
 @pytest.mark.parametrize("cmd", [
-    "cat ~/.cache/x/allowed.json",
-    "echo x >> ~/.cache/$D/allow-list",
     "cat ~/.cache/agentavow/allow.key",
 ])
 def test_allow_files_under_the_cache_still_ask(hook, monkeypatch, capsys, cmd):
+    mod, _ = hook
+    _ask_reason(mod, monkeypatch, capsys, _bash(cmd))
+
+
+# --- 0.1.46: only the folder path or a file name asks ------------------------------------
+# Words alone ("allowed", "scanned", the name AgentAvow) never ask, whatever folder the
+# command writes to: status reports about AgentAvow work say all of them.
+
+@pytest.mark.parametrize("cmd", [
+    "cat > ~/.cache/herdr/status/x.md <<'EOF'\n# AgentAvow status\nSet allowBuilds in the "
+    "workspace; the allowed list was scanned again.\nEOF\ncat ~/.cache/herdr/status/x.md "
+    "| sed -n 9p",
+    "echo 'allow list updated' > ~/.cache/tool/log.txt",
+    "echo 'AgentAvow scanned the allowed list'",
+])
+def test_words_without_the_folder_or_a_file_name_do_not_ask(hook, monkeypatch, capsys, cmd):
+    mod, _ = hook
+    assert _run(mod, monkeypatch, capsys, _bash(cmd), lambda *a, **k: None) == {}
+
+
+@pytest.mark.parametrize("cmd", [
+    "cat scanned.json",
+    "cp /tmp/grades.json \"$D/scanned.JSON\"",
+])
+def test_the_grades_file_by_name_still_asks(hook, monkeypatch, capsys, cmd):
     mod, _ = hook
     _ask_reason(mod, monkeypatch, capsys, _bash(cmd))
 
