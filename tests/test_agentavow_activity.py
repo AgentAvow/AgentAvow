@@ -7,6 +7,7 @@ import json
 import os
 import pathlib
 import subprocess
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -367,13 +368,13 @@ def test_hooks_json_wires_the_recorder():
     assert set(hooks) <= {"SessionStart", "SessionEnd", "PreToolUse", "PostToolUse",
                           "SubagentStart", "SubagentStop"}
     assert "PostToolUseFailure" not in hooks
-    for event in ("PreToolUse", "PostToolUse"):
+    # No matcher means every tool in both agents; Codex validates a matcher as a regex,
+    # so the recorder groups carry none. Codex runs async hooks inline, hence timeout 2.
+    for event in ("PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop"):
         group, h = recorder(event)
-        assert group["matcher"] == "*"
+        assert "matcher" not in group, event
         assert h["command"] == RECORDER and h["async"] is True
-    for event in ("SubagentStart", "SubagentStop"):
-        group, h = recorder(event)
-        assert h["command"] == RECORDER and h["async"] is True
+        assert h["timeout"] == 2
     group, h = recorder("SessionEnd")
     assert h["command"] == RECORDER + " --session-end"
     assert not h.get("async") and h["timeout"] == 1
@@ -454,3 +455,28 @@ def test_run_hook_and_enabled_agree_on_the_switch(tmp_path, monkeypatch):
         # --report always runs (it reads what is there); other scripts are not affected.
         assert run(stub, value, "--report") == "['--report']"
         assert run(other, value) == "ran"
+
+
+def test_readme_names_every_hook_script():
+    readme = (PLUGIN_DIR / "README.md").read_text()
+    for script in sorted((PLUGIN_DIR / "scripts").glob("*.py")):
+        assert f"scripts/{script.name}" in readme, script.name
+
+
+def test_a_broken_sibling_module_still_fails_open(tmp_path):
+    """A sibling that fails to import: exit 0, nothing on stdout or stderr."""
+    folder = tmp_path / "scripts"
+    folder.mkdir()
+    (folder / "agentavow_activity.py").write_bytes(MODULE.read_bytes())
+    payload = json.dumps(_payload())
+    for broken in ("raise RuntimeError('broken')\n", "def (:\n", ""):
+        (folder / "agentavow_activity_redact.py").write_text(broken)
+        for argv in ([], ["--session-start"], ["--session-end"], ["--notes"], ["--report"]):
+            r = subprocess.run(
+                [sys.executable, str(folder / "agentavow_activity.py"), *argv],
+                input=payload, capture_output=True, text=True, timeout=30,
+                env={"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path / "home"),
+                     "AGENTAVOW_ACTIVITY": "on"})
+            assert (r.returncode, r.stdout, r.stderr) == (0, "", ""), (broken, argv)
+    assert not (tmp_path / "home" / ".cache" / "agentavow" / "activity").exists() or not list(
+        (tmp_path / "home" / ".cache" / "agentavow" / "activity").glob("*/*.jsonl"))

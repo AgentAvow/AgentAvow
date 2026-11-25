@@ -488,3 +488,37 @@ def test_editing_last_line_and_stripping_its_newline_is_flagged(tmp_path, monkey
     assert A.verify_session("s1") != []
     A.append_event("s1", {"i": 3}, now=T0)
     assert A.verify_session("s1") != []
+
+
+# --- Task 4 fix round 1: the lock wait is bounded (Codex runs async hooks inline) -----
+
+
+def test_append_gives_up_on_a_held_lock_within_a_second(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+    import time
+
+    monkeypatch.setattr(A, "ACTIVITY_DIR", tmp_path / "act")
+    first = A.append_event("s1", {"i": 1}, now=T0)
+    assert first["seq"] == 1
+    lock = A._lock_path("s1")
+    holder = subprocess.Popen(
+        [sys.executable, "-c",
+         "import fcntl, os, sys, time\n"
+         "fd = os.open(sys.argv[1], os.O_RDWR)\n"
+         "fcntl.flock(fd, fcntl.LOCK_EX)\n"
+         "print('held', flush=True)\n"
+         "time.sleep(30)\n",
+         str(lock)],
+        stdout=subprocess.PIPE, text=True)
+    try:
+        assert holder.stdout.readline().strip() == "held"
+        start = time.monotonic()
+        assert A.append_event("s1", {"i": 2}, now=T0) is None
+        assert time.monotonic() - start < 1.5
+    finally:
+        holder.kill()
+        holder.wait(10)
+    # The dropped event is not a break: the next append continues the chain.
+    assert A.append_event("s1", {"i": 3}, now=T0)["seq"] == 2
+    assert A.verify_session("s1") == []

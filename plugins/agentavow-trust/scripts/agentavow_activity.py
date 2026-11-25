@@ -42,7 +42,10 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-import agentavow_activity_redact as _redact  # noqa: E402
+try:  # fail-open: a broken sibling must not print a traceback; main() then does nothing
+    import agentavow_activity_redact as _redact
+except Exception:
+    _redact = None
 
 __version__ = "0.1.47"
 
@@ -277,10 +280,37 @@ def _count_lines(log_file: pathlib.Path) -> int:
 
 _held: dict[str, int] = {}
 
+# Codex runs async hooks inline, so a tool call can wait on the recorder: the lock wait
+# is bounded, and on timeout the event is dropped (not a chain break).
+LOCK_WAIT_SECONDS = 1.0
+
+
+class LockTimeout(OSError):
+    """The session lock stayed held by another process for LOCK_WAIT_SECONDS."""
+
+
+def _flock_bounded(fd: int) -> None:
+    deadline = time.monotonic() + LOCK_WAIT_SECONDS
+    pause = 0.001
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            pass
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise LockTimeout("session lock busy")
+        time.sleep(min(pause, left))
+        pause = min(pause * 2, 0.02)
+
 
 @contextlib.contextmanager
 def session_lock(session_id: str):
-    """Hold the session's flock. Re-entrant in-process: append_event inside it is safe."""
+    """Hold the session's flock. Re-entrant in-process: append_event inside it is safe.
+
+    Waits at most LOCK_WAIT_SECONDS for another process, then raises LockTimeout.
+    """
     sid = _sid(session_id)
     if _held.get(sid):
         _held[sid] += 1
@@ -293,7 +323,7 @@ def session_lock(session_id: str):
     _mkdir(ACTIVITY_DIR / "sessions")
     fd = os.open(_lock_path(session_id), os.O_RDWR | os.O_CREAT, 0o600)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        _flock_bounded(fd)
         _held[sid] = 1
         try:
             yield
@@ -592,7 +622,10 @@ def build_event(payload: dict, *, now: datetime | None = None) -> dict | None:
         out["tool"] = _text(tool)
         out["input"] = _redact.summarize_input(tool, payload.get("tool_input"), out["cwd"])
         if tool.startswith("mcp__"):
-            parts = _gate().parse_tool_name(tool)
+            try:
+                parts = _gate().parse_tool_name(tool)
+            except Exception:  # the gate failed to import: record the call without them
+                parts = None
             if parts:
                 out["mcp_server"], out["mcp_tool"] = _text(parts[0]), _text(parts[1])
                 answer = _answer(parts[0])
@@ -619,7 +652,7 @@ def main(argv: list[str]) -> int:
         mode = argv[0] if argv else None
         if mode not in (None, "--session-start", "--session-end"):
             return 0  # --notes and --report come in later releases; unknown flags are ignored
-        if not _enabled():
+        if not _enabled() or _redact is None:
             return 0
         payload = json.loads(sys.stdin.read())
         now = datetime.now(timezone.utc)
