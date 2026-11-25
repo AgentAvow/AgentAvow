@@ -50,7 +50,22 @@ SECRET_CASES = [
     ("git clone https://u:p@github.com/o/r", "u:p@", "url_userinfo"),
     ("curl https://x.io/a?code=12345&state=zz", "code=12345", "query"),
     ("blob " + "Zk9mQ2xR7vB3nT8yWp4sHd6JuE1aXc5MgL0iOb2N", "Zk9mQ2xR7vB3nT8yWp4sHd6JuE1aXc5MgL0iOb2N", "entropy"),
+    ("curl -u alice:hunter2pw https://x.io", "hunter2pw", "secret"),
+    ("curl -sSu alice:hunter2pw https://x.io", "hunter2pw", "secret"),
+    ("curl -ualice:hunter2pw https://x.io", "hunter2pw", "secret"),
+    ("curl --user alice:hunter2pw https://x.io", "hunter2pw", "secret"),
+    ("curl --user=alice:hunter2pw https://x.io", "hunter2pw", "secret"),
+    ("curl -X POST -u 'alice:hunter 2pw' https://x.io", "hunter 2pw", "secret"),
+    ("curl --proxy-user bob:prx9pass https://x.io", "prx9pass", "secret"),
+    ("wget --user=alice --password=hunter2pw https://x.io", "hunter2pw", "secret"),
+    ("wget --http-password=hunter2pw https://x.io", "hunter2pw", "secret"),
 ]
+
+
+def test_curl_user_keeps_the_user_name():
+    assert R.redact("curl -u alice:pw1 https://x.io") == (
+        "curl -u alice:[redacted:secret] https://x.io")
+    assert R.redact("curl -u alice https://x.io") == "curl -u alice https://x.io"
 
 
 @pytest.mark.parametrize("text,secret,kind", SECRET_CASES)
@@ -126,6 +141,9 @@ def test_redact_is_fast_on_large_input():
         "token." * 17_000,
         "--token-" * 12_000,
         "mysql " * 16_000,
+        "curl " * 20_000,
+        "curl -" * 16_000,
+        "curl -u " * 12_000,
         "a://" * 25_000,
         "word " * 20_000,
         "x" * 100_000,

@@ -35,6 +35,11 @@ _AUTH_HEADER = re.compile(
 )
 _BEARER = re.compile(r"(\bBearer\s+)[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
 _MYSQL_P = re.compile(r"(?i)(\bmysql\b[^\n|;&]{0,100}?\s-p)\S+")
+# curl -u / -U / --user / --proxy-user user:password (also in a short-flag cluster: -sSu)
+_CURL_USER = re.compile(
+    r"(?i)(\bcurl\b[^\n|;&]{0,200}?\s(?:-[a-z]*u\s*|--(?:proxy-)?user(?:\s+|=)))"
+    r"(\"[^\"]*\"|'[^']*'|[^\s\"']+)"
+)
 # Name lengths are bounded so a long run of dots or dashes cannot make matching
 # quadratic.
 _SECRET_KV = re.compile(
@@ -119,6 +124,17 @@ def _entropy_sub(match: re.Match) -> str:
     return _mark("entropy") if _entropy(run) >= 4.0 else run
 
 
+def _curl_user_sub(match: re.Match) -> str:
+    """Keep the user name of ``user:password``; redact the password."""
+    value = match.group(2)
+    quote = value[0] if value[0] in "\"'" else ""
+    inner = value[1:-1] if quote else value
+    user, sep, password = inner.partition(":")
+    if not sep or not password or password.startswith("[redacted:"):
+        return match.group(0)
+    return match.group(1) + quote + user + ":" + _mark("secret") + quote
+
+
 def _query_sub(match: re.Match) -> str:
     """Redact a ``?...`` tail only when it follows a ``scheme://`` URL."""
     text, pos = match.string, match.start()
@@ -142,6 +158,7 @@ def redact(text: str) -> str:
     text = _AUTH_HEADER.sub(lambda m: m.group(1) + _mark("bearer"), text)
     text = _BEARER.sub(lambda m: m.group(1) + _mark("bearer"), text)
     text = _MYSQL_P.sub(lambda m: m.group(1) + _mark("secret"), text)
+    text = _CURL_USER.sub(_curl_user_sub, text)
     text = _SECRET_KV.sub(lambda m: m.group(1) + _mark("secret"), text)
     text = _SECRET_FLAG.sub(lambda m: m.group(1) + _mark("secret"), text)
     return _ENTROPY_RUN.sub(_entropy_sub, text)
