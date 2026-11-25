@@ -128,3 +128,4 @@ HANDOFF.md
 # catalog skill-rows overlay: runtime lock and bookkeeping (src/api/catalog_skill_rows.py)
 data/launch-scans/skill-rows.json.lock
 data/launch-scans/skill-rows-checks.json
+
