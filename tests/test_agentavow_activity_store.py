@@ -185,3 +185,83 @@ def test_append_fails_open(tmp_path, monkeypatch):
     blocker.write_text("x")
     monkeypatch.setattr(A, "ACTIVITY_DIR", blocker / "act")
     assert A.append_event("s1", {"i": 1}, now=T0) is None
+
+
+# --- fix round 1: the log is the source of truth; verify_session ---
+
+
+def _seqs(log):
+    return [json.loads(line)["seq"] for line in _lines(log)]
+
+
+def _three(monkeypatch, tmp_path):
+    monkeypatch.setattr(A, "ACTIVITY_DIR", tmp_path / "act")
+    for i in range(3):
+        A.append_event("s1", {"i": i}, now=T0)
+    return A.session_paths("s1", T0)
+
+
+def test_deleted_state_keeps_chain(tmp_path, monkeypatch):
+    log, state = _three(monkeypatch, tmp_path)
+    state.unlink()
+    assert A.append_event("s1", {"i": 3}, now=T0 + timedelta(days=1))["seq"] == 4
+    assert _seqs(log) == [1, 2, 3, 4]
+    assert A.verify_chain(log) == []
+    assert not (tmp_path / "act" / "2026-11-26").exists()
+
+
+def test_stale_state_keeps_chain(tmp_path, monkeypatch):
+    log, state = _three(monkeypatch, tmp_path)
+    st = A.load_state("s1")
+    lines = _lines(log)
+    st["seq"] = 2
+    st["prev"] = hashlib.sha256(lines[1]).hexdigest()
+    A.save_state("s1", st)
+    assert A.verify_session("s1") == []
+    A.append_event("s1", {"i": 3}, now=T0)
+    assert _seqs(log) == [1, 2, 3, 4]
+    assert A.verify_chain(log) == []
+    assert A.verify_session("s1") == []
+
+
+def test_empty_state_file_keeps_chain(tmp_path, monkeypatch):
+    log, state = _three(monkeypatch, tmp_path)
+    state.write_bytes(b"")
+    A.append_event("s1", {"i": 3}, now=T0)
+    assert _seqs(log) == [1, 2, 3, 4]
+    assert A.verify_chain(log) == []
+
+
+def test_torn_tail_flags_only_the_torn_line(tmp_path, monkeypatch):
+    log, _ = _three(monkeypatch, tmp_path)
+    with open(log, "ab") as f:
+        f.write(b'{"seq":4,"pre')
+    assert A.append_event("s1", {"i": 4}, now=T0)["seq"] == 4
+    assert A.verify_chain(log) == [4]
+    lines = _lines(log)
+    assert len(lines) == 5 and lines[3] == b'{"seq":4,"pre'
+    assert json.loads(lines[4])["seq"] == 4
+
+
+def test_tail_cut_is_detected(tmp_path, monkeypatch):
+    monkeypatch.setattr(A, "ACTIVITY_DIR", tmp_path / "act")
+    for i in range(4):
+        A.append_event("s1", {"i": i}, now=T0)
+    log, _ = A.session_paths("s1", T0)
+    log.write_bytes(b"\n".join(_lines(log)[:2]) + b"\n")
+    assert A.verify_chain(log) == []
+    assert A.verify_session("s1") == [3]
+
+
+def test_edited_last_line_is_detected(tmp_path, monkeypatch):
+    log, _ = _three(monkeypatch, tmp_path)
+    lines = _lines(log)
+    lines[2] = lines[2].replace(b'"i":2', b'"i":7')
+    log.write_bytes(b"\n".join(lines) + b"\n")
+    assert A.verify_session("s1") == [4]
+
+
+def test_clean_session_and_state_one_behind(tmp_path, monkeypatch):
+    log, _ = _three(monkeypatch, tmp_path)
+    assert A.verify_session("s1") == []
+    assert A.verify_session("never-seen") == []
