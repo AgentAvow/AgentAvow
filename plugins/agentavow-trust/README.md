@@ -118,12 +118,13 @@ example-server https://mcp.example.com/mcp K7Q2M-9XA3B
   prints no code, so Claude can't fetch the code this way either. A name with no grade
   on file is an error; use the name from the refusal.
 - As a second check, if Claude tries to run a command that names AgentAvow's folder
-  `~/.cache/agentavow` (or a file in it), or to write into that folder, the
-  install-time hook asks you first, and so does the gate for an MCP tool call that
-  names it. A Claude command that runs `--allow-line` asks too. A different folder that
-  happens to be named AgentAvow, such as a checkout of this repo or the plugin's own
-  install folder, does not count, and neither does a word that only contains "allow"
-  (such as "shallow") in a command about another cache folder.
+  `~/.cache/agentavow` as a path, or one of its files by name (`allowed-servers.txt`,
+  `allow.key`, `scanned.json`), or to write into that folder, the install-time hook
+  asks you first, and so does the gate for an MCP tool call that names it. A Claude
+  command that runs `--allow-line` asks too. Words alone never ask: the name AgentAvow,
+  "allowed" or "scanned" in a command about something else, and a different folder
+  that happens to be named AgentAvow, such as a checkout of this repo or the plugin's
+  own install folder, do not count.
 
 Settings, all optional, read from the environment and never sent anywhere:
 
@@ -238,7 +239,7 @@ AgentAvow, so it never sends it.
 **Once a day** (the first session start of each UTC day, even when there is nothing new
 to check) the session-start hook sends one more small request, a POST to
 `https://agentavow.com/api/v1/public/plugin/active` with the same install ID header and
-a body of `{"version": "0.1.45", "app": "desktop"}`: the plugin version and the app
+a body of `{"version": "0.1.46", "app": "desktop"}`: the plugin version and the app
 type, one of `desktop`, `cli`, `sdk`, `cloud` or `other`, read from Claude Code's
 `CLAUDE_CODE_ENTRYPOINT`. No tool, server, path or repo name goes in it. It lets
 AgentAvow count the machines the plugin protects, including the many days the hook

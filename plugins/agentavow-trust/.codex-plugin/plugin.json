@@ -1,6 +1,6 @@
 {
   "name": "agentavow-trust",
-  "version": "0.1.45",
+  "version": "0.1.46",
   "description": "Checks your MCP servers and packages with AgentAvow before Codex uses them. When a session starts it checks the servers in ~/.codex/config.toml and a trusted project's .codex/config.toml. When Codex runs codex mcp add, or installs a package by name with npm, pnpm, yarn, bun, pip, uv, pipx or poetry, it checks that exact version first: Do not connect stops the step and says why, Review before you connect is a one-line note, and Safe to connect stays silent. Every answer has its reason and a signed 0-100 trust score you can verify offline. Also bundles the AgentAvow connector and the scan-before-connect skill. The hooks run only while you trust them (/hooks). Fail-open. What leaves your machine: the server URL or package name being checked, and a random install ID used only to count active installs, also sent once a day with the plugin version and app type (turn it off with AGENTAVOW_ANON_ID=off).",
   "author": {
     "name": "AgentAvow",
