@@ -195,6 +195,39 @@ The hook makes no extra request for it and nothing from your machine is run in t
 sandbox. The `/agentavow-trust:scan` command and the scan-before-connect skill report the full sandbox
 observation (tools called, network, file writes, credentials) as its own section.
 
+## Activity log (preview)
+
+Off unless you set `AGENTAVOW_ACTIVITY=on`. Then each tool call gets a line before it
+and a line after it (a failed Claude Code call has only the line before, for now), and
+each subagent and session start or end gets one. A line holds a short, redacted summary:
+the command, the file path and size, the URL, the search query or Grep/Glob pattern, or
+MCP argument names with their values redacted and cut to 200 characters (a value whose
+name looks secret, such as `password`, `token`, `cookie`, `session`, `private_key` or `key`,
+is not kept, nor the value of a `{"name": "X-Api-Key", "value": ...}` or
+`["X-Api-Key", ...]` pair). It never
+records prompts, replies, tool output, file contents or environment values. It is kept
+in `~/.cache/agentavow/activity/` (only you can read it), and nothing in it leaves your
+machine. Logs older than 30 days are deleted at session start, even after you turn the
+log off; delete `~/.cache/agentavow/activity` to remove them all now. Not on Windows yet.
+
+To read it, run the report yourself. In Claude Code the `!` prefix shows the output
+directly, without passing through the model, so this is the view to trust:
+
+```
+! python3 ~/.claude/plugins/cache/<marketplace>/agentavow-trust/<version>/scripts/agentavow_activity.py --report
+```
+
+In any terminal, run the same command without the `!`. Find the folder with
+`claude plugin list --json` (the `installPath` of `agentavow-trust`). In Codex, the
+script is in Codex's plugin cache:
+`~/.codex/plugins/cache/<marketplace>/agentavow-trust/<version>/scripts/agentavow_activity.py`.
+It works whether or not the log is on. Options: `--days N`, `--session <id>` (one
+session's timeline), `--rule <id>` and `--export` (the raw JSON lines). Times are UTC.
+
+`--export` is for saving to a file, for example `--export > activity.jsonl`: it prints each
+line byte for byte as stored, oldest first, with all sessions mixed together. The report
+checks each session's log for changed or cut lines; an exported copy is not checked.
+
 ## What the hook reads and what leaves your machine
 
 What leaves your machine: the server URL or package name being checked, and a random
@@ -206,8 +239,10 @@ code, so we can count how many machines the plugin protects. To turn both off, s
 
 The hooks are three Python scripts, `scripts/agentavow_precheck.py` (session start),
 `scripts/agentavow_pre_install.py` (install time) and `scripts/agentavow_pretool_gate.py`
-(per call), started by the `scripts/run_hook.sh` launcher. They use only the standard
-library and you can read all of them.
+(per call), started by the `scripts/run_hook.sh` launcher. The activity log adds
+`scripts/agentavow_activity.py` and `scripts/agentavow_activity_redact.py`; they read
+only the hook's own input and the local cache, and send nothing. All of them use only
+the standard library and you can read all of them.
 
 **The session-start hook reads**, looking only for `mcpServers` entries:
 `~/.claude.json`, `.mcp.json` in the current folder, `.claude/settings.json` and
@@ -239,7 +274,7 @@ AgentAvow, so it never sends it.
 **Once a day** (the first session start of each UTC day, even when there is nothing new
 to check) the session-start hook sends one more small request, a POST to
 `https://agentavow.com/api/v1/public/plugin/active` with the same install ID header and
-a body of `{"version": "0.1.46", "app": "desktop"}`: the plugin version and the app
+a body of `{"version": "0.1.47", "app": "desktop"}`: the plugin version and the app
 type, one of `desktop`, `cli`, `sdk`, `cloud` or `other`, read from Claude Code's
 `CLAUDE_CODE_ENTRYPOINT`. No tool, server, path or repo name goes in it. It lets
 AgentAvow count the machines the plugin protects, including the many days the hook

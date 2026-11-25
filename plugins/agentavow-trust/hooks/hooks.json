@@ -10,6 +10,16 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run_hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/agentavow_activity.py\" --session-start",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PreToolUse": [
@@ -30,6 +40,63 @@
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run_hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/agentavow_pre_install.py\"",
             "timeout": 20
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run_hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/agentavow_activity.py\"",
+            "async": true,
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run_hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/agentavow_activity.py\"",
+            "async": true,
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run_hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/agentavow_activity.py\"",
+            "async": true,
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run_hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/agentavow_activity.py\"",
+            "async": true,
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run_hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/agentavow_activity.py\" --session-end",
+            "timeout": 1
           }
         ]
       }
