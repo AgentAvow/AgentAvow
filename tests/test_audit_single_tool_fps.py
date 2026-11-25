@@ -608,3 +608,23 @@ class TestFlagsRound3:
         assert not _crit(_scan(f"a = '{_flag('usca')}'\n", "pkg/f.py"))
         many = "".join(f"a{i} = '{_flag('usca')} {_flag('frbre')}'\n" for i in range(3))
         assert _crit(_scan(many, "pkg/f.py"))
+
+    @pytest.mark.parametrize("tags,real", [
+        ("gbeng", True), ("gbsct", True), ("gbwls", True),  # the RGI flags
+        ("usca", True),  # alpha-2 country + subdivision
+        ("zzabc", False),  # not a country code
+        ("hello", False),
+    ])
+    def test_real_flag_tags(self, tags, real):
+        from src.scanner.scan import _real_flag_tags
+        assert _real_flag_tags(tags) is real
+
+    def test_markdown_tag_text_outside_a_flag_is_critical(self):
+        from src.scanner.tool_descriptions import markdown_unicode_hits
+        tags = "".join(chr(0xE0000 + ord(c)) for c in "hello")
+        hits = markdown_unicode_hits(f"Plain text {tags} here\n")
+        assert hits and hits[0].severity == "critical"
+
+    def test_markdown_rgi_flag_is_not_a_hit(self):
+        from src.scanner.tool_descriptions import markdown_unicode_hits
+        assert not markdown_unicode_hits(f"Go {_flag('gbsct')} team\n")
