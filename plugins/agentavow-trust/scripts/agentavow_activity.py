@@ -679,6 +679,7 @@ _ANSWER_WORDS = {"safe": "Safe to connect", "review": "Review before you connect
                  "do_not_connect": "Do not connect"}
 _SUMMARY_LIMIT = 100
 _MAX_WARN_LINES = 10
+_UTC_NOTE = " · times in UTC"  # every time and day in the report is UTC
 
 
 def _parse_ts(value: object) -> datetime | None:
@@ -690,7 +691,7 @@ def _parse_ts(value: object) -> datetime | None:
 
 
 def _read_log(path: pathlib.Path) -> list[tuple[dict, bytes, datetime]]:
-    """Valid event lines of one log as (event, raw line bytes, time); others are skipped."""
+    """Valid event lines of one log as (event, raw line bytes, UTC time); others are skipped."""
     out = []
     try:
         data = path.read_bytes()
@@ -703,7 +704,7 @@ def _read_log(path: pathlib.Path) -> list[tuple[dict, bytes, datetime]]:
             continue
         ts = _parse_ts(obj.get("ts")) if isinstance(obj, dict) else None
         if ts is not None:
-            out.append((obj, raw, ts))
+            out.append((obj, raw, ts.astimezone(timezone.utc)))
     return out
 
 
@@ -765,6 +766,11 @@ def _summary_of(ev: dict) -> str:
     if isinstance(sub, dict) and sub.get("type"):
         return _short(f"subagent {sub['type']}")
     return ""
+
+
+def _count(n: int, word: str) -> str:
+    """``1 event``, ``2 events``, ``3,412 events``."""
+    return f"{n:,} {word}" if n == 1 else f"{n:,} {word}s"
 
 
 def _group(tool: str) -> str:
@@ -846,7 +852,7 @@ def report(days: int = 7, session: str | None = None, rule: str | None = None,
     warnings = _warnings(list(dict.fromkeys(stems_seen)))
 
     if not rows:
-        what = f"session {_clean(session)}" if session else f"the last {days} days"
+        what = f"session {_clean(session)}" if session else f"the last {_count(days, 'day')}"
         text = (f"AgentAvow activity: no events for {what}." if session
                 else f"AgentAvow activity: nothing recorded in {what}.")
         if not session and not _enabled():
@@ -854,12 +860,13 @@ def report(days: int = 7, session: str | None = None, rule: str | None = None,
         return "\n".join([*warnings, text])
 
     if session:
-        head = f"AgentAvow activity, session {_clean(session)} · {len(rows)} events"
+        head = (f"AgentAvow activity, session {_clean(session)} · {_count(len(rows), 'event')}"
+                f"{_UTC_NOTE}")
         lines = []
         for ev, _raw, ts, _stem in rows:
             try:
                 name = _short(ev.get("tool") or ev.get("event") or "?", 80)
-                line = f"{ts.astimezone(timezone.utc):%H:%M:%S}  {name}  {_summary(ev)}".rstrip()
+                line = f"{ts:%H:%M:%S}  {name}  {_summary(ev)}".rstrip()
                 flag = _flag_of(ev)
                 if flag:
                     line += (f"  [{_short(flag.get('severity', 'flag'), 20)}: "
@@ -877,8 +884,8 @@ def report(days: int = 7, session: str | None = None, rule: str | None = None,
     flags.sort(key=lambda f: (_SEVERITY.get(str(f[1].get("severity")).lower(), (3, ""))[0],
                               -f[2].timestamp()))
     head = (f"AgentAvow activity, {_range_text(rows[0][2], rows[-1][2])} · "
-            f"{len(rows):,} events · {len(set(r[3] for r in rows))} sessions · "
-            f"{len(flags)} flags")
+            f"{_count(len(rows), 'event')} · {_count(len(set(r[3] for r in rows)), 'session')} · "
+            f"{_count(len(flags), 'flag')}{_UTC_NOTE}")
     out = [*warnings, head, ""]
     for ev, flag, ts, stem in flags:
         try:

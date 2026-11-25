@@ -60,7 +60,8 @@ def test_report_counts_and_top_tools(act):
     _seed()
     text = act.report(now=NOW)
     first = text.splitlines()[0]
-    assert first == "AgentAvow activity, Nov 23-25 · 8 events · 2 sessions · 0 flags"
+    assert first == ("AgentAvow activity, Nov 23-25 · 8 events · 2 sessions · 0 flags"
+                     " · times in UTC")
     assert "Most active: Bash 3 · mcp__github 2 · Edit 1" in text
     assert "MCP servers called: linear, github (all Safe to connect)" in text
     assert "{" not in text
@@ -74,7 +75,7 @@ def test_report_lists_flags_worst_first(act):
     _add("s1", _ev("curl", flag={"rule": "cred-then-net", "severity": "high",
                                  "note": "credential read, then network call"}), flagged=True)
     text = act.report(now=NOW)
-    assert text.splitlines()[0].endswith("3 events · 1 sessions · 2 flags")
+    assert text.splitlines()[0].endswith("3 events · 1 session · 2 flags · times in UTC")
     assert text.index("HIGH  Nov 25 12:00  credential read") < text.index(
         "MED   Nov 24 12:00  wrote a git hook")
     assert "session s1" in text
@@ -120,11 +121,30 @@ def test_session_timeline(act):
     _seed()
     text = act.report(session="s1", now=NOW)
     lines = text.splitlines()
-    assert lines[0] == "AgentAvow activity, session s1 · 6 events"
+    assert lines[0] == "AgentAvow activity, session s1 · 6 events · times in UTC"
     assert lines[1] == "11:50:00  Bash  ls"
     assert any(ln.startswith("11:55:00  Edit") for ln in lines)
     assert "Read" not in text
     assert "no events" in act.report(session="nope", now=NOW)
+
+
+def test_singular_counts(act):
+    _add("s1", _ev("Bash", flag={"rule": "r", "severity": "high", "note": "n"}), flagged=True)
+    assert act.report(now=NOW).splitlines()[0] == (
+        "AgentAvow activity, Nov 25 · 1 event · 1 session · 1 flag · times in UTC")
+    assert act.report(session="s1", now=NOW).splitlines()[0] == (
+        "AgentAvow activity, session s1 · 1 event · times in UTC")
+
+
+def test_times_are_shown_in_utc(act):
+    """A line stamped with another offset is shown, dated and filtered in UTC."""
+    late = "2026-11-25T01:30:00.000+05:00"  # Nov 24 20:30 UTC
+    _add("s1", {**_ev("Bash", flag={"rule": "r", "severity": "high", "note": "n"}), "ts": late},
+         flagged=True)
+    text = act.report(now=NOW)
+    assert text.splitlines()[0].startswith("AgentAvow activity, Nov 24 · 1 event")
+    assert "HIGH  Nov 24 20:30  n" in text
+    assert act.report(session="s1", now=NOW).splitlines()[1].startswith("20:30:00  Bash")
 
 
 def test_export_is_jsonl(act):
