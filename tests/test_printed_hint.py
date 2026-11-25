@@ -13,9 +13,17 @@ from __future__ import annotations
 
 import pytest
 
+from src.scanner import printed_hint
 from src.scanner.artifact_fetch import ArtifactFetchResult, _make_file
 from src.scanner.patterns import DYNAMIC_REMOTE_LOAD_PATTERNS
-from src.scanner.printed_hint import Hints, why_not
+from src.scanner.printed_hint import (
+    Hints,
+    _alias_target,
+    _console_value_end,
+    _Toks,
+    console_aliases,
+    why_not,
+)
 from src.scanner.scan import ScanResult, _calculate_trust_score, _scan_content, apply_artifact_scan
 
 RULE = "curl/wget piped to shell"
@@ -578,3 +586,103 @@ def test_console_alias_property_written_in_another_file_stays_critical():
     files = {"a.js": a, "index.js": b}
     assert why_not(files, "a.js", _line_of(a), PAT, package=True) is not None
     assert why_not({"a.js": a}, "a.js", _line_of(a), PAT, package=True) is None
+
+
+# ---------------------------------------------------------------------------
+# console_aliases and its helpers, branch by branch
+# ---------------------------------------------------------------------------
+
+_NONE = (frozenset(), frozenset(), frozenset())
+_THIS_CLASS = ('class C {\n  constructor() { this._logger = console; }\n'
+               '  f() { this._logger.warn("x"); }\n}\n')
+
+
+def _aliases(text: str, tree: dict[str, str] | None = None):
+    return console_aliases(text, {"a.js": text} if tree is None else tree)
+
+
+def test_console_value_end_rejects_console_as_a_member():
+    t = _Toks("a.console;\n")
+    assert _console_value_end(t, t.val.index("console")) is None
+
+
+def test_console_value_end_rejects_global_object_without_console():
+    t = _Toks("globalThis.process;\nwindow;\n")
+    assert _console_value_end(t, t.val.index("globalThis")) is None
+    assert _console_value_end(t, t.val.index("window")) is None
+
+
+@pytest.mark.parametrize("src", ["obj.log = console;", "a?.log = console;",
+                                 "x.this.log = console;"])
+def test_alias_target_ignores_property_of_other_than_this(src):
+    t = _Toks(src)
+    assert _alias_target(t, t.val.index("=")) is None
+
+
+@pytest.mark.parametrize("src", [
+    'const arr = [];\narr[0] = console;\narr[0].warn("x");\n',
+    'x.this = console;\nx.this.warn("x");\n',
+])
+def test_alias_target_ignores_non_identifier_or_keyword_left_side(src):
+    assert _aliases(src) == _NONE
+
+
+@pytest.mark.parametrize("src", [
+    'obj._logger = console;\nobj._logger.warn("x");\n',
+    'x.this._logger = console;\nx.this._logger.warn("x");\n',
+])
+def test_console_aliases_ignores_property_of_other_than_this(src):
+    assert _aliases(src) == _NONE
+
+
+def test_console_aliases_ignores_files_that_do_not_tokenize_cleanly():
+    ok = 'const log = console;\nlog.warn("x");\n'
+    assert _aliases(ok)[0] == {"log"}
+    assert _aliases(ok + "const s = `open\n") == _NONE
+
+
+def test_console_aliases_ignores_name_bound_as_both_variable_and_property():
+    var = 'const _logger = console;\n_logger.warn("x");\n'
+    assert _aliases(var)[0] == {"_logger"}
+    assert _aliases(_THIS_CLASS)[1] == {"_logger"}
+    assert _aliases(var + _THIS_CLASS) == _NONE
+
+
+def test_console_aliases_ignores_console_member_of_another_object():
+    assert _aliases('const log = obj.console;\nlog.warn("x");\n') == _NONE
+
+
+def test_console_aliases_cache_is_bounded():
+    texts = [f'const log{i} = console;\nlog{i}.warn("x");\n' for i in range(300)]
+    trees = [{"a.js": s} for s in texts]
+    for s, tree in zip(texts, trees):
+        assert console_aliases(s, tree)[0] == {s.split()[1]}
+    assert len(printed_hint._CONSOLE_ALIAS_CACHE) <= 257
+    assert console_aliases(texts[0], trees[0])[0] == {"log0"}
+
+
+def test_this_alias_skips_tree_files_that_do_not_mention_the_name():
+    tree = {"a.js": _THIS_CLASS, "b.js": "module.exports = 1;\n"}
+    assert _aliases(_THIS_CLASS, tree)[1] == {"_logger"}
+
+
+def test_this_alias_ignores_non_js_files_in_tree():
+    tree = {"a.js": _THIS_CLASS, "README.md": "the _logger field\n"}
+    assert _aliases(_THIS_CLASS, tree) == _NONE
+
+
+def test_this_alias_rejects_tree_file_that_does_not_tokenize_cleanly():
+    tree = {"a.js": _THIS_CLASS, "b.js": "this._logger.warn(`x\n"}
+    assert _aliases(_THIS_CLASS, tree) == _NONE
+
+
+def test_this_alias_allows_quote_inside_a_regex_before_the_name():
+    src = _THIS_CLASS.replace('this._logger.warn("x");',
+                              "const re = /'/; this._logger.warn(\"x\");")
+    assert _aliases(src)[1] == {"_logger"}
+
+
+def test_this_alias_rejects_quote_in_a_comment_before_the_name():
+    src = _THIS_CLASS.replace('this._logger.warn("x");',
+                              "// don't this._logger.warn\n    this._logger.warn(\"x\");")
+    assert _aliases(src) == _NONE
