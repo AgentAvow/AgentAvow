@@ -28,17 +28,21 @@ _PRIVATE_KEY = re.compile(
     re.DOTALL,
 )
 _JWT = re.compile(r"eyJ[\w-]+\.[\w-]+\.[\w-]+")
-_USERINFO = re.compile(r"\b([a-zA-Z][a-zA-Z0-9+.-]*://)[^\s/@:]+:[^\s/@]*@")
-_QUERY = re.compile(r"\b([a-zA-Z][a-zA-Z0-9+.-]*://[^\s?\"'<>]*)\?[^\s\"'<>)]*")
+_USERINFO = re.compile(r"\b([a-zA-Z][a-zA-Z0-9+.-]{0,20}://)[^\s/@:]+:[^\s/]*@")
+_QUERY = re.compile(r"\?[^\s\"'<>)]*")
 _AUTH_HEADER = re.compile(
     r"(?i)(\bAuthorization:\s*)(?:(?:Bearer|Basic|Token)\s+)?[^\s\"']+"
 )
 _BEARER = re.compile(r"(\bBearer\s+)[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
-_MYSQL_P = re.compile(r"(?i)(\bmysql\b[^\n|;&]*?\s-p)\S+")
+_MYSQL_P = re.compile(r"(?i)(\bmysql\b[^\n|;&]{0,100}?\s-p)\S+")
+# Name lengths are bounded so a long run of dots or dashes cannot make matching
+# quadratic.
 _SECRET_KV = re.compile(
-    r"(?i)((?<![\w])[\w.-]*?" + _NAME + r"[\w.-]*\s*[=:]\s*)" + _VALUE
+    r"(?i)(" + _NAME + r"[\w.-]{0,40}[\"']?\s*[=:]\s*)" + _VALUE
 )
-_SECRET_FLAG = re.compile(r"(?i)(--[\w-]*?" + _NAME + r"[\w-]*\s+)(?!-)" + _VALUE)
+_SECRET_FLAG = re.compile(
+    r"(?i)((?<!-)--(?!-)[\w-]{0,40}?" + _NAME + r"[\w-]{0,40}\s+)(?!-)" + _VALUE
+)
 _ENTROPY_RUN = re.compile(r"[A-Za-z0-9+/=_-]{32,}")
 _HEX_ONLY = re.compile(r"[0-9a-fA-F]+")
 
@@ -66,11 +70,40 @@ def _entropy(run: str) -> float:
     return -sum(c / n * math.log2(c / n) for c in counts.values())
 
 
+def _token_start(text: str, pos: int) -> int:
+    """Start of the whitespace, quote or ``=`` delimited token containing pos."""
+    low = max(pos - 256, 0)
+    while pos > low and text[pos - 1] not in " \t\r\n\"'=":
+        pos -= 1
+    return pos
+
+
+def _is_path(run: str, text: str, start: int) -> bool:
+    tok = _token_start(text, start)
+    if text.startswith(("/", "~/", "./", "../"), tok):
+        return True  # absolute or explicitly relative path
+    return "/" in run and run == run.lower()  # word-like relative path
+
+
 def _entropy_sub(match: re.Match) -> str:
     run = match.group(0)
     if _HEX_ONLY.fullmatch(run):
         return run  # commit hashes and digests
+    if _is_path(run, match.string, match.start()):
+        return run
     return _mark("entropy") if _entropy(run) >= 4.0 else run
+
+
+def _query_sub(match: re.Match) -> str:
+    """Redact a ``?...`` tail only when it follows a ``scheme://`` URL."""
+    text, pos = match.string, match.start()
+    low = max(pos - 2048, 0)
+    start = pos
+    while start > low and text[start - 1] not in " \t\r\n\"'<>":
+        start -= 1
+    if "://" not in text[start:pos]:
+        return match.group(0)
+    return "?" + _mark("query")
 
 
 def redact(text: str) -> str:
@@ -80,7 +113,7 @@ def redact(text: str) -> str:
     for kind, pattern in _TOKEN_RULES:
         text = pattern.sub(_mark(kind), text)
     text = _USERINFO.sub(lambda m: m.group(1) + _mark("url_userinfo") + "@", text)
-    text = _QUERY.sub(lambda m: m.group(1) + "?" + _mark("query"), text)
+    text = _QUERY.sub(_query_sub, text)
     text = _AUTH_HEADER.sub(lambda m: m.group(1) + _mark("bearer"), text)
     text = _BEARER.sub(lambda m: m.group(1) + _mark("bearer"), text)
     text = _MYSQL_P.sub(lambda m: m.group(1) + _mark("secret"), text)
@@ -94,6 +127,11 @@ def cut(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: max(limit - len(_CUT_MARK), 0)] + _CUT_MARK
+
+
+def _scrub(text: str, limit: int) -> str:
+    """Redact then cut. Only a prefix a little past the limit is scanned."""
+    return cut(redact(text[: limit + 256]), limit)
 
 
 def _tilde(path: str) -> str:
@@ -152,9 +190,11 @@ def _patch_text(tool_input: dict) -> str:
 def summarize_input(tool: str, tool_input: object, cwd: str | None) -> dict:
     """Summarise a tool call's input without keeping content or secrets."""
     args = tool_input if isinstance(tool_input, dict) else {}
+    if not isinstance(tool, str):
+        tool = ""
 
     if tool in ("Bash", "exec", "shell"):
-        return {"command": cut(redact(_command_text(args)), CMD_LIMIT)}
+        return {"command": _scrub(_command_text(args), CMD_LIMIT)}
 
     if tool in ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit"):
         raw = args.get("file_path") or args.get("notebook_path") or args.get("path") or ""
@@ -167,27 +207,27 @@ def summarize_input(tool: str, tool_input: object, cwd: str | None) -> dict:
     if tool == "apply_patch":
         patch = _patch_text(args)
         return {
-            "paths": [_tilde(p) for p in _PATCH_FILE.findall(patch)],
+            "paths": [cut(_tilde(p), TEXT_LIMIT) for p in _PATCH_FILE.findall(patch)],
             "bytes": _nbytes(patch),
         }
 
     if tool == "WebFetch":
-        return {"url": redact(str(args.get("url", "")))}
+        return {"url": _scrub(str(args.get("url", "")), TEXT_LIMIT)}
 
     if tool == "WebSearch":
-        return {"query": cut(redact(str(args.get("query", ""))), TEXT_LIMIT)}
+        return {"query": _scrub(str(args.get("query", "")), TEXT_LIMIT)}
 
     if tool in ("Grep", "Glob"):
         path = args.get("path")
         return {
-            "pattern": cut(redact(str(args.get("pattern", ""))), TEXT_LIMIT),
+            "pattern": _scrub(str(args.get("pattern", "")), TEXT_LIMIT),
             "path": _tilde(path) if isinstance(path, str) else None,
         }
 
     if tool.startswith("mcp__"):
         return {
             "args": {
-                str(name): cut(redact(str(value)), MCP_VALUE_LIMIT)
+                str(name): _scrub(str(value), MCP_VALUE_LIMIT)
                 for name, value in args.items()
             }
         }

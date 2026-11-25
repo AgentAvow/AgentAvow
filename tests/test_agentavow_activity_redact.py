@@ -40,6 +40,11 @@ SECRET_CASES = [
     ("export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "wJalrXUtnFEMI/K7MDENG", "secret"),
     ("db password: hunter2hunter", "hunter2hunter", "secret"),
     ("tool --api-key abc123xyz", "abc123xyz", "secret"),
+    ("curl -d '{\"password\":\"hunter2\"}' x", "hunter2", "secret"),
+    ('{"api_key": "abc123"}', "abc123", "secret"),
+    ("postgres://u:pa@ss@host/db", "ss@", "url_userinfo"),
+    ("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "wJalrXUtnFEMI", "entropy"),
+    ("x " + "aZ3/Qw8+Lm2Xk9Pv4Rt7Yb1Nc6Hd5Jf0SgUe", "aZ3/Qw8", "entropy"),
     ("tool --token=abc123xyz", "abc123xyz", "secret"),
     ("mysql -uroot -pS3cret db", "S3cret", "secret"),
     ("git clone https://u:p@github.com/o/r", "u:p@", "url_userinfo"),
@@ -62,6 +67,72 @@ def test_query_marker_is_exact():
 def test_hex_hashes_are_kept():
     text = "git show 9fceb02d0ae598e95dc970b74767f19372d61af8"
     assert R.redact(text) == text
+
+
+PATH_CASES = [
+    "cat /home/alice/projects/agentavow-activity-log/plugins/agentavow-trust/scripts/x.py",
+    "ls /home/alice/very-long-directory-name-with-words/and-another-segment-here/file",
+    "cp ~/.aws/credentials /tmp/some_long_backup_directory_name/other_part/creds",
+    "vi plugins/agentavow-trust/scripts/agentavow_activity_redact.py",
+    "cat /home/Alice/My.Docs/Long_Directory_Name_With_Capitals/Another_Segment_Here/f",
+]
+
+
+@pytest.mark.parametrize("text", PATH_CASES)
+def test_paths_survive_entropy_rule(text):
+    assert R.redact(text) == text
+
+
+def test_long_path_in_bash_command_survives():
+    cmd = "cat /home/alice/projects/agentavow-activity-log/plugins/agentavow-trust/scripts/x.py"
+    assert R.summarize_input("Bash", {"command": cmd}, None) == {"command": cmd}
+
+
+def test_redact_is_fast_on_large_input():
+    import time
+
+    inputs = [
+        "a." * 50_000,
+        "-" * 100_000,
+        "token." * 17_000,
+        "--token-" * 12_000,
+        "mysql " * 16_000,
+        "a://" * 25_000,
+        "word " * 20_000,
+        "x" * 100_000,
+    ]
+    for text in inputs:
+        t0 = time.perf_counter()
+        R.redact(text)
+        assert time.perf_counter() - t0 < 0.05, text[:12]
+
+
+def test_summaries_are_fast_on_large_input():
+    import time
+
+    t0 = time.perf_counter()
+    R.summarize_input("Bash", {"command": "a." * 500_000}, None)
+    assert time.perf_counter() - t0 < 0.05
+
+
+def test_secret_at_cut_boundary_is_still_caught():
+    cmd = "x" * 1990 + " AKIAIOSFODNN7EXAMPLE"
+    out = R.summarize_input("Bash", {"command": cmd}, None)["command"]
+    assert "AKIAIOSFODNN7" not in out
+
+
+def test_webfetch_url_and_patch_paths_are_cut():
+    url = R.summarize_input("WebFetch", {"url": "https://x.io/" + "p/" * 600}, None)["url"]
+    assert len(url) == 500
+    patch = "*** Update File: " + "d" * 900 + "\n"
+    paths = R.summarize_input("apply_patch", {"input": patch}, None)["paths"]
+    assert len(paths[0]) == 500
+
+
+@pytest.mark.parametrize("tool", [None, 5, ["Bash"]])
+def test_non_str_tool_does_not_raise(tool):
+    assert R.summarize_input(tool, {"b": 1, "a": 2}, None) == {"arg_names": ["a", "b"]}
+    assert R.summarize_input(tool, "oops", None) == {"arg_names": []}
 
 
 def test_plain_text_is_unchanged():
