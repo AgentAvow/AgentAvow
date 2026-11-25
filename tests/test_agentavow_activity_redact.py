@@ -347,7 +347,49 @@ MCP_SECRET_CASES = [
     ("refreshToken", "rt-1"),
     ("db_credentials", ["a", "b"]),
     ("auth", {"user": "u", "pw": "p1"}),
+    ("pwd", "pw1"),
+    ("db_pwd", "pw2"),
+    ("private_key", "pk-short"),
+    ("privateKey", "pk2"),
+    ("cookie", "sid=abc"),
+    ("Set-Cookie", "sid=abc"),
+    ("key", "k-short"),
+    ("access_key", "ak1"),
+    ("signingKey", "sk1"),
+    ("x-key", "xk1"),
+    ("bearer", "b1"),
+    ("bearer_token", "b2"),
 ]
+
+
+@pytest.mark.parametrize("name", ["keyword", "monkey", "hotkeys", "keyboard", "title", "cwd",
+                                  "keys_count", "query"])
+def test_mcp_ordinary_names_are_kept(name):
+    args = R.summarize_input("mcp__srv__tool", {name: "plain"}, None)["args"]
+    assert args == {name: "plain"}
+
+
+@pytest.mark.parametrize("pair", [
+    {"name": "X-Api-Key", "value": "short1"},
+    {"Name": "Cookie", "Value": "short1"},
+    {"header": "Authorization", "value": "short1"},
+    {"key": "password", "val": "short1"},
+    {"field": "private_key", "content": "short1"},
+])
+def test_mcp_secret_named_pairs_mask_their_value(pair):
+    value = {"headers": [pair, {"name": "Accept", "value": "json"}]}
+    out = R.summarize_input("mcp__srv__tool", {"req": value}, None)["args"]["req"]
+    assert "short1" not in out
+    assert "json" in out and "Accept" in out
+
+
+def test_mcp_top_level_secret_pair_masks_its_value():
+    args = R.summarize_input("mcp__srv__set_header", {"name": "X-Api-Key", "value": "short1"},
+                             None)["args"]
+    assert args == {"name": "X-Api-Key", "value": "[redacted:secret]"}
+    args = R.summarize_input("mcp__srv__set_header", {"name": "Accept", "value": "json"},
+                             None)["args"]
+    assert args == {"name": "Accept", "value": "json"}
 
 
 @pytest.mark.parametrize("name,value", MCP_SECRET_CASES)

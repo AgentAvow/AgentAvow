@@ -202,7 +202,8 @@ and a line after it (a failed Claude Code call has only the line before, for now
 each subagent and session start or end gets one. A line holds a short, redacted summary:
 the command, the file path and size, the URL, the search query or Grep/Glob pattern, or
 MCP argument names with their values redacted and cut to 200 characters (a value whose
-name looks secret, such as `password`, `token` or `client_secret`, is not kept). It never
+name looks secret, such as `password`, `token`, `cookie`, `private_key` or `key`, is not
+kept, nor the value of a `{"name": "X-Api-Key", "value": ...}` pair). It never
 records prompts, replies, tool output, file contents or environment values. It is kept
 in `~/.cache/agentavow/activity/` (only you can read it), and nothing in it leaves your
 machine. Logs older than 30 days are deleted at session start, even after you turn the
@@ -223,7 +224,8 @@ It works whether or not the log is on. Options: `--days N`, `--session <id>` (on
 session's timeline), `--rule <id>` and `--export` (the raw JSON lines). Times are UTC.
 
 `--export` is for saving to a file, for example `--export > activity.jsonl`: it prints each
-line exactly as stored, so the copy still checks against the hash chain.
+line byte for byte as stored, oldest first, with all sessions mixed together. The report
+checks each session's log for changed or cut lines; an exported copy is not checked.
 
 ## What the hook reads and what leaves your machine
 
