@@ -78,19 +78,44 @@ def _token_start(text: str, pos: int) -> int:
     return pos
 
 
-def _is_path(run: str, text: str, start: int) -> bool:
-    tok = _token_start(text, start)
-    if text.startswith(("/", "~/", "./", "../"), tok):
-        return True  # absolute or explicitly relative path
-    return "/" in run and run == run.lower()  # word-like relative path
+_PATH_PREFIXES = ("/", "~/", "./", "../")
+# Readable names: lower-case or Capitalised words (camelCase allowed, no runs of
+# capitals), or a whole ALL-CAPS word like LICENSE, joined by . _ -
+_PIECE = r"(?:(?:[A-Z][a-z0-9]*|[a-z0-9]+)(?:[A-Z][a-z0-9]+)*|[A-Z]+)"
+_READABLE = re.compile(_PIECE + r"(?:[._-]" + _PIECE + r")*")
+
+
+def _random_segment(seg: str) -> bool:
+    """True when one path segment looks like a random secret on its own."""
+    if len(seg) < 6 or _HEX_ONLY.fullmatch(seg):
+        return False
+    if not _READABLE.fullmatch(seg):
+        return True
+    return (
+        len(seg) >= 16
+        and any(c.isupper() for c in seg)
+        and any(c.islower() for c in seg)
+        and any(c.isdigit() for c in seg)
+        and _entropy(seg) >= 3.5
+    )
 
 
 def _entropy_sub(match: re.Match) -> str:
     run = match.group(0)
     if _HEX_ONLY.fullmatch(run):
         return run  # commit hashes and digests
-    if _is_path(run, match.string, match.start()):
-        return run
+    if "/" in run:
+        segments = run.split("/")
+        random_flags = [_random_segment(seg) for seg in segments]
+        text, start = match.string, match.start()
+        if text.startswith(_PATH_PREFIXES, _token_start(text, start)):
+            # A path: keep readable segments, redact each random-looking one.
+            return "/".join(
+                _mark("entropy") if flag else seg
+                for seg, flag in zip(segments, random_flags)
+            )
+        if not any(random_flags):
+            return run  # a relative path of readable segments
     return _mark("entropy") if _entropy(run) >= 4.0 else run
 
 
