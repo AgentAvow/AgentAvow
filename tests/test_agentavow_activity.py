@@ -233,6 +233,26 @@ def test_mcp_call_carries_server_tool_and_answer(act, monkeypatch, capsys):
     assert act._gate().CACHE.read_bytes() == before  # read-only
 
 
+SECRET_ARGS = {"password": "hunter2", "api_key": "abc123shortkey", "token": "tok_live_9f8e7d",
+               "Authorization": "Basic dXNlcjpwYXNz", "client_secret": "s3cr3tValue!",
+               "opts": {"refresh_token": "rt_9z8y7x", "region": "eu"}}
+
+
+def test_secret_named_mcp_args_never_reach_the_log_or_report(act, monkeypatch, capsys):
+    _run(act, monkeypatch, capsys, _payload(tool_name="mcp__vault__login", tool_input=SECRET_ARGS))
+    [line] = _lines(act)
+    assert line["input"]["args"]["password"] == "[redacted:secret]"
+    assert line["input"]["args"]["Authorization"] == "[redacted:secret]"
+    assert "eu" in line["input"]["args"]["opts"]
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    assert act.main(["--report", "--session", SID]) == 0
+    shown = capsys.readouterr().out + _raw(act)
+    assert "Authorization=[redacted:secret] api_key=[redacted:secret]" in shown
+    for secret in ("hunter2", "abc123shortkey", "tok_live_9f8e7d", "dXNlcjpwYXNz",
+                   "s3cr3tValue!", "rt_9z8y7x"):
+        assert secret not in shown, secret
+
+
 def test_a_broken_cache_just_omits_the_answer(act, monkeypatch, capsys):
     act._gate().CACHE.parent.mkdir(parents=True, exist_ok=True)
     act._gate().CACHE.write_text("{not json")

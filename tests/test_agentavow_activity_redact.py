@@ -265,6 +265,47 @@ def test_mcp_values_cut_and_redacted():
     assert s["args"]["c"] == "5"
 
 
+MCP_SECRET_CASES = [
+    ("password", "hunter2"),
+    ("api_key", "abc123shortkey"),
+    ("token", "tok_live_9f8e7d"),
+    ("Authorization", "Basic dXNlcjpwYXNz"),
+    ("client_secret", "s3cr3tValue!"),
+    ("X-Api-Key", "k1"),
+    ("PASSWD", "pw"),
+    ("refreshToken", "rt-1"),
+    ("db_credentials", ["a", "b"]),
+    ("auth", {"user": "u", "pw": "p1"}),
+]
+
+
+@pytest.mark.parametrize("name,value", MCP_SECRET_CASES)
+def test_mcp_secret_named_args_are_redacted(name, value):
+    args = R.summarize_input("mcp__srv__tool", {name: value, "title": "Bug"}, None)["args"]
+    assert args == {name: "[redacted:secret]", "title": "Bug"}
+
+
+def test_mcp_nested_secret_keys_are_redacted():
+    value = {"s": {"token": ["leak1", "leak2"], "pin": 7}, "user": "alice",
+             "password": "hunter2", "h": [{"Authorization": "Basic dXNlcjpwYXNz", "accept": "json"}],
+             "d": {"client_secret": "s3cr3tValue!"}}
+    out = R.summarize_input("mcp__srv__tool", {"config": value}, None)["args"]["config"]
+    for secret in ("hunter2", "dXNlcjpwYXNz", "s3cr3tValue!", "leak1", "leak2"):
+        assert secret not in out
+    assert "alice" in out and "json" in out and "'pin': 7" in out
+    assert out.count("[redacted:secret]") == 4
+
+
+def test_mcp_huge_nested_value_is_fast_and_cut():
+    import time
+
+    value = {"rows": [{"id": i, "token": "t%d" % i} for i in range(200_000)]}
+    t0 = time.perf_counter()
+    out = R.summarize_input("mcp__srv__tool", {"q": value}, None)["args"]["q"]
+    assert time.perf_counter() - t0 < 0.2
+    assert len(out) == 200 and "t1'" not in out
+
+
 def test_unknown_tool_keeps_names_only():
     s = R.summarize_input("Mystery", {"b": "secret", "a": 1}, None)
     assert s == {"arg_names": ["a", "b"]}

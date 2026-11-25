@@ -159,6 +159,49 @@ def _scrub(text: str, limit: int) -> str:
     return cut(redact(text[: limit + 256]), limit)
 
 
+_SECRET_ARG_NAME = re.compile(_NAME, re.IGNORECASE)
+# Bounds for walking a nested MCP argument: past these the value is cut anyway.
+_MASK_DEPTH = 8
+_MASK_ITEMS = 200
+
+
+def _secret_name(name: object) -> bool:
+    """True when an argument or key name looks like it holds a secret (``client_secret``)."""
+    return isinstance(name, str) and _SECRET_ARG_NAME.search(name[:256]) is not None
+
+
+def _mask(value: object, depth: int = 0) -> object:
+    """A copy of a nested value with every secret-named dict key's value replaced.
+
+    Walks at most ``_MASK_DEPTH`` levels and ``_MASK_ITEMS`` items per container,
+    which is more than a value cut to ``MCP_VALUE_LIMIT`` characters can show.
+    """
+    if isinstance(value, dict):
+        if depth >= _MASK_DEPTH:
+            return "…"
+        out = {}
+        for n, (k, v) in enumerate(value.items()):
+            if n >= _MASK_ITEMS:
+                break
+            out[k] = _mark("secret") if _secret_name(k) else _mask(v, depth + 1)
+        return out
+    if isinstance(value, (list, tuple)):
+        if depth >= _MASK_DEPTH:
+            return "…"
+        return [_mask(v, depth + 1) for v in value[:_MASK_ITEMS]]
+    if isinstance(value, str):
+        return value[: MCP_VALUE_LIMIT + 256]
+    return value
+
+
+def _mcp_value(name: object, value: object) -> str:
+    if _secret_name(name):
+        return _mark("secret")
+    if isinstance(value, (dict, list, tuple)):
+        value = _mask(value)
+    return _scrub(str(value), MCP_VALUE_LIMIT)
+
+
 def _tilde(path: str) -> str:
     home = os.path.expanduser("~")
     if home and home != os.sep:
@@ -252,7 +295,7 @@ def summarize_input(tool: str, tool_input: object, cwd: str | None) -> dict:
     if tool.startswith("mcp__"):
         return {
             "args": {
-                str(name): _scrub(str(value), MCP_VALUE_LIMIT)
+                str(name): _mcp_value(name, value)
                 for name, value in args.items()
             }
         }
