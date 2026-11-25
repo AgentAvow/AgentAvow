@@ -158,6 +158,59 @@ def test_webfetch_url_and_patch_paths_are_cut():
     assert len(paths[0]) == 500
 
 
+LONG = "/srv/" + "segment/" * 120 + "file.txt"
+
+
+@pytest.mark.parametrize("tool,args,field", [
+    ("Read", {"file_path": LONG}, "path"),
+    ("Write", {"file_path": LONG, "content": "x"}, "path"),
+    ("Edit", {"file_path": LONG, "new_string": "x"}, "path"),
+    ("NotebookEdit", {"notebook_path": LONG, "new_source": "x"}, "path"),
+    ("Grep", {"pattern": "x", "path": LONG}, "path"),
+    ("Glob", {"pattern": "x", "path": LONG}, "path"),
+])
+def test_every_path_is_cut(tool, args, field):
+    assert len(LONG) > 900
+    out = R.summarize_input(tool, args, None)[field]
+    assert len(out) == 500 and out.endswith("…[cut]")
+
+
+def test_arg_names_and_mcp_names_are_cut():
+    name = "n" * 900
+    [kept] = R.summarize_input("Mystery", {name: 1}, None)["arg_names"]
+    assert len(kept) == 500 and kept.endswith("…[cut]")
+    [key] = R.summarize_input("mcp__s__t", {name: 1}, None)["args"]
+    assert len(key) == 500 and key.endswith("…[cut]")
+
+
+SECRET_PATH = "https://user:pw@files.example.test/a/b.txt?token=abc123"
+
+
+@pytest.mark.parametrize("tool,args,field", [
+    ("Read", {"file_path": SECRET_PATH}, "path"),
+    ("Write", {"file_path": SECRET_PATH, "content": "x"}, "path"),
+    ("Edit", {"file_path": SECRET_PATH, "new_string": "x"}, "path"),
+    ("NotebookEdit", {"notebook_path": SECRET_PATH}, "path"),
+    ("Grep", {"pattern": "x", "path": SECRET_PATH}, "path"),
+])
+def test_paths_are_scrubbed_like_other_text(tool, args, field):
+    out = R.summarize_input(tool, args, None)[field]
+    assert out == "https://[redacted:url_userinfo]@files.example.test/a/b.txt?[redacted:query]"
+
+
+def test_patch_paths_are_scrubbed():
+    patch = f"*** Update File: /tmp/{LEAK_SECRET}/a.py\n*** Add File: src/ok.py\n"
+    paths = R.summarize_input("apply_patch", {"input": patch}, None)["paths"]
+    assert paths == ["/tmp/aZ3/[redacted:entropy]/a.py", "src/ok.py"]  # LEAK_SECRET has a /
+
+
+def test_readable_paths_are_unchanged(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    for path in ("/srv/app/src/main.py", "~/.aws/credentials", "notes/2026-11-25.md",
+                 ".git/objects/9f/ceb02d0ae598e95dc970b74767f19372d61af8"):
+        assert R.summarize_input("Read", {"file_path": path}, None) == {"path": path}
+
+
 @pytest.mark.parametrize("tool", [None, 5, ["Bash"]])
 def test_non_str_tool_does_not_raise(tool):
     assert R.summarize_input(tool, {"b": 1, "a": 2}, None) == {"arg_names": ["a", "b"]}

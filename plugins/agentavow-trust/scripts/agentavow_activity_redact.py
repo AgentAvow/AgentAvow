@@ -212,6 +212,13 @@ def _tilde(path: str) -> str:
     return path
 
 
+def _path(value: object) -> str | None:
+    """A file path: home shown as ``~``, scrubbed like other text, cut to TEXT_LIMIT."""
+    if not isinstance(value, str):
+        return None
+    return _scrub(_tilde(value), TEXT_LIMIT)
+
+
 def _nbytes(value: object) -> int:
     return len(value.encode("utf-8", "replace")) if isinstance(value, str) else 0
 
@@ -266,7 +273,7 @@ def summarize_input(tool: str, tool_input: object, cwd: str | None) -> dict:
 
     if tool in ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit"):
         raw = args.get("file_path") or args.get("notebook_path") or args.get("path") or ""
-        summary: dict = {"path": _tilde(raw) if isinstance(raw, str) else ""}
+        summary: dict = {"path": _path(raw) or ""}
         size = _write_bytes(tool, args)
         if size is not None:
             summary["bytes"] = size
@@ -275,7 +282,7 @@ def summarize_input(tool: str, tool_input: object, cwd: str | None) -> dict:
     if tool == "apply_patch":
         patch = _patch_text(args)
         return {
-            "paths": [cut(_tilde(p), TEXT_LIMIT) for p in _PATCH_FILE.findall(patch)],
+            "paths": [_path(p) for p in _PATCH_FILE.findall(patch)],
             "bytes": _nbytes(patch),
         }
 
@@ -286,21 +293,20 @@ def summarize_input(tool: str, tool_input: object, cwd: str | None) -> dict:
         return {"query": _scrub(str(args.get("query", "")), TEXT_LIMIT)}
 
     if tool in ("Grep", "Glob"):
-        path = args.get("path")
         return {
             "pattern": _scrub(str(args.get("pattern", "")), TEXT_LIMIT),
-            "path": _tilde(path) if isinstance(path, str) else None,
+            "path": _path(args.get("path")),
         }
 
     if tool.startswith("mcp__"):
         return {
             "args": {
-                str(name): _mcp_value(name, value)
+                cut(str(name), TEXT_LIMIT): _mcp_value(name, value)
                 for name, value in args.items()
             }
         }
 
-    return {"arg_names": sorted(str(k) for k in args)}
+    return {"arg_names": sorted(cut(str(k), TEXT_LIMIT) for k in args)}
 
 
 def summarize_output(tool_response: object) -> dict:
