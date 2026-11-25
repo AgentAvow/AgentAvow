@@ -411,3 +411,17 @@ def test_save_state_leaves_no_tmp_and_cleanup_removes_stale_tmp(tmp_path, monkey
     os.utime(fresh, (T0.timestamp() - 60, T0.timestamp() - 60))
     A.cleanup(T0)
     assert not stale.exists() and fresh.exists()
+
+
+def test_torn_write_then_lost_state_save_is_not_a_false_break(tmp_path, monkeypatch):
+    log, _ = _three(monkeypatch, tmp_path)
+    with open(log, "ab") as f:
+        f.write(b'{"seq":4,"pre')  # torn line 4, state not saved
+    real = A.save_state
+    monkeypatch.setattr(A, "save_state", lambda *a, **k: (_ for _ in ()).throw(OSError("full")))
+    assert A.append_event("s1", {"i": 4}, now=T0) is None  # log written, state save lost
+    monkeypatch.setattr(A, "save_state", real)
+    assert len(_lines(log)) == 5
+    assert A.append_event("s1", {"i": 5}, now=T0)["seq"] == 5
+    assert A.verify_session("s1") == [4]
+    assert A.load_state("s1")["breaks"] == []

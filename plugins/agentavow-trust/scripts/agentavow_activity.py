@@ -148,7 +148,7 @@ def _tail(log_file: pathlib.Path) -> dict:
             start = max(0, size - chunk)
             f.seek(start)
             data = f.read(size - start)
-            if start == 0 or data.count(b"\n") >= 2:
+            if start == 0 or data.count(b"\n") >= 5:
                 break
             chunk *= 4
     if start > 0:
@@ -157,6 +157,24 @@ def _tail(log_file: pathlib.Path) -> dict:
     info["torn"] = parts[-1] != b""
     complete = parts[:-1]
     info["last_line"] = parts[-1] if info["torn"] else (complete[-1] if complete else None)
+    if len(complete) >= 2:
+        # Torn-line recovery: the line before the last is unparseable, and its
+        # nearest parseable predecessor is the anchor the state may still hold.
+        info["before_hash"] = hashlib.sha256(complete[-2]).hexdigest()
+        for raw in reversed(complete[:-1]):
+            try:
+                json.loads(raw)
+            except ValueError:
+                continue
+            info["anchor_hash"] = hashlib.sha256(raw).hexdigest()
+            break
+        else:
+            info["anchor_hash"] = None
+        try:
+            json.loads(complete[-2])
+            info["before_torn"] = False
+        except ValueError:
+            info["before_torn"] = True
     if complete:
         info["hash"] = hashlib.sha256(complete[-1]).hexdigest()
         try:
@@ -185,7 +203,15 @@ def _tail_mismatch(state: dict, tail: dict) -> bool:
     if tail["seq"] == s:
         return tail["hash"] != state.get("prev")
     if tail["seq"] == s + 1:
-        return tail["prev"] != state.get("prev")
+        if tail["prev"] == state.get("prev"):
+            return False
+        # A torn line, then a recovery append whose state save was lost.
+        torn_recovery = (
+            tail.get("before_torn")
+            and tail["prev"] == tail.get("before_hash")
+            and tail.get("anchor_hash") == state.get("prev")
+        )
+        return not torn_recovery
     return False
 
 
